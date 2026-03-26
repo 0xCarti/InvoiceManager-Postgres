@@ -12,6 +12,7 @@ from flask import (
 )
 from flask_login import current_user, login_required
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 
 from app import GST, db
 from app.forms import (
@@ -26,6 +27,10 @@ from app.utils.numeric import coerce_float
 from app.utils.pagination import build_pagination_args, get_per_page
 
 invoice = Blueprint("invoice", __name__)
+
+
+class InvoiceCreationError(Exception):
+    """Raised when invoice creation cannot be completed safely."""
 
 
 def _create_invoice_from_form(form):
@@ -131,7 +136,23 @@ def _create_invoice_from_form(form):
                     recipe_item.quantity * factor * quantity
                 )
 
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError as exc:
+        db.session.rollback()
+        current_app.logger.exception(
+            "invoice_creation_integrity_error",
+            extra={
+                "invoice_id": invoice.id,
+                "customer_id": customer.id,
+                "line_items": [
+                    {"product_id": item.product_id, "quantity": item.quantity}
+                    for item in invoice.products
+                ],
+            },
+        )
+        raise InvoiceCreationError("Invoice could not be created.") from exc
+
     log_activity(f"Created invoice {invoice.id}")
     return invoice
 
@@ -146,9 +167,16 @@ def create_invoice():
     ]
 
     if form.validate_on_submit():
-        _create_invoice_from_form(form)
-        flash("Invoice created successfully!", "success")
-        return redirect(url_for("invoice.view_invoices"))
+        try:
+            _create_invoice_from_form(form)
+        except InvoiceCreationError:
+            flash(
+                "Unable to create invoice right now. Please try again.",
+                "danger",
+            )
+        else:
+            flash("Invoice created successfully!", "success")
+            return redirect(url_for("invoice.view_invoices"))
 
     return render_template("invoices/create_invoice.html", form=form)
 
