@@ -19,6 +19,10 @@ from app.utils.activity import log_activity
 BACKUP_SCHEMA_VERSION = "2026.03"
 
 
+class RestoreBackupError(RuntimeError):
+    """Raised when a restore fails during runtime schema rebuild."""
+
+
 @dataclass
 class RestoreCompatibilityResult:
     compatible: bool
@@ -314,6 +318,7 @@ def start_auto_backup_thread(app):
 
 __all__ = [
     "BACKUP_SCHEMA_VERSION",
+    "RestoreBackupError",
     "create_backup",
     "ensure_backup_schema_marker",
     "restore_backup",
@@ -344,8 +349,14 @@ def restore_backup(file_path):
     logger = current_app.logger if current_app else logging.getLogger(__name__)
 
     with db.engine.begin() as target_conn:
-        db.metadata.drop_all(bind=target_conn)
-        db.metadata.create_all(bind=target_conn)
+        try:
+            db.metadata.drop_all(bind=target_conn)
+            db.metadata.create_all(bind=target_conn)
+        except Exception as exc:
+            raise RestoreBackupError(
+                "Restore failed while rebuilding database schema. "
+                "The backup may be incompatible with current schema/constraints."
+            ) from exc
 
         # Iterate over all tables in dependency order
         for table in db.metadata.sorted_tables:

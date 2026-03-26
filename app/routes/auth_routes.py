@@ -73,6 +73,7 @@ from app.models import (
 from app.utils import send_email
 from app.utils.activity import log_activity
 from app.utils.backup import (
+    RestoreBackupError,
     UNIT_SECONDS,
     create_backup,
     restore_backup,
@@ -632,7 +633,22 @@ def restore_backup_route():
                 f"Restore compatibility warnings detected for {filename}: {warning_details}"
             )
 
-        restore_backup(filepath)
+        try:
+            restore_backup(filepath)
+        except RestoreBackupError as exc:
+            current_app.logger.exception(
+                "Restore runtime failure for %s: %s",
+                filename,
+                exc,
+            )
+            log_activity(
+                f"Restore failed for {filename}: {exc}"
+            )
+            flash(
+                "Restore could not proceed due to a database schema/constraint mismatch.",
+                "danger",
+            )
+            return redirect(url_for("admin.backups"))
         mode, changed_count = _apply_restore_favorites_mode(
             bool(form.ignore_favorites.data)
         )
@@ -719,7 +735,22 @@ def restore_backup_file(filename):
             f"Restore compatibility warnings detected for {fname}: {warning_details}"
         )
 
-    restore_backup(filepath)
+    try:
+        restore_backup(filepath)
+    except RestoreBackupError as exc:
+        current_app.logger.exception(
+            "Restore runtime failure for %s: %s",
+            fname,
+            exc,
+        )
+        log_activity(
+            f"Restore failed for {fname}: {exc}"
+        )
+        flash(
+            "Restore could not proceed due to a database schema/constraint mismatch.",
+            "danger",
+        )
+        return redirect(url_for("admin.backups"))
     ignore_values = {
         value.lower()
         for value in flask.request.values.getlist("ignore_favorites")
