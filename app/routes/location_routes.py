@@ -37,6 +37,7 @@ from app.utils.units import (
 from app.utils.text import (
     build_text_match_predicate,
     normalize_name_for_sorting,
+    normalize_request_text_filter,
     normalize_text_match_mode,
 )
 from app.utils.email import SMTPConfigurationError, send_email
@@ -740,7 +741,7 @@ def view_locations():
     """List all locations."""
     page = request.args.get("page", 1, type=int)
     per_page = get_per_page()
-    name_query = request.args.get("name_query", "")
+    name_query = normalize_request_text_filter(request.args.get("name_query"))
     match_mode = normalize_text_match_mode(request.args.get("match_mode"))
     archived = request.args.get("archived", "active")
     raw_menu_ids = request.args.getlist("menu_ids")

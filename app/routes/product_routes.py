@@ -44,7 +44,11 @@ from app.utils.filter_state import (
 )
 from app.utils.numeric import coerce_float
 from app.utils.pagination import build_pagination_args, get_per_page
-from app.utils.text import build_text_match_predicate, normalize_text_match_mode
+from app.utils.text import (
+    build_text_match_predicate,
+    normalize_request_text_filter,
+    normalize_text_match_mode,
+)
 
 product = Blueprint("product", __name__)
 
@@ -101,7 +105,7 @@ def view_products():
     create_form = ProductWithRecipeForm()
     page = request.args.get("page", 1, type=int)
     per_page = get_per_page()
-    name_query = request.args.get("name_query", "")
+    name_query = normalize_request_text_filter(request.args.get("name_query"))
     match_mode = normalize_text_match_mode(request.args.get("match_mode"))
     sales_gl_code_ids = [
         int(x) for x in request.args.getlist("sales_gl_code_id") if x.isdigit()
@@ -1059,7 +1063,7 @@ def delete_product(product_id):
 def search_products():
     """Return products matching a search query."""
     # Retrieve query parameter from the URL
-    query = request.args.get("query", "").lower()
+    query = normalize_request_text_filter(request.args.get("query")).lower()
     # Query the database for products that match the search query
     matched_products = Product.query.filter(
         Product.name.ilike(f"%{query}%")

@@ -30,6 +30,12 @@ def normalize_name_for_sorting(value: str | None) -> str:
     return _TRIM_WHITESPACE_RE.sub("", normalized)
 
 
+
+
+def normalize_request_text_filter(value: str | None) -> str:
+    """Normalize optional free-text request filter values."""
+    return (value or "").strip()
+
 def normalize_text_match_mode(mode: str | None) -> str:
     """Normalize supported list/search text match modes."""
     normalized_mode = (mode or "").strip().lower()
@@ -59,5 +65,6 @@ __all__ = [
     "TEXT_MATCH_MODES",
     "build_text_match_predicate",
     "normalize_name_for_sorting",
+    "normalize_request_text_filter",
     "normalize_text_match_mode",
 ]

@@ -23,7 +23,11 @@ from app.forms import (
 from app.models import Location, Menu, MenuAssignment, Product
 from app.utils.activity import log_activity
 from app.utils.menu_assignments import set_location_menu, sync_menu_locations
-from app.utils.text import build_text_match_predicate, normalize_text_match_mode
+from app.utils.text import (
+    build_text_match_predicate,
+    normalize_request_text_filter,
+    normalize_text_match_mode,
+)
 
 menu = Blueprint("menu", __name__)
 
@@ -40,7 +44,7 @@ def _load_products(product_ids: list[int]) -> list[Product]:
 @menu.route("/menus")
 @login_required
 def view_menus():
-    name_query = request.args.get("name_query", "").strip()
+    name_query = normalize_request_text_filter(request.args.get("name_query"))
     match_mode = normalize_text_match_mode(request.args.get("match_mode"))
     assigned_status = request.args.get("assigned_status", "all")
     product_status = request.args.get("product_status", "all")
