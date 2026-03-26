@@ -102,6 +102,8 @@ class RestoreSummary:
     skipped_count: int
     affected_tables: list[str]
     quarantine_report: str | None = None
+    repaired_count: int = 0
+    repair_report: dict[str, dict[str, int]] | None = None
 
 
 def _collect_missing_expected_endpoints() -> list[str]:
@@ -746,6 +748,68 @@ def _insert_rows_permissive(
     return inserted
 
 
+def _load_table_key_set(
+    backup_conn,
+    *,
+    backup_metadata: MetaData,
+    table_name: str,
+    key_column: str = "id",
+) -> set:
+    table = backup_metadata.tables.get(table_name)
+    if table is None or key_column not in table.c:
+        return set()
+    rows = backup_conn.execute(
+        table.select().with_only_columns(table.c[key_column])
+    ).all()
+    return {row[0] for row in rows if row and row[0] is not None}
+
+
+def _normalize_purchase_invoice_draft_rows(
+    *,
+    rows: list[dict],
+    backup_conn,
+    backup_metadata: MetaData,
+) -> tuple[list[dict], dict[str, int]]:
+    purchase_order_ids = _load_table_key_set(
+        backup_conn, backup_metadata=backup_metadata, table_name="purchase_order"
+    )
+    kept_rows: list[dict] = []
+    dropped_orphans = 0
+    for row in rows:
+        purchase_order_id = row.get("purchase_order_id")
+        if purchase_order_id is not None and purchase_order_id not in purchase_order_ids:
+            dropped_orphans += 1
+            continue
+        kept_rows.append(row)
+    return kept_rows, {"dropped_orphans": dropped_orphans}
+
+
+def _normalize_purchase_invoice_item_rows(
+    *,
+    rows: list[dict],
+    backup_conn,
+    backup_metadata: MetaData,
+) -> tuple[list[dict], dict[str, int]]:
+    gl_code_ids = _load_table_key_set(
+        backup_conn, backup_metadata=backup_metadata, table_name="gl_code"
+    )
+    repaired = 0
+    for row in rows:
+        purchase_gl_code_id = row.get("purchase_gl_code_id")
+        if purchase_gl_code_id is None:
+            continue
+        if purchase_gl_code_id not in gl_code_ids:
+            row["purchase_gl_code_id"] = None
+            repaired += 1
+    return rows, {"nullified_orphans": repaired}
+
+
+RESTORE_ROW_NORMALIZERS: dict[str, list] = {
+    "purchase_invoice_draft": [_normalize_purchase_invoice_draft_rows],
+    "purchase_invoice_item": [_normalize_purchase_invoice_item_rows],
+}
+
+
 def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> RestoreSummary:
     restore_mode = _normalize_restore_mode(restore_mode)
     backup_engine = create_engine(f"sqlite+pysqlite:///{file_path}")
@@ -761,6 +825,9 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
     inserted_total = 0
     skipped_rows: list[dict] = []
     affected_tables: set[str] = set()
+    repair_report: dict[str, dict[str, int]] = {}
+    repair_total = 0
+    repair_orphans_enabled = bool(current_app.config.get("RESTORE_REPAIR_ORPHANS", True))
 
     with db.engine.begin() as target_conn:
         try:
@@ -803,35 +870,50 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
                     )
                 ).mappings().all()
 
-            insert_rows = []
-            for row in rows:
-                record = {col.name: row[col.name] for col in select_cols}
+                insert_rows = []
+                for row in rows:
+                    record = {col.name: row[col.name] for col in select_cols}
 
-                for col in table.columns:
-                    if col.name not in record:
-                        default = None
-                        if col.default is not None:
-                            default = col.default.arg
-                            if callable(default):
+                    for col in table.columns:
+                        if col.name not in record:
+                            default = None
+                            if col.default is not None:
+                                default = col.default.arg
+                                if callable(default):
+                                    try:
+                                        default = default()
+                                    except TypeError:
+                                        default = default(None)
+                            record[col.name] = default
+                        else:
+                            value = record[col.name]
+                            if isinstance(col.type, db.DateTime) and isinstance(value, str):
                                 try:
-                                    default = default()
-                                except TypeError:
-                                    default = default(None)
-                        record[col.name] = default
-                    else:
-                        value = record[col.name]
-                        if isinstance(col.type, db.DateTime) and isinstance(value, str):
-                            try:
-                                record[col.name] = datetime.fromisoformat(value)
-                            except ValueError:
-                                pass
-                        elif isinstance(col.type, db.Date) and isinstance(value, str):
-                            try:
-                                record[col.name] = datetime.fromisoformat(value).date()
-                            except ValueError:
-                                pass
+                                    record[col.name] = datetime.fromisoformat(value)
+                                except ValueError:
+                                    pass
+                            elif isinstance(col.type, db.Date) and isinstance(value, str):
+                                try:
+                                    record[col.name] = datetime.fromisoformat(value).date()
+                                except ValueError:
+                                    pass
 
-                insert_rows.append(record)
+                    insert_rows.append(record)
+
+                if repair_orphans_enabled:
+                    normalizers = RESTORE_ROW_NORMALIZERS.get(table_name, [])
+                    for normalizer in normalizers:
+                        insert_rows, modifications = normalizer(
+                            rows=insert_rows,
+                            backup_conn=backup_conn,
+                            backup_metadata=backup_metadata,
+                        )
+                        for action, count in (modifications or {}).items():
+                            if count <= 0:
+                                continue
+                            table_report = repair_report.setdefault(table_name, {})
+                            table_report[action] = table_report.get(action, 0) + count
+                            repair_total += count
 
             if insert_rows:
                 if restore_mode == "permissive":
@@ -933,4 +1015,6 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
         skipped_count=len(skipped_rows),
         affected_tables=sorted(affected_tables),
         quarantine_report=quarantine_report,
+        repaired_count=repair_total,
+        repair_report=repair_report or None,
     )
