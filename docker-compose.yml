@@ -9,14 +9,23 @@ services:
       - POSTGRES_USER=${DATABASE_USER:-invoicemanager}
       - POSTGRES_PASSWORD=${DATABASE_PASSWORD:-invoicemanager}
       - POSTGRES_DB=${DATABASE_NAME:-invoicemanager}
+    ports:
+      - "${DATABASE_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-invoicemanager} -d ${DATABASE_NAME:-invoicemanager}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   web:
     image: gwcarti/invoicemanager:latest
     container_name: invoice-manager
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     ports:
       - "${PORT:-5000}:${PORT:-5000}"
     volumes:
@@ -33,6 +42,7 @@ services:
       - DATABASE_USER=${DATABASE_USER:-invoicemanager}
       - DATABASE_PASSWORD=${DATABASE_PASSWORD:-invoicemanager}
       - DATABASE_NAME=${DATABASE_NAME:-invoicemanager}
+      - DATABASE_URL=postgresql+psycopg://${DATABASE_USER:-invoicemanager}:${DATABASE_PASSWORD:-invoicemanager}@postgres:${DATABASE_PORT:-5432}/${DATABASE_NAME:-invoicemanager}
 
 volumes:
   postgres_data:
