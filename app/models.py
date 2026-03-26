@@ -571,7 +571,7 @@ class InvoiceProduct(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     invoice_id = db.Column(
         db.String(10),
-        db.ForeignKey("invoice.id", ondelete="CASCADE", use_alter=True),
+        db.ForeignKey("invoice.id", ondelete="CASCADE"),
         nullable=False,
     )
     quantity = db.Column(db.Float, nullable=False)
