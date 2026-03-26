@@ -61,7 +61,7 @@ end note
 
 note bottom of BackupImports
   * Manual/automatic DB backups
-  * Restore uploaded SQLite backups
+  * Restore uploaded database backups
   * CSV import for items/locations/products/etc.
 end note
 
