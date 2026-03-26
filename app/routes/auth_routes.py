@@ -1,10 +1,12 @@
 import json
 import os
 import platform
+import re
 import subprocess
 import uuid
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from typing import Any
 from urllib.parse import urlparse
 
 import flask
@@ -206,6 +208,57 @@ def _flash_restore_report(
         "Restore report: " + json.dumps(report_payload, sort_keys=True),
         "info",
     )
+
+
+def _extract_restore_exception_context(exc: SQLAlchemyError) -> dict[str, Any]:
+    details = str(exc)
+    table_match = re.search(r"(?:table|into)\s+[`\"]?([a-zA-Z_][\w]*)", details, re.IGNORECASE)
+    column_match = re.search(r"(?:column|no such column:)\s+[`\"]?([a-zA-Z_][\w]*)", details, re.IGNORECASE)
+    context: dict[str, Any] = {}
+    if table_match:
+        context["table"] = table_match.group(1)
+    if column_match:
+        context["column"] = column_match.group(1)
+    statement = getattr(exc, "statement", None)
+    params = getattr(exc, "params", None)
+    if statement:
+        context["statement"] = statement
+    if params:
+        context["params"] = str(params)
+    original_error = getattr(exc, "orig", None)
+    if original_error is not None:
+        context["orig"] = str(original_error)
+    return context
+
+
+def _persist_restore_preflight_diagnostic(
+    *,
+    backups_dir: str,
+    filename: str,
+    restore_mode: str,
+    stage: str,
+    exc: SQLAlchemyError,
+) -> tuple[str, str]:
+    diagnostic_id = uuid.uuid4().hex[:8]
+    report_filename = f"restore_preflight_diag_{diagnostic_id}.json"
+    report_path = os.path.join(backups_dir, report_filename)
+    payload = {
+        "diagnostic_id": diagnostic_id,
+        "filename": filename,
+        "restore_mode": restore_mode,
+        "stage": stage,
+        "exception_class": type(exc).__name__,
+        "exception_message": str(exc),
+        "context": _extract_restore_exception_context(exc),
+        "created_at_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    }
+    with open(report_path, "w", encoding="utf-8") as report_file:
+        json.dump(payload, report_file, indent=2, sort_keys=True)
+    log_activity(
+        f"Restore preflight diagnostic [{diagnostic_id}] for {filename} "
+        f"(mode={restore_mode}, stage={stage}): {json.dumps(payload, sort_keys=True)}"
+    )
+    return diagnostic_id, report_filename
 
 
 def _serializer():
@@ -661,6 +714,7 @@ def restore_backup_route():
         filepath = os.path.join(backups_dir, filename)
         file.save(filepath)
         unresolved_blockers: list[str] = []
+        restore_mode = _resolve_restore_mode(form.restore_mode.data)
         try:
             compatibility = validate_backup_file_compatibility(filepath)
         except SQLAlchemyError as exc:
@@ -669,15 +723,27 @@ def restore_backup_route():
                 flash("Invalid backup database file.", "error")
                 return redirect(url_for("admin.backups"))
             compatibility = None
-            current_app.logger.warning(
-                "Restore preflight adapter fallback for %s due to %s: %s",
+            diagnostic_id, report_filename = _persist_restore_preflight_diagnostic(
+                backups_dir=backups_dir,
+                filename=filename,
+                restore_mode=restore_mode,
+                stage="preflight",
+                exc=exc,
+            )
+            current_app.logger.exception(
+                "Restore preflight adapter fallback for file=%s mode=%s stage=%s diagnostic_id=%s",
                 filename,
-                type(exc).__name__,
-                exc,
+                restore_mode,
+                "preflight",
+                diagnostic_id,
             )
             flash(
                 "Preflight schema inspection could not fully validate this backup. "
                 "Proceeding with legacy adapter/transform restore workflow.",
+                "warning",
+            )
+            flash(
+                f"Restore diagnostic ID: {diagnostic_id} (report: {report_filename})",
                 "warning",
             )
         if compatibility is not None:
@@ -705,8 +771,6 @@ def restore_backup_route():
             )
             flash(f"Compatibility errors: {details}", "danger")
             return redirect(url_for("admin.backups"))
-
-        restore_mode = _resolve_restore_mode(form.restore_mode.data)
 
         if compatibility is not None and compatibility.warnings:
             warning_details = "; ".join(compatibility.warnings)
@@ -819,6 +883,17 @@ def restore_backup_file(filename):
         abort(404)
     fname = os.path.basename(filepath)
     unresolved_blockers: list[str] = []
+    raw_mode = flask.request.values.get("restore_mode")
+    restore_permissive_values = {
+        value.lower()
+        for value in flask.request.values.getlist("restore_permissive")
+        if value
+    }
+    is_permissive = bool(
+        restore_permissive_values & {"1", "true", "on", "yes"}
+    )
+    selected_mode = "permissive" if is_permissive else (raw_mode or "strict")
+    restore_mode = _resolve_restore_mode(selected_mode)
     try:
         compatibility = validate_backup_file_compatibility(filepath)
     except SQLAlchemyError as exc:
@@ -826,15 +901,27 @@ def restore_backup_file(filename):
             flash("Invalid backup database file.", "error")
             return redirect(url_for("admin.backups"))
         compatibility = None
-        current_app.logger.warning(
-            "Restore preflight adapter fallback for %s due to %s: %s",
+        diagnostic_id, report_filename = _persist_restore_preflight_diagnostic(
+            backups_dir=backups_dir,
+            filename=fname,
+            restore_mode=restore_mode,
+            stage="preflight",
+            exc=exc,
+        )
+        current_app.logger.exception(
+            "Restore preflight adapter fallback for file=%s mode=%s stage=%s diagnostic_id=%s",
             fname,
-            type(exc).__name__,
-            exc,
+            restore_mode,
+            "preflight",
+            diagnostic_id,
         )
         flash(
             "Preflight schema inspection could not fully validate this backup. "
             "Proceeding with legacy adapter/transform restore workflow.",
+            "warning",
+        )
+        flash(
+            f"Restore diagnostic ID: {diagnostic_id} (report: {report_filename})",
             "warning",
         )
 
@@ -863,18 +950,6 @@ def restore_backup_file(filename):
         )
         flash(f"Compatibility errors: {details}", "danger")
         return redirect(url_for("admin.backups"))
-
-    raw_mode = flask.request.values.get("restore_mode")
-    restore_permissive_values = {
-        value.lower()
-        for value in flask.request.values.getlist("restore_permissive")
-        if value
-    }
-    is_permissive = bool(
-        restore_permissive_values & {"1", "true", "on", "yes"}
-    )
-    selected_mode = "permissive" if is_permissive else (raw_mode or "strict")
-    restore_mode = _resolve_restore_mode(selected_mode)
 
     if compatibility is not None and compatibility.warnings:
         warning_details = "; ".join(compatibility.warnings)

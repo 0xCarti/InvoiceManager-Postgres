@@ -1,12 +1,15 @@
 import os
 import shutil
 import sqlite3
+import io
+import json
 
 from app.models import ActivityLog, User
 from app.utils.backup import RestoreCompatibilityResult, RestoreSummary
 from tests.utils import login
 from app.utils.activity import flush_activity_logs
 from app.utils.backup import create_backup
+from sqlalchemy.exc import OperationalError
 
 
 def _create_sqlite_backup(app, filename):
@@ -219,3 +222,107 @@ def test_restore_backup_file_permissive_mode_shows_partial_restore_message(
     assert b"Backup restored from permissive_partial.db" in response.data
     assert b"Partial restore completed in permissive mode" in response.data
     assert b"restore_quarantine_20260326_123456.json" in response.data
+
+
+def test_restore_backup_file_preflight_exception_creates_diagnostic_report(
+    client, app, monkeypatch, caplog
+):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    _create_sqlite_backup(app, "preflight_exception.db")
+
+    def _raise_preflight(*_args, **_kwargs):
+        raise OperationalError(
+            "SELECT total FROM invoice",
+            {},
+            sqlite3.OperationalError("no such column: total"),
+        )
+
+    monkeypatch.setattr(
+        "app.routes.auth_routes.validate_backup_file_compatibility",
+        _raise_preflight,
+    )
+    monkeypatch.setattr(
+        "app.routes.auth_routes.restore_backup",
+        lambda *_args, **_kwargs: RestoreSummary(
+            mode="strict", inserted_count=1, skipped_count=0, affected_tables=["user"]
+        ),
+    )
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            "/controlpanel/backups/restore/preflight_exception.db",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"Restore diagnostic ID:" in response.data
+    assert b"restore_preflight_diag_" in response.data
+    assert "stage=preflight" in caplog.text
+
+    report_files = sorted(
+        name
+        for name in os.listdir(app.config["BACKUP_FOLDER"])
+        if name.startswith("restore_preflight_diag_") and name.endswith(".json")
+    )
+    assert report_files
+    report_path = os.path.join(app.config["BACKUP_FOLDER"], report_files[-1])
+    with open(report_path, encoding="utf-8") as handle:
+        payload = json.load(handle)
+    assert payload["stage"] == "preflight"
+    assert payload["filename"] == "preflight_exception.db"
+    assert payload["exception_class"] == "OperationalError"
+    assert payload["context"]["column"] == "total"
+
+    with app.app_context():
+        flush_activity_logs()
+        activities = [row.activity for row in ActivityLog.query.order_by(ActivityLog.id).all()]
+        assert any("Restore preflight diagnostic" in item for item in activities)
+
+
+def test_restore_backup_upload_preflight_exception_creates_diagnostic_report(
+    client, app, monkeypatch
+):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    def _raise_preflight(*_args, **_kwargs):
+        raise OperationalError(
+            "INSERT INTO user(email) VALUES (?)",
+            {"email": "admin@example.com"},
+            sqlite3.OperationalError("table user has no column named email"),
+        )
+
+    monkeypatch.setattr(
+        "app.routes.auth_routes.validate_backup_file_compatibility",
+        _raise_preflight,
+    )
+    monkeypatch.setattr(
+        "app.routes.auth_routes.restore_backup",
+        lambda *_args, **_kwargs: RestoreSummary(
+            mode="strict", inserted_count=1, skipped_count=0, affected_tables=["user"]
+        ),
+    )
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            "/controlpanel/backups/restore",
+            data={
+                "file": (io.BytesIO(b"SQLite format 3\x00fake"), "upload_preflight.db"),
+                "restore_mode": "strict",
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"Restore diagnostic ID:" in response.data
+    assert b"upload_preflight.db" in response.data
+    report_files = sorted(
+        name
+        for name in os.listdir(app.config["BACKUP_FOLDER"])
+        if name.startswith("restore_preflight_diag_") and name.endswith(".json")
+    )
+    assert report_files
