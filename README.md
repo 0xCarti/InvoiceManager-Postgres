@@ -163,6 +163,31 @@ from the `DATABASE_*` environment variables. You can override this with
 `DATABASE_URL` or `SQLALCHEMY_DATABASE_URI`. The app also creates `uploads` and
 `backups` directories automatically on startup.
 
+## Backups and Restore (Postgres runtime)
+
+- **Backup artifact format remains SQLite `.db`.** The backup files in the
+  `backups/` folder are still SQLite databases and remain the expected format
+  for restore uploads.
+- **Runtime database is PostgreSQL.** During restore, the app rebuilds the
+  current runtime schema (via SQLAlchemy metadata) and then imports rows from
+  the uploaded SQLite backup into matching tables/columns.
+- **Migration prerequisite before restore:** ensure migrations are fully up to
+  date and include revision `d2f7a1b9c8e0`
+  (`fix_invoice_product_invoice_fk`) before attempting restore:
+  ```bash
+  python -m flask --app run.py db upgrade
+  ```
+  For Docker Compose:
+  ```bash
+  ./scripts/docker_migrate.sh
+  ```
+
+### Restore troubleshooting
+
+If restore fails with FK/constraint errors (especially around
+`invoice_product.invoice_id`), verify the target Postgres database has applied
+revision `d2f7a1b9c8e0` and any later migrations, then retry the restore.
+
 For production deployments using Gunicorn, use the provided configuration to enable WebSocket support and prevent worker timeouts:
 
 ```bash
