@@ -147,7 +147,7 @@ def upgrade():
     )
     with op.batch_alter_table('item', schema=None) as batch_op:
         batch_op.create_index('ix_item_archived', ['archived'], unique=False)
-        batch_op.create_index('uix_item_name_active', ['name'], unique=True, sqlite_where=sa.text('archived = 0'), postgresql_where=sa.text('archived = false'))
+        batch_op.create_index('uix_item_name_active', ['name'], unique=True, postgresql_where=sa.text('archived = false'))
 
     op.create_table('location',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -706,7 +706,7 @@ def downgrade():
 
     op.drop_table('location')
     with op.batch_alter_table('item', schema=None) as batch_op:
-        batch_op.drop_index('uix_item_name_active', sqlite_where=sa.text('archived = 0'), postgresql_where=sa.text('archived = false'))
+        batch_op.drop_index('uix_item_name_active', postgresql_where=sa.text('archived = false'))
         batch_op.drop_index('ix_item_archived')
 
     op.drop_table('item')

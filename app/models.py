@@ -235,7 +235,6 @@ class Item(db.Model):
             "uix_item_name_active",
             "name",
             unique=True,
-            sqlite_where=db.text("archived = 0"),
             postgresql_where=db.text("archived = false"),
         ),
         db.Index("ix_item_archived", "archived"),

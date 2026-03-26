@@ -2746,36 +2746,19 @@ def upload_terminal_sales(event_id):
                             if product is not None:
                                 product_lookup[original_name] = product
 
-                    bind = db.session.get_bind()
-                    supports_sql_normalization = (
-                        bind is not None
-                        and getattr(bind.dialect, "name", None) not in {"sqlite"}
-                    )
-                    if supports_sql_normalization:
-                        normalized_expression = _normalized_sql_expression(
-                            Product.name
-                        ).label("normalized_name")
-                        for product, normalized_name in (
-                            Product.query.add_columns(normalized_expression)
-                            .filter(normalized_expression.in_(normalized_values))
-                            .all()
-                        ):
-                            if not normalized_name:
-                                continue
-                            normalized_product_candidates.setdefault(
-                                normalized_name, set()
-                            ).add(product)
-                    else:
-                        # SQLite does not support ``regexp_replace`` out of the box,
-                        # so fall back to normalizing in Python when the SQL
-                        # function is unavailable.
-                        for product in Product.query.all():
-                            normalized_name = _normalize_product_name(product.name or "")
-                            if normalized_name not in normalized_values:
-                                continue
-                            normalized_product_candidates.setdefault(
-                                normalized_name, set()
-                            ).add(product)
+                    normalized_expression = _normalized_sql_expression(
+                        Product.name
+                    ).label("normalized_name")
+                    for product, normalized_name in (
+                        Product.query.add_columns(normalized_expression)
+                        .filter(normalized_expression.in_(normalized_values))
+                        .all()
+                    ):
+                        if not normalized_name:
+                            continue
+                        normalized_product_candidates.setdefault(
+                            normalized_name, set()
+                        ).add(product)
                     if normalized_product_candidates:
                         for original_name, normalized in normalized_lookup.items():
                             if not normalized or original_name in product_lookup:
