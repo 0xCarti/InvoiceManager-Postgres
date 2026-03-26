@@ -3,6 +3,7 @@ from datetime import datetime
 import re
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 from werkzeug.security import generate_password_hash
 
 from app import db
@@ -38,6 +39,64 @@ def create_sales_invoices(client, email, customer_id, product_name, count):
             )
             assert create_resp.status_code == 200
 
+
+
+
+def test_create_invoice_handles_integrity_error_with_rollback_and_friendly_message(
+    client, app, monkeypatch, caplog
+):
+    email, cust_id, prod_name, _ = setup_sales(app)
+
+    commit_calls = {"count": 0}
+    rollback_calls = {"count": 0}
+
+    original_commit = db.session.commit
+    original_rollback = db.session.rollback
+
+    def failing_commit():
+        commit_calls["count"] += 1
+        if commit_calls["count"] == 1:
+            raise IntegrityError(
+                "INSERT INTO invoice_product ...",
+                {"invoice_id": "generated"},
+                Exception("duplicate key"),
+            )
+        return original_commit()
+
+    def tracking_rollback():
+        rollback_calls["count"] += 1
+        return original_rollback()
+
+    monkeypatch.setattr(db.session, "commit", failing_commit)
+    monkeypatch.setattr(db.session, "rollback", tracking_rollback)
+
+    with client, caplog.at_level("ERROR"):
+        login(client, email, "pass")
+        response = client.post(
+            "/create_invoice",
+            data={"customer": float(cust_id), "products": f"{prod_name}?2??"},
+            follow_redirects=True,
+        )
+
+        assert response.status_code == 200
+        assert b"Unable to create invoice right now. Please try again." in response.data
+
+        # Session remains usable after rollback; no PendingRollbackError should surface.
+        follow_up = client.get("/view_invoices", follow_redirects=True)
+        assert follow_up.status_code == 200
+
+    with app.app_context():
+        assert Invoice.query.filter_by(customer_id=cust_id).count() == 0
+
+    assert rollback_calls["count"] == 1
+    assert any(
+        record.message == "invoice_creation_integrity_error"
+        and getattr(record, "customer_id", None) == cust_id
+        and any(
+            line.get("quantity") == 2.0 for line in getattr(record, "line_items", [])
+        )
+        for record in caplog.records
+    )
 
 def test_sales_invoice_create_view_delete(client, app):
     email, cust_id, prod_name, prod_id = setup_sales(app)
