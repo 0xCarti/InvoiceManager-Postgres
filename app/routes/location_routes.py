@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 from flask_login import login_required
 
 from app import db
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import selectinload
 
 from app.forms import (
@@ -766,13 +766,13 @@ def view_locations():
 
     if name_query:
         if match_mode == "exact":
-            query = query.filter(Location.name == name_query)
+            query = query.filter(func.lower(Location.name) == name_query.lower())
         elif match_mode == "startswith":
-            query = query.filter(Location.name.like(f"{name_query}%"))
+            query = query.filter(Location.name.ilike(f"{name_query}%"))
         elif match_mode == "not_contains":
-            query = query.filter(Location.name.notlike(f"%{name_query}%"))
+            query = query.filter(Location.name.notilike(f"%{name_query}%"))
         else:
-            query = query.filter(Location.name.like(f"%{name_query}%"))
+            query = query.filter(Location.name.ilike(f"%{name_query}%"))
 
     if include_no_menu and menu_ids:
         query = query.filter(

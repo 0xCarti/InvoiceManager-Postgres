@@ -132,15 +132,15 @@ def view_products():
     query = Product.query
     if name_query:
         if match_mode == "exact":
-            query = query.filter(Product.name == name_query)
+            query = query.filter(func.lower(Product.name) == name_query.lower())
         elif match_mode == "startswith":
-            query = query.filter(Product.name.like(f"{name_query}%"))
+            query = query.filter(Product.name.ilike(f"{name_query}%"))
         elif match_mode == "contains":
-            query = query.filter(Product.name.like(f"%{name_query}%"))
+            query = query.filter(Product.name.ilike(f"%{name_query}%"))
         elif match_mode == "not_contains":
-            query = query.filter(Product.name.notlike(f"%{name_query}%"))
+            query = query.filter(Product.name.notilike(f"%{name_query}%"))
         else:
-            query = query.filter(Product.name.like(f"%{name_query}%"))
+            query = query.filter(Product.name.ilike(f"%{name_query}%"))
 
     if sales_gl_code_ids:
         query = query.filter(Product.sales_gl_code_id.in_(sales_gl_code_ids))

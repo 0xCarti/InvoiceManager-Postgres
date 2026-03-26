@@ -149,15 +149,15 @@ def view_items():
         query = query.filter(Item.archived.is_(True))
     if name_query:
         if match_mode == "exact":
-            query = query.filter(Item.name == name_query)
+            query = query.filter(func.lower(Item.name) == name_query.lower())
         elif match_mode == "startswith":
-            query = query.filter(Item.name.like(f"{name_query}%"))
+            query = query.filter(Item.name.ilike(f"{name_query}%"))
         elif match_mode == "contains":
-            query = query.filter(Item.name.like(f"%{name_query}%"))
+            query = query.filter(Item.name.ilike(f"%{name_query}%"))
         elif match_mode == "not_contains":
-            query = query.filter(Item.name.notlike(f"%{name_query}%"))
+            query = query.filter(Item.name.notilike(f"%{name_query}%"))
         else:
-            query = query.filter(Item.name.like(f"%{name_query}%"))
+            query = query.filter(Item.name.ilike(f"%{name_query}%"))
 
     if purchase_gl_code_ids:
         query = query.filter(Item.purchase_gl_code_id.in_(purchase_gl_code_ids))
