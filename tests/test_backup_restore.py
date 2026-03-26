@@ -597,6 +597,60 @@ def test_validate_backup_file_compatibility_reports_orphan_fk_issue_in_strict_mo
     )
 
 
+def test_validate_backup_file_compatibility_warns_on_not_null_violations(app):
+    backup_path = _create_sqlite_backup_copy(app, "not_null_violation_warning.db")
+
+    with sqlite3.connect(backup_path) as conn:
+        conn.execute("ALTER TABLE setting RENAME TO setting_original")
+        conn.execute("CREATE TABLE setting (id INTEGER, name TEXT, value TEXT)")
+        conn.execute(
+            "INSERT INTO setting (id, name, value) SELECT id, name, value FROM setting_original"
+        )
+        conn.execute("DROP TABLE setting_original")
+        conn.execute(
+            "INSERT INTO setting (id, name, value) VALUES (?, ?, ?)",
+            (999001, None, "bad-null"),
+        )
+        conn.commit()
+
+    with app.app_context():
+        app.config["RESTORE_PREFLIGHT_STRICT_FK_VALIDATION"] = False
+        result = validate_backup_file_compatibility(backup_path)
+
+    assert result.compatible is True
+    assert any("Not-null violation in setting.name" in warning for warning in result.warnings)
+    assert any("Sample rowids" in warning for warning in result.warnings)
+
+
+def test_validate_backup_file_compatibility_warns_on_unique_violations(app):
+    backup_path = _create_sqlite_backup_copy(app, "unique_violation_warning.db")
+
+    with sqlite3.connect(backup_path) as conn:
+        conn.execute("ALTER TABLE setting RENAME TO setting_original")
+        conn.execute("CREATE TABLE setting (id INTEGER, name TEXT, value TEXT)")
+        conn.execute(
+            "INSERT INTO setting (id, name, value) SELECT id, name, value FROM setting_original"
+        )
+        conn.execute("DROP TABLE setting_original")
+        conn.execute(
+            "INSERT INTO setting (id, name, value) VALUES (?, ?, ?)",
+            (999101, "DUPLICATE_SETTING", "v1"),
+        )
+        conn.execute(
+            "INSERT INTO setting (id, name, value) VALUES (?, ?, ?)",
+            (999102, "DUPLICATE_SETTING", "v2"),
+        )
+        conn.commit()
+
+    with app.app_context():
+        app.config["RESTORE_PREFLIGHT_STRICT_FK_VALIDATION"] = False
+        result = validate_backup_file_compatibility(backup_path)
+
+    assert result.compatible is True
+    assert any("Unique violation for setting" in warning for warning in result.warnings)
+    assert any("Sample duplicates" in warning for warning in result.warnings)
+
+
 def test_restore_backup_file_surfaces_orphan_fk_warning_details(client, app):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")

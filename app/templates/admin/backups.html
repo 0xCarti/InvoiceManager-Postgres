@@ -13,6 +13,8 @@
         <strong>Restore compatibility:</strong>
         Backups are only supported for safe restore on the <em>same application release</em>.
         Cross-version restores are blocked when compatibility checks fail (schema marker, required tables/settings, and enabled-module endpoint expectations).
+        Preflight also checks for data-quality violations against current model rules (NULL values in non-null columns, duplicate values in unique keys/indexes, and foreign-key orphans) and reports findings before restore.
+        Review those findings to choose <em>strict</em> mode (stop on first invalid row) or <em>permissive</em> mode (skip/quarantine invalid rows).
         If a backup was created by a different release, create a fresh backup from the current version before restoring.
     </div>
 

@@ -633,6 +633,8 @@ def restore_backup_route():
             flash(f"Compatibility errors: {details}", "danger")
             return redirect(url_for("admin.backups"))
 
+        restore_mode = _resolve_restore_mode(form.restore_mode.data)
+
         if compatibility.warnings:
             warning_details = "; ".join(compatibility.warnings)
             current_app.logger.warning(
@@ -644,8 +646,12 @@ def restore_backup_route():
                 f"Restore compatibility warnings detected for {filename}: {warning_details}"
             )
             flash(f"Compatibility warnings: {warning_details}", "warning")
-
-        restore_mode = _resolve_restore_mode(form.restore_mode.data)
+            flash(
+                "Preflight detected data-quality risks. "
+                f"Selected restore mode: {restore_mode}. "
+                "Use permissive mode to quarantine invalid rows, or strict mode to fail on first violation.",
+                "warning",
+            )
         try:
             restore_summary = restore_backup(filepath, restore_mode=restore_mode)
         except RestoreBackupError as exc:
@@ -758,6 +764,9 @@ def restore_backup_file(filename):
         flash(f"Compatibility errors: {details}", "danger")
         return redirect(url_for("admin.backups"))
 
+    raw_mode = flask.request.values.get("restore_mode")
+    restore_mode = _resolve_restore_mode(raw_mode)
+
     if compatibility.warnings:
         warning_details = "; ".join(compatibility.warnings)
         current_app.logger.warning(
@@ -769,9 +778,12 @@ def restore_backup_file(filename):
             f"Restore compatibility warnings detected for {fname}: {warning_details}"
         )
         flash(f"Compatibility warnings: {warning_details}", "warning")
-
-    raw_mode = flask.request.values.get("restore_mode")
-    restore_mode = _resolve_restore_mode(raw_mode)
+        flash(
+            "Preflight detected data-quality risks. "
+            f"Selected restore mode: {restore_mode}. "
+            "Use permissive mode to quarantine invalid rows, or strict mode to fail on first violation.",
+            "warning",
+        )
     try:
         restore_summary = restore_backup(filepath, restore_mode=restore_mode)
     except RestoreBackupError as exc:
