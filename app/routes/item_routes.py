@@ -49,7 +49,11 @@ from app.utils.filter_state import (
     normalize_filters,
 )
 from app.utils.pagination import build_pagination_args, get_per_page
-from app.utils.text import build_text_match_predicate, normalize_text_match_mode
+from app.utils.text import (
+    build_text_match_predicate,
+    normalize_request_text_filter,
+    normalize_text_match_mode,
+)
 from app.utils.units import BASE_UNITS
 
 item = Blueprint("item", __name__)
@@ -125,7 +129,7 @@ def view_items():
 
     page = request.args.get("page", 1, type=int)
     per_page = get_per_page()
-    name_query = request.args.get("name_query", "")
+    name_query = normalize_request_text_filter(request.args.get("name_query"))
     match_mode = normalize_text_match_mode(request.args.get("match_mode"))
     purchase_gl_code_params = request.args.getlist("purchase_gl_code_id")
     sales_gl_code_params = request.args.getlist("gl_code_id")

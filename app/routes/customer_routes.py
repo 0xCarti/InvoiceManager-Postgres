@@ -15,7 +15,11 @@ from app.forms import CustomerForm, DeleteForm
 from app.models import Customer
 from app.utils.activity import log_activity
 from app.utils.pagination import build_pagination_args, get_per_page
-from app.utils.text import build_text_match_predicate, normalize_text_match_mode
+from app.utils.text import (
+    build_text_match_predicate,
+    normalize_request_text_filter,
+    normalize_text_match_mode,
+)
 from sqlalchemy import func
 
 customer = Blueprint("customer", __name__)
@@ -26,7 +30,7 @@ customer = Blueprint("customer", __name__)
 def view_customers():
     """Display all customers."""
     page = request.args.get("page", 1, type=int)
-    name_query = request.args.get("name_query", "")
+    name_query = normalize_request_text_filter(request.args.get("name_query"))
     match_mode = normalize_text_match_mode(request.args.get("match_mode"))
     gst_exempt = request.args.get("gst_exempt", "all")
     pst_exempt = request.args.get("pst_exempt", "all")

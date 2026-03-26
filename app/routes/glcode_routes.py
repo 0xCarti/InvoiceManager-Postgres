@@ -13,6 +13,7 @@ from app import db
 from app.forms import DeleteForm, GLCodeForm
 from app.models import GLCode
 from app.utils.pagination import build_pagination_args, get_per_page
+from app.utils.text import normalize_request_text_filter
 
 glcode_bp = Blueprint("glcode", __name__)
 
@@ -22,8 +23,10 @@ glcode_bp = Blueprint("glcode", __name__)
 def view_gl_codes():
     """List GL codes."""
     page = request.args.get("page", 1, type=int)
-    code_query = request.args.get("code_query", "")
-    description_query = request.args.get("description_query", "")
+    code_query = normalize_request_text_filter(request.args.get("code_query"))
+    description_query = normalize_request_text_filter(
+        request.args.get("description_query")
+    )
 
     query = GLCode.query
     if code_query:
