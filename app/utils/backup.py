@@ -1,5 +1,6 @@
 """Database backup and restore utilities."""
 
+import json
 import logging
 import os
 import tempfile
@@ -33,6 +34,15 @@ class RestoreCompatibilityResult:
     def __post_init__(self):
         if self.warnings is None:
             self.warnings = []
+
+
+@dataclass
+class RestoreSummary:
+    mode: str
+    inserted_count: int
+    skipped_count: int
+    affected_tables: list[str]
+    quarantine_report: str | None = None
 
 
 def _collect_missing_expected_endpoints() -> list[str]:
@@ -320,6 +330,7 @@ def start_auto_backup_thread(app):
 __all__ = [
     "BACKUP_SCHEMA_VERSION",
     "RestoreBackupError",
+    "RestoreSummary",
     "create_backup",
     "ensure_backup_schema_marker",
     "restore_backup",
@@ -330,7 +341,7 @@ __all__ = [
 ]
 
 
-def restore_backup(file_path):
+def restore_backup(file_path, *, restore_mode: str | None = None):
     """Restore the database from the specified file.
 
     The backup is read using a separate SQLite connection. The current database
@@ -339,6 +350,104 @@ def restore_backup(file_path):
     current schema and supplying defaults for any new columns.
     """
 
+    if restore_mode is None:
+        restore_mode = current_app.config.get("RESTORE_MODE_DEFAULT", "strict")
+    return _restore_backup(file_path, restore_mode=restore_mode)
+
+
+def _normalize_restore_mode(restore_mode: str | None) -> str:
+    mode = (restore_mode or "").strip().lower()
+    if mode in {"permissive", "lenient"}:
+        return "permissive"
+    return "strict"
+
+
+def _extract_primary_key_values(table: Table, row: dict) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for column in table.primary_key.columns:
+        if column.name in row:
+            values[column.name] = str(row.get(column.name))
+    return values
+
+
+def _row_failure_reason(exc: Exception) -> str:
+    reason = getattr(exc, "orig", exc)
+    return str(reason)[:500]
+
+
+def _write_quarantine_report(
+    *,
+    backup_file_path: str,
+    skipped_rows: list[dict],
+    restore_mode: str,
+) -> str:
+    backups_dir = current_app.config["BACKUP_FOLDER"]
+    os.makedirs(backups_dir, exist_ok=True)
+    report_name = (
+        f"restore_quarantine_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+    )
+    report_path = os.path.join(backups_dir, report_name)
+    payload = {
+        "created_at_utc": datetime.utcnow().isoformat(),
+        "backup_file": os.path.basename(backup_file_path),
+        "restore_mode": restore_mode,
+        "skipped_count": len(skipped_rows),
+        "skipped_rows": skipped_rows,
+    }
+    with open(report_path, "w", encoding="utf-8") as fp:
+        json.dump(payload, fp, indent=2, default=str)
+    return report_name
+
+
+def _insert_rows_permissive(
+    *,
+    target_conn,
+    table: Table,
+    rows: list[dict],
+    skipped_rows: list[dict],
+    logger,
+) -> int:
+    def _insert_with_bisect(batch: list[dict]) -> int:
+        if not batch:
+            return 0
+        try:
+            with target_conn.begin_nested():
+                target_conn.execute(table.insert(), batch)
+            return len(batch)
+        except (IntegrityError, DataError, DBAPIError) as exc:
+            if len(batch) == 1:
+                record = batch[0]
+                skipped_rows.append(
+                    {
+                        "table": table.name,
+                        "primary_key": _extract_primary_key_values(table, record),
+                        "reason": _row_failure_reason(exc),
+                        "row": record,
+                    }
+                )
+                logger.warning(
+                    "Skipping invalid restore row for table %s pk=%s reason=%s",
+                    table.name,
+                    _extract_primary_key_values(table, record),
+                    _row_failure_reason(exc),
+                )
+                return 0
+
+            midpoint = len(batch) // 2
+            return _insert_with_bisect(batch[:midpoint]) + _insert_with_bisect(
+                batch[midpoint:]
+            )
+
+    batch_size = int(current_app.config.get("RESTORE_PERMISSIVE_BATCH_SIZE", 200))
+    inserted = 0
+    for idx in range(0, len(rows), batch_size):
+        batch = rows[idx : idx + batch_size]
+        inserted += _insert_with_bisect(batch)
+    return inserted
+
+
+def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> RestoreSummary:
+    restore_mode = _normalize_restore_mode(restore_mode)
     backup_engine = create_engine(f"sqlite+pysqlite:///{file_path}")
     backup_metadata = MetaData()
     backup_metadata.reflect(bind=backup_engine)
@@ -348,6 +457,10 @@ def restore_backup(file_path):
     db.session.remove()
 
     logger = current_app.logger if current_app else logging.getLogger(__name__)
+
+    inserted_total = 0
+    skipped_rows: list[dict] = []
+    affected_tables: set[str] = set()
 
     with db.engine.begin() as target_conn:
         try:
@@ -421,20 +534,51 @@ def restore_backup(file_path):
                 insert_rows.append(record)
 
             if insert_rows:
-                try:
-                    target_conn.execute(table.insert(), insert_rows)
-                except IntegrityError as exc:
-                    raise RestoreBackupError(
-                        "Restore failed while inserting rows into table "
-                        f"'{table_name}' due to a constraint failure "
-                        "(for example: foreign key, unique, or not-null). "
-                        "Please verify backup data integrity and schema compatibility "
-                        "before retrying."
-                    ) from exc
-                except (DataError, DBAPIError) as exc:
-                    raise RestoreBackupError(
-                        "Restore failed while inserting rows into table "
-                        f"'{table_name}'. This likely indicates a column length/type "
-                        "mismatch or driver-level database error while loading backup "
-                        "data. Please run the latest database migrations and retry."
-                    ) from exc
+                if restore_mode == "permissive":
+                    inserted = _insert_rows_permissive(
+                        target_conn=target_conn,
+                        table=table,
+                        rows=insert_rows,
+                        skipped_rows=skipped_rows,
+                        logger=logger,
+                    )
+                else:
+                    try:
+                        target_conn.execute(table.insert(), insert_rows)
+                        inserted = len(insert_rows)
+                    except IntegrityError as exc:
+                        raise RestoreBackupError(
+                            "Restore failed while inserting rows into table "
+                            f"'{table_name}' due to a constraint failure "
+                            "(for example: foreign key, unique, or not-null). "
+                            "Please verify backup data integrity and schema compatibility "
+                            "before retrying."
+                        ) from exc
+                    except (DataError, DBAPIError) as exc:
+                        raise RestoreBackupError(
+                            "Restore failed while inserting rows into table "
+                            f"'{table_name}'. This likely indicates a column length/type "
+                            "mismatch or driver-level database error while loading backup "
+                            "data. Please run the latest database migrations and retry."
+                        ) from exc
+
+                if inserted:
+                    inserted_total += inserted
+                    affected_tables.add(table_name)
+
+    quarantine_report = None
+    if skipped_rows:
+        affected_tables.update(row["table"] for row in skipped_rows if row.get("table"))
+        quarantine_report = _write_quarantine_report(
+            backup_file_path=file_path,
+            skipped_rows=skipped_rows,
+            restore_mode=restore_mode,
+        )
+
+    return RestoreSummary(
+        mode=restore_mode,
+        inserted_count=inserted_total,
+        skipped_count=len(skipped_rows),
+        affected_tables=sorted(affected_tables),
+        quarantine_report=quarantine_report,
+    )
