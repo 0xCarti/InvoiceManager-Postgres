@@ -461,6 +461,10 @@ def create_app(args=None):
     app.config.setdefault("RESTORE_MODE_DEFAULT", "strict")
     app.config.setdefault("RESTORE_PREFLIGHT_STRICT_FK_VALIDATION", False)
     app.config.setdefault(
+        "RESTORE_REPAIR_ORPHANS",
+        _get_bool_env("RESTORE_REPAIR_ORPHANS", default=True),
+    )
+    app.config.setdefault(
         "RESTORE_ENDPOINT_EXPECTATIONS",
         [
             {

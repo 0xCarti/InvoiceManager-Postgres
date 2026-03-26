@@ -756,6 +756,68 @@ def test_restore_backup_strict_mode_still_fails_on_invalid_rows(app):
             assert "constraint failure" in str(exc)
 
 
+def test_restore_backup_repairs_orphan_purchase_invoice_draft_when_enabled(app):
+    with app.app_context():
+        populate_data()
+        backup_path = _create_sqlite_backup_copy(app, "repair_orphan_draft.db")
+        app.config["RESTORE_REPAIR_ORPHANS"] = True
+
+        with sqlite3.connect(backup_path) as conn:
+            conn.execute("DELETE FROM purchase_order")
+            conn.commit()
+
+        summary = restore_backup(backup_path, restore_mode="strict")
+
+        assert summary.repaired_count > 0
+        assert summary.repair_report is not None
+        assert (
+            summary.repair_report["purchase_invoice_draft"]["dropped_orphans"] > 0
+        )
+        assert PurchaseInvoiceDraft.query.count() == 0
+
+
+def test_restore_backup_orphan_purchase_invoice_draft_fails_when_repairs_disabled(app):
+    with app.app_context():
+        populate_data()
+        backup_path = _create_sqlite_backup_copy(
+            app, "orphan_draft_repairs_disabled.db"
+        )
+        app.config["RESTORE_REPAIR_ORPHANS"] = False
+
+        with sqlite3.connect(backup_path) as conn:
+            conn.execute("DELETE FROM purchase_order")
+            conn.commit()
+
+        try:
+            restore_backup(backup_path, restore_mode="strict")
+            assert False, "Expected RestoreBackupError when orphan repair is disabled"
+        except RestoreBackupError as exc:
+            assert "constraint failure" in str(exc)
+
+
+def test_restore_backup_nullifies_orphan_purchase_gl_code_when_enabled(app):
+    with app.app_context():
+        populate_data()
+        backup_path = _create_sqlite_backup_copy(app, "repair_orphan_purchase_gl.db")
+        app.config["RESTORE_REPAIR_ORPHANS"] = True
+
+        with sqlite3.connect(backup_path) as conn:
+            conn.execute("UPDATE purchase_invoice_item SET purchase_gl_code_id = 999999")
+            conn.commit()
+
+        summary = restore_backup(backup_path, restore_mode="strict")
+
+        assert summary.repaired_count > 0
+        assert summary.repair_report is not None
+        assert summary.repair_report["purchase_invoice_item"]["nullified_orphans"] > 0
+        assert (
+            PurchaseInvoiceItem.query.filter(
+                PurchaseInvoiceItem.purchase_gl_code_id.is_(None)
+            ).count()
+            >= 1
+        )
+
+
 def test_restore_backup_wraps_drop_constraint_compile_error(app, monkeypatch):
     with app.app_context():
         backup_path = _create_sqlite_backup_copy(

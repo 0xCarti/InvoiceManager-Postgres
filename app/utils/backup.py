@@ -101,6 +101,8 @@ class RestoreSummary:
     skipped_count: int
     affected_tables: list[str]
     quarantine_report: str | None = None
+    repaired_count: int = 0
+    repair_report: dict[str, dict[str, int]] | None = None
 
 
 def _collect_missing_expected_endpoints() -> list[str]:
@@ -606,6 +608,68 @@ def _insert_rows_permissive(
     return inserted
 
 
+def _load_table_key_set(
+    backup_conn,
+    *,
+    backup_metadata: MetaData,
+    table_name: str,
+    key_column: str = "id",
+) -> set:
+    table = backup_metadata.tables.get(table_name)
+    if table is None or key_column not in table.c:
+        return set()
+    rows = backup_conn.execute(
+        table.select().with_only_columns(table.c[key_column])
+    ).all()
+    return {row[0] for row in rows if row and row[0] is not None}
+
+
+def _normalize_purchase_invoice_draft_rows(
+    *,
+    rows: list[dict],
+    backup_conn,
+    backup_metadata: MetaData,
+) -> tuple[list[dict], dict[str, int]]:
+    purchase_order_ids = _load_table_key_set(
+        backup_conn, backup_metadata=backup_metadata, table_name="purchase_order"
+    )
+    kept_rows: list[dict] = []
+    dropped_orphans = 0
+    for row in rows:
+        purchase_order_id = row.get("purchase_order_id")
+        if purchase_order_id is not None and purchase_order_id not in purchase_order_ids:
+            dropped_orphans += 1
+            continue
+        kept_rows.append(row)
+    return kept_rows, {"dropped_orphans": dropped_orphans}
+
+
+def _normalize_purchase_invoice_item_rows(
+    *,
+    rows: list[dict],
+    backup_conn,
+    backup_metadata: MetaData,
+) -> tuple[list[dict], dict[str, int]]:
+    gl_code_ids = _load_table_key_set(
+        backup_conn, backup_metadata=backup_metadata, table_name="gl_code"
+    )
+    repaired = 0
+    for row in rows:
+        purchase_gl_code_id = row.get("purchase_gl_code_id")
+        if purchase_gl_code_id is None:
+            continue
+        if purchase_gl_code_id not in gl_code_ids:
+            row["purchase_gl_code_id"] = None
+            repaired += 1
+    return rows, {"nullified_orphans": repaired}
+
+
+RESTORE_ROW_NORMALIZERS: dict[str, list] = {
+    "purchase_invoice_draft": [_normalize_purchase_invoice_draft_rows],
+    "purchase_invoice_item": [_normalize_purchase_invoice_item_rows],
+}
+
+
 def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> RestoreSummary:
     restore_mode = _normalize_restore_mode(restore_mode)
     backup_engine = create_engine(f"sqlite+pysqlite:///{file_path}")
@@ -621,6 +685,9 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
     inserted_total = 0
     skipped_rows: list[dict] = []
     affected_tables: set[str] = set()
+    repair_report: dict[str, dict[str, int]] = {}
+    repair_total = 0
+    repair_orphans_enabled = bool(current_app.config.get("RESTORE_REPAIR_ORPHANS", True))
 
     with db.engine.begin() as target_conn:
         try:
@@ -663,95 +730,52 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
                     )
                 ).mappings().all()
 
-            insert_rows = []
-            for row in rows:
-                record = {col.name: row[col.name] for col in select_cols}
+                insert_rows = []
+                for row in rows:
+                    record = {col.name: row[col.name] for col in select_cols}
 
-                for col in table.columns:
-                    if col.name not in record:
-                        default = None
-                        if col.default is not None:
-                            default = col.default.arg
-                            if callable(default):
+                    for col in table.columns:
+                        if col.name not in record:
+                            default = None
+                            if col.default is not None:
+                                default = col.default.arg
+                                if callable(default):
+                                    try:
+                                        default = default()
+                                    except TypeError:
+                                        default = default(None)
+                            record[col.name] = default
+                        else:
+                            value = record[col.name]
+                            if isinstance(col.type, db.DateTime) and isinstance(value, str):
                                 try:
-                                    default = default()
-                                except TypeError:
-                                    default = default(None)
-                        record[col.name] = default
-                    else:
-                        value = record[col.name]
-                        if isinstance(col.type, db.DateTime) and isinstance(value, str):
-                            try:
-                                record[col.name] = datetime.fromisoformat(value)
-                            except ValueError:
-                                pass
-                        elif isinstance(col.type, db.Date) and isinstance(value, str):
-                            try:
-                                record[col.name] = datetime.fromisoformat(value).date()
-                            except ValueError:
-                                pass
+                                    record[col.name] = datetime.fromisoformat(value)
+                                except ValueError:
+                                    pass
+                            elif isinstance(col.type, db.Date) and isinstance(value, str):
+                                try:
+                                    record[col.name] = datetime.fromisoformat(value).date()
+                                except ValueError:
+                                    pass
 
-                insert_rows.append(record)
+                    insert_rows.append(record)
+
+                if repair_orphans_enabled:
+                    normalizers = RESTORE_ROW_NORMALIZERS.get(table_name, [])
+                    for normalizer in normalizers:
+                        insert_rows, modifications = normalizer(
+                            rows=insert_rows,
+                            backup_conn=backup_conn,
+                            backup_metadata=backup_metadata,
+                        )
+                        for action, count in (modifications or {}).items():
+                            if count <= 0:
+                                continue
+                            table_report = repair_report.setdefault(table_name, {})
+                            table_report[action] = table_report.get(action, 0) + count
+                            repair_total += count
 
             if insert_rows:
-                try:
-                    target_conn.execute(table.insert(), insert_rows)
-                except IntegrityError as exc:
-                    first_row = insert_rows[0] if insert_rows else {}
-                    dbapi_details = _extract_dbapi_diagnostics(exc.orig)
-                    diagnostic_payload = {
-                        "phase": "insert_rows",
-                        "table": dbapi_details.get("table") or table_name,
-                        "constraint": dbapi_details.get("constraint"),
-                        "column": dbapi_details.get("column"),
-                        "sqlstate": dbapi_details.get("sqlstate"),
-                        "driver_error": dbapi_details.get("error_type"),
-                        "detail": _truncate_value(
-                            dbapi_details.get("detail") or "", max_length=180
-                        ),
-                        "sample_row_identifiers": _summarize_offending_row(first_row),
-                    }
-                    logger.error(
-                        "Restore integrity violation diagnostics: %s",
-                        json.dumps(diagnostic_payload, sort_keys=True),
-                    )
-                    concise_detail = ", ".join(
-                        [
-                            f"constraint={dbapi_details['constraint']}"
-                            if dbapi_details.get("constraint")
-                            else "",
-                            f"column={dbapi_details['column']}"
-                            if dbapi_details.get("column")
-                            else "",
-                            f"detail={_truncate_value(dbapi_details['detail'])}"
-                            if dbapi_details.get("detail")
-                            else "",
-                            (
-                                "keys="
-                                + ",".join(
-                                    f"{k}:{v}"
-                                    for k, v in diagnostic_payload[
-                                        "sample_row_identifiers"
-                                    ].items()
-                                )
-                            )
-                            if diagnostic_payload["sample_row_identifiers"]
-                            else "",
-                        ]
-                    ).strip(", ")
-                    raise RestoreBackupError(
-                        "Restore failed while inserting rows into table "
-                        f"'{diagnostic_payload['table']}' due to integrity violation "
-                        f"({dbapi_details.get('error_type', 'IntegrityError')}). "
-                        f"{concise_detail or 'No additional DBAPI diagnostics available.'}"
-                    ) from exc
-                except (DataError, DBAPIError) as exc:
-                    raise RestoreBackupError(
-                        "Restore failed while inserting rows into table "
-                        f"'{table_name}'. This likely indicates a column length/type "
-                        "mismatch or driver-level database error while loading backup "
-                        "data. Please run the latest database migrations and retry."
-                    ) from exc
                 if restore_mode == "permissive":
                     inserted = _insert_rows_permissive(
                         target_conn=target_conn,
@@ -799,4 +823,6 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
         skipped_count=len(skipped_rows),
         affected_tables=sorted(affected_tables),
         quarantine_report=quarantine_report,
+        repaired_count=repair_total,
+        repair_report=repair_report or None,
     )
