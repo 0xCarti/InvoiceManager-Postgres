@@ -1,0 +1,46 @@
+<!-- templates/report_vendor_invoices.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-5">
+    <h2>Customer Invoice Report</h2>
+    <form method="POST" class="mb-4">
+        {{ form.hidden_tag() }}
+        <div class="form-group">
+            {{ form.customer.label }}
+            <div
+                style="border: 1px solid #ccc; padding: 10px; max-height: 300px; overflow-y: auto; background-color: #f9f9f9; border-radius: 4px;">
+                {{ form.customer() }}
+            </div>
+        </div>
+        <div class="form-group">{{ form.start_date.label }} {{ form.start_date(class="form-control") }}</div>
+        <div class="form-group">{{ form.end_date.label }} {{ form.end_date(class="form-control") }}</div>
+        <div class="form-group">{{ form.payment_status.label }} {{ form.payment_status(class="form-control") }}</div>
+        <button type="submit" class="btn btn-primary">Generate Report</button>
+    </form>
+
+    {% if invoices %}
+    <h4>Results</h4>
+    <div class="table-responsive">
+    <table class="table table-bordered">
+        <thead>
+            <tr>
+                <th>Invoice ID</th>
+                <th>Date</th>
+                <th>Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for invoice in invoices %}
+            <tr>
+                <td>{{ invoice.id }}</td>
+                <td>{{ invoice.date_created|format_datetime('%Y-%m-%d') }}</td>
+                <td>${{ "%.2f"|format(invoice.total) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

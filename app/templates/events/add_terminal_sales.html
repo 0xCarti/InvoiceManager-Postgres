@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Terminal Sales - {{ event_location.location.name }}</h2>
+<form method="post" id="terminal-sales-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+    <div class="table-responsive">
+    <table class="table">
+        <thead>
+            <tr><th>Product</th><th class="text-end">Price</th><th>Quantity</th></tr>
+        </thead>
+        <tbody>
+        {% set product_list = products or event_location.location.products %}
+        {% for product in product_list %}
+        <tr data-price="{{ product.price | float }}">
+            <td>{{ product.name }}</td>
+            <td class="text-end">${{ '{:,.2f}'.format(product.price) }}</td>
+            <td>
+                <input type="number" step="any" name="qty_{{ product.id }}" class="form-control terminal-sale-input"
+                       value="{{ existing_sales.get(product.id, '') }}">
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="mt-3">
+        <strong>Grand Total:</strong>
+        <span id="terminal-sales-grand-total">$0.00</span>
+    </div>
+    <button type="submit" class="btn btn-primary mt-2">Submit</button>
+</form>
+<script nonce="{{ csp_nonce }}">
+    document.addEventListener('DOMContentLoaded', () => {
+        const form = document.getElementById('terminal-sales-form');
+        const totalEl = document.getElementById('terminal-sales-grand-total');
+
+        if (!form || !totalEl) {
+            return;
+        }
+
+        const currencyFormatter = new Intl.NumberFormat(undefined, {
+            style: 'currency',
+            currency: 'USD',
+        });
+
+        const updateTotal = () => {
+            let total = 0;
+
+            document.querySelectorAll('tr[data-price]').forEach((row) => {
+                const price = Number(row.dataset.price);
+                if (!Number.isFinite(price)) {
+                    return;
+                }
+
+                const input = row.querySelector('.terminal-sale-input');
+                if (!input) {
+                    return;
+                }
+
+                const qty = Number(input.value || 0);
+                if (!Number.isNaN(qty)) {
+                    total += price * qty;
+                }
+            });
+
+            totalEl.textContent = currencyFormatter.format(total);
+        };
+
+        const handleInput = (event) => {
+            if (event.target.classList.contains('terminal-sale-input')) {
+                updateTotal();
+            }
+        };
+
+        form.addEventListener('input', handleInput);
+        form.addEventListener('change', handleInput);
+
+        updateTotal();
+    });
+</script>
+{% endblock %}

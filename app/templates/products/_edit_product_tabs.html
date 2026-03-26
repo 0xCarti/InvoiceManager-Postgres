@@ -1,0 +1,72 @@
+{% set tabs_id = tabs_id or 'productEditTabs' %}
+{% set tabs_content_id = tabs_content_id or tabs_id ~ 'Content' %}
+{% set is_default_tabs = tabs_id == 'productEditTabs' %}
+{% set details_tab_id = 'product-details-tab' if is_default_tabs else tabs_id ~ '-details-tab' %}
+{% set details_panel_id = 'product-details' if is_default_tabs else tabs_id ~ '-details' %}
+{% set terminal_tab_id = 'terminal-sales-tab' if is_default_tabs else tabs_id ~ '-terminal-sales-tab' %}
+{% set terminal_panel_id = 'terminal-sales' if is_default_tabs else tabs_id ~ '-terminal-sales' %}
+<div class="product-edit-sections" data-role="product-edit-tabs">
+    <ul class="nav nav-tabs mt-4" id="{{ tabs_id }}" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="{{ details_tab_id }}" data-bs-toggle="tab"
+                data-bs-target="#{{ details_panel_id }}" type="button" role="tab"
+                aria-controls="{{ details_panel_id }}" aria-selected="true">Details</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="{{ terminal_tab_id }}" data-bs-toggle="tab"
+                data-bs-target="#{{ terminal_panel_id }}" type="button" role="tab"
+                aria-controls="{{ terminal_panel_id }}" aria-selected="false">Terminal Sales Mappings</button>
+        </li>
+    </ul>
+    <div class="tab-content mt-3" id="{{ tabs_content_id }}">
+        <div class="tab-pane fade show active" id="{{ details_panel_id }}" role="tabpanel"
+            aria-labelledby="{{ details_tab_id }}">
+            {% include 'products/_create_product_form.html' %}
+        </div>
+        <div class="tab-pane fade" id="{{ terminal_panel_id }}" role="tabpanel"
+            aria-labelledby="{{ terminal_tab_id }}">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h3 class="h5 mb-0">Linked Terminal Sales Products</h3>
+            </div>
+            {% if terminal_sale_aliases %}
+            <div class="table-responsive">
+                <table class="table table-striped table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th scope="col">Terminal Product Name</th>
+                            <th scope="col">Normalized Name</th>
+                            <th scope="col">Mapped On</th>
+                            <th scope="col" class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for alias in terminal_sale_aliases|sort(attribute='source_name') %}
+                        <tr>
+                            <td class="text-wrap">{{ alias.source_name }}</td>
+                            <td class="text-wrap">{{ alias.normalized_name }}</td>
+                            <td>
+                                {% if alias.created_at %}
+                                {{ alias.created_at.strftime('%Y-%m-%d %H:%M') }}
+                                {% else %}
+                                <span class="text-muted">Unknown</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                <form class="d-inline" method="POST"
+                                    action="{{ url_for('product.remove_terminal_sale_alias', product_id=product_id, alias_id=alias.id) }}">
+                                    {{ alias_delete_form.hidden_tag() }}
+                                    <button type="submit" class="btn btn-outline-danger btn-sm"
+                                        data-confirm-message="Remove this mapping?">Remove</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-muted mb-0">There are no terminal sales product mappings for this product.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>

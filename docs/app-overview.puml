@@ -1,0 +1,276 @@
+@startuml
+' InvoiceManager functional overview component diagram
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam ArrowColor #4A90E2
+skinparam component {
+  BackgroundColor<<core>> #F5F7FA
+  BackgroundColor<<feature>> #FFFFFF
+  BorderColor #4A90E2
+}
+
+left to right direction
+
+title InvoiceManager Functional Overview
+
+package "Core Infrastructure" {
+  component "Application Factory" as AppFactory <<core>>
+  component "Shared Services" as SharedServices <<core>>
+  component "Data Models (SQLAlchemy)" as Models <<core>>
+  component "Templates & Static Assets" as Templates <<core>>
+}
+
+note right of AppFactory
+  * Builds Flask app, configures extensions
+  * Ensures directories, seeds defaults
+  * Registers blueprints & context processors
+end note
+
+note bottom of SharedServices
+  * Authentication (Flask-Login)
+  * Rate limiting (Flask-Limiter)
+  * SocketIO, CSRF, Bootstrap helpers
+  * Background backup scheduler
+end note
+
+note bottom of Models
+  Users, Settings, Items, Products,
+  Locations, Transfers, Purchases,
+  Invoices, Events, Activity Logs, etc.
+end note
+
+package "Authentication & Administration" {
+  component "Auth & Session Routes" as AuthRoutes <<feature>>
+  component "User & Role Management" as UserMgmt <<feature>>
+  component "Backups & Data Imports" as BackupImports <<feature>>
+  component "Settings & Notifications" as Settings <<feature>>
+}
+
+note right of AuthRoutes
+  * Login/logout with rate limiting
+  * Password reset email flow
+  * Demo landing & zero-threat page
+end note
+
+note bottom of UserMgmt
+  * Invite, activate, archive users
+  * Manage profiles & timezones
+  * Audit trail via Activity Logs
+end note
+
+note bottom of BackupImports
+  * Manual/automatic DB backups
+  * Restore uploaded SQLite backups
+  * CSV import for items/locations/products/etc.
+end note
+
+note bottom of Settings
+  * Manage GST, timezone, SMTP, brand info
+  * Toggle SMS/email notifications
+  * Configure backup cadence
+end note
+
+package "Inventory Operations" {
+  component "Item & Unit Management" as Items <<feature>>
+  component "Product Catalog" as Products <<feature>>
+  component "GL Code Registry" as GLCodes <<feature>>
+  component "Location Directory" as Locations <<feature>>
+  component "Transfers & Spoilage" as Transfers <<feature>>
+}
+
+note right of Items
+  * CRUD for items & alternate units
+  * Track stock, costs, conversion factors
+  * Link recipes and GL accounts
+end note
+
+note right of Products
+  * Maintain sellable products
+  * Manage recipes & availability per location
+  * Adjust inventory via sales integration
+end note
+
+note right of GLCodes
+  * Define revenue/expense mappings
+  * Assign defaults for items/products/vendors
+end note
+
+note right of Locations
+  * Create/archive storage sites & stands
+  * Map inventory expectations
+  * Flag spoilage locations
+end note
+
+note right of Transfers
+  * Schedule, approve, and complete moves
+  * Record spoilage and stock adjustments
+  * Emit SocketIO updates to dashboards
+end note
+
+package "Sales & Customer Management" {
+  component "Customer Directory" as Customers <<feature>>
+  component "Invoice Workflow" as Invoices <<feature>>
+  component "Notes & Activity" as Notes <<feature>>
+  component "Reports" as Reports <<feature>>
+}
+
+note right of Customers
+  * Manage customer profiles & tax exemptions
+  * Attach addresses and archival status
+end note
+
+note right of Invoices
+  * Build invoices with dynamic IDs
+  * Apply GST/PST overrides & totals
+  * Decrement inventory & recipe items
+end note
+
+note right of Notes
+  * Record internal notes linked to entities
+  * Surface on dashboards & detail pages
+end note
+
+note right of Reports
+  * Sales summaries, inventory balance,
+    spoilage, purchase history exports
+  * CSV/PDF download support
+end note
+
+package "Purchasing & Vendor Management" {
+  component "Vendor Directory" as Vendors <<feature>>
+  component "Purchase Orders" as PurchaseOrders <<feature>>
+  component "Purchase Invoices" as PurchaseInvoices <<feature>>
+}
+
+note right of Vendors
+  * Maintain supplier contacts & GL defaults
+  * Archive/reactivate vendors
+end note
+
+note right of PurchaseOrders
+  * Create PO with expected delivery
+  * Track line items, costs, approvals
+  * Export or email order PDFs
+end note
+
+note right of PurchaseInvoices
+  * Receive goods against PO & locations
+  * Capture taxes, freight, adjustments
+  * Update stock & item costs
+end note
+
+package "Events & Field Operations" {
+  component "Event Planning" as Events <<feature>>
+  component "Terminal Sales" as TerminalSales <<feature>>
+  component "Stand Sheets" as StandSheets <<feature>>
+}
+
+note right of Events
+  * Configure multi-day events & venues
+  * Assign locations and staff
+end note
+
+note right of TerminalSales
+  * Import POS sales per event/location
+  * Reconcile against inventory & revenue
+end note
+
+note right of StandSheets
+  * Capture opening/closing counts
+  * Generate variance & spoilage reports
+end note
+
+package "Shared Utilities" {
+  component "Activity Logger" as ActivityLogger <<feature>>
+  component "Pagination & Filtering" as Pagination <<feature>>
+  component "Email & Notifications" as Messaging <<feature>>
+  component "File Helpers" as FileHelpers <<feature>>
+}
+
+note right of ActivityLogger
+  * Persist audit trail for user actions
+  * Expose admin filterable view
+end note
+
+note right of Pagination
+  * Build pagination args
+  * Standardise per-page settings
+end note
+
+note right of Messaging
+  * SMTP integration for resets/invites
+  * Optional SMS notifications
+end note
+
+note right of FileHelpers
+  * Secure upload paths
+  * Import/export file management
+end note
+
+AppFactory --> SharedServices
+AppFactory --> Models
+AppFactory --> Templates
+SharedServices --> ActivityLogger
+SharedServices --> Messaging
+Models --> Items
+Models --> Products
+Models --> GLCodes
+Models --> Locations
+Models --> Transfers
+Models --> Customers
+Models --> Invoices
+Models --> Vendors
+Models --> PurchaseOrders
+Models --> PurchaseInvoices
+Models --> Events
+Models --> TerminalSales
+Models --> StandSheets
+Models --> Notes
+Models --> Reports
+
+AuthRoutes --> SharedServices : uses login_manager, limiter
+AuthRoutes --> Models : query User & Setting
+UserMgmt --> Models
+BackupImports --> FileHelpers
+BackupImports --> Models
+Settings --> Models
+Settings --> Messaging
+
+Items --> SharedServices : uses CSRF, login
+Products --> Items
+Products --> Locations
+GLCodes --> Items
+GLCodes --> Products
+Transfers --> Items
+Transfers --> Locations
+Transfers --> SharedServices : websocket updates
+Customers --> Invoices
+Invoices --> Products
+Invoices --> Customers
+Invoices --> ActivityLogger
+Notes --> ActivityLogger
+Reports --> Models
+Reports --> FileHelpers
+
+Vendors --> PurchaseOrders
+Vendors --> PurchaseInvoices
+PurchaseOrders --> Items
+PurchaseOrders --> Vendors
+PurchaseInvoices --> PurchaseOrders
+PurchaseInvoices --> Items
+PurchaseInvoices --> Vendors
+
+Events --> Locations
+TerminalSales --> Events
+TerminalSales --> Products
+StandSheets --> Events
+StandSheets --> Items
+StandSheets --> Transfers
+
+ActivityLogger --> Models
+Pagination --> Templates
+Messaging --> SharedServices
+FileHelpers --> Templates
+
+@enduml

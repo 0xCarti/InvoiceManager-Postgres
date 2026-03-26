@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container my-4">
+    <h1 class="h3 mb-3">{{ 'Edit Menu' if menu else 'Create Menu' }}</h1>
+    <form method="post" id="menu-form" data-products-endpoint="{{ url_for('menu.get_menu_products') }}">
+        {{ form.hidden_tag() }}
+        <div class="mb-3">
+            {{ form.name.label(class="form-label") }}
+            {{ form.name(class="form-control", placeholder="Menu name") }}
+            {% for error in form.name.errors %}
+            <div class="text-danger small">{{ error }}</div>
+            {% endfor %}
+        </div>
+        <div class="mb-3">
+            {{ form.description.label(class="form-label") }}
+            {{ form.description(class="form-control", rows=3) }}
+            {% for error in form.description.errors %}
+            <div class="text-danger small">{{ error }}</div>
+            {% endfor %}
+        </div>
+        <div class="mb-4">
+            <label for="copy-menu-select" class="form-label">Copy products from another menu</label>
+            <div class="input-group">
+                <select id="copy-menu-select" class="form-select" data-products-endpoint="{{ url_for('menu.get_menu_products') }}">
+                    <option value="">Select a menu…</option>
+                    {% for other_menu in copy_menus %}
+                    <option value="{{ other_menu.id }}">{{ other_menu.name }}</option>
+                    {% endfor %}
+                </select>
+                <button type="button" class="btn btn-outline-secondary" id="copy-menu-button">Copy Products</button>
+            </div>
+            <div id="copy-menu-status" class="form-text d-none"></div>
+        </div>
+        <div class="mb-3">
+            <div class="d-flex justify-content-between align-items-center">
+                {{ form.product_ids.label(class="form-label mb-0") }}
+                <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#quickProductModal">
+                    Quick Create Product
+                </button>
+            </div>
+            <div class="input-group mb-2">
+                <span class="input-group-text" id="product-search-label">Search</span>
+                <input type="text" class="form-control" id="product-search" placeholder="Search products" aria-describedby="product-search-label">
+                <button class="btn btn-outline-secondary" type="button" id="product-search-clear">Clear</button>
+            </div>
+            {{ form.product_ids(class="form-select", multiple=True, size=12) }}
+            <div class="form-text">Use the search box to quickly find products, then hold Ctrl (Windows) or Command (Mac) to select multiple items.</div>
+            <div id="quick-product-feedback" class="form-text d-none"></div>
+            {% for error in form.product_ids.errors %}
+            <div class="text-danger small">{{ error }}</div>
+            {% endfor %}
+        </div>
+        {{ form.submit(class="btn btn-primary") }}
+        <a href="{{ url_for('menu.view_menus') }}" class="btn btn-secondary ms-2">Cancel</a>
+    </form>
+</div>
+<div class="modal fade" id="quickProductModal" tabindex="-1" aria-labelledby="quickProductModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="quick-product-form" method="post" action="{{ url_for('product.quick_create_product') }}">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="quickProductModalLabel">Quick Create Product</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    {{ quick_product_form.hidden_tag() }}
+                    <div id="quick-product-errors" class="alert alert-danger d-none"></div>
+                    <div class="mb-3">
+                        {{ quick_product_form.name.label(class="form-label") }}
+                        {{ quick_product_form.name(class="form-control", placeholder="Product name") }}
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            {{ quick_product_form.price.label(class="form-label") }}
+                            {{ quick_product_form.price(class="form-control", placeholder="0.00", step="0.01") }}
+                        </div>
+                        <div class="col-md-4">
+                            {{ quick_product_form.invoice_sale_price.label(class="form-label") }}
+                            {{ quick_product_form.invoice_sale_price(class="form-control", placeholder="0.00", step="0.01", min="0") }}
+                        </div>
+                        <div class="col-md-4">
+                            {{ quick_product_form.cost.label(class="form-label") }}
+                            {{ quick_product_form.cost(class="form-control", placeholder="0.00", step="0.01") }}
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        {{ quick_product_form.sales_gl_code.label(class="form-label") }}
+                        {{ quick_product_form.sales_gl_code(class="form-select") }}
+                        <div class="form-text">Optional: choose a sales GL code for this product.</div>
+                    </div>
+                    <div class="mt-4">
+                        <h6 class="mb-2">Product Recipe</h6>
+                        <div class="form-text mb-3">Optional: add items that make up this product's recipe.</div>
+                        <div class="row g-3 align-items-end mb-3">
+                            <div class="col-md-6">
+                                {{ quick_product_form.recipe_yield_quantity.label(class="form-label") }}
+                                {{ quick_product_form.recipe_yield_quantity(class="form-control", placeholder="1") }}
+                            </div>
+                            <div class="col-md-6">
+                                {{ quick_product_form.recipe_yield_unit.label(class="form-label") }}
+                                {{ quick_product_form.recipe_yield_unit(class="form-control", placeholder="e.g. servings") }}
+                            </div>
+                        </div>
+                        <div id="quick-recipe-items" class="mb-2" data-countable-label="{{ quick_product_form.countable_label|default('Countable', true) }}" data-next-index="{{ quick_product_form.items|length }}">
+                            {% for item_form in quick_product_form.items %}
+                            {% set selected_name = item_form.item.choices | selectattr('0', 'equalto', item_form.item.data) | map(attribute=1) | first %}
+                            <div class="row g-2 align-items-center quick-item-row mb-2">
+                                <div class="col position-relative">
+                                    <input type="hidden" name="{{ item_form.item.name }}" value="{{ item_form.item.data or '' }}" class="item-id">
+                                    <input type="text" class="form-control form-control-sm item-search" placeholder="Search item…" autocomplete="off" value="{{ selected_name or '' }}">
+                                    <div class="list-group item-suggestions"></div>
+                                </div>
+                                <div class="col">
+                                    <select name="{{ item_form.unit.name }}" class="form-select form-select-sm unit-select" data-selected="{{ item_form.unit.data or '' }}"></select>
+                                </div>
+                                <div class="col">
+                                    {{ item_form.quantity(class="form-control form-control-sm", placeholder="Qty", step="any") }}
+                                </div>
+                                <div class="col-auto form-check d-flex align-items-center">
+                                    {{ item_form.countable(class="form-check-input") }}
+                                    {{ item_form.countable.label(class="form-check-label ms-1") }}
+                                </div>
+                                <div class="col-auto">
+                                    <button type="button" class="btn btn-sm btn-outline-danger quick-remove-item">Remove</button>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="quick-add-recipe-item">Add Recipe Item</button>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    {{ quick_product_form.submit(class="btn btn-primary") }}
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script src="{{ url_for('static', filename='js/menu_form.js') }}"></script>
+{% endblock %}

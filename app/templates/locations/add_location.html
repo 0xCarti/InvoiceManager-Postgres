@@ -1,0 +1,28 @@
+<form id="locationForm" action="{{ url_for('locations.add_location') }}" method="post">
+    {{ form.hidden_tag() }}
+    <div class="modal-header">
+        <h5 class="modal-title">Add New Location</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    </div>
+    <div class="modal-body">
+        <div class="form-group">
+            {{ form.name.label(class="form-label") }}
+            {{ form.name(class="form-control") }}
+        </div>
+        <div class="form-group">
+            {{ form.menu_id.label(class="form-label") }}
+            {{ form.menu_id(class="form-select") }}
+            <div class="form-text">
+                Assigning a menu will automatically manage the products and stand sheet items.
+            </div>
+        </div>
+        <div class="form-check mb-3">
+            {{ form.is_spoilage(class="form-check-input") }}
+            {{ form.is_spoilage.label(class="form-check-label") }}
+        </div>
+    </div>
+    <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        {{ form.submit(class="btn btn-primary") }}
+    </div>
+</form>

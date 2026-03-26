@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <h2 class="mb-0">Product Sales Report</h2>
+        <a class="btn btn-outline-secondary" href="{{ url_for('invoice.view_invoices') }}">Back to Invoices</a>
+    </div>
+    <p class="text-muted">Analyze total quantity sold, revenue, and profit for your products over a selected date range. Choose specific products or sales GL codes to focus the report.</p>
+
+    <form method="POST" class="mb-4">
+        {{ form.hidden_tag() }}
+        <div class="row g-3">
+            <div class="col-md-6">
+                {{ form.start_date.label(class="form-label") }}
+                {{ form.start_date(class="form-control") }}
+                {% if form.start_date.errors %}
+                    <div class="text-danger small">{{ form.start_date.errors[0] }}</div>
+                {% endif %}
+            </div>
+            <div class="col-md-6">
+                {{ form.end_date.label(class="form-label") }}
+                {{ form.end_date(class="form-control") }}
+                {% if form.end_date.errors %}
+                    <div class="text-danger small">{{ form.end_date.errors[0] }}</div>
+                {% endif %}
+            </div>
+        </div>
+        <div class="row g-3 mt-1">
+            <div class="col-md-6">
+                {{ form.products.label(class="form-label") }}
+                {{ form.products(class="form-select", multiple=true) }}
+                <div class="form-text">Leave blank to include all products.</div>
+                {% if form.products.errors %}
+                    <div class="text-danger small">{{ form.products.errors[0] }}</div>
+                {% endif %}
+            </div>
+            <div class="col-md-6">
+                {{ form.gl_codes.label(class="form-label") }}
+                {{ form.gl_codes(class="form-select", multiple=true) }}
+                <div class="form-text">Hold Ctrl (Windows) or Command (Mac) to select multiple GL codes.</div>
+                {% if form.gl_codes.errors %}
+                    <div class="text-danger small">{{ form.gl_codes.errors[0] }}</div>
+                {% endif %}
+            </div>
+        </div>
+        {{ form.submit(class="btn btn-primary mt-3") }}
+    </form>
+
+    {% if report is not none %}
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <h3 class="mb-0">Report Results</h3>
+            <div class="d-flex align-items-center flex-wrap gap-2">
+                {% if start and end %}
+                <span class="text-muted">{{ start.strftime('%Y-%m-%d') }} to {{ end.strftime('%Y-%m-%d') }}</span>
+                {% endif %}
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('report.product_sales_report') }}">Reset Filters</a>
+            </div>
+        </div>
+
+        {% if selected_product_names or selected_gl_labels %}
+        <div class="alert alert-secondary" role="status">
+            <div class="fw-semibold">Filters Applied</div>
+            <ul class="mb-0 small">
+                {% if selected_product_names %}
+                <li><span class="fw-semibold">Products:</span> {{ selected_product_names | join(', ') }}</li>
+                {% endif %}
+                {% if selected_gl_labels %}
+                <li><span class="fw-semibold">Sales GL Codes:</span> {{ selected_gl_labels | join(', ') }}</li>
+                {% endif %}
+            </ul>
+            <div class="mt-2">
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('report.product_sales_report') }}">Clear Filters</a>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if report %}
+        <div class="table-responsive">
+            <table class="table table-bordered table-striped align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th scope="col">Product</th>
+                        <th scope="col" class="text-end">Quantity Sold</th>
+                        <th scope="col" class="text-end">Cost (each)</th>
+                        <th scope="col" class="text-end">Price (each)</th>
+                        <th scope="col" class="text-end">Total Cost</th>
+                        <th scope="col" class="text-end">Profit per Item</th>
+                        <th scope="col" class="text-end">Total Revenue</th>
+                        <th scope="col" class="text-end">Total Profit</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in report %}
+                    <tr>
+                        <td>{{ row.name }}</td>
+                        <td class="text-end">{{ '%.2f'|format(row.quantity) }}</td>
+                        <td class="text-end">${{ '%.2f'|format(row.cost) }}</td>
+                        <td class="text-end">${{ '%.2f'|format(row.price) }}</td>
+                        <td class="text-end">${{ '%.2f'|format(row.total_cost) }}</td>
+                        <td class="text-end">${{ '%.2f'|format(row.profit_each) }}</td>
+                        <td class="text-end">${{ '%.2f'|format(row.revenue) }}</td>
+                        <td class="text-end">${{ '%.2f'|format(row.profit) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                {% if totals %}
+                <tfoot>
+                    <tr>
+                        <th scope="row" class="text-end">Totals</th>
+                        <td class="text-end">{{ '%.2f'|format(totals.quantity) }}</td>
+                        <td></td>
+                        <td></td>
+                        <td class="text-end">${{ '%.2f'|format(totals.cost) }}</td>
+                        <td></td>
+                        <td class="text-end">${{ '%.2f'|format(totals.revenue) }}</td>
+                        <td class="text-end">${{ '%.2f'|format(totals.profit) }}</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+        {% else %}
+            <div class="alert alert-info" role="alert">
+                No sales data matched the selected filters.
+            </div>
+        {% endif %}
+    {% endif %}
+</div>
+{% endblock %}

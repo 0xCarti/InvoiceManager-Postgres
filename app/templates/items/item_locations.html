@@ -1,0 +1,85 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>{{ item.name }} Locations</h2>
+<form method="post" class="mb-3">
+    {{ form.hidden_tag() }}
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead>
+                <tr>
+                    <th>Location</th>
+                    <th>Quantity</th>
+                    <th>Purchase GL Code</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for e in entries.items %}
+                {% set field_name = 'location_gl_code_' ~ e.location_id %}
+                {% if request.method == 'POST' %}
+                    {% set selected_value = request.form.get(field_name, '') %}
+                {% else %}
+                    {% set selected_value = e.purchase_gl_code_id if e.purchase_gl_code_id else '' %}
+                {% endif %}
+                <tr>
+                    <td>{{ e.location.name }}</td>
+                    <td>{{ e.expected_count }}</td>
+                    <td>
+                        <select name="{{ field_name }}" class="form-select">
+                            {% set default_gl = item.purchase_gl_code %}
+                            <option value="" {% if not selected_value %}selected{% endif %}>
+                                Use Item Default
+                                {% if default_gl and default_gl.code %}
+                                    ({{ default_gl.code }}{% if default_gl.description %} - {{ default_gl.description }}{% endif %})
+                                {% endif %}
+                            </option>
+                            {% for gl in purchase_gl_codes %}
+                                <option value="{{ gl.id }}" {% if selected_value and selected_value|int == gl.id %}selected{% endif %}>
+                                    {{ gl.code }}{% if gl.description %} - {{ gl.description }}{% endif %}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                </tr>
+            {% endfor %}
+                <tr>
+                    <td><strong>Total</strong></td>
+                    <td><strong>{{ total }}</strong></td>
+                    <td></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <button type="submit" class="btn btn-primary">Save Changes</button>
+</form>
+<div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
+    <nav aria-label="Location pagination">
+        <ul class="pagination mb-0">
+            <li class="page-item {% if not entries.has_prev %}disabled{% endif %}">
+                <a class="page-link" href="{{ url_for('item.item_locations', item_id=item.id, page=entries.prev_num if entries.has_prev else 1, **pagination_args) }}"{% if not entries.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>
+            </li>
+            <li class="page-item disabled">
+                <span class="page-link">Page {{ entries.page }} of {{ entries.pages }}</span>
+            </li>
+            <li class="page-item {% if not entries.has_next %}disabled{% endif %}">
+                <a class="page-link" href="{{ url_for('item.item_locations', item_id=item.id, page=entries.next_num if entries.has_next else entries.pages or 1, **pagination_args) }}"{% if not entries.has_next %} tabindex="-1" aria-disabled="true"{% endif %}>Next</a>
+            </li>
+        </ul>
+    </nav>
+    <form method="get" class="d-flex align-items-center gap-2">
+        {% for key, values in request.args.lists() %}
+            {% if key not in ['page', 'per_page'] %}
+                {% for value in values %}
+                    <input type="hidden" name="{{ key }}" value="{{ value }}">
+                {% endfor %}
+            {% endif %}
+        {% endfor %}
+        <input type="hidden" name="page" value="1">
+        <label for="item-locations-per-page" class="form-label mb-0">Rows per page</label>
+        <select id="item-locations-per-page" name="per_page" class="form-select js-auto-submit">
+            {% for option in PAGINATION_SIZES %}
+                <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+        </select>
+    </form>
+</div>
+{% endblock %}

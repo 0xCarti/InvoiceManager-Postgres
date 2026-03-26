@@ -1,0 +1,578 @@
+{% extends 'base.html' %}
+{% from 'macros/filter_modal.html' import filter_modal %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Items</h2>
+            <p class="text-muted mb-0">Manage inventory items, units, and purchasing details</p>
+        </div>
+        <div>
+            <a href="{{ url_for('item.add_item') }}" class="btn btn-primary" id="createItemBtn">Add New Item</a>
+        </div>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <a href="{{ url_for('item.recipe_cost_calculator') }}" class="btn btn-outline-primary" id="recipeCostCalculatorBtn">Recipe Cost Calculator</a>
+        <button type="button" class="btn btn-outline-secondary" id="bulkEditItemsBtn" disabled>Bulk Edit</button>
+        <a href="{{ url_for('item.import_items') }}" class="btn btn-outline-secondary">Import Items</a>
+        <button type="submit" form="bulk-delete-form" class="btn btn-warning" data-confirm-message="Are you sure?">Delete Items</button>
+        <div class="dropdown d-md-none">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                More actions
+            </button>
+            <ul class="dropdown-menu">
+                <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</button></li>
+            </ul>
+        </div>
+        <div class="dropdown">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                Reports
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="{{ url_for('report.purchase_cost_forecast') }}">Forecasted Stock Item Sales</a></li>
+            </ul>
+        </div>
+        <div>
+            <div class="dropdown d-inline-block mb-3 me-2" data-column-visibility data-table-id="itemsTable" data-storage-key="itemsTableColumnVisibility">
+                <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="columnSelectorDropdown"
+                    data-bs-toggle="dropdown" aria-expanded="false">
+                    Columns
+                </button>
+                <div class="dropdown-menu dropdown-menu-end p-3" aria-labelledby="columnSelectorDropdown">
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-column-id"
+                            data-column-target="col-id" checked>
+                        <label class="form-check-label" for="toggle-column-id">ID</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-column-name"
+                            data-column-target="col-name" checked>
+                        <label class="form-check-label" for="toggle-column-name">Name</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-column-base-unit"
+                            data-column-target="col-base-unit" checked>
+                        <label class="form-check-label" for="toggle-column-base-unit">Base Unit</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-column-cost"
+                            data-column-target="col-cost" checked>
+                        <label class="form-check-label" for="toggle-column-cost">Cost / Base Unit</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-column-quantity"
+                            data-column-target="col-quantity" checked>
+                        <label class="form-check-label" for="toggle-column-quantity">Quantity</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-column-last-received"
+                            data-column-target="col-last-received" checked>
+                        <label class="form-check-label" for="toggle-column-last-received">Last Received</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-column-gl-code"
+                            data-column-target="col-gl-code" checked>
+                        <label class="form-check-label" for="toggle-column-gl-code">Inventory GL Code</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-column-gl-desc"
+                            data-column-target="col-gl-desc" checked>
+                        <label class="form-check-label" for="toggle-column-gl-desc">Inventory GL Description</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-column-purchase-gl-code"
+                            data-column-target="col-purchase-gl-code" checked>
+                        <label class="form-check-label" for="toggle-column-purchase-gl-code">Purchase GL Code</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-column-purchase-gl-desc"
+                            data-column-target="col-purchase-gl-desc" checked>
+                        <label class="form-check-label" for="toggle-column-purchase-gl-desc">Purchase GL Description</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-column-units"
+                            data-column-target="col-units" checked>
+                        <label class="form-check-label" for="toggle-column-units">Units</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-column-receiving-default"
+                            data-column-target="col-receiving-default" checked>
+                        <label class="form-check-label" for="toggle-column-receiving-default">Receiving Default Unit</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-column-transfer-default"
+                            data-column-target="col-transfer-default" checked>
+                        <label class="form-check-label" for="toggle-column-transfer-default">Transfer Default Unit</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-column-archived"
+                            data-column-target="col-archived" checked>
+                        <label class="form-check-label" for="toggle-column-archived">Archived</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <button type="button" class="btn btn-outline-secondary d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</button>
+    </div>
+
+    <!-- Filter Modal -->
+    {% call filter_modal(
+        'filterModal',
+        'Filters',
+        form_id='filter-form',
+        form_action=url_for('item.view_items'),
+        method='get',
+        reset_url=url_for('item.view_items', reset=1),
+        dialog_class='modal-lg',
+        scope=request.endpoint
+    ) %}
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
+                <label for="name_query" class="form-label">Name</label>
+                <input type="text" id="name_query" name="name_query" class="form-control" placeholder="Search name" value="{{ name_query or '' }}">
+            </div>
+            <div class="col-md-6">
+                <label for="match_mode" class="form-label">Match Mode</label>
+                <select id="match_mode" name="match_mode" class="form-select">
+                    <option value="exact" {% if match_mode == 'exact' %}selected{% endif %}>Exact</option>
+                    <option value="startswith" {% if match_mode == 'startswith' %}selected{% endif %}>Starts with</option>
+                    <option value="contains" {% if match_mode == 'contains' %}selected{% endif %}>Contains</option>
+                    <option value="not_contains" {% if match_mode == 'not_contains' %}selected{% endif %}>Does not contain</option>
+                </select>
+            </div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
+                <label for="purchase_gl_code_id" class="form-label">Purchase GL Code</label>
+                <select id="purchase_gl_code_id" name="purchase_gl_code_id" class="form-select" multiple>
+                    <option value="" {% if not purchase_gl_code_ids %}selected{% endif %}>All Purchase GL Codes</option>
+                    {% for gl in purchase_gl_codes %}
+                    <option value="{{ gl.id }}" {% if gl.id in purchase_gl_code_ids %}selected{% endif %}>{{ gl.code }} - {{ gl.description }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label for="vendor_id" class="form-label">Vendor</label>
+                <select id="vendor_id" name="vendor_id" class="form-select" multiple>
+                    <option value="" {% if not vendor_ids %}selected{% endif %}>All Vendors</option>
+                    {% for v in vendors %}
+                    <option value="{{ v.id }}" {% if v.id in vendor_ids %}selected{% endif %}>{{ v.first_name }} {{ v.last_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
+                <label for="archived" class="form-label">Status</label>
+                <select id="archived" name="archived" class="form-select">
+                    <option value="active" {% if archived == 'active' %}selected{% endif %}>Active</option>
+                    <option value="archived" {% if archived == 'archived' %}selected{% endif %}>Archived</option>
+                    <option value="all" {% if archived == 'all' %}selected{% endif %}>All</option>
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label for="base_unit" class="form-label">Base Unit</label>
+                <select id="base_unit" name="base_unit" class="form-select">
+                    <option value="">All Base Units</option>
+                    {% for unit in base_units %}
+                    <option value="{{ unit }}" {% if base_unit == unit %}selected{% endif %}>{{ unit|capitalize }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
+                <label for="cost_min" class="form-label">Cost ≥</label>
+                <input type="number" step="0.01" id="cost_min" name="cost_min" class="form-control" value="{{ cost_min if cost_min is not none else '' }}">
+            </div>
+            <div class="col-md-6">
+                <label for="cost_max" class="form-label">Cost ≤</label>
+                <input type="number" step="0.01" id="cost_max" name="cost_max" class="form-control" value="{{ cost_max if cost_max is not none else '' }}">
+            </div>
+        </div>
+    {% endcall %}
+    {% if active_gl_code_filter or base_unit or active_vendors %}
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="text-muted small">Active filters:</span>
+        {% if active_gl_code_filter %}
+        <span class="badge rounded-pill text-bg-light border">{{ active_gl_code_filter.label }} GL Code: {{ active_gl_code_filter.codes | map(attribute='code') | join(', ') }}</span>
+        {% endif %}
+        {% if base_unit %}
+        <span class="badge rounded-pill text-bg-light border">Base Unit: {{ base_unit|capitalize }}</span>
+        {% endif %}
+        {% if active_vendors %}
+        <span class="badge rounded-pill text-bg-light border">
+            Vendor:
+            {% for v in active_vendors %}
+                {{ v.first_name }} {{ v.last_name }}{% if not loop.last %}, {% endif %}
+            {% endfor %}
+        </span>
+        {% endif %}
+    </div>
+    {% endif %}
+    <form id="bulk-delete-form" action="{{ url_for('item.bulk_delete_items') }}" method="post">
+        {{ bulk_delete_form.hidden_tag() }}
+        <div class="table-responsive">
+        <table class="table sortable" id="itemsTable">
+            <thead>
+                <tr>
+                    <th scope="col" class="col-select"><input type="checkbox" id="select-all" style="transform: scale(1.5);"></th>
+                    <th scope="col" class="col-id" data-type="number">ID</th>
+                    <th scope="col" class="col-name">Name</th>
+                    <th scope="col" class="col-base-unit">Base Unit</th>
+                    <th scope="col" class="col-cost" data-type="number">Cost / Base Unit</th>
+                    <th scope="col" class="col-quantity" data-type="number">Quantity</th>
+                    <th scope="col" class="col-last-received" data-type="text">Last Received</th>
+                    <th scope="col" class="col-gl-code">Inventory GL Code</th>
+                    <th scope="col" class="col-gl-desc">Inventory GL Description</th>
+                    <th scope="col" class="col-purchase-gl-code">Purchase GL Code</th>
+                    <th scope="col" class="col-purchase-gl-desc">Purchase GL Description</th>
+                    <th scope="col" class="col-units">Units</th>
+                    <th scope="col" class="col-receiving-default">Receiving Default Unit</th>
+                    <th scope="col" class="col-transfer-default">Transfer Default Unit</th>
+                    <th scope="col" class="col-archived">Archived</th>
+                    <th scope="col" class="col-actions">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items.items %}
+                {% include 'items/_item_row.html' %}
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    </form>
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
+        <nav aria-label="Item pagination">
+            <ul class="pagination mb-0">
+                <li class="page-item {% if not items.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('item.view_items', page=items.prev_num if items.has_prev else 1, **pagination_args) }}"{% if not items.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link">Page {{ items.page }} of {{ items.pages }}</span>
+                </li>
+                <li class="page-item {% if not items.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('item.view_items', page=items.next_num if items.has_next else items.pages or 1, **pagination_args) }}"{% if not items.has_next %} tabindex="-1" aria-disabled="true"{% endif %}>Next</a>
+                </li>
+            </ul>
+        </nav>
+        <form method="get" class="d-flex align-items-center gap-2">
+            {% for key, values in request.args.lists() %}
+                {% if key not in ['page', 'per_page'] %}
+                    {% for value in values %}
+                        <input type="hidden" name="{{ key }}" value="{{ value }}">
+                    {% endfor %}
+                {% endif %}
+            {% endfor %}
+            <input type="hidden" name="page" value="1">
+            <label for="items-per-page" class="form-label mb-0">Rows per page</label>
+            <select id="items-per-page" name="per_page" class="form-select js-auto-submit">
+                {% for option in PAGINATION_SIZES %}
+                    <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+</div>
+<script src="{{ url_for('static', filename='js/item_form.js') }}"></script>
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('DOMContentLoaded', function() {
+    const selectAll = document.getElementById('select-all');
+    function updateBulkButtonState() {
+        const bulkButton = document.getElementById('bulkEditItemsBtn');
+        if (!bulkButton) {
+            return;
+        }
+        const selectedCount = document.querySelectorAll('input[name="item_ids"]:checked').length;
+        bulkButton.disabled = selectedCount === 0;
+    }
+
+    window.updateItemBulkButtonState = updateBulkButtonState;
+
+    if (selectAll) {
+        selectAll.addEventListener('click', function() {
+            document.querySelectorAll('input[type="checkbox"][name="item_ids"]').forEach(function(checkbox) {
+                checkbox.checked = selectAll.checked;
+            });
+            updateBulkButtonState();
+        });
+    }
+
+    document.addEventListener('change', function(event) {
+        if (event.target && event.target.matches('input[name="item_ids"]')) {
+            updateBulkButtonState();
+        }
+    });
+
+    updateBulkButtonState();
+});
+</script>
+<!-- Item Modal -->
+<div class="modal fade" id="itemModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Item</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                {% with form=create_form, item=None %}
+                    {% include 'items/item_form.html' %}
+                {% endwith %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bulk Item Update Modal -->
+<div class="modal fade" id="itemBulkModal" tabindex="-1" aria-hidden="true" data-url="{{ url_for('item.bulk_update_items') }}">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Bulk Edit Items</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" data-role="bulk-form"></div>
+        </div>
+    </div>
+</div>
+
+<script nonce="{{ csp_nonce }}">
+const itemModalEl = document.getElementById('itemModal');
+const itemModalBody = itemModalEl ? itemModalEl.querySelector('.modal-body') : null;
+const scriptNonce = {{ csp_nonce | tojson }};
+let createItemTemplate = '';
+
+if (itemModalBody) {
+    createItemTemplate = itemModalBody.innerHTML.trim();
+    itemModalBody.innerHTML = '';
+}
+
+function updateModalBody(html) {
+    if (!itemModalBody) {
+        return;
+    }
+
+    const template = document.createElement('template');
+    template.innerHTML = html || '';
+    const fragment = template.content;
+
+    const scripts = fragment.querySelectorAll('script');
+    scripts.forEach((originalScript) => {
+        const newScript = document.createElement('script');
+        Array.from(originalScript.attributes).forEach((attr) => {
+            if (attr.name.toLowerCase() === 'nonce') {
+                return;
+            }
+            newScript.setAttribute(attr.name, attr.value);
+        });
+
+        if (originalScript.src) {
+            const srcValue = originalScript.src;
+            const alreadyLoaded = Array.from(document.querySelectorAll('script[src]'))
+                .some((scriptEl) => scriptEl.src === srcValue);
+            if (!alreadyLoaded) {
+                if (scriptNonce) {
+                    newScript.setAttribute('nonce', scriptNonce);
+                }
+                newScript.src = srcValue;
+                document.head.appendChild(newScript);
+            }
+            originalScript.remove();
+            return;
+        }
+
+        newScript.textContent = originalScript.textContent;
+        if (scriptNonce) {
+            newScript.setAttribute('nonce', scriptNonce);
+        }
+        originalScript.replaceWith(newScript);
+    });
+
+    itemModalBody.innerHTML = '';
+    itemModalBody.appendChild(fragment);
+}
+
+function initializeItemForm() {
+    if (window.ItemForm && typeof window.ItemForm.init === 'function') {
+        window.ItemForm.init(itemModalEl);
+    }
+}
+
+function bindItemForm(actionUrl) {
+    const form = itemModalEl.querySelector('form');
+    if (!form) return;
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const formData = new FormData(form);
+        fetch(actionUrl, {
+            method: 'POST',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRFToken': formData.get('csrf_token')
+            },
+            body: formData
+        }).then(r => r.json()).then(data => {
+            if (data.success) {
+                if (data.row_html) {
+                    if (data.item_id && document.getElementById('item-row-' + data.item_id)) {
+                        document.getElementById('item-row-' + data.item_id).outerHTML = data.row_html;
+                    } else {
+                        document.querySelector('#itemsTable tbody').insertAdjacentHTML('beforeend', data.row_html);
+                    }
+                }
+                bootstrap.Modal.getInstance(itemModalEl).hide();
+            } else if (data.form_html) {
+                updateModalBody(data.form_html);
+                initializeItemForm();
+                bindItemForm(actionUrl);
+            }
+        });
+    });
+}
+
+const createItemBtn = document.getElementById('createItemBtn');
+if (createItemBtn) {
+    createItemBtn.addEventListener('click', function(event) {
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+            return;
+        }
+        event.preventDefault();
+        if (!createItemTemplate) {
+            return;
+        }
+        itemModalEl.dataset.mode = 'create';
+        itemModalEl.querySelector('.modal-title').textContent = 'Add Item';
+        updateModalBody(createItemTemplate);
+        initializeItemForm();
+        const modal = bootstrap.Modal.getOrCreateInstance(itemModalEl);
+        modal.show();
+        bindItemForm('{{ url_for('item.add_item') }}');
+    });
+}
+
+const itemsTableEl = document.querySelector('#itemsTable');
+if (itemsTableEl) {
+    itemsTableEl.addEventListener('click', function(e) {
+        if (e.target.classList.contains('edit-item-btn')) {
+            const itemId = e.target.getAttribute('data-item-id');
+            const url = '{{ url_for('item.edit_item', item_id=0) }}'.replace('0', itemId);
+            fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(r => r.text())
+                .then(html => {
+                    itemModalEl.dataset.mode = 'edit';
+                    itemModalEl.querySelector('.modal-title').textContent = 'Edit Item';
+                    updateModalBody(html);
+                    initializeItemForm();
+                    const modal = bootstrap.Modal.getOrCreateInstance(itemModalEl);
+                    modal.show();
+                    bindItemForm(url);
+                });
+        } else if (e.target.classList.contains('copy-item-btn')) {
+            const itemId = e.target.getAttribute('data-item-id');
+            const url = '{{ url_for('item.copy_item', item_id=0) }}'.replace('0', itemId);
+            const actionUrl = '{{ url_for('item.add_item') }}';
+            fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(r => r.text())
+                .then(html => {
+                    itemModalEl.dataset.mode = 'copy';
+                    itemModalEl.querySelector('.modal-title').textContent = 'Copy Item';
+                    updateModalBody(html);
+                    initializeItemForm();
+                    const modal = bootstrap.Modal.getOrCreateInstance(itemModalEl);
+                    modal.show();
+                    bindItemForm(actionUrl);
+                });
+        }
+    });
+}
+
+const itemBulkModalEl = document.getElementById('itemBulkModal');
+const itemBulkModalBody = itemBulkModalEl ? itemBulkModalEl.querySelector('[data-role="bulk-form"]') : null;
+const itemBulkModalUrl = itemBulkModalEl ? itemBulkModalEl.getAttribute('data-url') : null;
+const bulkEditItemsBtn = document.getElementById('bulkEditItemsBtn');
+
+function getSelectedItemIds() {
+    return Array.from(document.querySelectorAll('input[name="item_ids"]:checked')).map((cb) => cb.value);
+}
+
+function bindBulkItemForm() {
+    if (!itemBulkModalEl) {
+        return;
+    }
+    const form = itemBulkModalEl.querySelector('form');
+    if (!form) {
+        return;
+    }
+    form.addEventListener('submit', function(event) {
+        event.preventDefault();
+        const formData = new FormData(form);
+        fetch(itemBulkModalUrl, {
+            method: 'POST',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: formData
+        })
+            .then((response) => response.json())
+            .then((data) => {
+                if (data.success) {
+                    if (Array.isArray(data.rows)) {
+                        data.rows.forEach((row) => {
+                            if (!row || !row.id || !row.html) {
+                                return;
+                            }
+                            const targetRow = document.getElementById(`item-row-${row.id}`);
+                            if (targetRow) {
+                                targetRow.outerHTML = row.html;
+                            }
+                        });
+                    }
+                    if (typeof window.updateItemBulkButtonState === 'function') {
+                        window.updateItemBulkButtonState();
+                    }
+                    bootstrap.Modal.getOrCreateInstance(itemBulkModalEl).hide();
+                } else if (data.form_html) {
+                    itemBulkModalBody.innerHTML = data.form_html;
+                    bindBulkItemForm();
+                }
+            })
+            .catch(() => {});
+    });
+}
+
+if (bulkEditItemsBtn && itemBulkModalEl && itemBulkModalBody && itemBulkModalUrl) {
+    bulkEditItemsBtn.addEventListener('click', function(event) {
+        if (event.defaultPrevented || event.button !== 0) {
+            return;
+        }
+        const ids = getSelectedItemIds();
+        if (!ids.length) {
+            return;
+        }
+        const params = new URLSearchParams();
+        ids.forEach((id) => params.append('ids', id));
+        fetch(`${itemBulkModalUrl}?${params.toString()}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+            .then((response) => response.text())
+            .then((html) => {
+                itemBulkModalBody.innerHTML = html;
+                bindBulkItemForm();
+                const modalInstance = bootstrap.Modal.getOrCreateInstance(itemBulkModalEl);
+                modalInstance.show();
+            });
+    });
+}
+
+if (itemModalEl) {
+    itemModalEl.addEventListener('hidden.bs.modal', () => {
+        if (itemModalEl.dataset.mode === 'create') {
+            itemModalBody.innerHTML = '';
+        }
+        itemModalEl.dataset.mode = '';
+    });
+}
+</script>
+{% endblock %}

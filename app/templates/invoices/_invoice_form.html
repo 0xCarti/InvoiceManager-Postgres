@@ -1,0 +1,30 @@
+<form id="invoiceForm" method="post">
+    {{ form.hidden_tag() }}
+    <div class="form-group">
+        <label for="customerSelect">Select Customer:</label>
+        {{ form.customer(class="form-control", id="customerSelect") }}
+    </div>
+    {{ form.products(id="products") }}
+    <div class="form-group">
+        <label for="productSearch">Search Products:</label>
+        <input type="text" class="form-control" id="productSearch" placeholder="Enter product name..." autocomplete="off">
+        <div id="productSuggestions" class="list-group"></div>
+    </div>
+    <div class="table-responsive">
+    <table class="table" id="productTable">
+        <thead>
+            <tr>
+                <th>Product Name</th>
+                <th>Quantity</th>
+                <th>Price</th>
+                <th>Total (with Tax)</th>
+                <th>Override Tax</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
+    </div>
+    <button type="submit" class="btn btn-primary">Create Invoice</button>
+</form>

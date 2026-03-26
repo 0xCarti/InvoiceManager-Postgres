@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Product{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <h2>Edit Product</h2>
+    {% set form_action = url_for('product.edit_product', product_id=product_id) %}
+    {% set form_id = 'edit-product-form-page' %}
+    {% include 'products/_edit_product_tabs.html' with context %}
+</div>
+<script nonce="{{ csp_nonce }}">
+    document.addEventListener('DOMContentLoaded', function () {
+        const hash = window.location.hash;
+        const tabs = document.querySelectorAll('#productEditTabs button[data-bs-toggle="tab"]');
+
+        if (hash) {
+            const targetTab = document.querySelector(`#productEditTabs button[data-bs-target="${hash}"]`);
+            if (targetTab) {
+                bootstrap.Tab.getOrCreateInstance(targetTab).show();
+            }
+        }
+
+        tabs.forEach(function (button) {
+            button.addEventListener('shown.bs.tab', function (event) {
+                const target = event.target.getAttribute('data-bs-target');
+                if (target) {
+                    history.replaceState(null, '', target);
+                }
+            });
+        });
+    });
+</script>
+{% endblock %}
+

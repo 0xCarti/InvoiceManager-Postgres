@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
+        <div>
+            <h2 class="mb-1">Invoice {{ invoice.id }}</h2>
+            <p class="text-muted mb-0">Purchase invoice detail</p>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    Reports
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" href="{{ url_for('report.purchase_inventory_summary') }}">Purchase Inventory Summary Report</a></li>
+                </ul>
+            </div>
+            <a class="btn btn-outline-secondary" href="{{ url_for('notes.entity_notes', entity_type='purchase_invoice', entity_id=invoice.id) }}">View Notes</a>
+        </div>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="badge rounded-pill text-bg-light border">Purchase Order: {{ invoice.purchase_order_id }}</span>
+        <span class="badge rounded-pill text-bg-light border">Vendor: {{ invoice.purchase_order.vendor.first_name }} {{ invoice.purchase_order.vendor.last_name }}</span>
+        <span class="badge rounded-pill text-bg-light border">Location: {{ invoice.location_name }}</span>
+        <span class="badge rounded-pill text-bg-light border">Invoice Number: {{ invoice.invoice_number }}</span>
+        <span class="badge rounded-pill text-bg-light border">Received: {{ invoice.received_date }}</span>
+    </div>
+    <div class="table-responsive">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Item</th>
+                <th>Unit</th>
+                <th>Qty</th>
+                <th>Cost</th>
+                <th>Location</th>
+                <th>GL Code</th>
+                <th>Line Total</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for it in invoice.items %}
+            <tr>
+                <td>{{ it.item.name if it.item else it.item_name }}</td>
+                <td>
+                    {% if it.unit %}{{ it.unit.name }}{% else %}{{ it.unit_name }}{% endif %}
+                </td>
+                <td>{{ it.quantity }}</td>
+                <td>{{ '%.2f'|format(it.cost) }}</td>
+                <td>
+                    {% if it.location %}
+                        {{ it.location.name }}
+                    {% elif it.location_id %}
+                        Deleted Location (#{{ it.location_id }})
+                    {% else %}
+                        {{ invoice.location_name }}
+                    {% endif %}
+                </td>
+                <td>
+                    {% set gl_obj = it.resolved_purchase_gl_code(it.location_id or invoice.location_id) %}
+                    {% if gl_obj and gl_obj.code %}
+                        {{ gl_obj.code }}{% if gl_obj.description %} - {{ gl_obj.description }}{% endif %}
+                    {% else %}
+                        Unassigned
+                    {% endif %}
+                </td>
+                <td>{{ '%.2f'|format(it.line_total) }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2">
+        <span class="badge rounded-pill text-bg-light border">Item Total: {{ '%.2f'|format(invoice.item_total) }}</span>
+        <span class="badge rounded-pill text-bg-light border">GST: {{ '%.2f'|format(invoice.gst) }}</span>
+        <span class="badge rounded-pill text-bg-light border">PST: {{ '%.2f'|format(invoice.pst) }}</span>
+        <span class="badge rounded-pill text-bg-light border">Delivery: {{ '%.2f'|format(invoice.delivery_charge) }}</span>
+        <span class="badge rounded-pill text-bg-light border">Total: {{ '%.2f'|format(invoice.total) }}</span>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,3 @@
+name,price,cost,gl_code,recipe
+Burger,5.99,3.00,4000,"Buns:1:each;Patties:1:each"
+Fries,2.50,1.00,4000,"Ketchup:0.1:gram"

@@ -1,0 +1,229 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style>
+    .stand-sheet-table {
+        font-size: 0.95rem;
+    }
+
+    .stand-sheet-table th,
+    .stand-sheet-table td {
+        white-space: nowrap;
+    }
+
+    .stand-sheet-table thead th {
+        background-color: #f8f9fa;
+    }
+
+    .stand-sheet-table th:first-child,
+    .stand-sheet-table td:first-child {
+        min-width: 14rem;
+        white-space: normal;
+        position: sticky;
+        left: 0;
+        background-color: #fff;
+        z-index: 2;
+    }
+
+    .stand-sheet-table thead th:first-child {
+        z-index: 3;
+    }
+
+    .stand-sheet-table input.form-control {
+        max-width: 6.5rem;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.9rem;
+    }
+
+    .stand-sheet-table .sales,
+    .stand-sheet-table .variance {
+        min-width: 5.5rem;
+    }
+
+    .stand-sheet-table .adjustments {
+        min-width: 5.5rem;
+    }
+</style>
+<div class="container mt-4">
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <div class="mb-3">
+            <div>Location: {{ location.name }}</div>
+            <div>Event: {{ event.name }}</div>
+            <div>Event Date/Time: {{ event.start_date }}</div>
+        </div>
+    <div class="table-responsive">
+    <table class="table table-bordered stand-sheet-table">
+        <thead>
+            <tr>
+                <th>Item (Report Unit)</th>
+                <th>Prior Event Close</th>
+                <th>Pre-Event Count</th>
+                <th>Transferred In</th>
+                <th>Transferred Out</th>
+                <th>Adjustments</th>
+                <th>Sales</th>
+                <th>Eaten</th>
+                <th>Spoiled</th>
+                <th>Closing Count</th>
+                <th>Variance</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for entry in stand_items %}
+            {% set opening_val = entry.sheet_values.opening_count or 0 %}
+            {% set in_val = entry.sheet_values.transferred_in or 0 %}
+            {% set out_val = entry.sheet_values.transferred_out or 0 %}
+            {% set eaten_val = entry.sheet_values.eaten or 0 %}
+            {% set spoiled_val = entry.sheet_values.spoiled or 0 %}
+            {% set adjustments_val = entry.sheet_values.adjustments or 0 %}
+            {% set close_val = entry.sheet_values.closing_count or 0 %}
+            {% set variance = opening_val + in_val + adjustments_val - out_val - entry.sales - eaten_val - spoiled_val - close_val %}
+            <tr>
+                <td>
+                    {{ entry.item.name }}
+                    {% if entry.report_unit_label %}
+                        ({{ entry.report_unit_label }})
+                    {% endif %}
+                </td>
+                <td>
+                    {% if entry.expected is not none %}
+                        {{ '%.2f'|format(entry.expected) }}
+                    {% endif %}
+                </td>
+                <td>
+                    <input type="text" inputmode="decimal" data-numeric-input="1" class="form-control" name="open_{{ entry.item.id }}" value="{% if entry.sheet_values.opening_count is not none %}{{ '%.4f'|format(entry.sheet_values.opening_count) }}{% endif %}">
+                </td>
+                <td>
+                    <input type="text" inputmode="decimal" data-numeric-input="1" class="form-control" name="in_{{ entry.item.id }}" value="{% if entry.sheet_values.transferred_in is not none %}{{ '%.4f'|format(entry.sheet_values.transferred_in) }}{% endif %}">
+                </td>
+                <td>
+                    <input type="text" inputmode="decimal" data-numeric-input="1" class="form-control" name="out_{{ entry.item.id }}" value="{% if entry.sheet_values.transferred_out is not none %}{{ '%.4f'|format(entry.sheet_values.transferred_out) }}{% endif %}">
+                </td>
+                <td>
+                    <input type="text" inputmode="decimal" data-numeric-input="1" class="form-control adjustments" name="adjust_{{ entry.item.id }}" value="{% if entry.sheet_values.adjustments is not none %}{{ '%.4f'|format(entry.sheet_values.adjustments) }}{% endif %}">
+                </td>
+                <td class="sales" data-sales="{{ '%.4f'|format(entry.sales) }}">{{ '%.2f'|format(entry.sales) }}</td>
+                <td>
+                    <input type="text" inputmode="decimal" data-numeric-input="1" class="form-control" name="eaten_{{ entry.item.id }}" value="{% if entry.sheet_values.eaten is not none %}{{ '%.4f'|format(entry.sheet_values.eaten) }}{% endif %}">
+                </td>
+                <td>
+                    <input type="text" inputmode="decimal" data-numeric-input="1" class="form-control" name="spoiled_{{ entry.item.id }}" value="{% if entry.sheet_values.spoiled is not none %}{{ '%.4f'|format(entry.sheet_values.spoiled) }}{% endif %}">
+                </td>
+                <td>
+                    <input type="text" inputmode="decimal" data-numeric-input="1" class="form-control" name="close_{{ entry.item.id }}" value="{% if entry.sheet_values.closing_count is not none %}{{ '%.4f'|format(entry.sheet_values.closing_count) }}{% endif %}">
+                </td>
+                <td class="variance">{% if entry.sheet %}{{ '%.2f'|format(variance) }}{% else %}0.00{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="mt-4">
+        <label class="form-label" for="notes">Notes</label>
+        <textarea
+            class="form-control"
+            id="notes"
+            name="notes"
+            rows="4"
+            placeholder="Add context about adjustments, transfers, or other changes"
+        >{{- event_location.notes or '' -}}</textarea>
+        <div class="form-text">
+            Notes will be saved with the stand sheet and remain visible after the location is confirmed.
+        </div>
+    </div>
+    <button type="submit" class="btn btn-primary mt-3">Save</button>
+    </form>
+</div>
+<script nonce="{{ csp_nonce }}">
+    function parseNumber(value, defaultValue = 0) {
+        if (window.NumericInput) {
+            const parsed = window.NumericInput.parseValue(value);
+            return Number.isFinite(parsed) ? parsed : defaultValue;
+        }
+        const parsed = parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : defaultValue;
+    }
+
+    function calcVariance(row) {
+        const sales = parseNumber(row.querySelector('.sales').dataset.sales, 0);
+        const pre = parseNumber(row.querySelector('input[name^="open_"]').value, 0);
+        const tin = parseNumber(row.querySelector('input[name^="in_"]').value, 0);
+        const tout = parseNumber(row.querySelector('input[name^="out_"]').value, 0);
+        const adjustmentsInput = row.querySelector('input[name^="adjust_"]');
+        const adjustments = adjustmentsInput ? parseNumber(adjustmentsInput.value, 0) : 0;
+        const eaten = parseNumber(row.querySelector('input[name^="eaten_"]').value, 0);
+        const spoiled = parseNumber(row.querySelector('input[name^="spoiled_"]').value, 0);
+        const close = parseNumber(row.querySelector('input[name^="close_"]').value, 0);
+        const variance = pre + tin + adjustments - tout - sales - eaten - spoiled - close;
+        row.querySelector('.variance').textContent = variance.toFixed(2);
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const rows = Array.from(document.querySelectorAll('tbody tr'));
+        const columns = [];
+
+        rows.forEach(function(row) {
+            const inputs = Array.from(row.querySelectorAll('input'));
+            inputs.forEach(function(inp, colIdx) {
+                if (!columns[colIdx]) {
+                    columns[colIdx] = [];
+                }
+                columns[colIdx].push(inp);
+                inp.dataset.columnIndex = colIdx;
+                inp.addEventListener('keydown', function(e) {
+                    if (e.key === ' ') {
+                        e.preventDefault();
+                    }
+                });
+                inp.addEventListener('input', function() {
+                    const cleaned = inp.value.replace(/\s+/g, '');
+                    if (cleaned !== inp.value) {
+                        inp.value = cleaned;
+                    }
+                    calcVariance(row);
+                });
+            });
+            calcVariance(row);
+        });
+
+        columns.forEach(function(col) {
+            col.forEach(function(inp, rowIdx) {
+                inp.dataset.rowIndex = rowIdx;
+            });
+        });
+
+        function moveWithinColumn(input, direction) {
+            const columnIndex = Number(input.dataset.columnIndex);
+            const rowIndex = Number(input.dataset.rowIndex);
+            if (Number.isNaN(columnIndex) || Number.isNaN(rowIndex)) {
+                return false;
+            }
+            const column = columns[columnIndex];
+            if (!column) {
+                return false;
+            }
+            const targetIndex = rowIndex + direction;
+            if (targetIndex < 0 || targetIndex >= column.length) {
+                return false;
+            }
+            const target = column[targetIndex];
+            target.focus();
+            target.select();
+            return true;
+        }
+
+        document.querySelectorAll('tbody input').forEach(function(input) {
+            input.addEventListener('keydown', function(e) {
+                if (e.key !== 'Tab' || e.altKey || e.ctrlKey || e.metaKey) {
+                    return;
+                }
+                const direction = e.shiftKey ? -1 : 1;
+                if (moveWithinColumn(input, direction)) {
+                    e.preventDefault();
+                }
+            });
+        });
+    });
+</script>
+{% endblock %}

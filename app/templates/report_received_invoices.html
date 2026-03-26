@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-5">
+    <h2>Received Invoice Report</h2>
+    <p class="text-muted">Select a date range to view all purchase invoices received during that period.</p>
+    <form method="POST" class="mb-4">
+        {{ form.hidden_tag() }}
+        <div class="row g-3">
+            <div class="col-md-6">
+                {{ form.start_date.label(class="form-label") }}
+                {{ form.start_date(class="form-control") }}
+                {% if form.start_date.errors %}
+                    <div class="text-danger small">
+                        {{ form.start_date.errors[0] }}
+                    </div>
+                {% endif %}
+            </div>
+            <div class="col-md-6">
+                {{ form.end_date.label(class="form-label") }}
+                {{ form.end_date(class="form-control") }}
+                {% if form.end_date.errors %}
+                    <div class="text-danger small">
+                        {{ form.end_date.errors[0] }}
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary mt-3">Generate Report</button>
+    </form>
+</div>
+{% endblock %}

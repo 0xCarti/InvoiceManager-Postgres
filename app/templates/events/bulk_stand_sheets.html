@@ -1,0 +1,249 @@
+{% extends 'base.html' %}
+{% block content %}
+<style>
+@page {
+  margin: 0.5in;
+}
+.navbar {
+  display: none;
+}
+.container {
+  max-width: 100%;
+}
+.standsheet-content {
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.report {
+  width: 100%;
+}
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.header .logo {
+  width: 60px;
+  height: 24px;
+  background: #ddd;
+}
+.header .title {
+  font-size: 22px;
+  font-weight: bold;
+}
+.header .generated {
+  font-size: 11px;
+  text-align: right;
+}
+.meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  border-bottom: 1px solid #000;
+  padding-bottom: 4px;
+  margin-bottom: 10px;
+}
+.table table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.table th,
+.table td {
+  border: 1px solid #000;
+  padding: 2px 4px;
+}
+.table th {
+  text-align: center;
+}
+.table td:first-child {
+  text-align: left;
+}
+.table td:not(:first-child) {
+  text-align: right;
+}
+.table .border-right {
+  border-right: 1px solid #000;
+}
+.table tbody tr:nth-child(even) {
+  background: #fafafa;
+}
+.signoffs {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 20px;
+}
+.signoffs .left,
+.signoffs .right {
+  width: 48%;
+}
+.signoffs .left div,
+.signoffs .right div {
+  margin-bottom: 8px;
+}
+.print-signoffs {
+  display: none;
+  padding-top: 12px;
+}
+.print-signoffs .columns {
+  display: flex;
+  justify-content: space-between;
+}
+.print-signoffs .columns .left,
+.print-signoffs .columns .right {
+  width: 48%;
+}
+.print-signoffs .columns .left div,
+.print-signoffs .columns .right div {
+  margin-bottom: 8px;
+}
+.standsheet-page {
+  page-break-after: auto;
+}
+@media print {
+  .no-print { display: none; }
+  .print-signoffs {
+    display: block;
+    break-inside: avoid;
+    page-break-after: always;
+  }
+  .report:last-of-type .print-signoffs {
+    page-break-after: auto;
+  }
+  .signoffs { display: none; }
+}
+</style>
+<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 no-print mb-3">
+  <h2 class="mb-0">Opening Stand Sheets - {{ event.name }}</h2>
+</div>
+<div class="standsheet-content">
+{% for entry in data %}
+<section class="report standsheet-page">
+  <div class="header">
+    <div class="logo"></div>
+    <div class="title">Opening Standsheet</div>
+    <div class="generated">Generated {{ generated_at_local }}</div>
+  </div>
+  <div class="meta">
+    <div>
+      Location: {{ entry.location.name }}
+    </div>
+    <div>Event: {{ event.name }}</div>
+    <div>Event Date/Time: {{ event.start_date|format_datetime('%-m/%-d/%Y %-I:%M %p') }}</div>
+  </div>
+  <div class="table">
+    <table>
+      <colgroup>
+        <col style="width:35%">
+        <col style="width:7%">
+        <col style="width:7%">
+        <col style="width:5%">
+        <col style="width:5%">
+        <col style="width:7%">
+        <col style="width:7%">
+        <col style="width:7%">
+        <col style="width:7%">
+        <col style="width:6%">
+        <col style="width:7%">
+      </colgroup>
+      <thead>
+        <tr>
+          <th rowspan="2">Stock Item (Report Unit)</th>
+          <th rowspan="2">Expected Opening Count</th>
+          <th rowspan="2">Opening Count</th>
+          <th colspan="2" class="border-right">Event Transfers</th>
+          <th rowspan="2">Eaten</th>
+          <th rowspan="2" class="border-right">Spoilage</th>
+          <th rowspan="2">Closing Count</th>
+          <th rowspan="2">Units Sold</th>
+          <th rowspan="2">Price</th>
+          <th rowspan="2">Variance</th>
+        </tr>
+        <tr>
+          <th class="border-right">In</th>
+          <th>Out</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in entry.stand_items %}
+        {% set price = namespace(value=None) %}
+        {% for product in entry.location.products %}
+          {% if price.value is none %}
+            {% for ri in product.recipe_items %}
+              {% if price.value is none and ri.item_id == s.item.id %}
+                {% set price.value = product.price %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+        {% endfor %}
+        {% set expected_open = s.expected %}
+        {% set opening_count = s.sheet_values.opening_count if s.sheet_values else None %}
+        {% set transferred_in = s.sheet_values.transferred_in if s.sheet_values else None %}
+        {% set transferred_out = s.sheet_values.transferred_out if s.sheet_values else None %}
+        {% set eaten_val = s.sheet_values.eaten if s.sheet_values else None %}
+        {% set spoiled_val = s.sheet_values.spoiled if s.sheet_values else None %}
+        {% set closing_count = s.sheet_values.closing_count if s.sheet_values else None %}
+        {% set variance = (closing_count or 0) - (expected_open or 0) %}
+        <tr>
+          <td>{{ s.item.name }}{% if s.report_unit_label %} ({{ s.report_unit_label }}){% endif %}</td>
+          <td>{% if expected_open is not none %}{{ '%.2f'|format(expected_open) }}{% endif %}</td>
+          <td></td>
+          <td class="border-right"></td>
+          <td></td>
+          <td></td>
+          <td class="border-right"></td>
+          <td></td>
+          <td></td>
+          <td>{% if price.value is not none %}${{ '%.2f'|format(price.value) }}{% endif %}</td>
+          <td>{% if s.sheet %}{{ '%.2f'|format(variance) }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="print-signoffs">
+    <div class="columns">
+      <div class="left">
+        <div>Opening Stand Manager  ______________________________</div>
+        <div>Opening Supervisor     ______________________________</div>
+        <div>Closing Stand Manager  ______________________________</div>
+        <div>Closing Supervisor     ______________________________</div>
+        <div>Audit/Review Signature ______________________________</div>
+      </div>
+      <div class="right">
+        <div>Total Sales  ______________________________</div>
+        <div>Total Cash   ______________________________</div>
+        <div>Credit Cards ______________________________</div>
+        <div>Coupons      ______________________________</div>
+        <div>Over/Short   ______________________________</div>
+      </div>
+    </div>
+  </div>
+  <div class="signoffs no-print">
+    <div class="left">
+      <div>Opening Stand Manager  ______________________________</div>
+      <div>Opening Supervisor     ______________________________</div>
+      <div>Closing Stand Manager  ______________________________</div>
+      <div>Closing Supervisor     ______________________________</div>
+      <div>Audit/Review Signature ______________________________</div>
+    </div>
+    <div class="right">
+      <div>Total Sales  ______________________________</div>
+      <div>Total Cash   ______________________________</div>
+      <div>Credit Cards ______________________________</div>
+      <div>Coupons      ______________________________</div>
+      <div>Over/Short   ______________________________</div>
+    </div>
+  </div>
+</section>
+{% endfor %}
+</div>
+{% include 'shared/email_stand_sheet_modal.html' %}
+{% endblock %}
+{% block scripts %}
+  {{ super() }}
+  <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='js/stand_sheet_email.js') }}"></script>
+{% endblock %}

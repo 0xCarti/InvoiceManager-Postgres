@@ -1,0 +1,342 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>Department Sales Forecast</h2>
+
+<div class="card mb-4">
+    <div class="card-header">Upload IdealPOS Export</div>
+    <div class="card-body">
+        <form method="post" enctype="multipart/form-data">
+            {{ form.csrf_token }}
+            <div class="mb-3">
+                {{ form.upload.label(class="form-label") }}
+                {{ form.upload(class="form-control") }}
+                {% for error in form.upload.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                {% endfor %}
+            </div>
+            <div class="form-check mb-3">
+                {{ form.only_mapped_products(class="form-check-input", id="upload-only-mapped") }}
+                {{ form.only_mapped_products.label(class="form-check-label", for="upload-only-mapped") }}
+            </div>
+            {{ form.submit(class="btn btn-primary") }}
+            {% if state_token %}
+                <a class="btn btn-outline-secondary ms-2" href="{{ url_for('report.department_sales_forecast', reset=1) }}">Start Over</a>
+            {% endif %}
+        </form>
+    </div>
+</div>
+
+{% if state_token %}
+    <div class="card mb-4">
+        <div class="card-header" data-role="collapse-toggle" data-target="map-products" role="button" tabindex="0" aria-expanded="false">Map Products</div>
+        <div class="card-body d-none" id="map-products">
+            {% if filename %}
+                <p class="mb-3"><strong>Source file:</strong> {{ filename }}</p>
+            {% endif %}
+            {% if mapping_errors %}
+                <div class="alert alert-danger" role="alert">
+                    <ul class="mb-0 ps-3">
+                        {% for error in mapping_errors %}
+                            <li>{{ error }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
+            <form method="post">
+                <input type="hidden" name="state_token" value="{{ state_token }}">
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="mapping-only-mapped" name="only_mapped" value="1" {% if only_mapped %}checked{% endif %}>
+                    <label class="form-check-label" for="mapping-only-mapped">
+                        Only include mapped products in usage totals
+                    </label>
+                </div>
+                <datalist id="terminal-product-options">
+                    {% for option in product_search_options %}
+                        <option value="{{ option.value }}" data-id="{{ option.id }}" label="{{ option.label }}"></option>
+                    {% endfor %}
+                </datalist>
+                <p class="text-muted small mb-3">
+                    Start typing to search for a matching product, or use the buttons to skip the entry or create a new product.
+                </p>
+                {% if pending_entries %}
+                    {% for entry in pending_entries %}
+                        <div class="mb-3 terminal-product-mapping" data-terminal-product-mapping data-skip-value="{{ skip_selection_value }}" data-create-value="{{ create_selection_value }}">
+                            <label class="form-label" for="{{ entry.field }}-search">
+                                {{ entry.name }}
+                                {% if entry.departments %}
+                                    <small class="text-muted">({{ entry.departments | join(', ') }})</small>
+                                {% endif %}
+                            </label>
+                            <div class="input-group">
+                                <input type="search"
+                                       class="form-control"
+                                       id="{{ entry.field }}-search"
+                                       name="{{ entry.field }}-search"
+                                       list="terminal-product-options"
+                                       data-role="product-search-input"
+                                       placeholder="Search for a product..."
+                                       value="{{ entry.selected_display }}">
+                                <button type="button" class="btn btn-outline-secondary" data-action="clear">Clear</button>
+                            </div>
+                            <input type="hidden" name="{{ entry.key_field }}" value="{{ entry.normalized_name }}">
+                            <input type="hidden" name="{{ entry.field }}" value="{{ entry.selected }}" data-role="product-value">
+                            <div class="form-text" data-role="selection-status">
+                                {% if entry.status == 'auto' and entry.selected_display %}
+                                    Automatically linked to {{ entry.selected_display }}.
+                                {% elif entry.status == 'manual' and entry.selected_display %}
+                                    Linked to {{ entry.selected_display }}.
+                                {% elif entry.status == 'skipped' %}
+                                    This product will be skipped.
+                                {% endif %}
+                            </div>
+                            <div class="form-text text-danger {% if not entry.has_error %}d-none{% endif %}" data-role="selection-error">
+                                Select a product from the suggestions, choose Skip, or Create a new product.
+                            </div>
+                            <div class="btn-group mt-2" role="group" aria-label="Mapping actions">
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-action="skip">Skip</button>
+                                <button type="button" class="btn btn-outline-primary btn-sm" data-action="create">Create new product</button>
+                            </div>
+                            <p class="text-muted small mb-0">
+                                Quantity: {{ '%.2f' | format(entry.quantity) }}
+                                {% if entry.sample_price is not none %}
+                                    &middot; Sample price: {{ '%.2f' | format(entry.sample_price) }}
+                                {% endif %}
+                            </p>
+                        </div>
+                    {% endfor %}
+                {% elif product_entries %}
+                    <p class="text-muted mb-0">No further product mappings are required. Review the summaries below for details.</p>
+                {% else %}
+                    <p class="text-muted mb-0">No products were detected in the uploaded file.</p>
+                {% endif %}
+                {% if quick_product_forms %}
+                    <hr class="my-4">
+                    <input type="hidden" name="creation-step" value="1">
+                    <h5 class="mb-3">Create new products</h5>
+                    <p class="text-muted small">Fill out the details for each new product so recipe usage can be calculated.</p>
+                    {% for creation in quick_product_forms %}
+                        <div class="card mb-3">
+                            <div class="card-header">
+                                {{ creation.display_name }}
+                                {% if creation.departments %}
+                                    <small class="text-muted">({{ creation.departments | join(', ') }})</small>
+                                {% endif %}
+                            </div>
+                            <div class="card-body">
+                                {% if creation.quantity %}
+                                    <p class="text-muted small mb-3">Quantity sold: {{ '%.2f' | format(creation.quantity) }}{% if creation.sample_price is not none %} &middot; Sample price: {{ '%.2f' | format(creation.sample_price) }}{% endif %}</p>
+                                {% elif creation.sample_price is not none %}
+                                    <p class="text-muted small mb-3">Sample price: {{ '%.2f' | format(creation.sample_price) }}</p>
+                                {% endif %}
+                                {% with form=creation.form, form_id='quick-product-' ~ creation.index, embedded=True, show_submit=False %}
+                                    {% include 'products/_create_product_form.html' %}
+                                {% endwith %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+                <div class="d-flex justify-content-between align-items-center mt-4">
+                    <button type="submit" class="btn btn-primary">Update Mappings</button>
+                    <a class="btn btn-outline-secondary" href="{{ url_for('report.department_sales_forecast', reset=1) }}">Start Over</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {% if resolved_entries %}
+        <div class="card mb-4">
+            <div class="card-header" data-role="collapse-toggle" data-target="current-mappings" role="button" tabindex="0" aria-expanded="false">Current Mappings</div>
+            <div class="card-body d-none" id="current-mappings">
+                <ul class="mb-0 ps-3">
+                    {% for entry in resolved_entries %}
+                        <li>
+                            {{ entry.name }}
+                            {% if entry.product %}
+                                &rarr; {{ entry.product.name }} (ID {{ entry.product.id }})
+                            {% endif %}
+                            {% if entry.status == 'auto' %}
+                                <span class="badge bg-secondary">Auto</span>
+                            {% elif entry.status == 'manual' %}
+                                <span class="badge bg-primary">Manual</span>
+                            {% endif %}
+                        </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    {% endif %}
+{% endif %}
+
+{% if overall_warnings %}
+    <div class="alert alert-warning" role="alert">
+        <ul class="mb-0 ps-3">
+            {% for warning in overall_warnings %}
+                <li>{{ warning }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+{% endif %}
+
+{% if overall_unmapped_products %}
+    <div class="alert alert-info" role="alert">
+        <strong>Unmapped products:</strong> {{ overall_unmapped_products | join(', ') }}
+    </div>
+{% endif %}
+
+{% if overall_skipped_products %}
+    <div class="alert alert-secondary" role="alert">
+        <strong>Skipped products:</strong> {{ overall_skipped_products | join(', ') }}
+    </div>
+{% endif %}
+
+{% if report_overall %}
+    <div class="card mb-4">
+        <div class="card-header" data-role="collapse-toggle" data-target="overall-usage" role="button" tabindex="0" aria-expanded="false">Overall Stock Usage</div>
+        <div class="card-body d-none" id="overall-usage">
+            {% if report_overall['items'] %}
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th scope="col">Item</th>
+                                <th scope="col">Quantity</th>
+                                <th scope="col">Unit</th>
+                                <th scope="col">Base Quantity</th>
+                                <th scope="col">Base Unit</th>
+                                <th scope="col">Receiving Quantity</th>
+                                <th scope="col">Receiving Unit</th>
+                                <th scope="col">Cost Each</th>
+                                <th scope="col">Total Cost</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in report_overall['items'] %}
+                                <tr>
+                                    <th scope="row">{{ item.item_name }}</th>
+                                    <td>{{ '%.2f' | format(item.quantity) }}</td>
+                                    <td>{{ item.unit or 'N/A' }}</td>
+                                    <td>
+                                        {% if item.base_quantity is not none %}
+                                            {{ '%.2f' | format(item.base_quantity) }}
+                                        {% else %}
+                                            N/A
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ item.base_unit_label or 'N/A' }}</td>
+                                    <td>
+                                        {% if item.receiving_quantity is not none %}
+                                            {{ '%.2f' | format(item.receiving_quantity) }}
+                                        {% else %}
+                                            N/A
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ item.receiving_unit or 'N/A' }}</td>
+                                    <td>{{ '%.2f' | format(item.cost_each) }}</td>
+                                    <td>{{ '%.2f' | format(item.total_cost) }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="text-muted mb-0">No mapped products are available to calculate stock usage.</p>
+            {% endif %}
+            <p class="fw-semibold mt-3 mb-0">Total cost: {{ '%.2f' | format(report_overall['total_cost']) }}</p>
+        </div>
+    </div>
+{% endif %}
+
+{% for department in report_departments %}
+    <div class="card mb-4">
+        <div class="card-header" data-role="collapse-toggle" data-target="department-{{ loop.index }}" role="button" tabindex="0" aria-expanded="false">
+            {{ department.department_name }}
+            {% if department.gl_code %}
+                <small class="text-muted">({{ department.gl_code }})</small>
+            {% endif %}
+        </div>
+        <div class="card-body d-none" id="department-{{ loop.index }}">
+            {% if department['items'] %}
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th scope="col">Item</th>
+                                <th scope="col">Quantity</th>
+                                <th scope="col">Unit</th>
+                                <th scope="col">Base Quantity</th>
+                                <th scope="col">Base Unit</th>
+                                <th scope="col">Receiving Quantity</th>
+                                <th scope="col">Receiving Unit</th>
+                                <th scope="col">Cost Each</th>
+                                <th scope="col">Total Cost</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in department['items'] %}
+                                <tr>
+                                    <th scope="row">{{ item.item_name }}</th>
+                                    <td>{{ '%.2f' | format(item.quantity) }}</td>
+                                    <td>{{ item.unit or 'N/A' }}</td>
+                                    <td>
+                                        {% if item.base_quantity is not none %}
+                                            {{ '%.2f' | format(item.base_quantity) }}
+                                        {% else %}
+                                            N/A
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ item.base_unit_label or 'N/A' }}</td>
+                                    <td>
+                                        {% if item.receiving_quantity is not none %}
+                                            {{ '%.2f' | format(item.receiving_quantity) }}
+                                        {% else %}
+                                            N/A
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ item.receiving_unit or 'N/A' }}</td>
+                                    <td>{{ '%.2f' | format(item.cost_each) }}</td>
+                                    <td>{{ '%.2f' | format(item.total_cost) }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <p class="fw-semibold mt-3 mb-0">Department total cost: {{ '%.2f' | format(department['total_cost']) }}</p>
+            {% else %}
+                <p class="text-muted mb-3">No mapped products for this department.</p>
+            {% endif %}
+            {% if department['unmapped_products'] %}
+                <div class="alert alert-warning" role="alert">
+                    <strong>Unmapped:</strong> {{ department['unmapped_products'] | join(', ') }}
+                </div>
+            {% endif %}
+            {% if department['skipped_products'] %}
+                <div class="alert alert-secondary" role="alert">
+                    <strong>Skipped:</strong> {{ department['skipped_products'] | join(', ') }}
+                </div>
+            {% endif %}
+            {% if department['warnings'] %}
+                <div class="alert alert-danger" role="alert">
+                    <ul class="mb-0 ps-3">
+                        {% for warning in department['warnings'] %}
+                            <li>{{ warning }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+{% endfor %}
+
+{% if not state_token and not report_overall and not report_departments %}
+    <p class="text-muted">Upload an IdealPOS export to begin mapping products and forecasting usage.</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+    {{ super() }}
+    <script src="{{ url_for('static', filename='js/department_sales_forecast_sections.js') }}"></script>
+    {% if pending_entries %}
+        <script src="{{ url_for('static', filename='js/terminal_sales_mapping.js') }}"></script>
+    {% endif %}
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Data Imports</h2>
+    {% for key,label in labels.items() %}
+    <form action="{{ url_for('admin.import_data', data_type=key) }}" method="post" enctype="multipart/form-data" class="mb-3">
+        {{ forms[key].hidden_tag() }}
+        <div class="mb-2">
+            {{ forms[key].file(class="form-control") }}
+        </div>
+        <a href="{{ url_for('admin.download_example', data_type=key) }}" class="btn btn-secondary me-2">Download Example</a>
+        <button type="submit" class="btn btn-primary">{{ label }}</button>
+    </form>
+    {% endfor %}
+</div>
+{% endblock %}

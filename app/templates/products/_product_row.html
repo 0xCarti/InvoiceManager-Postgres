@@ -1,0 +1,93 @@
+<tr id="product-row-{{ product.id }}">
+    <td class="col-select"><input type="checkbox" name="product_ids" value="{{ product.id }}" style="transform: scale(1.5);"></td>
+    <td class="col-product-id" data-sort-value="{{ product.id }}">{{ product.id }}</td>
+    <td class="col-product-name">{{ product.name }}</td>
+    <td class="col-product-price" data-sort-value="{{ '%.6f'|format(product.price or 0) }}">{{ '%.2f'|format(product.price or 0) }}</td>
+    <td class="col-product-invoice-price" data-sort-value="{{ '%.6f'|format(product.invoice_sale_price or 0) }}">{{ '%.2f'|format(product.invoice_sale_price if product.invoice_sale_price is not none else product.price or 0) }}</td>
+    <td class="col-product-cost" data-sort-value="{{ '%.6f'|format(product.cost or 0) }}">{{ '%.2f'|format(product.cost or 0) }}</td>
+    <td class="col-product-food-cost" data-sort-value="{{ '%.6f'|format(product.food_cost_percentage or 0) }}">{{ '{:.2f}%'.format(product.food_cost_percentage or 0) }}</td>
+    <td class="col-product-last-sold" data-sort-value="{{ product.last_sold_at.strftime('%Y%m%d') if product.last_sold_at else '' }}">{{ product.last_sold_at.strftime('%Y-%m-%d') if product.last_sold_at else 'Never' }}</td>
+    <td class="col-product-quantity" data-sort-value="{{ '%.6f'|format(product.quantity or 0) }}">{{ '%.2f'|format(product.quantity or 0) }}</td>
+    {% set profit_value = (product.price or 0) - (product.cost or 0) %}
+    <td class="col-product-profit" data-sort-value="{{ '%.6f'|format(profit_value) }}">{{ '%.2f'|format(profit_value) }}</td>
+    <td class="col-product-sales-gl-code">{{ product.sales_gl_code.code if product.sales_gl_code else '—' }}</td>
+    <td class="col-product-sales-gl-desc">{{ product.sales_gl_code.description if product.sales_gl_code and product.sales_gl_code.description else '—' }}</td>
+    <td class="col-product-gl-code">{{ product.gl_code_rel.code if product.gl_code_rel else product.gl_code or '—' }}</td>
+    <td class="col-product-gl-desc">{{ product.gl_code_rel.description if product.gl_code_rel and product.gl_code_rel.description else '—' }}</td>
+    <td class="col-product-locations text-wrap">
+        {% if product.locations %}
+            {% for location in product.locations %}
+                <div>
+                    <a href="{{ url_for('locations.edit_location', location_id=location.id) }}" class="link-primary text-decoration-none">
+                        {{ location.name }}
+                    </a>
+                </div>
+            {% endfor %}
+        {% else %}
+            <span class="text-muted">—</span>
+        {% endif %}
+    </td>
+    {% set recipe_count = product.recipe_items | length %}
+    <td class="col-product-recipe-count" data-sort-value="{{ recipe_count }}">{{ recipe_count }}</td>
+    <td class="col-product-recipe-details text-wrap">
+        {% if product.recipe_items %}
+            {% if product.recipe_yield_quantity %}
+                <div><strong>Yield:</strong> {{ '{:g}'.format(product.recipe_yield_quantity) }}{% if product.recipe_yield_unit %} {{ product.recipe_yield_unit }}{% endif %}</div>
+            {% endif %}
+            <ul class="mb-0 ps-3">
+                {% for recipe_item in product.recipe_items %}
+                    <li>
+                        {{ '%.4f'|format(recipe_item.quantity) }}
+                        {% if recipe_item.unit %}
+                            {{ recipe_item.unit.name }}
+                        {% endif %}
+                        {% if recipe_item.item %}
+                            {{ recipe_item.item.name }}
+                        {% else %}
+                            Item #{{ recipe_item.item_id }}
+                        {% endif %}
+                    </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <span class="text-muted">No recipe items</span>
+        {% endif %}
+    </td>
+    <td class="col-product-actions">
+        {% set menu_ns = namespace(entries=[]) %}
+        {% for menu in product.menus %}
+            {% set menu_ns.entries = menu_ns.entries + [{'name': menu.name, 'url': url_for('menu.edit_menu', menu_id=menu.id)}] %}
+        {% endfor %}
+        {% set location_ns = namespace(entries=[]) %}
+        {% for location in product.locations %}
+            {% set location_ns.entries = location_ns.entries + [{'name': location.name, 'url': url_for('locations.edit_location', location_id=location.id)}] %}
+        {% endfor %}
+        <div class="d-flex flex-wrap gap-1">
+            <button type="button"
+                    class="btn btn-outline-primary btn-sm view-product-menus"
+                    data-bs-toggle="modal"
+                    data-bs-target="#productMenusModal"
+                    data-product-name="{{ product.name }}"
+                    data-product-menus='{{ menu_ns.entries | tojson }}'>
+                View Menus
+            </button>
+            <button type="button"
+                    class="btn btn-outline-secondary btn-sm view-product-locations"
+                    data-bs-toggle="modal"
+                    data-bs-target="#productLocationsModal"
+                    data-product-name="{{ product.name }}"
+                    data-product-locations='{{ location_ns.entries | tojson }}'>
+                View Locations
+            </button>
+            <a href="{{ url_for('product.edit_product', product_id=product.id) }}"
+               class="btn btn-primary btn-sm edit-product-link"
+               data-product-id="{{ product.id }}">Edit</a>
+            <a href="{{ url_for('notes.entity_notes', entity_type='product', entity_id=product.id) }}" class="btn btn-outline-secondary btn-sm">Notes</a>
+            <a href="{{ url_for('product.copy_product', product_id=product.id) }}" class="btn btn-secondary btn-sm">Copy</a>
+            <form action="{{ url_for('product.delete_product', product_id=product.id) }}" method="post" class="d-inline-block">
+                {{ delete_form.hidden_tag() }}
+                <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+            </form>
+        </div>
+    </td>
+</tr>

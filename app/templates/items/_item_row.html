@@ -1,0 +1,50 @@
+<tr id="item-row-{{ item.id }}">
+    <td class="col-select"><input type="checkbox" name="item_ids" value="{{ item.id }}" style="transform: scale(1.5);"></td>
+    <td class="col-id" data-sort-value="{{ item.id }}">{{ item.id }}</td>
+    <td class="col-name">{{ item.name }}</td>
+    <td class="col-base-unit">{{ item.base_unit or '—' }}</td>
+    <td class="col-cost" data-sort-value="{{ '%.6f'|format(item.cost or 0) }}">{{ '%.6f'|format(item.cost or 0) }} / {{ item.base_unit or '—' }}</td>
+    <td class="col-quantity" data-sort-value="{{ '%.6f'|format(item.quantity or 0) }}">{{ '%.6f'|format(item.quantity or 0) }}</td>
+    {% set last_received = item.last_purchase_received_date %}
+    <td class="col-last-received" data-sort-value="{{ last_received.strftime('%Y%m%d') if last_received else '' }}">
+        {{ last_received.strftime('%Y-%m-%d') if last_received else '—' }}
+    </td>
+    <td class="col-gl-code">{{ item.gl_code_rel.code if item.gl_code_rel else item.gl_code or '—' }}</td>
+    <td class="col-gl-desc">{{ item.gl_code_rel.description if item.gl_code_rel and item.gl_code_rel.description else '—' }}</td>
+    <td class="col-purchase-gl-code">{{ item.purchase_gl_code.code if item.purchase_gl_code else '—' }}</td>
+    <td class="col-purchase-gl-desc">{{ item.purchase_gl_code.description if item.purchase_gl_code and item.purchase_gl_code.description else '—' }}</td>
+    <td class="col-units text-wrap">
+        {% if item.units %}
+            {% for unit in item.units %}
+                <div>{{ unit.name }} (&times;{{ '%.4f'|format(unit.factor) }})</div>
+            {% endfor %}
+        {% else %}
+            <span class="text-muted">—</span>
+        {% endif %}
+    </td>
+    {% set receiving_units = item.units | selectattr('receiving_default') | list %}
+    {% set receiving_unit = receiving_units[0] if receiving_units else None %}
+    <td class="col-receiving-default" data-sort-value="{{ '1' if receiving_unit else '0' }}">
+        {% if receiving_unit %}
+            {{ receiving_unit.name }} (&times;{{ '%.4f'|format(receiving_unit.factor) }})
+        {% else %}
+            <span class="text-muted">—</span>
+        {% endif %}
+    </td>
+    {% set transfer_units = item.units | selectattr('transfer_default') | list %}
+    {% set transfer_unit = transfer_units[0] if transfer_units else None %}
+    <td class="col-transfer-default" data-sort-value="{{ '1' if transfer_unit else '0' }}">
+        {% if transfer_unit %}
+            {{ transfer_unit.name }} (&times;{{ '%.4f'|format(transfer_unit.factor) }})
+        {% else %}
+            <span class="text-muted">—</span>
+        {% endif %}
+    </td>
+    <td class="col-archived" data-sort-value="{{ '1' if item.archived else '0' }}">{{ 'Yes' if item.archived else 'No' }}</td>
+    <td class="col-actions">
+        <a href="{{ url_for('item.view_item', item_id=item.id) }}" class="btn btn-primary">View</a>
+        <button type="button" class="btn btn-secondary edit-item-btn ms-1" data-item-id="{{ item.id }}">Edit</button>
+        <button type="button" class="btn btn-secondary copy-item-btn ms-1" data-item-id="{{ item.id }}">Copy</button>
+        <a href="{{ url_for('item.item_locations', item_id=item.id) }}" class="btn btn-info ms-1">Locations</a>
+    </td>
+</tr>

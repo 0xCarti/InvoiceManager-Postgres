@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-10 col-lg-8">
+        <div class="card border-danger mt-4">
+            <div class="card-header bg-danger text-white">
+                <h2 class="h4 mb-0">Something went wrong</h2>
+            </div>
+            <div class="card-body">
+                <p class="mb-3">
+                    An unexpected error occurred. Please share the error token with support so we can investigate.
+                </p>
+                <p class="mb-3 fw-bold text-danger">
+                    Error token: <span class="font-monospace">{{ error_token }}</span>
+                </p>
+                <p class="alert alert-warning py-2">
+                    Do not share this publicly. This information is for support troubleshooting only.
+                </p>
+                <label class="form-label" for="error-details">
+                    {% if show_error_details %}
+                    Technical details (redacted)
+                    {% else %}
+                    Error summary (redacted)
+                    {% endif %}
+                </label>
+                <textarea
+                    id="error-details"
+                    class="form-control font-monospace"
+                    rows="14"
+                    readonly
+                >{{ error_details }}</textarea>
+            </div>
+            <div class="card-footer d-flex justify-content-between align-items-center">
+                <small class="text-muted">Copy only when requested by support.</small>
+                <button type="button" id="copy-error-details" class="btn btn-outline-secondary">
+                    Copy for support
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script nonce="{{ csp_nonce }}">
+    (function () {
+        const copyButton = document.getElementById("copy-error-details");
+        const detailsField = document.getElementById("error-details");
+        if (!copyButton || !detailsField) return;
+
+        copyButton.addEventListener("click", async function () {
+            try {
+                await navigator.clipboard.writeText(detailsField.value);
+                copyButton.textContent = "Copied";
+            } catch (error) {
+                detailsField.select();
+                document.execCommand("copy");
+                copyButton.textContent = "Copied";
+            }
+
+            window.setTimeout(function () {
+                copyButton.textContent = "Copy for support";
+            }, 1500);
+        });
+    })();
+</script>
+{% endblock %}

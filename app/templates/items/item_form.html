@@ -1,0 +1,212 @@
+{% if item is defined %}
+    {% set current_item = item %}
+{% else %}
+    {% set current_item = None %}
+{% endif %}
+{% set location_stand_items = location_stand_items | default([]) %}
+{% set purchase_gl_codes = purchase_gl_codes | default([]) %}
+{% set recipe_product_items = recipe_product_items | default([]) %}
+{% set show_location_tab = current_item is not none %}
+{% set default_gl = current_item.purchase_gl_code if current_item else None %}
+{% set details_content %}
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            {{ form.name.label(class="form-label") }}
+            {{ form.name(class="form-control") }}
+        </div>
+        <div class="col-md-6 mb-3">
+            {{ form.base_unit.label(class="form-label") }}
+            {{ form.base_unit(class="form-control") }}
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            {{ form.purchase_gl_code.label(class="form-label") }}
+            {{ form.purchase_gl_code(class="form-control") }}
+        </div>
+        <div class="col-md-6 mb-3">
+            {{ form.upc.label(class="form-label") }}
+            {{ form.upc(class="form-control", placeholder="Scan or enter UPC") }}
+        </div>
+    </div>
+    {% if current_item %}
+    <div class="form-group">
+        <label class="form-label">Cost</label>
+        <input type="text" class="form-control" value="{{ '%.6f'|format(current_item.cost) }}" readonly>
+    </div>
+    {% endif %}
+    <h4>Units</h4>
+    <div id="units-container">
+    {% for unit in form.units %}
+    <div class="row g-2 align-items-end unit-row mb-2">
+        <div class="col-md-4">
+            <label class="form-label {% if not loop.first %}visually-hidden{% endif %}"
+                   for="{{ unit.form.name.id }}">Unit of Measure</label>
+            {{ unit.form.name(class="form-control", placeholder="e.g. case") }}
+        </div>
+        <div class="col-md-3">
+            <label class="form-label {% if not loop.first %}visually-hidden{% endif %}"
+                   for="{{ unit.form.factor.id }}">Factor</label>
+            {{ unit.form.factor(class="form-control", placeholder="Quantity in base units") }}
+        </div>
+        <div class="col-md-2">
+            <div class="form-check mt-4">
+                {{ unit.form.receiving_default(class="form-check-input default-receiving", id=unit.form.receiving_default.id) }}
+                <label class="form-check-label" for="{{ unit.form.receiving_default.id }}">Receiving Default</label>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="form-check mt-4">
+                {{ unit.form.transfer_default(class="form-check-input default-transfer", id=unit.form.transfer_default.id) }}
+                <label class="form-check-label" for="{{ unit.form.transfer_default.id }}">Transfer Default</label>
+            </div>
+        </div>
+        <div class="col-md-1 text-end">
+            <button type="button" class="btn btn-outline-danger btn-sm remove-unit mt-4">Delete</button>
+        </div>
+    </div>
+    {% endfor %}
+    </div>
+    <button type="button" class="btn btn-outline-secondary" id="add-unit">Add Unit</button>
+{% endset %}
+<form method="POST" data-item-form data-next-index="{{ form.units|length }}">
+    {{ form.hidden_tag() }}
+    {% if show_location_tab %}
+    <ul class="nav nav-tabs" id="itemFormTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="item-details-tab" data-bs-toggle="tab" data-bs-target="#item-details"
+                    type="button" role="tab" aria-controls="item-details" aria-selected="true">Details</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="item-location-gl-tab" data-bs-toggle="tab" data-bs-target="#item-location-gl"
+                    type="button" role="tab" aria-controls="item-location-gl" aria-selected="false">Location GL Codes</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="item-recipe-products-tab" data-bs-toggle="tab"
+                    data-bs-target="#item-recipe-products" type="button" role="tab"
+                    aria-controls="item-recipe-products" aria-selected="false">Recipe Products</button>
+        </li>
+    </ul>
+    <div class="tab-content pt-3" id="itemFormTabContent">
+        <div class="tab-pane fade show active" id="item-details" role="tabpanel" aria-labelledby="item-details-tab">
+            {{ details_content | safe }}
+        </div>
+        <div class="tab-pane fade" id="item-location-gl" role="tabpanel" aria-labelledby="item-location-gl-tab">
+            <div class="table-responsive">
+                <table class="table align-middle">
+                    <thead>
+                        <tr>
+                            <th>Location</th>
+                            <th>Purchase GL Code</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for record in location_stand_items %}
+                        {% set field_name = 'location_gl_code_' ~ record.location_id %}
+                        {% if request.method == 'POST' %}
+                            {% set selected_value = request.form.get(field_name, '') %}
+                        {% else %}
+                            {% set selected_value = record.purchase_gl_code_id if record.purchase_gl_code_id else '' %}
+                        {% endif %}
+                        <tr>
+                            <td>
+                                <a href="{{ url_for('locations.location_items', location_id=record.location_id) }}">
+                                    {{ record.location.name }}
+                                </a>
+                            </td>
+                            <td>
+                                <select name="{{ field_name }}" class="form-select">
+                                    <option value="" {% if not selected_value %}selected{% endif %}>
+                                        Use Item Default
+                                        {% if default_gl and default_gl.code %}
+                                            ({{ default_gl.code }}{% if default_gl.description %} - {{ default_gl.description }}{% endif %})
+                                        {% endif %}
+                                    </option>
+                                    {% for gl in purchase_gl_codes %}
+                                        <option value="{{ gl.id }}" {% if selected_value and selected_value|int == gl.id %}selected{% endif %}>
+                                            {{ gl.code }}{% if gl.description %} - {{ gl.description }}{% endif %}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                        </tr>
+                    {% else %}
+                        <tr>
+                            <td colspan="2" class="text-center text-muted">No locations are currently assigned to this item.</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="tab-pane fade" id="item-recipe-products" role="tabpanel" aria-labelledby="item-recipe-products-tab">
+            <div class="table-responsive">
+                <table class="table align-middle">
+                    <thead>
+                        <tr>
+                            <th>Product</th>
+                            <th>Countable</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for recipe_item in recipe_product_items %}
+                        <tr>
+                            <td>
+                                {% if recipe_item.product %}
+                                    <a href="{{ url_for('product.edit_product', product_id=recipe_item.product_id) }}">
+                                        {{ recipe_item.product.name }}
+                                    </a>
+                                {% else %}
+                                    <span class="text-muted">Unknown product</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ 'Yes' if recipe_item.countable else 'No' }}</td>
+                        </tr>
+                    {% else %}
+                        <tr>
+                            <td colspan="2" class="text-center text-muted">This item is not currently used in any product recipes.</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% else %}
+        {{ details_content | safe }}
+    {% endif %}
+    {{ form.submit(class="btn btn-primary mt-3") }}
+    <template id="unit-row-template">
+    <div class="row g-2 align-items-end unit-row mb-2">
+        <div class="col-md-4">
+            <label class="form-label visually-hidden" for="units-__index__-name">Unit of Measure</label>
+            <input type="text" name="units-__index__-name" id="units-__index__-name"
+                   class="form-control" placeholder="e.g. case">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label visually-hidden" for="units-__index__-factor">Factor</label>
+            <input type="number" step="any" name="units-__index__-factor" id="units-__index__-factor"
+                   class="form-control" placeholder="Quantity in base units" data-numeric-input="1" inputmode="decimal">
+        </div>
+        <div class="col-md-2">
+            <div class="form-check mt-4">
+                <input type="checkbox" name="units-__index__-receiving_default"
+                       id="units-__index__-receiving_default" value="y"
+                       class="form-check-input default-receiving">
+                <label class="form-check-label" for="units-__index__-receiving_default">Receiving Default</label>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="form-check mt-4">
+                <input type="checkbox" name="units-__index__-transfer_default"
+                       id="units-__index__-transfer_default" value="y"
+                       class="form-check-input default-transfer">
+                <label class="form-check-label" for="units-__index__-transfer_default">Transfer Default</label>
+            </div>
+        </div>
+        <div class="col-md-1 text-end">
+            <button type="button" class="btn btn-outline-danger btn-sm remove-unit mt-4">Delete</button>
+        </div>
+    </div>
+    </template>
+</form>

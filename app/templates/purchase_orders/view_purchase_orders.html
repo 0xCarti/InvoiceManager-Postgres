@@ -1,0 +1,603 @@
+{% extends 'base.html' %}
+{% from 'macros/filter_modal.html' import filter_modal %}
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Purchase Orders</h2>
+            <p class="text-muted mb-0">Create, review, and receive purchase orders</p>
+        </div>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+            <div class="dropdown d-md-none">
+                <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    More actions
+                </button>
+                <ul class="dropdown-menu">
+                    <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#uploadPurchaseOrderModal">Upload Purchase Order</button></li>
+                    <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</button></li>
+                </ul>
+            </div>
+            <a class="btn btn-primary" href="{{ url_for('purchase.create_purchase_order') }}">Create Purchase Order</a>
+            <a class="btn btn-outline-primary" href="{{ url_for('purchase.purchase_order_recommendations') }}">
+                View Recommendations
+            </a>
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    Reports
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" href="{{ url_for('report.purchase_cost_forecast') }}">Forecast Purchase Costs</a></li>
+                    <li><a class="dropdown-item" href="{{ url_for('report.purchase_inventory_summary') }}">Purchase Inventory Summary</a></li>
+                </ul>
+            </div>
+            <span class="d-inline-block" tabindex="0" id="merge-button-tooltip-wrapper" data-bs-toggle="tooltip" data-bs-placement="top">
+                <button type="button" class="btn btn-primary" id="merge-selected-btn" data-bs-toggle="modal"
+                    data-bs-target="#mergeConfirmModal" disabled>Merge selected</button>
+            </span>
+            <div class="form-check ms-2">
+                <input class="form-check-input" type="checkbox" id="merge-require-expected" checked>
+                <label class="form-check-label" for="merge-require-expected">
+                    Require matching expected date
+                </label>
+            </div>
+        <div class="ms-md-auto d-flex flex-wrap align-items-center gap-2">
+            <div class="dropdown d-inline-block mb-3 me-2" data-column-visibility data-table-id="purchase-orders-table" data-storage-key="purchaseOrderTableColumnVisibility">
+                <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="purchaseOrderColumnSelector"
+                    data-bs-toggle="dropdown" aria-expanded="false">
+                    Columns
+                </button>
+                <div class="dropdown-menu dropdown-menu-end p-3" aria-labelledby="purchaseOrderColumnSelector">
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-po-column-id"
+                            data-column-target="col-po-id" checked>
+                        <label class="form-check-label" for="toggle-po-column-id">PO ID</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-po-column-vendor"
+                            data-column-target="col-po-vendor" checked>
+                        <label class="form-check-label" for="toggle-po-column-vendor">Vendor</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-po-column-vendor-name"
+                            data-column-target="col-po-vendor-name">
+                        <label class="form-check-label" for="toggle-po-column-vendor-name">Vendor (Recorded)</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-po-column-vendor-id"
+                            data-column-target="col-po-vendor-id">
+                        <label class="form-check-label" for="toggle-po-column-vendor-id">Vendor ID</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-po-column-order-number"
+                            data-column-target="col-po-order-number">
+                        <label class="form-check-label" for="toggle-po-column-order-number">Order #</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-po-column-order-date"
+                            data-column-target="col-po-order-date" checked>
+                        <label class="form-check-label" for="toggle-po-column-order-date">Order Date</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-po-column-expected-date"
+                            data-column-target="col-po-expected-date" checked>
+                        <label class="form-check-label" for="toggle-po-column-expected-date">Expected Date</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-po-column-expected-total"
+                            data-column-target="col-po-expected-total">
+                        <label class="form-check-label" for="toggle-po-column-expected-total">Expected Total</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-po-column-delivery"
+                            data-column-target="col-po-delivery">
+                        <label class="form-check-label" for="toggle-po-column-delivery">Delivery Charge</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-po-column-received"
+                            data-column-target="col-po-received" checked>
+                        <label class="form-check-label" for="toggle-po-column-received">Received</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-po-column-item-count"
+                            data-column-target="col-po-item-count">
+                        <label class="form-check-label" for="toggle-po-column-item-count">Item Count</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-po-column-items"
+                            data-column-target="col-po-items">
+                        <label class="form-check-label" for="toggle-po-column-items">Line Items</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-po-column-user"
+                            data-column-target="col-po-user">
+                        <label class="form-check-label" for="toggle-po-column-user">Created By (User ID)</label>
+                    </div>
+                </div>
+            </div>
+            <button type="button" class="btn btn-outline-secondary d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#uploadPurchaseOrderModal">
+                Upload Purchase Order
+            </button>
+            <button type="button" class="btn btn-outline-secondary d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#filterModal">
+                Filters
+            </button>
+        </div>        
+    </div>
+    <div id="merge-selection-alert" class="alert alert-warning d-none" role="alert"></div>
+
+    <!-- Filter Modal -->
+    {% call filter_modal(
+        'filterModal',
+        'Filters',
+        form_id='filter-form',
+        form_action=url_for('purchase.view_purchase_orders'),
+        method='get',
+        reset_url=url_for('purchase.view_purchase_orders'),
+        scope=request.endpoint
+    ) %}
+        <div class="mb-3">
+            <label for="vendor_id" class="form-label">Vendor</label>
+            <select id="vendor_id" name="vendor_id" class="form-select">
+                <option value="">All Vendors</option>
+                {% for v in vendors %}
+                <option value="{{ v.id }}" {% if vendor_id == v.id %}selected{% endif %}>{{ v.first_name }} {{ v.last_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
+                <label for="start_date" class="form-label">Start Date</label>
+                <input type="text" id="start_date" name="start_date" class="form-control" data-flatpickr autocomplete="off" value="{{ start_date }}">
+            </div>
+            <div class="col-md-6">
+                <label for="end_date" class="form-label">End Date</label>
+                <input type="text" id="end_date" name="end_date" class="form-control" data-flatpickr autocomplete="off" value="{{ end_date }}">
+            </div>
+        </div>
+        <div class="mb-3">
+            <label for="status" class="form-label">Status</label>
+            <select id="status" name="status" class="form-select">
+                <option value="pending" {% if status == 'pending' %}selected{% endif %}>Pending</option>
+                <option value="completed" {% if status == 'completed' %}selected{% endif %}>Completed</option>
+                <option value="all" {% if status == 'all' %}selected{% endif %}>All</option>
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="item_id" class="form-label">Items</label>
+            <select id="item_id" name="item_id" class="form-select" multiple size="8">
+                {% for item in filter_items %}
+                <option value="{{ item.id }}" {% if item.id in selected_item_ids %}selected{% endif %}>{{ item.name }}</option>
+                {% endfor %}
+                {% for item in extra_item_options %}
+                <option value="{{ item.id }}" {% if item.id in selected_item_ids %}selected{% endif %}>{{ item.name }}{% if item.archived %} (Archived){% endif %}</option>
+                {% endfor %}
+            </select>
+            <div class="form-text">Hold Ctrl (Windows) or Command (macOS) to select multiple items.</div>
+        </div>
+    {% endcall %}
+
+    {% if selected_vendor or start_date or end_date or status != 'pending' or selected_items %}
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="text-muted small">Active filters:</span>
+        {% if selected_vendor %}
+        <span class="badge rounded-pill text-bg-light border">Vendor: {{ selected_vendor.first_name }} {{ selected_vendor.last_name }}</span>
+        {% endif %}
+        {% if start_date or end_date %}
+        <span class="badge rounded-pill text-bg-light border">Date: {{ start_date or '...' }} - {{ end_date or '...' }}</span>
+        {% endif %}
+        {% if status != 'pending' %}
+        <span class="badge rounded-pill text-bg-light border">Status: {% if status == 'completed' %}Completed{% elif status == 'all' %}All{% else %}Pending{% endif %}</span>
+        {% endif %}
+        {% if selected_items %}
+        <span class="badge rounded-pill text-bg-light border">
+            Items:
+            {% for item in selected_items %}
+            {{ item.name }}{% if item.archived %} (Archived){% endif %}{% if not loop.last %}, {% endif %}
+            {% endfor %}
+        </span>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="table-responsive">
+    <table class="table sortable" id="purchase-orders-table">
+        <thead>
+            <tr>
+                <th class="text-center">Select (pending)</th>
+                <th class="col-po-id" data-type="number">ID</th>
+                <th class="col-po-vendor">Vendor</th>
+                <th class="col-po-vendor-name">Vendor (Recorded)</th>
+                <th class="col-po-vendor-id" data-type="number">Vendor ID</th>
+                <th class="col-po-order-number">Order #</th>
+                <th class="col-po-order-date">Order Date</th>
+                <th class="col-po-expected-date">Expected Date</th>
+                <th class="col-po-expected-total" data-type="number">Expected Total</th>
+                <th class="col-po-delivery" data-type="number">Delivery</th>
+                <th class="col-po-received">Received</th>
+                <th class="col-po-item-count" data-type="number">Item Count</th>
+                <th class="col-po-items">Line Items</th>
+                <th class="col-po-user" data-type="number">Created By</th>
+                <th class="col-po-actions">Actions</th>
+            </tr>
+        </thead>
+        <tbody id="po-table-body">
+        {% for order in orders.items %}
+            <tr data-id="{{ order.id }}" data-vendor="{{ order.vendor_id }}" data-order-date="{{ order.order_date }}" data-expected-date="{{ order.expected_date }}" data-delivery="{{ order.delivery_charge }}">
+                <td class="text-center">
+                    {% if not order.received %}
+                    <input class="form-check-input po-select" type="checkbox" value="{{ order.id }}" data-vendor="{{ order.vendor_id }}" data-vendor-name="{{ (order.vendor.first_name ~ ' ' ~ order.vendor.last_name) if order.vendor else order.vendor_name or 'Vendor ' ~ order.vendor_id }}" data-expected-date="{{ order.expected_date.strftime('%Y-%m-%d') if order.expected_date else ''}}" data-order-number="{{ order.order_number or '' }}" data-expected-total="{{ '%.2f'|format(order.expected_total_cost) if order.expected_total_cost is not none else '' }}" data-received="0">
+                    {% else %}
+                    <span class="text-muted" title="Received purchase orders cannot be merged">—</span>
+                    {% endif %}
+                </td>
+                <td class="col-po-id" data-sort-value="{{ order.id }}">{{ order.id }}</td>
+                <td class="col-po-vendor">
+                    {% if order.vendor %}
+                        {{ order.vendor.first_name }} {{ order.vendor.last_name }}
+                    {% else %}
+                        <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                <td class="col-po-vendor-name">{{ order.vendor_name or '—' }}</td>
+                <td class="col-po-vendor-id" data-sort-value="{{ order.vendor_id }}">{{ order.vendor_id }}</td>
+                <td class="col-po-order-number" data-sort-value="{{ order.order_number or '' }}">{{ order.order_number or '—' }}</td>
+                <td class="col-po-order-date" data-sort-value="{{ order.order_date.strftime('%Y%m%d') if order.order_date else '' }}">{{ order.order_date.strftime('%Y-%m-%d') if order.order_date else '—' }}</td>
+                <td class="col-po-expected-date" data-sort-value="{{ order.expected_date.strftime('%Y%m%d') if order.expected_date else '' }}">{{ order.expected_date.strftime('%Y-%m-%d') if order.expected_date else '—' }}</td>
+                <td class="col-po-expected-total" data-sort-value="{{ '%.6f'|format(order.expected_total_cost or 0) if order.expected_total_cost is not none else '' }}">
+                    {% if order.expected_total_cost is not none %}
+                        {{ '%.2f'|format(order.expected_total_cost) }}
+                    {% else %}
+                        <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                <td class="col-po-delivery" data-sort-value="{{ '%.6f'|format(order.delivery_charge or 0) }}">{{ '%.2f'|format(order.delivery_charge or 0) }}</td>
+                <td class="col-po-received" data-sort-value="{{ '1' if order.received else '0' }}">{{ 'Yes' if order.received else 'No' }}</td>
+                {% set order_item_count = order.items | length %}
+                <td class="col-po-item-count" data-sort-value="{{ order_item_count }}">{{ order_item_count }}</td>
+                <td class="col-po-items text-wrap">
+                    {% if order.items %}
+                        <ul class="mb-0 ps-3">
+                            {% for line in order.items %}
+                                <li>
+                                    {% if line.item %}
+                                        {{ line.item.name }}
+                                    {% elif line.product %}
+                                        {{ line.product.name }}
+                                    {% else %}
+                                        Item #{{ line.item_id or line.product_id }}
+                                    {% endif %}
+                                    — {{ '%.4f'|format(line.quantity) }}
+                                    {% if line.unit %}
+                                        {{ line.unit.name }}
+                                    {% endif %}
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <span class="text-muted">No items</span>
+                    {% endif %}
+                </td>
+                <td class="col-po-user" data-sort-value="{{ order.user_id or '' }}">{{ order.user_id or '—' }}</td>
+                <td class="col-po-actions">
+                    <a href="{{ url_for('purchase.edit_purchase_order', po_id=order.id) }}" class="btn btn-sm btn-primary">Edit</a>
+                    <a href="{{ url_for('notes.entity_notes', entity_type='purchase_order', entity_id=order.id) }}" class="btn btn-sm btn-outline-secondary">Notes</a>
+                    <a href="{{ url_for('purchase.receive_invoice', po_id=order.id) }}" class="btn btn-sm btn-success">Receive</a>
+                    <form action="{{ url_for('purchase.delete_purchase_order', po_id=order.id) }}" method="post" class="d-inline">
+                        {{ delete_form.hidden_tag() }}
+                        <button type="submit" class="btn btn-sm btn-danger" data-confirm-message="Are you sure?">Delete</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
+        <nav aria-label="Purchase order pagination">
+            <ul class="pagination mb-0">
+                <li class="page-item {% if not orders.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('purchase.view_purchase_orders', page=orders.prev_num if orders.has_prev else 1, **pagination_args) }}"{% if not orders.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link">Page {{ orders.page }} of {{ orders.pages }}</span>
+                </li>
+                <li class="page-item {% if not orders.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('purchase.view_purchase_orders', page=orders.next_num if orders.has_next else orders.pages or 1, **pagination_args) }}"{% if not orders.has_next %} tabindex="-1" aria-disabled="true"{% endif %}>Next</a>
+                </li>
+            </ul>
+        </nav>
+        <form method="get" class="d-flex align-items-center gap-2">
+            {% for key, values in request.args.lists() %}
+                {% if key not in ['page', 'per_page'] %}
+                    {% for value in values %}
+                        <input type="hidden" name="{{ key }}" value="{{ value }}">
+                    {% endfor %}
+                {% endif %}
+            {% endfor %}
+            <input type="hidden" name="page" value="1">
+            <label for="purchase-orders-per-page" class="form-label mb-0">Rows per page</label>
+            <select id="purchase-orders-per-page" name="per_page" class="form-select js-auto-submit">
+                {% for option in PAGINATION_SIZES %}
+                    <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+</div>
+<div class="modal fade" id="uploadPurchaseOrderModal" tabindex="-1" aria-labelledby="uploadPurchaseOrderModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="uploadPurchaseOrderModalLabel">Upload Purchase Order</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="upload-po-form" method="post" action="/purchase_orders/upload" enctype="multipart/form-data">
+                <div class="modal-body">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div id="upload-po-error" class="alert alert-danger d-none" role="alert"></div>
+                    <div class="mb-3">
+                        <label for="upload-po-vendor" class="form-label">Vendor</label>
+                        <select name="vendor_id" id="upload-po-vendor" class="form-select" required>
+                            <option value="">Select a vendor</option>
+                            {% for vendor in upload_vendors %}
+                                <option value="{{ vendor.id }}">{{ vendor.first_name }} {{ vendor.last_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <label for="upload-po-file-input" class="form-label">Select a file</label>
+                    <div id="upload-po-dropzone" class="border border-2 border-secondary rounded p-4 text-center bg-light" role="button" tabindex="0" aria-describedby="upload-po-help">
+                        <p class="mb-2">Drag and drop a purchase order file here, or browse to select one.</p>
+                        <p class="text-muted mb-3" id="upload-po-help">Supported formats depend on the upload endpoint.</p>
+                        <button class="btn btn-outline-secondary" type="button" id="upload-po-browse-btn">Choose File</button>
+                        <div class="mt-2">
+                            <span class="text-muted" id="upload-po-file-name">No file chosen</span>
+                        </div>
+                    </div>
+                    <input type="file" name="purchase_order_file" id="upload-po-file-input" class="form-control mt-3 d-none" aria-label="Purchase order file">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="upload-po-submit">Upload</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<div class="modal fade" id="mergeConfirmModal" tabindex="-1" aria-labelledby="mergeConfirmModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="mergeConfirmModalLabel">Confirm Merge</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="post" action="{{ url_for('purchase.merge_purchase_orders_route') }}" id="merge-modal-form">
+                {{ merge_form.hidden_tag() }}
+                <div class="modal-body">
+                    <p class="mb-2">Merge the selected purchase orders into a single target. All orders must share the same vendor and, when required, the same expected date.</p>
+                    <ul class="mb-3">
+                        <li><strong>Vendor:</strong> <span id="merge-vendor-summary">—</span></li>
+                        <li><strong>Expected date:</strong> <span id="merge-date-summary">—</span></li>
+                        <li><strong>Order numbers:</strong> <span id="merge-order-number-summary">—</span></li>
+                        <li><strong>Expected totals:</strong> <span id="merge-expected-total-summary">—</span></li>
+                        <li><strong>Selected POs:</strong> <span id="merge-selected-list">None</span></li>
+                    </ul>
+                    <div class="mb-3">
+                        <label for="merge-target-select" class="form-label">Target purchase order</label>
+                        <select class="form-select" id="merge-target-select" name="target_po_id" required></select>
+                        <div class="form-text">Choose which purchase order should receive all line items.</div>
+                    </div>
+                    <input type="hidden" name="source_po_ids" id="merge-source-input" required>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="merge-modal-expected" name="require_expected_date_match" value="y" checked>
+                        <label class="form-check-label" for="merge-modal-expected">Require matching expected date</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="confirm-merge-btn">Merge</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="{{ url_for('static', filename='js/date_pickers.js') }}"></script>
+<script src="{{ url_for('static', filename='js/purchase_order_upload.js') }}"></script>
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('DOMContentLoaded', function() {
+    initDatePickers({
+        modalSelectors: ['[data-filter-modal]']
+    });
+
+    const checkboxes = Array.from(document.querySelectorAll('.po-select'));
+    const mergeButton = document.getElementById('merge-selected-btn');
+    const mergeButtonWrapper = document.getElementById('merge-button-tooltip-wrapper');
+    const mergeAlert = document.getElementById('merge-selection-alert');
+    const requireExpectedToggle = document.getElementById('merge-require-expected');
+    const modalRequireExpected = document.getElementById('merge-modal-expected');
+    const sourceInput = document.getElementById('merge-source-input');
+    const targetSelect = document.getElementById('merge-target-select');
+    const vendorSummary = document.getElementById('merge-vendor-summary');
+    const dateSummary = document.getElementById('merge-date-summary');
+    const orderNumberSummary = document.getElementById('merge-order-number-summary');
+    const expectedTotalSummary = document.getElementById('merge-expected-total-summary');
+    const selectedList = document.getElementById('merge-selected-list');
+    const mergeForm = document.getElementById('merge-modal-form');
+    const confirmMergeBtn = document.getElementById('confirm-merge-btn');
+    const mergeTooltip = new bootstrap.Tooltip(mergeButtonWrapper, {
+        trigger: 'hover focus',
+        title: ''
+    });
+
+    const showAlert = (message) => {
+        mergeAlert.textContent = message;
+        mergeAlert.classList.remove('d-none');
+    };
+
+    const clearAlert = () => {
+        mergeAlert.textContent = '';
+        mergeAlert.classList.add('d-none');
+    };
+
+    const getSelected = () => checkboxes.filter((cb) => cb.checked);
+
+    const updateTooltip = (message) => {
+        if (message) {
+            mergeButtonWrapper.setAttribute('data-bs-title', message);
+            if (typeof mergeTooltip.setContent === 'function') {
+                mergeTooltip.setContent({ '.tooltip-inner': message });
+            }
+            mergeTooltip.enable();
+        } else {
+            mergeTooltip.hide();
+            mergeTooltip.disable();
+            mergeButtonWrapper.removeAttribute('data-bs-title');
+        }
+    };
+
+    const updateSourceInput = (selected) => {
+        const targetId = targetSelect.value;
+        const sources = selected.map((cb) => cb.value).filter((id) => id !== targetId);
+        sourceInput.value = sources.join(', ');
+    };
+
+    const updateTargetOptions = (selected) => {
+        const previousTarget = targetSelect.value;
+        targetSelect.innerHTML = '';
+        selected.forEach((cb) => {
+            const option = document.createElement('option');
+            option.value = cb.value;
+            option.textContent = `PO #${cb.value}`;
+            targetSelect.appendChild(option);
+        });
+        if (selected.length) {
+            const preferred = selected.find((cb) => cb.value === previousTarget) || selected[0];
+            targetSelect.value = preferred.value;
+        }
+        updateSourceInput(selected);
+    };
+
+    const updateSummaries = (selected) => {
+        if (!selected.length) {
+            vendorSummary.textContent = '—';
+            dateSummary.textContent = '—';
+            orderNumberSummary.textContent = '—';
+            expectedTotalSummary.textContent = '—';
+            selectedList.textContent = 'None';
+            return;
+        }
+
+        vendorSummary.textContent = selected[0].dataset.vendorName || '—';
+        const expectedDates = new Set(selected.map((cb) => cb.dataset.expectedDate || ''));
+        dateSummary.textContent = expectedDates.size === 1 ? (selected[0].dataset.expectedDate || '—') : 'Mixed dates';
+        const orderNumbers = selected
+            .map((cb) => cb.dataset.orderNumber || '')
+            .filter((value) => value);
+        orderNumberSummary.textContent = orderNumbers.length ? orderNumbers.join(', ') : '—';
+        const expectedTotals = selected
+            .map((cb) => (cb.dataset.expectedTotal ? Number(cb.dataset.expectedTotal) : null))
+            .filter((value) => value !== null && !Number.isNaN(value));
+        expectedTotalSummary.textContent = expectedTotals.length
+            ? expectedTotals.map((value) => value.toFixed(2)).join(', ')
+            : '—';
+        selectedList.textContent = selected.map((cb) => `#${cb.value}`).join(', ');
+    };
+
+    const validateSelection = () => {
+        const selected = getSelected();
+        let invalidMessage = '';
+        let tooltipMessage = '';
+
+        if (!selected.length) {
+            if (!mergeAlert.textContent) {
+                clearAlert();
+            }
+            mergeButton.disabled = true;
+            confirmMergeBtn.disabled = true;
+            targetSelect.innerHTML = '';
+            updateSummaries([]);
+            sourceInput.value = '';
+            modalRequireExpected.checked = requireExpectedToggle.checked;
+            updateTooltip('');
+            return;
+        }
+
+        if (selected.length < 2) {
+            invalidMessage = 'Select at least two pending purchase orders to merge.';
+        }
+
+        const vendorIds = new Set(selected.map((cb) => cb.dataset.vendor || ''));
+        if (!invalidMessage && vendorIds.size > 1) {
+            invalidMessage = 'All selected purchase orders must share the same vendor.';
+            tooltipMessage = 'Orders must be from the same vendor';
+        }
+
+        const expectedDates = new Set(selected.map((cb) => cb.dataset.expectedDate || ''));
+        if (!invalidMessage && requireExpectedToggle.checked && expectedDates.size > 1) {
+            invalidMessage = 'When matching expected dates, choose orders with the same expected date.';
+        }
+
+        const anyReceived = selected.some((cb) => cb.dataset.received === '1');
+        if (!invalidMessage && anyReceived) {
+            invalidMessage = 'Received purchase orders cannot be merged.';
+        }
+
+        if (invalidMessage) {
+            showAlert(invalidMessage);
+            mergeButton.disabled = true;
+            confirmMergeBtn.disabled = true;
+        } else {
+            clearAlert();
+            mergeButton.disabled = false;
+            confirmMergeBtn.disabled = false;
+        }
+
+        updateTooltip(tooltipMessage);
+
+        if (selected.length) {
+            updateTargetOptions(selected);
+            updateSummaries(selected);
+        } else {
+            targetSelect.innerHTML = '';
+            updateSummaries([]);
+            sourceInput.value = '';
+        }
+
+        modalRequireExpected.checked = requireExpectedToggle.checked;
+    };
+
+    checkboxes.forEach((cb) => {
+        cb.addEventListener('change', () => {
+            validateSelection();
+        });
+    });
+
+    targetSelect.addEventListener('change', () => {
+        updateSourceInput(getSelected());
+    });
+
+    requireExpectedToggle.addEventListener('change', () => {
+        validateSelection();
+    });
+
+    modalRequireExpected.addEventListener('change', () => {
+        requireExpectedToggle.checked = modalRequireExpected.checked;
+        validateSelection();
+    });
+
+    mergeForm.addEventListener('submit', (event) => {
+        if (!sourceInput.value.trim() || !targetSelect.value) {
+            event.preventDefault();
+            showAlert('Select purchase orders to merge and choose a target.');
+            return;
+        }
+        modalRequireExpected.checked = requireExpectedToggle.checked;
+    });
+
+    validateSelection();
+});
+</script>
+{% endblock %}

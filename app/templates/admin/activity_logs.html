@@ -1,0 +1,97 @@
+{% extends 'base.html' %}
+{% from 'macros/column_visibility.html' import column_visibility_dropdown %}
+{% from 'macros/filter_modal.html' import filter_modal %}
+
+{% block content %}
+<div class="desktop-dense compact-controls mt-3 mt-lg-2">
+    <h2>Activity Logs</h2>
+    <div class="d-flex flex-column flex-xl-row justify-content-between align-items-xl-center gap-2 mb-2 section-block">
+        <div class="d-flex flex-wrap gap-2">
+            <button type="button" class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#filterModal">
+                Filters
+            </button>
+        </div>
+        <div class="text-xl-end">
+            {{ column_visibility_dropdown(
+                table_id='activity-logs-table',
+                storage_key='activityLogsTableColumnVisibility',
+                align='end',
+                columns=[
+                    {'id': 'toggle-log-timestamp', 'target': 'col-log-timestamp', 'label': 'Timestamp', 'checked': True},
+                    {'id': 'toggle-log-user', 'target': 'col-log-user', 'label': 'User', 'checked': True},
+                    {'id': 'toggle-log-activity', 'target': 'col-log-activity', 'label': 'Activity', 'checked': True},
+                ]
+            ) }}
+        </div>
+    </div>
+
+    {% call filter_modal(
+        'filterModal',
+        'Filters',
+        form_id='activity-log-filter-form',
+        form_action=url_for('admin.activity_logs'),
+        method='get',
+        reset_url=url_for('admin.activity_logs'),
+        scope=request.endpoint
+    ) %}
+        {{ form.hidden_tag() }}
+        <div class="mb-3">
+            {{ form.user_id.label(class="form-label") }}
+            {{ form.user_id(class="form-select") }}
+        </div>
+        <div class="mb-3">
+            {{ form.activity.label(class="form-label") }}
+            {{ form.activity(class="form-control", placeholder="Contains text") }}
+        </div>
+        <div class="mb-3">
+            {{ form.start_date.label(class="form-label") }}
+            {{ form.start_date(class="form-control", type="date") }}
+        </div>
+        <div class="mb-3">
+            {{ form.end_date.label(class="form-label") }}
+            {{ form.end_date(class="form-control", type="date") }}
+        </div>
+    {% endcall %}
+
+    {% if form.user_id.data == -2 %}
+        <p class="mb-1"><strong>Filtering by User:</strong> System Activity</p>
+    {% elif form.user_id.data not in [-1, None] %}
+        {% set selected_user_label = '' %}
+        {% for value, label in form.user_id.choices %}
+            {% if value == form.user_id.data %}
+                {% set selected_user_label = label %}
+            {% endif %}
+        {% endfor %}
+        <p class="mb-1"><strong>Filtering by User:</strong> {{ selected_user_label }}</p>
+    {% endif %}
+    {% if form.activity.data %}
+        <p class="mb-1"><strong>Filtering by Activity:</strong> {{ form.activity.data }}</p>
+    {% endif %}
+    {% if form.start_date.data or form.end_date.data %}
+        <p class="mb-3">
+            <strong>Filtering by Date:</strong>
+            {{ form.start_date.data or '...' }} - {{ form.end_date.data or '...' }}
+        </p>
+    {% endif %}
+    <div class="table-responsive">
+    <table class="table sortable compact-table" id="activity-logs-table">
+        <thead>
+            <tr>
+                <th scope="col" class="col-log-timestamp">Timestamp</th>
+                <th scope="col" class="col-log-user">User</th>
+                <th scope="col" class="col-log-activity">Activity</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in logs %}
+            <tr>
+                <td class="col-log-timestamp">{{ log.timestamp|format_datetime('%Y-%m-%d %H:%M:%S') }}</td>
+                <td class="col-log-user">{{ log.user.email if log.user else 'System' }}</td>
+                <td class="col-log-activity">{{ log.activity }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endblock %}

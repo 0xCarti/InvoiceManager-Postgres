@@ -1,0 +1,135 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
+    <h2 class="mb-0">{{ location.name }} Items</h2>
+    <a class="btn btn-outline-secondary" href="{{ url_for('notes.entity_notes', entity_type='location', entity_id=location.id) }}">
+        View Notes
+    </a>
+</div>
+{% if can_add_items %}
+<form method="post" action="{{ url_for('locations.add_location_item', location_id=location.id) }}" class="row g-2 align-items-end mb-4">
+    {{ add_form.hidden_tag() }}
+    <input type="hidden" name="page" value="{{ entries.page }}">
+    <input type="hidden" name="per_page" value="{{ per_page }}">
+    <div class="col-md-6 col-lg-5">
+        {{ add_form.item_id.label(class="form-label") }}
+        {{ add_form.item_id(class="form-select" + (' is-invalid' if add_form.item_id.errors else '')) }}
+        {% for error in add_form.item_id.errors %}
+            <div class="invalid-feedback d-block">{{ error }}</div>
+        {% endfor %}
+    </div>
+    <div class="col-md-3 col-lg-3">
+        {{ add_form.expected_count.label(class="form-label") }}
+        {{ add_form.expected_count(class="form-control" + (' is-invalid' if add_form.expected_count.errors else ''), step="any") }}
+        {% for error in add_form.expected_count.errors %}
+            <div class="invalid-feedback d-block">{{ error }}</div>
+        {% endfor %}
+    </div>
+    <div class="col-md-3 col-lg-2">
+        {{ add_form.submit(class="btn btn-success w-100") }}
+    </div>
+</form>
+{% else %}
+<div class="alert alert-info" role="status">
+    All active items are already assigned to this location.
+</div>
+{% endif %}
+<form method="post" class="mb-3">
+    {{ form.hidden_tag() }}
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead>
+                <tr>
+                    <th>Item</th>
+                    <th>Expected Count</th>
+                    <th>Purchase GL Code</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for entry in entries.items %}
+                {% set field_name = 'location_gl_code_' ~ entry.item_id %}
+                {% if request.method == 'POST' %}
+                    {% set selected_value = request.form.get(field_name, '') %}
+                {% else %}
+                    {% set selected_value = entry.purchase_gl_code_id if entry.purchase_gl_code_id else '' %}
+                {% endif %}
+                <tr>
+                    <td><a href="{{ url_for('item.view_item', item_id=entry.item_id) }}">{{ entry.item.name }}</a></td>
+                    <td>{{ entry.expected_count }}</td>
+                    <td>
+                        <select name="{{ field_name }}" class="form-select">
+                            {% set default_gl = entry.item.purchase_gl_code %}
+                            <option value="" {% if not selected_value %}selected{% endif %}>
+                                Use Item Default
+                                {% if default_gl and default_gl.code %}
+                                    ({{ default_gl.code }}{% if default_gl.description %} - {{ default_gl.description }}{% endif %})
+                                {% endif %}
+                            </option>
+                            {% for gl in purchase_gl_codes %}
+                                <option value="{{ gl.id }}" {% if selected_value and selected_value|int == gl.id %}selected{% endif %}>
+                                    {{ gl.code }}{% if gl.description %} - {{ gl.description }}{% endif %}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                    <td class="text-end">
+                        {% if entry.is_protected %}
+                            <span class="text-muted" title="This item comes from a product recipe and cannot be removed.">Locked</span>
+                        {% else %}
+                            <input type="hidden" name="page" value="{{ entries.page }}">
+                            <input type="hidden" name="per_page" value="{{ per_page }}">
+                            <button
+                                type="submit"
+                                class="btn btn-outline-danger btn-sm"
+                                formmethod="post"
+                                formaction="{{ url_for('locations.delete_location_item', location_id=location.id, item_id=entry.item_id) }}"
+                            >
+                                Remove
+                            </button>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+                <tr>
+                    <td><strong>Total</strong></td>
+                    <td><strong>{{ total }}</strong></td>
+                    <td colspan="2"></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <button type="submit" class="btn btn-primary">Save Changes</button>
+</form>
+<div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
+    <nav aria-label="Location item pagination">
+        <ul class="pagination mb-0">
+            <li class="page-item {% if not entries.has_prev %}disabled{% endif %}">
+                <a class="page-link" href="{{ url_for('locations.location_items', location_id=location.id, page=entries.prev_num if entries.has_prev else 1, **pagination_args) }}"{% if not entries.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>
+            </li>
+            <li class="page-item disabled">
+                <span class="page-link">Page {{ entries.page }} of {{ entries.pages }}</span>
+            </li>
+            <li class="page-item {% if not entries.has_next %}disabled{% endif %}">
+                <a class="page-link" href="{{ url_for('locations.location_items', location_id=location.id, page=entries.next_num if entries.has_next else entries.pages or 1, **pagination_args) }}"{% if not entries.has_next %} tabindex="-1" aria-disabled="true"{% endif %}>Next</a>
+            </li>
+        </ul>
+    </nav>
+    <form method="get" class="d-flex align-items-center gap-2">
+        {% for key, values in request.args.lists() %}
+            {% if key not in ['page', 'per_page'] %}
+                {% for value in values %}
+                    <input type="hidden" name="{{ key }}" value="{{ value }}">
+                {% endfor %}
+            {% endif %}
+        {% endfor %}
+        <input type="hidden" name="page" value="1">
+        <label for="location-items-per-page" class="form-label mb-0">Rows per page</label>
+        <select id="location-items-per-page" name="per_page" class="form-select js-auto-submit">
+            {% for option in PAGINATION_SIZES %}
+                <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+        </select>
+    </form>
+</div>
+{% endblock %}

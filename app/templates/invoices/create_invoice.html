@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Create Invoice{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <h1>Create Invoice</h1>
+    {% include "invoices/_invoice_form.html" %}
+</div>
+
+<script nonce="{{ csp_nonce }}">
+$(document).ready(function () {
+    let currentTaxStatus = { gst_exempt: false, pst_exempt: false };
+
+    // Load initial customer tax status if one is preselected
+    const initialCustomerId = $('#customerSelect').val();
+    if (initialCustomerId) {
+        $.get(`/get_customer_tax_status/${initialCustomerId}`, function (data) {
+            currentTaxStatus = data;
+        });
+    }
+
+    // Update tax status on customer change
+    $('#customerSelect').on('change', function () {
+        const customerId = $(this).val();
+        if (customerId) {
+            $.get(`/get_customer_tax_status/${customerId}`, function (data) {
+                currentTaxStatus = data;
+            });
+        }
+    });
+
+    // Product search autocomplete
+    $('#productSearch').keyup(function () {
+        var query = $(this).val();
+        $.ajax({
+            url: '/search_products',
+            data: { query: query },
+            success: function (response) {
+                var suggestions = response.map(function (product) {
+                    const invoicePrice = product.invoice_sale_price ?? product.price;
+                    return '<a href="#" class="list-group-item list-group-item-action" data-name="' + product.name + '" data-price="' + invoicePrice + '">' + product.name + ' - $' + invoicePrice + '</a>';
+                });
+                $('#productSuggestions').html(suggestions.join(''));
+            }
+        });
+    });
+
+    // Add selected product to table
+    $('#productSuggestions').on('click', '.list-group-item', function (e) {
+        e.preventDefault();
+        var productName = $(this).data('name');
+        var productPrice = $(this).data('price');
+
+        var newRow = `
+<tr class="product-row">
+    <td>${productName}</td>
+    <td><input type="text" class="form-control quantity" value="1" inputmode="decimal" data-numeric-input="1"></td>
+    <td class="price">$${productPrice}</td>
+    <td class="total">$${(parseFloat(productPrice)).toFixed(2)}</td>
+    <td>
+        <label><input type="checkbox" class="override-gst"${!currentTaxStatus.gst_exempt ? ' checked' : ''}> GST</label><br>
+        <label><input type="checkbox" class="override-pst"${!currentTaxStatus.pst_exempt ? ' checked' : ''}> PST</label>
+    </td>
+    <td><button type="button" class="btn btn-danger btn-sm">Remove</button></td>
+</tr>`;
+        $('#productTable tbody').append(newRow);
+
+        const row = $('#productTable tbody tr').last();
+        if (window.NumericInput) {
+            window.NumericInput.enableWithin(row.get(0));
+        }
+        updateRowTotal(row);
+    });
+
+    // Update total when quantity or tax status changes
+    $('#productTable').on('input', '.quantity', function () {
+        const row = $(this).closest('tr');
+        updateRowTotal(row);
+    });
+
+    $('#productTable').on('change', '.override-gst, .override-pst', function () {
+        const row = $(this).closest('tr');
+        updateRowTotal(row);
+    });
+
+    // Remove row
+    $('#productTable').on('click', '.btn-danger', function () {
+        $(this).closest('tr').remove();
+    });
+
+    // Function to update total for a row
+    function parseNumber(value, defaultValue = 0) {
+        if (window.NumericInput) {
+            const parsed = window.NumericInput.parseValue(value);
+            return Number.isFinite(parsed) ? parsed : defaultValue;
+        }
+        const parsed = parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : defaultValue;
+    }
+
+    function updateRowTotal(row) {
+        const quantity = parseNumber(row.find('.quantity').val(), 0);
+        const price = parseNumber(row.find('.price').text().replace('$', ''), 0);
+        const applyGST = row.find('.override-gst').is(':checked');
+        const applyPST = row.find('.override-pst').is(':checked');
+
+        const subtotal = quantity * price;
+        const gst = applyGST ? subtotal * 0.05 : 0;
+        const pst = applyPST ? subtotal * 0.07 : 0;
+        const total = subtotal + gst + pst;
+
+        row.find('.total').text(`$${total.toFixed(2)}`);
+    }
+
+    // Submit handler
+    $('#invoiceForm').submit(function (e) {
+        e.preventDefault();
+        let products = '';
+        $('#productTable tbody tr').each(function () {
+            const productName = $(this).find('td:first-child').text();
+            const quantity = $(this).find('.quantity').val();
+            const override_gst = $(this).find('.override-gst').is(':checked') ? 1 : 0;
+            const override_pst = $(this).find('.override-pst').is(':checked') ? 1 : 0;
+            products += `${productName}?${quantity}?${override_gst}?${override_pst}:`;
+        });
+        $('#products').val(products);
+        this.submit();
+    });
+});
+</script>
+{% endblock %}

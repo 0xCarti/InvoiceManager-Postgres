@@ -1,0 +1,301 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="mb-1">Recipe Cost Calculator</h2>
+            <p class="text-muted mb-0">Build a recipe to estimate the cost per finished product.</p>
+        </div>
+        <a href="{{ url_for('item.view_items') }}" class="btn btn-outline-secondary mt-2 mt-sm-0">Back to Items</a>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+            {% if not items %}
+            <div class="alert alert-info" role="alert">
+                Add items to your inventory to start building recipe costs.
+            </div>
+            {% endif %}
+
+            <div id="recipe-items" class="mb-3"></div>
+            <button type="button" class="btn btn-secondary mb-4" id="add-ingredient" {% if not items %}disabled{% endif %}>
+                Add Item
+            </button>
+
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label for="yield-quantity" class="form-label">Recipe Yield Quantity</label>
+                    <input type="text" inputmode="decimal" data-numeric-input="1" class="form-control" id="yield-quantity" value="1">
+                    <div class="form-text">How many products this recipe batch makes.</div>
+                </div>
+                <div class="col-md-6">
+                    <label for="yield-unit" class="form-label">Recipe Yield Unit (optional)</label>
+                    <input type="text" class="form-control" id="yield-unit" placeholder="e.g. cups, servings">
+                </div>
+            </div>
+
+            <hr class="my-4">
+
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <div class="border rounded p-3 bg-light h-100">
+                        <div class="text-uppercase text-muted small mb-1">Batch Cost</div>
+                        <div class="fs-4 fw-semibold" id="batch-cost">$0.00</div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="border rounded p-3 bg-light h-100">
+                        <div class="text-uppercase text-muted small mb-1">Base Cost per Product</div>
+                        <div class="fs-4 fw-semibold" id="unit-cost">$0.00</div>
+                        <div class="text-muted small" id="unit-cost-hint">Enter a yield above zero to see the per-product cost.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script nonce="{{ csp_nonce }}">
+(function () {
+    const ITEMS = {{ items|tojson }};
+    const HAS_ITEMS = Array.isArray(ITEMS) && ITEMS.length > 0;
+    const itemLookup = new Map((ITEMS || []).map((item) => [String(item.id), item]));
+    const recipeContainer = document.getElementById('recipe-items');
+    const addButton = document.getElementById('add-ingredient');
+    const yieldInput = document.getElementById('yield-quantity');
+    const unitCostElement = document.getElementById('unit-cost');
+    const unitCostHint = document.getElementById('unit-cost-hint');
+    const batchCostElement = document.getElementById('batch-cost');
+
+    const ITEM_OPTIONS_HTML = ['<option value="">Select an item</option>']
+        .concat((ITEMS || []).map((item) => `<option value="${item.id}">${item.name}</option>`))
+        .join('');
+
+    function formatCurrency(value) {
+        if (typeof value !== 'number' || !isFinite(value)) {
+            return '$0.00';
+        }
+        return `$${value.toFixed(2)}`;
+    }
+
+    function parseNumber(value, defaultValue = NaN) {
+        if (window.NumericInput) {
+            const parsed = window.NumericInput.parseValue(value);
+            return Number.isFinite(parsed) ? parsed : defaultValue;
+        }
+        const parsed = parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : defaultValue;
+    }
+
+    function refreshColumnHeaders() {
+        const rows = recipeContainer.querySelectorAll('.recipe-row');
+        rows.forEach((row, index) => {
+            const showHeaders = index === 0;
+            row.querySelectorAll('.column-label').forEach((label) => {
+                label.classList.toggle('visually-hidden', !showHeaders);
+            });
+        });
+    }
+
+    function updateTotals() {
+        let total = 0;
+        document.querySelectorAll('.recipe-row').forEach((row) => {
+            const lineCost = parseFloat(row.dataset.lineCost || '0');
+            if (!Number.isNaN(lineCost)) {
+                total += lineCost;
+            }
+        });
+        batchCostElement.textContent = formatCurrency(total);
+
+        const yieldQuantity = parseNumber(yieldInput.value);
+        if (Number.isFinite(yieldQuantity) && yieldQuantity > 0) {
+            const perProduct = total / yieldQuantity;
+            unitCostElement.textContent = formatCurrency(perProduct);
+            unitCostElement.classList.remove('text-muted');
+            unitCostHint.classList.add('d-none');
+        } else {
+            unitCostElement.textContent = '$0.00';
+            unitCostElement.classList.add('text-muted');
+            unitCostHint.classList.remove('d-none');
+        }
+    }
+
+    function updateUnitCost(row) {
+        const unitSelect = row.querySelector('.unit-select');
+        const unitCostLabel = row.querySelector('.unit-cost');
+        const baseCost = parseFloat(row.dataset.baseCost || '0');
+        const selected = unitSelect.options[unitSelect.selectedIndex];
+        if (!selected || Number.isNaN(baseCost)) {
+            unitCostLabel.textContent = '$0.00';
+            row.dataset.unitFactor = '0';
+            return;
+        }
+        const factor = parseFloat(selected.dataset.factor || '1');
+        const cost = baseCost * factor;
+        unitCostLabel.textContent = formatCurrency(cost);
+        row.dataset.unitFactor = String(factor);
+    }
+
+    function updateRowCost(row) {
+        const quantityInput = row.querySelector('.quantity-input');
+        const lineCostLabel = row.querySelector('.line-cost');
+        const quantity = parseNumber(quantityInput.value);
+        const baseCost = parseFloat(row.dataset.baseCost || '0');
+        const factor = parseFloat(row.dataset.unitFactor || '0');
+
+        if (!Number.isFinite(quantity) || Number.isNaN(baseCost) || Number.isNaN(factor) || baseCost <= 0 || factor <= 0) {
+            lineCostLabel.textContent = '$0.00';
+            row.dataset.lineCost = '0';
+        } else {
+            const lineCost = quantity * baseCost * factor;
+            row.dataset.lineCost = String(lineCost);
+            lineCostLabel.textContent = formatCurrency(lineCost);
+        }
+        updateTotals();
+    }
+
+    function resetRow(row) {
+        row.dataset.baseCost = '0';
+        row.dataset.unitFactor = '0';
+        row.dataset.lineCost = '0';
+        row.querySelector('.unit-select').innerHTML = '<option value="">Select a unit</option>';
+        row.querySelector('.unit-select').disabled = true;
+        row.querySelector('.unit-cost').textContent = '$0.00';
+        row.querySelector('.line-cost').textContent = '$0.00';
+        updateTotals();
+    }
+
+    function populateUnits(row, item) {
+        const unitSelect = row.querySelector('.unit-select');
+        const units = Array.isArray(item.units) ? item.units : [];
+        unitSelect.innerHTML = '';
+
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = 'Select a unit';
+        unitSelect.appendChild(placeholder);
+
+        units.forEach((unit, index) => {
+            const option = document.createElement('option');
+            const factor = typeof unit.factor === 'number' ? unit.factor : 1;
+            option.value = unit.id !== null ? String(unit.id) : `base-${item.id}`;
+            option.dataset.factor = String(factor);
+            option.dataset.isBase = unit.is_base ? '1' : '0';
+            option.textContent = unit.is_base
+                ? `${unit.name} (base unit)`
+                : `${unit.name} (×${factor} ${item.base_unit})`;
+            unitSelect.appendChild(option);
+            if (unit.is_base && index === 0) {
+                option.selected = true;
+            }
+        });
+
+        unitSelect.disabled = units.length === 0;
+        if (units.length > 0) {
+            const firstSelectable = unitSelect.querySelector('option[data-factor]');
+            if (firstSelectable) {
+                firstSelectable.selected = true;
+            }
+            row.dataset.baseCost = String(item.cost || 0);
+            updateUnitCost(row);
+            updateRowCost(row);
+        } else {
+            resetRow(row);
+        }
+    }
+
+    function createRow() {
+        const row = document.createElement('div');
+        row.className = 'recipe-row row g-3 align-items-end mb-3';
+        row.innerHTML = `
+            <div class="col-12 col-md-6 col-lg-4">
+                <label class="form-label column-label">Item</label>
+                <select class="form-select item-select">${ITEM_OPTIONS_HTML}</select>
+            </div>
+            <div class="col-12 col-md-6 col-lg-3">
+                <label class="form-label column-label">Unit of Measure</label>
+                <select class="form-select unit-select" disabled><option value="">Select a unit</option></select>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <label class="form-label column-label">Quantity</label>
+                <input type="text" inputmode="decimal" data-numeric-input="1" value="1" class="form-control quantity-input">
+            </div>
+            <div class="col-6 col-md-4 col-lg-1">
+                <div class="form-label column-label">Unit Cost</div>
+                <div class="fw-semibold unit-cost">$0.00</div>
+            </div>
+            <div class="col-6 col-md-4 col-lg-1">
+                <div class="form-label column-label">Line Cost</div>
+                <div class="fw-semibold line-cost">$0.00</div>
+            </div>
+            <div class="col-6 col-md-12 col-lg-1 text-lg-end align-self-center">
+                <button type="button" class="btn btn-outline-danger btn-sm remove-row">Remove</button>
+            </div>
+        `;
+
+        const itemSelect = row.querySelector('.item-select');
+        const unitSelect = row.querySelector('.unit-select');
+        const quantityInput = row.querySelector('.quantity-input');
+        const removeButton = row.querySelector('.remove-row');
+
+        itemSelect.addEventListener('change', () => {
+            const selectedItem = itemLookup.get(itemSelect.value);
+            if (!selectedItem) {
+                resetRow(row);
+                return;
+            }
+            populateUnits(row, selectedItem);
+        });
+
+        unitSelect.addEventListener('change', () => {
+            updateUnitCost(row);
+            updateRowCost(row);
+        });
+
+        quantityInput.addEventListener('input', () => updateRowCost(row));
+
+        removeButton.addEventListener('click', () => {
+            row.remove();
+            if (!document.querySelector('.recipe-row') && HAS_ITEMS) {
+                addRow();
+            } else {
+                updateTotals();
+                refreshColumnHeaders();
+            }
+        });
+
+        recipeContainer.appendChild(row);
+        refreshColumnHeaders();
+        updateTotals();
+        return row;
+    }
+
+    function addRow() {
+        const row = createRow();
+        const firstItem = ITEMS[0];
+        if (firstItem) {
+            row.querySelector('.item-select').value = String(firstItem.id);
+            populateUnits(row, firstItem);
+        }
+    }
+
+    if (HAS_ITEMS) {
+        addRow();
+    }
+
+    if (addButton) {
+        addButton.addEventListener('click', () => {
+            if (!HAS_ITEMS) {
+                return;
+            }
+            createRow();
+        });
+    }
+
+    if (yieldInput) {
+        yieldInput.addEventListener('input', updateTotals);
+    }
+})();
+</script>
+{% endblock %}

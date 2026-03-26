@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Event Terminal Sales Report</h2>
+
+<form method="post" class="card card-body mb-4">
+    {{ form.hidden_tag() }}
+    <div class="row g-3 align-items-end">
+        <div class="col-md-4">
+            {{ form.start_date.label(class='form-label') }}
+            {{ form.start_date(class='form-control', type='date') }}
+            {% for error in form.start_date.errors %}
+                <div class="text-danger small">{{ error }}</div>
+            {% endfor %}
+        </div>
+        <div class="col-md-4">
+            {{ form.end_date.label(class='form-label') }}
+            {{ form.end_date(class='form-control', type='date') }}
+            {% for error in form.end_date.errors %}
+                <div class="text-danger small">{{ error }}</div>
+            {% endfor %}
+        </div>
+        <div class="col-md-4">
+            {{ form.submit(class='btn btn-primary') }}
+        </div>
+    </div>
+</form>
+
+{% if report is not none %}
+    {% if report %}
+        <div class="accordion" id="event-terminal-sales-accordion">
+            {% for event in report %}
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <div class="fw-bold">{{ event.event_name }}</div>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-primary">Total: ${{ '%.2f'|format(event.total_sales) }}</span>
+                            {% if event.locations %}
+                                <button class="btn btn-sm btn-outline-secondary" type="button"
+                                    data-bs-toggle="collapse"
+                                    data-bs-target="#event-locations-{{ event.event_id }}"
+                                    aria-expanded="false"
+                                    aria-controls="event-locations-{{ event.event_id }}">
+                                    View Locations
+                                </button>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% if event.locations %}
+                        <div id="event-locations-{{ event.event_id }}" class="accordion-collapse collapse"
+                            data-bs-parent="#event-terminal-sales-accordion">
+                            <div class="card-body p-0">
+                                <div class="table-responsive">
+                                    <table class="table table-sm mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th scope="col">Location</th>
+                                                <th scope="col" class="text-end">Total Terminal Sales</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for location in event.locations %}
+                                                <tr>
+                                                    <td>{{ location.location_name or 'Unmapped Location' }}</td>
+                                                    <td class="text-end">${{ '%.2f'|format(location.total_sales) }}</td>
+                                                </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="alert alert-info">No terminal sales found for the selected date range.</div>
+    {% endif %}
+{% endif %}
+{% endblock %}

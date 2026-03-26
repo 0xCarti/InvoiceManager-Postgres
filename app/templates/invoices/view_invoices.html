@@ -1,0 +1,647 @@
+<!-- templates/view_invoices.html -->
+
+{% extends "base.html" %}
+{% from "macros/column_visibility.html" import column_visibility_dropdown %}
+{% from 'macros/filter_modal.html' import filter_modal %}
+
+{% block title %}Home{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Invoices</h2>
+            <p class="text-muted mb-0">Search and manage customer invoices</p>
+        </div>
+        <div>
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createInvoiceModal">Create Invoice</button>
+        </div>
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <form method="get" id="invoice-search-form" class="d-flex flex-grow-1 flex-wrap align-items-center gap-2">
+            {% for key, values in request.args.lists() %}
+                {% if key not in ['invoice_id', 'page'] %}
+                    {% for value in values %}
+                        <input type="hidden" name="{{ key }}" value="{{ value }}">
+                    {% endfor %}
+                {% endif %}
+            {% endfor %}
+            <input type="hidden" name="page" value="1">
+            <label for="invoice-search" class="visually-hidden">Search invoice number</label>
+            <input
+                id="invoice-search"
+                name="invoice_id"
+                value="{{ request.args.get('invoice_id', '') }}"
+                class="form-control"
+                style="max-width: 28rem;"
+                placeholder="Search invoice # or customer (invoice # only; use Filter for customer)"
+            >
+            <button type="submit" class="btn btn-primary">Search</button>
+        </form>
+
+        <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#filterModal">Filter</button>
+
+        <div class="dropdown">
+            <button
+                class="btn btn-outline-secondary dropdown-toggle"
+                type="button"
+                id="bulkInvoiceActionBtn"
+                data-bs-toggle="dropdown"
+                aria-expanded="false"
+                disabled
+            >
+                Bulk Actions
+            </button>
+            <ul class="dropdown-menu" aria-labelledby="bulkInvoiceActionBtn">
+                <li>
+                    <button type="button" class="dropdown-item js-bulk-invoice-action" data-action="paid">
+                        Mark selected as Paid
+                    </button>
+                </li>
+                <li>
+                    <button type="button" class="dropdown-item js-bulk-invoice-action" data-action="unpaid">
+                        Mark selected as Unpaid
+                    </button>
+                </li>
+            </ul>
+        </div>
+
+        {{ column_visibility_dropdown(
+            table_id='invoiceTable',
+            storage_key='invoiceTableColumnVisibility',
+            columns=[
+                {'id': 'toggle-invoice-select', 'target': 'col-invoice-select', 'label': 'Select', 'checked': True},
+                {'id': 'toggle-invoice-number', 'target': 'col-invoice-number', 'label': 'Invoice Number', 'checked': True},
+                {'id': 'toggle-invoice-date', 'target': 'col-invoice-date', 'label': 'Date', 'checked': True},
+                {'id': 'toggle-invoice-customer', 'target': 'col-invoice-customer', 'label': 'Customer Name', 'checked': True},
+                {'id': 'toggle-invoice-payment-status', 'target': 'col-invoice-payment-status', 'label': 'Payment Status', 'checked': True},
+                {'id': 'toggle-invoice-actions', 'target': 'col-invoice-actions', 'label': 'Actions', 'checked': True},
+            ]
+        ) }}
+
+        <div class="dropdown">
+            <button class="btn btn-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                Reports
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="{{ url_for('report.customer_invoice_report') }}">Customer Invoice Report</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('report.inventory_variance_report') }}">Inventory Variance Report</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('report.product_sales_report') }}">Revenue Report</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('report.product_stock_usage_report') }}">Stock Usage Report</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('report.department_sales_forecast') }}">Department Sales Forecast</a></li>
+            </ul>
+        </div>
+    </div>
+
+    <form id="bulkInvoiceActionForm">
+        {{ delete_form.hidden_tag() }}
+        <input type="hidden" id="selectedInvoiceIdsInput" name="invoice_ids" value="">
+        <input type="hidden" id="bulkInvoiceActionInput" name="bulk_action" value="">
+    </form>
+    <div class="table-responsive">
+    <table class="table sortable" id="invoiceTable">
+        <thead>
+            <tr>
+                <th scope="col" class="col-invoice-select" data-sortable="false">
+                    <input type="checkbox" id="select-all-invoices" aria-label="Select all visible invoices" style="transform: scale(1.3);">
+                </th>
+                <th scope="col" class="col-invoice-number" data-type="number">Invoice Number</th>
+                <th scope="col" class="col-invoice-date">Date</th>
+                <th scope="col" class="col-invoice-customer">Customer Name</th>
+                <th scope="col" class="col-invoice-payment-status">Payment Status</th>
+                <th scope="col" class="col-invoice-actions" data-sortable="false">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for invoice in invoices.items %}
+            <tr>
+                <td class="col-invoice-select">
+                    <input
+                        type="checkbox"
+                        class="invoice-select-checkbox"
+                        name="invoice_ids"
+                        value="{{ invoice.id }}"
+                        aria-label="Select invoice {{ invoice.id }}"
+                        style="transform: scale(1.3);"
+                    >
+                </td>
+                <td class="col-invoice-number">{{ invoice.id }}</td>
+                <td class="col-invoice-date">{{ invoice.date_created|format_datetime('%Y-%m-%d') }}</td>
+                <td class="col-invoice-customer">{{ invoice.customer.first_name }} {{ invoice.customer.last_name }}</td>
+                <td class="col-invoice-payment-status">
+                    <span class="badge {{ 'text-bg-success' if invoice.is_paid else 'text-bg-warning' }}">
+                        {{ 'Paid' if invoice.is_paid else 'Unpaid' }}
+                    </span>
+                </td>
+                <td class="col-invoice-actions">
+                    <a href="{{ url_for('invoice.view_invoice', invoice_id=invoice.id) }}" class="btn btn-primary mr-2">View</a>
+                    <div class="dropdown d-inline">
+                        <button
+                            class="btn btn-outline-secondary dropdown-toggle"
+                            type="button"
+                            id="invoice-actions-{{ invoice.id }}"
+                            data-bs-toggle="dropdown"
+                            aria-expanded="false"
+                            aria-label="Invoice actions"
+                        >
+                            &hellip;
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="invoice-actions-{{ invoice.id }}">
+                            <li>
+                                <form action="{{ url_for('invoice.mark_invoice_paid', invoice_id=invoice.id) }}" method="post">
+                                    {{ delete_form.hidden_tag() }}
+                                    <button type="submit" class="dropdown-item" {% if invoice.is_paid %}disabled{% endif %}>Mark Paid</button>
+                                </form>
+                            </li>
+                            <li>
+                                <form action="{{ url_for('invoice.mark_invoice_unpaid', invoice_id=invoice.id) }}" method="post">
+                                    {{ delete_form.hidden_tag() }}
+                                    <button type="submit" class="dropdown-item" {% if not invoice.is_paid %}disabled{% endif %}>Mark Unpaid</button>
+                                </form>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li>
+                                <form
+                                    action="{{ url_for('invoice.delete_invoice', invoice_id=invoice.id) }}"
+                                    method="post"
+                                    class="js-confirm-delete-invoice"
+                                    data-invoice-id="{{ invoice.id }}"
+                                >
+                                    {{ delete_form.hidden_tag() }}
+                                    <button type="submit" class="dropdown-item text-danger">Delete</button>
+                                </form>
+                            </li>
+                        </ul>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
+        <nav aria-label="Invoice pagination">
+            <ul class="pagination mb-0">
+                <li class="page-item {% if not invoices.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('invoice.view_invoices', page=invoices.prev_num if invoices.has_prev else 1, **pagination_args) }}"{% if not invoices.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link">Page {{ invoices.page }} of {{ invoices.pages }}</span>
+                </li>
+                <li class="page-item {% if not invoices.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('invoice.view_invoices', page=invoices.next_num if invoices.has_next else invoices.pages or 1, **pagination_args) }}"{% if not invoices.has_next %} tabindex="-1" aria-disabled="true"{% endif %}>Next</a>
+                </li>
+            </ul>
+        </nav>
+        <form method="get" class="d-flex align-items-center gap-2">
+            {% for key, values in request.args.lists() %}
+                {% if key not in ['page', 'per_page'] %}
+                    {% for value in values %}
+                        <input type="hidden" name="{{ key }}" value="{{ value }}">
+                    {% endfor %}
+                {% endif %}
+            {% endfor %}
+            <input type="hidden" name="page" value="1">
+            <label for="invoices-per-page" class="form-label mb-0">Rows per page</label>
+            <select id="invoices-per-page" name="per_page" class="form-select js-auto-submit">
+                {% for option in PAGINATION_SIZES %}
+                    <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+</div>
+
+<!-- Filter Modal -->
+{% call filter_modal(
+    'filterModal',
+    'Filter Invoices',
+    form_id='filterForm',
+    form_action=url_for('invoice.filter_invoices_api'),
+    method='get',
+    reset_url=(url_for('invoice.view_invoices', user_id=request.args.get('user_id')) if request.args.get('user_id') else url_for('invoice.view_invoices')),
+    ajax=True,
+    scope=request.endpoint
+) %}
+    {{ form.hidden_tag() }}
+    {% if request.args.get('user_id') %}
+    <input type="hidden" name="user_id" value="{{ request.args.get('user_id') }}">
+    {% endif %}
+    <div class="mb-3">
+        {{ form.invoice_id.label }} {{ form.invoice_id(class="form-control") }}
+    </div>
+    <div class="mb-3">
+        {{ form.customer_id.label }} {{ form.customer_id(class="form-control") }}
+    </div>
+    <div class="mb-3">
+        {{ form.start_date.label }} {{ form.start_date(class="form-control") }}
+    </div>
+    <div class="mb-3">
+        {{ form.end_date.label }} {{ form.end_date(class="form-control") }}
+    </div>
+    <div class="mb-3">
+        <label for="payment_status" class="form-label">Payment Status</label>
+        <select id="payment_status" name="payment_status" class="form-control">
+            <option value="all" {% if request.args.get('payment_status', 'all') == 'all' %}selected{% endif %}>All</option>
+            <option value="paid" {% if request.args.get('payment_status') == 'paid' %}selected{% endif %}>Paid</option>
+            <option value="unpaid" {% if request.args.get('payment_status') == 'unpaid' %}selected{% endif %}>Unpaid</option>
+        </select>
+    </div>
+{% endcall %}
+
+<!-- Create Invoice Modal -->
+<div class="modal fade" id="createInvoiceModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Create Invoice</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        {% with form=create_form %}
+          {% include "invoices/_invoice_form.html" %}
+        {% endwith %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<script nonce="{{ csp_nonce }}">
+$(document).ready(function(){
+    const deleteFormHTML = {{ delete_form.hidden_tag()|tojson }};
+    const viewInvoiceUrlTemplate = {{ url_for('invoice.view_invoice', invoice_id=0)|tojson }};
+    const deleteInvoiceUrlTemplate = {{ url_for('invoice.delete_invoice', invoice_id=0)|tojson }};
+    const markPaidUrlTemplate = {{ url_for('invoice.mark_invoice_paid', invoice_id=0)|tojson }};
+    const markUnpaidUrlTemplate = {{ url_for('invoice.mark_invoice_unpaid', invoice_id=0)|tojson }};
+    const $invoiceTable = $('#invoiceTable');
+    const $bulkInvoiceActionBtn = $('#bulkInvoiceActionBtn');
+    const $selectAllInvoices = $('#select-all-invoices');
+    const $selectedInvoiceIdsInput = $('#selectedInvoiceIdsInput');
+    const $bulkInvoiceActionInput = $('#bulkInvoiceActionInput');
+    const bulkActionFormEl = document.getElementById('bulkInvoiceActionForm');
+
+    function invoiceUrlFromTemplate(urlTemplate, invoiceId) {
+        const encodedInvoiceId = encodeURIComponent(invoiceId);
+        if (urlTemplate.endsWith('/0')) {
+            return `${urlTemplate.slice(0, -1)}${encodedInvoiceId}`;
+        }
+        return urlTemplate.replace(/0(?!.*0)/, encodedInvoiceId);
+    }
+
+    function renderInvoices(invoices){
+        const tbody = $('#invoiceTable tbody');
+        tbody.empty();
+        invoices.forEach(function(inv){
+        const isPaid = String(inv.payment_status || '').toLowerCase() === 'paid';
+        const statusBadgeClass = isPaid ? 'text-bg-success' : 'text-bg-warning';
+        const markPaidDisabled = isPaid ? 'disabled' : '';
+        const markUnpaidDisabled = isPaid ? '' : 'disabled';
+        const row = `<tr>
+            <td class="col-invoice-select">
+                <input
+                    type="checkbox"
+                    class="invoice-select-checkbox"
+                    name="invoice_ids"
+                    value="${inv.id}"
+                    aria-label="Select invoice ${inv.id}"
+                    style="transform: scale(1.3);"
+                >
+            </td>
+            <td class="col-invoice-number">${inv.id}</td>
+            <td class="col-invoice-date">${inv.date}</td>
+            <td class="col-invoice-customer">${inv.customer}</td>
+            <td class="col-invoice-payment-status">
+                <span class="badge ${statusBadgeClass}">${inv.payment_status || 'Unpaid'}</span>
+            </td>
+            <td class="col-invoice-actions">
+                <a href="${invoiceUrlFromTemplate(viewInvoiceUrlTemplate, inv.id)}" class="btn btn-primary mr-2">View</a>
+                <div class="dropdown d-inline">
+                    <button
+                        class="btn btn-outline-secondary dropdown-toggle"
+                        type="button"
+                        id="invoice-actions-${inv.id}"
+                        data-bs-toggle="dropdown"
+                        aria-expanded="false"
+                        aria-label="Invoice actions"
+                    >
+                        &hellip;
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="invoice-actions-${inv.id}">
+                        <li>
+                            <form action="${invoiceUrlFromTemplate(markPaidUrlTemplate, inv.id)}" method="post">
+                                ${deleteFormHTML}
+                                <button type="submit" class="dropdown-item" ${markPaidDisabled}>Mark Paid</button>
+                            </form>
+                        </li>
+                        <li>
+                            <form action="${invoiceUrlFromTemplate(markUnpaidUrlTemplate, inv.id)}" method="post">
+                                ${deleteFormHTML}
+                                <button type="submit" class="dropdown-item" ${markUnpaidDisabled}>Mark Unpaid</button>
+                            </form>
+                        </li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <form
+                                action="${invoiceUrlFromTemplate(deleteInvoiceUrlTemplate, inv.id)}"
+                                method="post"
+                                class="js-confirm-delete-invoice"
+                                data-invoice-id="${inv.id}"
+                            >
+                                ${deleteFormHTML}
+                                <button type="submit" class="dropdown-item text-danger">Delete</button>
+                            </form>
+                        </li>
+                    </ul>
+                </div>
+            </td>
+            </tr>`;
+            tbody.append(row);
+        });
+        if (window.TableSort && typeof window.TableSort.bind === 'function') {
+            window.TableSort.bind(document.getElementById('invoiceTable'));
+        }
+        updateBulkInvoiceSelectionState();
+    }
+
+    function getSelectedInvoiceIds() {
+        const selectedInvoiceIds = [];
+        $invoiceTable.find('tbody .invoice-select-checkbox:checked').each(function () {
+            selectedInvoiceIds.push(String($(this).val()));
+        });
+        return selectedInvoiceIds;
+    }
+
+    function updateBulkInvoiceSelectionState() {
+        const $invoiceCheckboxes = $invoiceTable.find('tbody .invoice-select-checkbox');
+        const totalCheckboxes = $invoiceCheckboxes.length;
+        const selectedInvoiceIds = getSelectedInvoiceIds();
+        const selectedCount = selectedInvoiceIds.length;
+        const hasSelection = selectedCount > 0;
+
+        $bulkInvoiceActionBtn.prop('disabled', !hasSelection);
+        $selectedInvoiceIdsInput.val(selectedInvoiceIds.join(','));
+
+        if (!totalCheckboxes) {
+            $selectAllInvoices.prop({
+                checked: false,
+                indeterminate: false
+            });
+            return;
+        }
+
+        $selectAllInvoices.prop('checked', selectedCount === totalCheckboxes);
+        $selectAllInvoices.prop('indeterminate', hasSelection && selectedCount < totalCheckboxes);
+    }
+
+    let currentFilters = '';
+    const searchFormEl = document.getElementById('invoice-search-form');
+    const searchInputEl = document.getElementById('invoice-search');
+    let searchDebounceTimer = null;
+
+    const filterModalEl = document.querySelector('[data-filter-modal]');
+    const filterFormEl = filterModalEl ? filterModalEl.querySelector('[data-filter-form]') : null;
+    const filterFormAction = filterFormEl ? (filterFormEl.getAttribute('action') || '{{ url_for('invoice.filter_invoices_api') }}') : '{{ url_for('invoice.filter_invoices_api') }}';
+
+    function buildInvoiceQueryParams() {
+        const params = new URLSearchParams(currentFilters);
+
+        if (searchFormEl) {
+            const formData = new FormData(searchFormEl);
+            for (const [key, value] of formData.entries()) {
+                if (!value || key === 'page' || key === 'invoice_id') {
+                    continue;
+                }
+                params.append(key, value);
+            }
+        }
+
+        const query = searchInputEl ? searchInputEl.value.trim() : '';
+        if (query) {
+            params.set('invoice_id', query);
+        } else {
+            params.delete('invoice_id');
+        }
+
+        return params.toString();
+    }
+
+    function loadInvoices(){
+        return $.getJSON(filterFormAction, buildInvoiceQueryParams(), function(data){
+            renderInvoices(data.invoices);
+        });
+    }
+
+    async function runBulkInvoiceAction(action) {
+        const selectedInvoiceIds = getSelectedInvoiceIds();
+        if (!selectedInvoiceIds.length) {
+            return;
+        }
+
+        const isMarkPaid = action === 'paid';
+        const actionVerb = isMarkPaid ? 'mark as paid' : 'mark as unpaid';
+        if (!window.confirm(`Are you sure you want to ${actionVerb} ${selectedInvoiceIds.length} selected invoice(s)?`)) {
+            return;
+        }
+
+        $bulkInvoiceActionBtn.prop('disabled', true);
+        $bulkInvoiceActionInput.val(action);
+        $selectedInvoiceIdsInput.val(selectedInvoiceIds.join(','));
+
+        const actionUrlTemplate = isMarkPaid ? markPaidUrlTemplate : markUnpaidUrlTemplate;
+        const requests = selectedInvoiceIds.map(function (invoiceId) {
+            const formData = bulkActionFormEl ? new FormData(bulkActionFormEl) : new FormData();
+            formData.append('selected_invoice_ids', invoiceId);
+
+            return fetch(invoiceUrlFromTemplate(actionUrlTemplate, invoiceId), {
+                method: 'POST',
+                body: formData,
+                credentials: 'same-origin'
+            }).then(function (response) {
+                if (!response.ok) {
+                    throw new Error(`Bulk invoice action failed for invoice ${invoiceId}`);
+                }
+            });
+        });
+
+        try {
+            await Promise.all(requests);
+            await loadInvoices();
+        } catch (error) {
+            window.alert('Unable to update one or more selected invoices. Please try again.');
+        } finally {
+            updateBulkInvoiceSelectionState();
+        }
+    }
+
+    if (searchFormEl) {
+        $(searchFormEl).on('submit', function (e) {
+            e.preventDefault();
+            loadInvoices();
+        });
+    }
+
+    if (searchInputEl) {
+        $(searchInputEl).on('input', function () {
+            window.clearTimeout(searchDebounceTimer);
+            searchDebounceTimer = window.setTimeout(function () {
+                loadInvoices();
+            }, 250);
+        });
+    }
+
+    $selectAllInvoices.on('change', function () {
+        const shouldSelectAll = $(this).is(':checked');
+        $invoiceTable.find('tbody .invoice-select-checkbox').prop('checked', shouldSelectAll);
+        updateBulkInvoiceSelectionState();
+    });
+
+    $invoiceTable.on('change', '.invoice-select-checkbox', function () {
+        updateBulkInvoiceSelectionState();
+    });
+
+    $(document).on('click', '.js-bulk-invoice-action', function () {
+        const action = $(this).data('action');
+        runBulkInvoiceAction(action);
+    });
+
+    $(document).on('submit', '.js-confirm-delete-invoice', function (e) {
+        const invoiceId = $(this).data('invoice-id');
+        const confirmationText = invoiceId
+            ? `Delete invoice #${invoiceId}?`
+            : 'Delete this invoice?';
+
+        if (!window.confirm(confirmationText)) {
+            e.preventDefault();
+        }
+    });
+
+    if (filterFormEl) {
+        const $filterForm = $(filterFormEl);
+        $filterForm.on('submit', function(e){
+            e.preventDefault();
+            currentFilters = $filterForm.serialize();
+            loadInvoices();
+            if (filterModalEl) {
+                const modal = bootstrap.Modal.getInstance(filterModalEl);
+                if (modal) { modal.hide(); }
+            }
+        });
+    }
+    updateBulkInvoiceSelectionState();
+
+    // Create invoice form logic
+    let currentTaxStatus = { gst_exempt: false, pst_exempt: false };
+    const initialCustomerId = $('#customerSelect').val();
+    if (initialCustomerId) {
+        $.get(`/get_customer_tax_status/${initialCustomerId}`, function (data) {
+            currentTaxStatus = data;
+        });
+    }
+    $('#customerSelect').on('change', function () {
+        const customerId = $(this).val();
+        if (customerId) {
+            $.get(`/get_customer_tax_status/${customerId}`, function (data) {
+                currentTaxStatus = data;
+            });
+        }
+    });
+
+    $('#productSearch').keyup(function () {
+        var query = $(this).val();
+        $.ajax({
+            url: '/search_products',
+            data: { query: query },
+            success: function (response) {
+                var suggestions = response.map(function (product) {
+                    const invoicePrice = product.invoice_sale_price ?? product.price;
+                    return '<a href="#" class="list-group-item list-group-item-action" data-name="' + product.name + '" data-price="' + invoicePrice + '">' + product.name + ' - $' + invoicePrice + '</a>';
+                });
+                $('#productSuggestions').html(suggestions.join(''));
+            }
+        });
+    });
+
+    $('#productSuggestions').on('click', '.list-group-item', function (e) {
+        e.preventDefault();
+        var productName = $(this).data('name');
+        var productPrice = $(this).data('price');
+
+        var newRow = `<tr class="product-row">
+    <td>${productName}</td>
+    <td><input type="text" class="form-control quantity" value="1" inputmode="decimal" data-numeric-input="1"></td>
+    <td class="price">$${productPrice}</td>
+    <td class="total">$${(parseFloat(productPrice)).toFixed(2)}</td>
+    <td>
+        <label><input type="checkbox" class="override-gst"${!currentTaxStatus.gst_exempt ? ' checked' : ''}> GST</label><br>
+        <label><input type="checkbox" class="override-pst"${!currentTaxStatus.pst_exempt ? ' checked' : ''}> PST</label>
+    </td>
+    <td><button type="button" class="btn btn-danger btn-sm">Remove</button></td>
+</tr>`;
+        $('#productTable tbody').append(newRow);
+
+        const row = $('#productTable tbody tr').last();
+        if (window.NumericInput) {
+            window.NumericInput.enableWithin(row.get(0));
+        }
+        updateRowTotal(row);
+    });
+
+    $('#productTable').on('input', '.quantity', function () {
+        const row = $(this).closest('tr');
+        updateRowTotal(row);
+    });
+
+    $('#productTable').on('change', '.override-gst, .override-pst', function () {
+        const row = $(this).closest('tr');
+        updateRowTotal(row);
+    });
+
+    $('#productTable').on('click', '.btn-danger', function () {
+        $(this).closest('tr').remove();
+    });
+
+    function parseNumber(value, defaultValue = 0) {
+        if (window.NumericInput) {
+            const parsed = window.NumericInput.parseValue(value);
+            return Number.isFinite(parsed) ? parsed : defaultValue;
+        }
+        const parsed = parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : defaultValue;
+    }
+
+    function updateRowTotal(row) {
+        const quantity = parseNumber(row.find('.quantity').val(), 0);
+        const price = parseNumber(row.find('.price').text().replace('$', ''), 0);
+        const applyGST = row.find('.override-gst').is(':checked');
+        const applyPST = row.find('.override-pst').is(':checked');
+
+        const subtotal = quantity * price;
+        const gst = applyGST ? subtotal * 0.05 : 0;
+        const pst = applyPST ? subtotal * 0.07 : 0;
+        const total = subtotal + gst + pst;
+
+        row.find('.total').text(`$${total.toFixed(2)}`);
+    }
+
+    $('#invoiceForm').on('submit', function (e) {
+        e.preventDefault();
+        let products = '';
+        $('#productTable tbody tr').each(function () {
+            const productName = $(this).find('td:first-child').text();
+            const quantity = $(this).find('.quantity').val();
+            const override_gst = $(this).find('.override-gst').is(':checked') ? 1 : 0;
+            const override_pst = $(this).find('.override-pst').is(':checked') ? 1 : 0;
+            products += `${productName}?${quantity}?${override_gst}?${override_pst}:`;
+        });
+        $('#products').val(products);
+        $.post("{{ url_for('invoice.create_invoice_api') }}", $(this).serialize(), function () {
+            $('#createInvoiceModal').modal('hide');
+            $('#invoiceForm')[0].reset();
+            $('#productTable tbody').empty();
+            loadInvoices();
+        });
+    });
+});
+</script>
+{% endblock %}

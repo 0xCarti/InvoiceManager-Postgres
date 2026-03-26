@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+{% block title %}{{ entity_label }} Notes{% endblock %}
+{% block content %}
+<div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center mb-4 gap-3">
+    <div>
+        <h1 class="h3 mb-1">{{ entity_label }} Notes</h1>
+        <p class="text-muted mb-0">{{ entity_name }}</p>
+    </div>
+    <div>
+        <a class="btn btn-outline-secondary" href="{{ back_url }}">Back to {{ back_label }}</a>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header">Add Note</div>
+    <div class="card-body">
+        <form method="post">
+            {{ form.hidden_tag() }}
+            <div class="mb-3">
+                {{ form.content.label(class="form-label") }}
+                {{ form.content(class="form-control" + (' is-invalid' if form.content.errors else ''), rows=4) }}
+                {% for error in form.content.errors %}
+                    <div class="invalid-feedback d-block">{{ error }}</div>
+                {% endfor %}
+            </div>
+            {% if can_pin %}
+            <div class="form-check mb-3">
+                {{ form.pinned(class="form-check-input", id='pinned') }}
+                {{ form.pinned.label(class="form-check-label", for='pinned') }}
+            </div>
+            {% endif %}
+            {{ form.submit(class="btn btn-primary") }}
+        </form>
+    </div>
+</div>
+
+{% if notes %}
+    {% for note in notes %}
+        <div class="card mb-3{% if note.pinned %} border-warning{% endif %}">
+            <div class="card-header d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
+                <div>
+                    {% if note.pinned %}
+                        <span class="badge bg-warning text-dark me-2">Pinned</span>
+                    {% endif %}
+                    <strong>{{ note.user.email if note.user else 'Deleted user' }}</strong>
+                    <span class="text-muted ms-2">{{ note.created_at|format_datetime }}</span>
+                    {% if note.updated_at and note.updated_at != note.created_at %}
+                        <small class="text-muted ms-2">Updated {{ note.updated_at|format_datetime }}</small>
+                    {% endif %}
+                </div>
+                <div class="d-flex flex-wrap gap-2">
+                    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('notes.edit_note', entity_type=entity_type, entity_id=entity_id, note_id=note.id) }}">Edit</a>
+                    <form method="post" action="{{ url_for('notes.delete_note', entity_type=entity_type, entity_id=entity_id, note_id=note.id) }}" class="d-inline">
+                        {{ delete_form.hidden_tag() }}
+                        <button type="submit" class="btn btn-outline-danger btn-sm">Delete</button>
+                    </form>
+                    {% if can_pin %}
+                    <form method="post" action="{{ url_for('notes.toggle_pin', entity_type=entity_type, entity_id=entity_id, note_id=note.id) }}" class="d-inline">
+                        {{ pin_form.hidden_tag() }}
+                        <button type="submit" class="btn btn-outline-warning btn-sm">
+                            {% if note.pinned %}Unpin{% else %}Pin{% endif %}
+                        </button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-body">
+                <p class="mb-0" style="white-space: pre-wrap;">{{ note.content }}</p>
+            </div>
+        </div>
+    {% endfor %}
+{% else %}
+    <div class="alert alert-info">No notes yet. Add one above to start the conversation.</div>
+{% endif %}
+{% endblock %}

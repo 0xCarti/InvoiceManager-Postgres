@@ -1,0 +1,734 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4" data-dashboard-container data-user-id="{{ current_user.id if current_user.is_authenticated else 'guest' }}">
+    {% set can_manage_operations = current_user.is_admin %}
+    {% set action_denied_message = "You do not have permission to perform this action." %}
+    <div class="d-flex align-items-center justify-content-between mb-4">
+        <div>
+            <h1 class="mb-0">Dashboard</h1>
+            <p class="text-muted mb-0">A quick overview of transfer activity, purchases, invoices, and events.</p>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-md-3 col-sm-6">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Transfers</h5>
+                    <button
+                        class="btn btn-sm btn-outline-secondary"
+                        type="button"
+                        data-bs-toggle="collapse"
+                        data-bs-target="#dashboard-card-transfers"
+                        aria-expanded="true"
+                        aria-controls="dashboard-card-transfers"
+                    >
+                        <span class="fw-semibold">Toggle</span>
+                    </button>
+                </div>
+                <div class="collapse show" id="dashboard-card-transfers" data-dashboard-collapse>
+                    <div class="card-body">
+                        <p class="mb-1"><strong>Total:</strong> {{ context.transfers.total }}</p>
+                        <p class="mb-1"><strong>Completed:</strong> {{ context.transfers.completed }}</p>
+                        <p class="mb-0"><strong>Pending:</strong> {{ context.transfers.pending }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Purchase Orders</h5>
+                    <button
+                        class="btn btn-sm btn-outline-secondary"
+                        type="button"
+                        data-bs-toggle="collapse"
+                        data-bs-target="#dashboard-card-purchase-orders"
+                        aria-expanded="true"
+                        aria-controls="dashboard-card-purchase-orders"
+                    >
+                        <span class="fw-semibold">Toggle</span>
+                    </button>
+                </div>
+                <div class="collapse show" id="dashboard-card-purchase-orders" data-dashboard-collapse>
+                    <div class="card-body">
+                        <p class="mb-1"><strong>Open:</strong> {{ context.purchase_orders.open_count }}</p>
+                        <p class="mb-1"><strong>Overdue:</strong> {{ context.purchase_orders.overdue_count }}</p>
+                        <p class="mb-0"><strong>Expected Total:</strong> ${{ '%.2f'|format(context.purchase_orders.expected_total) }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Purchase Invoices</h5>
+                    <button
+                        class="btn btn-sm btn-outline-secondary"
+                        type="button"
+                        data-bs-toggle="collapse"
+                        data-bs-target="#dashboard-card-purchase-invoices"
+                        aria-expanded="true"
+                        aria-controls="dashboard-card-purchase-invoices"
+                    >
+                        <span class="fw-semibold">Toggle</span>
+                    </button>
+                </div>
+                <div class="collapse show" id="dashboard-card-purchase-invoices" data-dashboard-collapse>
+                    <div class="card-body">
+                        <p class="mb-1"><strong>Received:</strong> {{ context.purchase_invoices.count }}</p>
+                        <p class="mb-0"><strong>Total Spend:</strong> ${{ '%.2f'|format(context.purchase_invoices.total) }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Invoices</h5>
+                    <button
+                        class="btn btn-sm btn-outline-secondary"
+                        type="button"
+                        data-bs-toggle="collapse"
+                        data-bs-target="#dashboard-card-invoices"
+                        aria-expanded="true"
+                        aria-controls="dashboard-card-invoices"
+                    >
+                        <span class="fw-semibold">Toggle</span>
+                    </button>
+                </div>
+                <div class="collapse show" id="dashboard-card-invoices" data-dashboard-collapse>
+                    <div class="card-body">
+                        <p class="mb-1"><strong>Issued:</strong> {{ context.invoices.count }}</p>
+                        <p class="mb-0"><strong>Invoice Total:</strong> ${{ '%.2f'|format(context.invoices.total) }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3 mt-1">
+        <div class="col-12">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5 class="mb-0">Transfer completion by location</h5>
+                        <p class="text-muted mb-0 small">Item-level completion for incoming transfers.</p>
+                    </div>
+                    <button
+                        class="btn btn-sm btn-outline-secondary"
+                        type="button"
+                        data-bs-toggle="collapse"
+                        data-bs-target="#dashboard-card-transfer-completion"
+                        aria-expanded="true"
+                        aria-controls="dashboard-card-transfer-completion"
+                    >
+                        <span class="fw-semibold">Toggle</span>
+                    </button>
+                </div>
+                <div class="collapse show" id="dashboard-card-transfer-completion" data-dashboard-collapse>
+                    <div class="card-body">
+                        <ul class="list-group list-group-flush">
+                            {% for location in context.transfer_completion_by_location %}
+                                <li class="list-group-item px-0">
+                                    <div class="d-flex justify-content-between align-items-center gap-2">
+                                        <div class="fw-semibold">{{ location.location_name }}</div>
+                                        <div class="text-end">
+                                            <div class="small text-muted">{{ location.transfer_count }} transfers</div>
+                                            <div class="fw-semibold">{{ '%.1f'|format(location.completion_percent) }}% complete</div>
+                                        </div>
+                                    </div>
+                                </li>
+                            {% else %}
+                                <li class="list-group-item px-0 text-muted">No transfer activity yet.</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3 mt-1">
+        <div class="col-12">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5 class="mb-0">Weekly transfers, purchases & sales</h5>
+                        <p class="text-muted mb-0 small">Track recent movement volume alongside purchase receipts and sales totals.</p>
+                    </div>
+                    <button
+                        class="btn btn-sm btn-outline-secondary"
+                        type="button"
+                        data-bs-toggle="collapse"
+                        data-bs-target="#dashboard-card-weekly"
+                        aria-expanded="true"
+                        aria-controls="dashboard-card-weekly"
+                    >
+                        <span class="fw-semibold">Toggle</span>
+                    </button>
+                </div>
+                <div class="collapse show" id="dashboard-card-weekly" data-dashboard-collapse>
+                    <div class="card-body">
+                        <form method="get" action="{{ url_for('main.home') }}" class="row g-2 align-items-end mb-3">
+                            <div class="col-sm-4 col-md-3">
+                                <label for="activity_interval" class="form-label mb-1">Activity interval</label>
+                                <select id="activity_interval" name="activity_interval" class="form-select form-select-sm">
+                                    {% for option in context.charts.weekly_activity.interval_options %}
+                                        <option value="{{ option.value }}" {% if option.value == context.charts.weekly_activity.selected_interval %}selected{% endif %}>
+                                            {{ option.label }}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-auto">
+                                <button type="submit" class="btn btn-sm btn-outline-primary">Apply</button>
+                            </div>
+                        </form>
+                        <div class="ratio ratio-16x9">
+                            <canvas id="weekly-activity-chart" aria-label="Weekly transfers and purchases" role="img"></canvas>
+                        </div>
+                        <noscript>
+                            <div class="alert alert-info mt-3 mb-2">JavaScript is disabled; showing tabular summary instead.</div>
+                            <div class="table-responsive">
+                                <table class="table table-sm mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">{{ context.charts.weekly_activity.bucket_label }}</th>
+                                            <th scope="col">Transfers</th>
+                                            <th scope="col">Purchases</th>
+                                            <th scope="col">Purchase total</th>
+                                            <th scope="col">Sales total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for bucket in context.charts.weekly_activity.buckets %}
+                                            <tr>
+                                                <td>{{ bucket.label }}</td>
+                                                <td>{{ bucket.transfers }}</td>
+                                                <td>{{ bucket.purchases }}</td>
+                                                <td>${{ '%.2f'|format(bucket.purchase_total) }}</td>
+                                                <td>${{ '%.2f'|format(bucket.sales_total) }}</td>
+                                            </tr>
+                                        {% else %}
+                                            <tr>
+                                                <td colspan="5" class="text-muted">{{ context.charts.weekly_activity.empty_state_text }}</td>
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </noscript>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="row g-3 mt-1">
+        <div class="col-12">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Events</h5>
+                    <button
+                        class="btn btn-sm btn-outline-secondary"
+                        type="button"
+                        data-bs-toggle="collapse"
+                        data-bs-target="#dashboard-card-events-summary"
+                        aria-expanded="true"
+                        aria-controls="dashboard-card-events-summary"
+                    >
+                        <span class="fw-semibold">Toggle</span>
+                    </button>
+                </div>
+                <div class="collapse show" id="dashboard-card-events-summary" data-dashboard-collapse>
+                    <div class="card-body">
+                        <p class="mb-1"><strong>Today:</strong> {{ context.events.today_count }}</p>
+                        <p class="mb-1"><strong>Upcoming:</strong> {{ context.events.upcoming_count }}</p>
+                        {% if context.events.next_event %}
+                            <p class="mb-0"><strong>Next:</strong> {{ context.events.next_event.name }} ({{ context.events.next_event.start_date.strftime('%Y-%m-%d') }} - {{ context.events.next_event.end_date.strftime('%Y-%m-%d') }})</p>
+                        {% else %}
+                            <p class="mb-0 text-muted">No upcoming events scheduled.</p>
+                        {% endif %}
+                        <div class="mt-3">
+                            <h6 class="mb-2">Starting {{ context.events.next_day.strftime('%b %d, %Y') }}</h6>
+                            <ul class="list-group list-group-flush">
+                                {% for ev in context.events.next_day_events %}
+                                    <li class="list-group-item px-0">
+                                        <div class="fw-semibold">{{ ev.name }}</div>
+                                        <div class="text-muted small">{{ ev.start_date.strftime('%b %d, %Y') }} – {{ ev.end_date.strftime('%b %d, %Y') }}</div>
+                                    </li>
+                                {% else %}
+                                    <li class="list-group-item px-0 text-muted">No events starting tomorrow.</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3 mt-1">
+        <div class="col-12">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5 class="mb-0">Action queues</h5>
+                        <p class="text-muted mb-0 small">Stay ahead on receipts, approvals, and vendor payments.</p>
+                    </div>
+                    <button
+                        class="btn btn-sm btn-outline-secondary"
+                        type="button"
+                        data-bs-toggle="collapse"
+                        data-bs-target="#dashboard-card-action-queues"
+                        aria-expanded="true"
+                        aria-controls="dashboard-card-action-queues"
+                    >
+                        <span class="fw-semibold">Toggle</span>
+                    </button>
+                </div>
+                <div class="collapse show" id="dashboard-card-action-queues" data-dashboard-collapse>
+                    <div class="card-body">
+                        <div class="row g-3 mt-2">
+                            <div class="col-lg-6">
+                                <div class="border rounded p-3 h-100">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <h6 class="mb-0">Pending purchase orders</h6>
+                                        {% if context.queues.purchase_orders.total > context.queues.purchase_orders['items']|length %}
+                                            <a class="small" href="{{ url_for('purchase.view_purchase_orders') }}">Show more</a>
+                                        {% endif %}
+                                    </div>
+                                    <ul class="list-group list-group-flush">
+                                        {% for po in context.queues.purchase_orders['items'] %}
+                                            {% set vendor_label = po.vendor_name or (po.vendor and (po.vendor.first_name ~ ' ' ~ po.vendor.last_name)) or 'Unknown vendor' %}
+                                            <li class="list-group-item px-0">
+                                                <div class="d-flex justify-content-between align-items-start gap-3">
+                                                    <div>
+                                                        <div class="fw-semibold">{{ vendor_label }}</div>
+                                                        <div class="text-muted small">Due {{ po.expected_date.strftime('%b %d, %Y') }} · ${{ '%.2f'|format(po.expected_total_cost or 0) }}</div>
+                                                    </div>
+                                                    <div class="text-end">
+                                                        {% if can_manage_operations %}
+                                                            <a class="btn btn-sm btn-primary" href="{{ url_for('purchase.receive_invoice', po_id=po.id) }}">Receive</a>
+                                                        {% else %}
+                                                            <span class="btn btn-sm btn-primary disabled" aria-disabled="true" title="{{ action_denied_message }}">Receive</span>
+                                                        {% endif %}
+                                                    </div>
+                                                </div>
+                                            </li>
+                                        {% else %}
+                                            <li class="list-group-item px-0 text-muted">No pending purchase orders.</li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                            </div>
+                            <div class="col-lg-6">
+                                <div class="border rounded p-3 h-100">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <h6 class="mb-0">Transfers awaiting approval</h6>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <a class="btn btn-sm btn-primary" href="{{ url_for('transfer.add_transfer') }}">Start Transfer</a>
+                                            {% if context.queues.transfers.total > context.queues.transfers['items']|length %}
+                                                <a class="small" href="{{ url_for('transfer.view_transfers') }}">Show more</a>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <ul class="list-group list-group-flush">
+                                        {% for transfer in context.queues.transfers['items'] %}
+                                            <li class="list-group-item px-0">
+                                                <div class="d-flex justify-content-between align-items-start gap-3">
+                                                    <div>
+                                                        <div class="fw-semibold">{{ transfer.from_location_name or transfer.from_location.name }} → {{ transfer.to_location_name or transfer.to_location.name }}</div>
+                                                        <div class="text-muted small">Created {{ transfer.date_created.strftime('%b %d, %Y') }}</div>
+                                                    </div>
+                                                    <div class="text-end d-flex flex-column align-items-end gap-1">
+                                                        {% if can_manage_operations %}
+                                                            <form method="post" action="{{ url_for('transfer.complete_transfer', transfer_id=transfer.id) }}" class="d-inline">
+                                                                {{ confirm_form.hidden_tag() }}
+                                                                <button type="submit" class="btn btn-sm btn-success">Approve</button>
+                                                            </form>
+                                                        {% else %}
+                                                            <button type="button" class="btn btn-sm btn-success" disabled title="{{ action_denied_message }}">Approve</button>
+                                                        {% endif %}
+                                                        <a class="small" href="{{ url_for('transfer.view_transfer', transfer_id=transfer.id) }}">Review</a>
+                                                    </div>
+                                                </div>
+                                            </li>
+                                        {% else %}
+                                            <li class="list-group-item px-0 text-muted">No transfers awaiting approval.</li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3 mt-1">
+        <div class="col-12">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5 class="mb-0">Event Schedule</h5>
+                        <p class="text-muted mb-0 small">Browse upcoming and active events; overdue dates are highlighted.</p>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        {% if can_manage_operations %}
+                            <a class="btn btn-primary btn-sm" href="{{ url_for('event.create_event') }}">Schedule event</a>
+                        {% endif %}
+                        <button
+                            class="btn btn-sm btn-outline-secondary"
+                            type="button"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#dashboard-card-event-schedule"
+                            aria-expanded="true"
+                            aria-controls="dashboard-card-event-schedule"
+                        >
+                            <span class="fw-semibold">Toggle</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="collapse show" id="dashboard-card-event-schedule" data-dashboard-collapse>
+                    <div class="card-body">
+                        <div class="row g-3 mt-3 align-items-start">
+                            <div class="col-12 col-lg-8">
+                                <div class="border rounded p-3 h-100">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <h6 class="mb-0">{{ context.events.schedule.calendar.month_label }}</h6>
+                                        <span class="badge bg-light text-body-secondary">Today: {{ context.events.schedule.calendar.today.strftime('%b %d') }}</span>
+                                    </div>
+                                    <p class="small text-muted mb-2">Click a date badge to view events filtered by that day.</p>
+                                    <div class="d-grid gap-2 event-calendar-grid" style="grid-template-columns: repeat(7, minmax(2.75rem, 1fr));">
+                                        {% for day in context.events.schedule.calendar.days %}
+                                            {% set has_events = day.count > 0 %}
+                                            <button
+                                                type="button"
+                                                class="btn btn-sm btn-outline-secondary text-start event-calendar-day"
+                                                data-date="{{ day.date.isoformat() }}"
+                                                data-label="{{ day.date.strftime('%b %d') }}"
+                                                {% if has_events %}data-events='{{ day.events | tojson }}'{% endif %}
+                                                {% if day.date == context.events.schedule.calendar.today %}data-today="true"{% endif %}
+                                                {% if not has_events %}data-empty="true"{% endif %}
+                                                {% if not has_events %}disabled{% endif %}
+                                                aria-label="{% if has_events %}{{ day.date.strftime('%b %d') }}: {% for ev in day.events %}{{ ev.name }} — {{ ev.open_location_count }} locations open{% if not loop.last %}, {% endif %}{% endfor %}{% else %}{{ day.date.strftime('%b %d') }}: No events scheduled{% endif %}"
+                                                aria-haspopup="true"
+                                                aria-expanded="false"
+                                            >
+                                                <div class="d-flex justify-content-between align-items-center">
+                                                    <span class="fw-semibold">{{ day.day }}</span>
+                                                    {% if has_events %}
+                                                        <span class="badge bg-primary">{{ day.count }}</span>
+                                                    {% else %}
+                                                        <span class="text-muted small">–</span>
+                                                    {% endif %}
+                                                </div>
+                                            </button>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-12 col-lg-4">
+                                <div class="border rounded p-3 h-100 d-flex flex-column">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <h6 class="mb-0">Scheduled events</h6>
+                                        <span class="small text-muted" data-event-filter-label>Selecting a date opens the filtered events view</span>
+                                    </div>
+                                    <ul class="list-group list-group-flush flex-grow-1" id="event-schedule-list">
+                                        {% for ev in context.events.schedule.sidebar_events %}
+                                            <li class="list-group-item" data-event-row data-start-date="{{ ev.start_date.isoformat() }}" data-end-date="{{ ev.end_date.isoformat() }}">
+                                                <div class="d-flex justify-content-between align-items-start gap-3">
+                                                    <div>
+                                                        <div class="fw-semibold">{{ ev.name }}</div>
+                                                        <div class="text-muted small">{{ ev.start_date.strftime('%b %d, %Y') }} – {{ ev.end_date.strftime('%b %d, %Y') }}</div>
+                                                    </div>
+                                                    <div class="text-end">
+                                                        {% if ev.status == 'past_due' %}
+                                                            <span class="badge bg-danger">Past close date</span>
+                                                        {% elif ev.status == 'active' %}
+                                                            <span class="badge bg-success">Active today</span>
+                                                        {% elif ev.status == 'in_progress' %}
+                                                            <span class="badge bg-info text-dark">In progress</span>
+                                                        {% else %}
+                                                            <span class="badge bg-primary">Upcoming</span>
+                                                        {% endif %}
+                                                        <div>
+                                                            <a class="small" href="{{ url_for('event.view_event', event_id=ev.id) }}">View</a>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </li>
+                                        {% else %}
+                                            <li class="list-group-item text-muted">No events scheduled.</li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+    {{ super() }}
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style nonce="{{ csp_nonce }}">
+        .event-calendar-popover .popover-body {
+            max-width: 18rem;
+            font-size: 0.9rem;
+        }
+
+        .event-calendar-popover ul {
+            margin-bottom: 0;
+        }
+    </style>
+    <script nonce="{{ csp_nonce }}">
+        document.addEventListener('DOMContentLoaded', () => {
+            const dashboardContainer = document.querySelector('[data-dashboard-container]');
+            const userId = (dashboardContainer?.dataset.userId || 'guest').toString();
+            const collapseStorageKey = `dashboard-collapse-state:${userId}`;
+            const collapsibleSections = Array.from(document.querySelectorAll('[data-dashboard-collapse]'));
+
+            const readCollapseState = () => {
+                try {
+                    const stored = localStorage.getItem(collapseStorageKey);
+                    return stored ? JSON.parse(stored) : {};
+                } catch (error) {
+                    return {};
+                }
+            };
+
+            const persistCollapseState = (collapseId, isOpen) => {
+                const state = readCollapseState();
+                state[collapseId] = isOpen;
+
+                try {
+                    localStorage.setItem(collapseStorageKey, JSON.stringify(state));
+                } catch (error) {
+                    // Ignore storage errors (e.g., quota exceeded, disabled storage)
+                }
+            };
+
+            const applyStoredCollapseState = () => {
+                const state = readCollapseState();
+
+                collapsibleSections.forEach((section) => {
+                    const collapseId = section.id;
+                    const isOpen = state[collapseId];
+
+                    if (typeof isOpen !== 'boolean') {
+                        return;
+                    }
+
+                    section.classList.toggle('show', isOpen);
+                    section.classList.toggle('collapsing', false);
+
+                    const trigger = document.querySelector(`[data-bs-target="#${collapseId}"]`);
+                    if (trigger) {
+                        trigger.classList.toggle('collapsed', !isOpen);
+                        trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+                    }
+                });
+            };
+
+            applyStoredCollapseState();
+
+            collapsibleSections.forEach((section) => {
+                section.addEventListener('shown.bs.collapse', () => persistCollapseState(section.id, true));
+                section.addEventListener('hidden.bs.collapse', () => persistCollapseState(section.id, false));
+            });
+
+            const weeklyActivity = {{ context.charts.weekly_activity | tojson }};
+            const weeklyData = weeklyActivity?.buckets || [];
+
+            const weeklyCanvas = document.getElementById('weekly-activity-chart');
+            if (weeklyCanvas && weeklyData.length) {
+                const labels = weeklyData.map((bucket) => bucket.label);
+                const transferCounts = weeklyData.map((bucket) => bucket.transfers);
+                const purchaseCounts = weeklyData.map((bucket) => bucket.purchases);
+                const purchaseTotals = weeklyData.map((bucket) => bucket.purchase_total);
+                const salesTotals = weeklyData.map((bucket) => bucket.sales_total);
+
+                new Chart(weeklyCanvas, {
+                    type: 'bar',
+                    data: {
+                        labels,
+                        datasets: [
+                            {
+                                type: 'bar',
+                                label: 'Transfers',
+                                data: transferCounts,
+                                backgroundColor: 'rgba(13, 110, 253, 0.6)',
+                                borderColor: 'rgba(13, 110, 253, 1)',
+                                borderWidth: 1,
+                                stack: 'counts',
+                            },
+                            {
+                                type: 'bar',
+                                label: 'Purchases',
+                                data: purchaseCounts,
+                                backgroundColor: 'rgba(25, 135, 84, 0.6)',
+                                borderColor: 'rgba(25, 135, 84, 1)',
+                                borderWidth: 1,
+                                stack: 'counts',
+                            },
+                            {
+                                type: 'line',
+                                label: 'Purchase total',
+                                data: purchaseTotals,
+                                yAxisID: 'y1',
+                                borderColor: 'rgba(255, 193, 7, 0.9)',
+                                backgroundColor: 'rgba(255, 193, 7, 0.2)',
+                                tension: 0.3,
+                                borderWidth: 2,
+                                pointRadius: 3,
+                            },
+                            {
+                                type: 'line',
+                                label: 'Sales total',
+                                data: salesTotals,
+                                yAxisID: 'y1',
+                                borderColor: 'rgba(220, 53, 69, 0.9)',
+                                backgroundColor: 'rgba(220, 53, 69, 0.15)',
+                                tension: 0.3,
+                                borderWidth: 2,
+                                pointRadius: 3,
+                            },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false,
+                        },
+                        scales: {
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: weeklyActivity?.bucket_label || 'Period',
+                                },
+                            },
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Count',
+                                },
+                            },
+                            y1: {
+                                beginAtZero: true,
+                                position: 'right',
+                                grid: {
+                                    drawOnChartArea: false,
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'Financial totals ($)',
+                                },
+                            },
+                        },
+                        plugins: {
+                            legend: {
+                                position: 'bottom',
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function (context) {
+                                        const label = context.dataset.label || '';
+                                        if (context.dataset.yAxisID === 'y1') {
+                                            return `${label}: $${context.parsed.y.toFixed(2)}`;
+                                        }
+                                        return `${label}: ${context.parsed.y}`;
+                                    },
+                                },
+                            },
+                        },
+                    },
+                });
+            }
+
+            const calendarButtons = Array.from(document.querySelectorAll('.event-calendar-day'));
+            const filterLabel = document.querySelector('[data-event-filter-label]');
+            const eventsUrl = "{{ url_for('event.view_events') }}";
+
+            if (typeof bootstrap !== 'undefined') {
+                calendarButtons
+                    .filter((btn) => btn.dataset.empty !== 'true')
+                    .forEach((btn) => {
+                        let events = [];
+
+                        try {
+                            events = JSON.parse(btn.dataset.events || '[]');
+                        } catch (e) {
+                            events = [];
+                        }
+
+                        if (!Array.isArray(events) || events.length === 0) {
+                            return;
+                        }
+
+                        const renderContent = () => {
+                            const list = document.createElement('ul');
+                            list.classList.add('mb-0', 'list-unstyled', 'small');
+
+                            events.forEach((event) => {
+                                const { name, open_location_count: openLocationCount } = event;
+                                const li = document.createElement('li');
+                                li.classList.add('mb-1');
+                                const openCountLabel =
+                                    typeof openLocationCount === 'number'
+                                        ? openLocationCount
+                                        : 0;
+                                li.textContent = `${name} — ${openCountLabel} locations open`;
+                                list.appendChild(li);
+                            });
+
+                            return list;
+                        };
+
+                        const popover = new bootstrap.Popover(btn, {
+                            title: btn.dataset.label,
+                            html: true,
+                            trigger: 'hover focus',
+                            placement: 'top',
+                            container: 'body',
+                            content: renderContent,
+                            customClass: 'event-calendar-popover',
+                        });
+
+                        btn.addEventListener('shown.bs.popover', () => {
+                            btn.setAttribute('aria-expanded', 'true');
+                        });
+
+                        btn.addEventListener('hidden.bs.popover', () => {
+                            btn.setAttribute('aria-expanded', 'false');
+                        });
+                    });
+            }
+
+            calendarButtons.forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    if (btn.dataset.empty === 'true') {
+                        return;
+                    }
+
+                    const targetUrl = new URL(eventsUrl, window.location.origin);
+                    targetUrl.searchParams.set('date_filter', btn.dataset.date);
+                    window.location.href = targetUrl.toString();
+                });
+            });
+
+            if (filterLabel) {
+                filterLabel.textContent = 'Selecting a date opens the filtered events view';
+            }
+        });
+    </script>
+{% endblock %}

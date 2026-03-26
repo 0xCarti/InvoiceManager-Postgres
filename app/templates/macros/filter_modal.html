@@ -1,0 +1,56 @@
+{% macro filter_modal(
+    modal_id,
+    title,
+    form_id=None,
+    form_action='',
+    method='get',
+    reset_url=None,
+    ajax=False,
+    dialog_class='',
+    form_class='',
+    scope=None,
+    save_url=None
+) -%}
+<div
+  class="modal fade"
+  id="{{ modal_id }}"
+  tabindex="-1"
+  aria-labelledby="{{ modal_id }}-label"
+  aria-hidden="true"
+  data-filter-modal
+>
+  <div class="modal-dialog{% if dialog_class %} {{ dialog_class }}{% endif %}">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="{{ modal_id }}-label">{{ title }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form
+        {% if form_id %}id="{{ form_id }}"{% endif %}
+        {% if form_class %}class="{{ form_class }}"{% endif %}
+        method="{{ method }}"
+        {% if form_action %}action="{{ form_action }}"{% endif %}
+        data-filter-form
+        {% if ajax %}data-filter-ajax="true"{% endif %}
+        {% if scope %}data-filter-scope="{{ scope }}"{% endif %}
+        {% if save_url %}data-filter-save-url="{{ save_url }}"{% endif %}
+      >
+        <div class="modal-body">
+          <div class="alert d-none" role="alert" data-filter-feedback aria-live="polite"></div>
+          {{ caller() }}
+        </div>
+        <div class="modal-footer">
+          {% if reset_url %}
+          <a href="{{ reset_url }}" class="btn btn-outline-secondary" data-filter-reset>Reset</a>
+          {% else %}
+          <button type="reset" class="btn btn-outline-secondary" data-filter-reset>Reset</button>
+          {% endif %}
+          <button type="button" class="btn btn-outline-primary" data-filter-save>Save as Default</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Apply</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{%- endmacro %}

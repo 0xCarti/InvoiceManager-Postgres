@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>System Information</h2>
+    <table class="table">
+        <tbody>
+            <tr><th>Platform</th><td>{{ info.platform }}</td></tr>
+            <tr><th>Python Version</th><td>{{ info.python_version }}</td></tr>
+            <tr><th>Flask Version</th><td>{{ info.flask_version }}</td></tr>
+            <tr><th>Application Version</th><td>{{ info.version }}</td></tr>
+            <tr><th>Start Time</th><td>{{ info.started_at }}</td></tr>
+            <tr><th>Uptime</th><td>{{ info.uptime }}</td></tr>
+        </tbody>
+    </table>
+</div>
+{% endblock %}

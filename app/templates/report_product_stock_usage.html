@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <h2 class="mb-0">Product Stock Usage Report</h2>
+        <a class="btn btn-outline-secondary" href="{{ url_for('invoice.view_invoices') }}">Back to Invoices</a>
+    </div>
+    <p class="text-muted">Review the inventory items that were consumed through product sales over the selected period. Use the filters to focus on specific products or sales GL codes.</p>
+
+    <form method="POST" class="mb-4">
+        {{ form.hidden_tag() }}
+        <div class="row g-3">
+            <div class="col-md-6">
+                {{ form.start_date.label(class="form-label") }}
+                {{ form.start_date(class="form-control") }}
+                {% if form.start_date.errors %}
+                    <div class="text-danger small">{{ form.start_date.errors[0] }}</div>
+                {% endif %}
+            </div>
+            <div class="col-md-6">
+                {{ form.end_date.label(class="form-label") }}
+                {{ form.end_date(class="form-control") }}
+                {% if form.end_date.errors %}
+                    <div class="text-danger small">{{ form.end_date.errors[0] }}</div>
+                {% endif %}
+            </div>
+        </div>
+        <div class="row g-3 mt-1">
+            <div class="col-md-6">
+                {{ form.payment_status.label(class="form-label") }}
+                {{ form.payment_status(class="form-select") }}
+                {% if form.payment_status.errors %}
+                    <div class="text-danger small">{{ form.payment_status.errors[0] }}</div>
+                {% endif %}
+            </div>
+            <div class="col-md-6">
+                {{ form.products.label(class="form-label") }}
+                {{ form.products(class="form-select", multiple=true) }}
+                <div class="form-text">Leave blank to include sales of all products.</div>
+                {% if form.products.errors %}
+                    <div class="text-danger small">{{ form.products.errors[0] }}</div>
+                {% endif %}
+            </div>
+            <div class="col-md-6">
+                {{ form.gl_codes.label(class="form-label") }}
+                {{ form.gl_codes(class="form-select", multiple=true) }}
+                <div class="form-text">Hold Ctrl (Windows) or Command (Mac) to select multiple GL codes.</div>
+                {% if form.gl_codes.errors %}
+                    <div class="text-danger small">{{ form.gl_codes.errors[0] }}</div>
+                {% endif %}
+            </div>
+        </div>
+        {{ form.submit(class="btn btn-primary mt-3") }}
+    </form>
+
+    {% if report is not none %}
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <h3 class="mb-0">Report Results</h3>
+            <div class="d-flex align-items-center flex-wrap gap-2">
+                {% if excluded_occurrences %}
+                <span class="position-relative">
+                    <button
+                        type="button"
+                        class="btn btn-sm btn-outline-warning"
+                        data-bs-toggle="popover"
+                        data-bs-trigger="hover focus"
+                        data-bs-placement="bottom"
+                        data-bs-html="true"
+                        data-bs-custom-class="excluded-products-popover"
+                        data-bs-content="
+                            <div class='small text-start' style='max-height: 280px; overflow-y: auto; min-width: 360px;'>
+                                <div class='fw-semibold mb-2'>Excluded (no stock item mapping)</div>
+                                <ul class='mb-0 ps-3'>
+                                    {% for occurrence in excluded_occurrences %}
+                                    <li class='mb-1'>
+                                        <span class='fw-semibold'>{{ occurrence.product_name|e }}</span> —
+                                        Invoice {{ occurrence.invoice_id|e }},
+                                        {{ occurrence.customer_name|e }},
+                                        {{ occurrence.invoice_date|format_datetime('%Y-%m-%d') }}
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                        "
+                        aria-label="View excluded products with invoice details"
+                    >
+                        ⚠ {{ excluded_occurrences|length }} excluded {{ 'occurrence' if excluded_occurrences|length == 1 else 'occurrences' }}
+                    </button>
+                </span>
+                {% endif %}
+                {% if start and end %}
+                <span class="text-muted">{{ start.strftime('%Y-%m-%d') }} to {{ end.strftime('%Y-%m-%d') }}</span>
+                {% endif %}
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('report.product_stock_usage_report') }}">Reset Filters</a>
+            </div>
+        </div>
+
+        {% if selected_product_names or selected_gl_labels or payment_status|default('all') != 'all' %}
+        <div class="alert alert-secondary" role="status">
+            <div class="fw-semibold">Filters Applied</div>
+            <ul class="mb-0 small">
+                <li><span class="fw-semibold">Payment Status:</span> {{ payment_status|default('all')|title }}</li>
+                {% if selected_product_names %}
+                <li><span class="fw-semibold">Products:</span> {{ selected_product_names | join(', ') }}</li>
+                {% endif %}
+                {% if selected_gl_labels %}
+                <li><span class="fw-semibold">Sales GL Codes:</span> {{ selected_gl_labels | join(', ') }}</li>
+                {% endif %}
+            </ul>
+            <div class="mt-2">
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('report.product_stock_usage_report') }}">Clear Filters</a>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if report %}
+        <div class="table-responsive">
+            <table class="table table-bordered table-striped align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th scope="col">Stock Item</th>
+                        <th scope="col">Unit</th>
+                        <th scope="col" class="text-end">Quantity Used</th>
+                        <th scope="col" class="text-end">Cost (each)</th>
+                        <th scope="col" class="text-end">Total Cost</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in report %}
+                    <tr>
+                        <td>{{ row.name }}</td>
+                        <td>{{ row.unit }}</td>
+                        <td class="text-end">{{ '%.2f'|format(row.quantity) }}</td>
+                        <td class="text-end">${{ '%.2f'|format(row.cost) }}</td>
+                        <td class="text-end">${{ '%.2f'|format(row.total_cost) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                {% if totals %}
+                <tfoot>
+                    <tr>
+                        <th scope="row" class="text-end">Totals</th>
+                        <td></td>
+                        <td class="text-end">{{ '%.2f'|format(totals.quantity) }}</td>
+                        <td></td>
+                        <td class="text-end">${{ '%.2f'|format(totals.cost) }}</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+        {% else %}
+            <div class="alert alert-info" role="alert">
+                No stock usage matched the selected filters.
+            </div>
+        {% endif %}
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+document.addEventListener("DOMContentLoaded", function () {
+    const popovers = document.querySelectorAll('[data-bs-toggle="popover"]');
+    popovers.forEach((popoverTriggerEl) => {
+        new bootstrap.Popover(popoverTriggerEl);
+    });
+});
+</script>
+{% endblock %}

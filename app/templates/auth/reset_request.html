@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row">
+  <div class="col-md-6 offset-md-3">
+    <h2>Reset Password</h2>
+    <form action="{{ url_for('auth.reset_request') }}" method="post">
+      {{ form.hidden_tag() }}
+      <div class="form-group">
+        {{ form.email.label(class_='form-label') }}
+        {{ form.email(class_='form-control') }}
+      </div>
+      <button type="submit" class="btn btn-primary mt-2">Send Reset Email</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

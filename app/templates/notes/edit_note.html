@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% block title %}Edit Note{% endblock %}
+{% block content %}
+<div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center mb-4 gap-3">
+    <div>
+        <h1 class="h3 mb-1">Edit Note</h1>
+        <p class="text-muted mb-0">{{ entity_label }} – {{ entity_name }}</p>
+    </div>
+    <div>
+        <a class="btn btn-outline-secondary" href="{{ url_for('notes.entity_notes', entity_type=entity_type, entity_id=entity_id) }}">Back to Notes</a>
+        <a class="btn btn-outline-secondary ms-2" href="{{ back_url }}">Back to {{ back_label }}</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">Update Note</div>
+    <div class="card-body">
+        <form method="post">
+            {{ form.hidden_tag() }}
+            <div class="mb-3">
+                {{ form.content.label(class="form-label") }}
+                {{ form.content(class="form-control" + (' is-invalid' if form.content.errors else ''), rows=5) }}
+                {% for error in form.content.errors %}
+                    <div class="invalid-feedback d-block">{{ error }}</div>
+                {% endfor %}
+            </div>
+            {% if can_pin %}
+            <div class="form-check mb-3">
+                {{ form.pinned(class="form-check-input", id='pinned') }}
+                {{ form.pinned.label(class="form-check-label", for='pinned') }}
+            </div>
+            {% endif %}
+            {{ form.submit(class="btn btn-primary") }}
+            <a class="btn btn-link" href="{{ url_for('notes.entity_notes', entity_type=entity_type, entity_id=entity_id) }}">Cancel</a>
+        </form>
+    </div>
+</div>
+{% endblock %}

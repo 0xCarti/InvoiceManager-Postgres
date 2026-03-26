@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+{% from 'macros/column_visibility.html' import column_visibility_dropdown %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Manage Users</h2>
+            <p class="text-muted mb-0">Invite and manage user access</p>
+        </div>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <form action="{{ url_for('admin.users') }}" method="post" class="d-flex flex-grow-1 flex-wrap align-items-center gap-2">
+            {{ invite_form.hidden_tag() }}
+            {{ invite_form.email(class_='form-control', placeholder='Email', style='max-width: 24rem;') }}
+            <button type="submit" class="btn btn-primary">{{ invite_form.submit.label.text }}</button>
+        </form>
+        <div>
+            {{ column_visibility_dropdown(
+                table_id='admin-users-table',
+                storage_key='adminUsersTableColumnVisibility',
+                align='end',
+                columns=[
+                    {'id': 'toggle-user-email', 'target': 'col-user-email', 'label': 'Email', 'checked': True},
+                    {'id': 'toggle-user-active', 'target': 'col-user-active', 'label': 'Active', 'checked': True},
+                    {'id': 'toggle-user-admin', 'target': 'col-user-admin', 'label': 'Admin', 'checked': True},
+                    {'id': 'toggle-user-actions', 'target': 'col-user-actions', 'label': 'Actions', 'checked': True},
+                    {'id': 'toggle-user-profile', 'target': 'col-user-profile', 'label': 'Profile', 'checked': True},
+                ]
+            ) }}
+        </div>
+    </div>
+    <div class="table-responsive">
+    <table class="table sortable" id="admin-users-table">
+        <thead>
+        <tr>
+            <th scope="col" class="col-user-email">Email</th>
+            <th scope="col" class="col-user-active">Active</th>
+            <th scope="col" class="col-user-admin">Admin</th>
+            <th scope="col" class="col-user-actions" data-sortable="false">Actions</th>
+            <th scope="col" class="col-user-profile" data-sortable="false">Profile</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for user in users %}
+        <tr>
+            <td class="col-user-email">{{ user.email }}</td>
+            <td class="col-user-active">{{ user.active }}</td>
+            <td class="col-user-admin">{{ user.is_admin }}</td>
+            <td class="col-user-actions">
+                <form action="{{ url_for('admin.users', user_id=user.id) }}" method="post" class="d-inline">
+                    {{ form.hidden_tag() }}
+                    <button type="submit" name="action" value="toggle_active" class="btn btn-sm btn-primary"
+                            data-confirm-message="Are you sure you want to toggle the active status?">
+                        Toggle Active
+                    </button>
+                </form>
+                <form action="{{ url_for('admin.users', user_id=user.id) }}" method="post" class="d-inline">
+                    {{ form.hidden_tag() }}
+                    <button type="submit" name="action" value="toggle_admin" class="btn btn-sm btn-secondary"
+                            data-confirm-message="Are you sure you want to toggle the admin status?">
+                        Toggle Admin
+                    </button>
+                </form>
+                <!-- Separate form for deletion to ensure clear user intent -->
+                <form action="{{ url_for('admin.delete_user', user_id=user.id) }}" method="post" class="d-inline">
+                    {{ form.hidden_tag() }}
+                    <button type="submit" class="btn btn-sm btn-danger"
+                            data-confirm-message="Are you sure you want to delete this user?">
+                        Delete
+                    </button>
+                </form>
+            </td>
+            <td class="col-user-profile">
+                <a href="{{ url_for('admin.user_profile', user_id=user.id) }}" class="btn btn-sm btn-info">View Profile</a>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endblock %}

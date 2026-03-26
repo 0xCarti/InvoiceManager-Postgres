@@ -1,0 +1,43 @@
+    <div class="modal fade" id="newItemModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create Item</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="new-item-name" class="form-label">Name</label>
+                        <input type="text" id="new-item-name" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label for="new-item-gl-code" class="form-label">Purchase GL Code</label>
+                        <select id="new-item-gl-code" class="form-select">
+                            {% for code in gl_codes %}
+                                <option value="{{ code.id }}">{{ code.code }}{% if code.description %} - {{ code.description }}{% endif %}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="new-item-base-unit" class="form-label">Base Unit</label>
+                        <select id="new-item-base-unit" class="form-select">
+                            <option value="ounce">Ounce</option>
+                            <option value="gram">Gram</option>
+                            <option value="each" selected>Each</option>
+                            <option value="millilitre">Millilitre</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Units of Measure</label>
+                        <div id="new-item-units" class="d-flex flex-column gap-2"></div>
+                        <button type="button" id="add-new-item-unit" class="btn btn-outline-secondary btn-sm mt-2">Add Unit</button>
+                        <div class="form-text">Configure unit conversions and choose the defaults for receiving and transfers.</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" id="save-new-item" class="btn btn-primary">Save Item</button>
+                </div>
+            </div>
+        </div>
+    </div>

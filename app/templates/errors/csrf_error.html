@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8 col-lg-6">
+        <div class="card border-warning mt-4">
+            <div class="card-header bg-warning text-dark">
+                <h2 class="h4 mb-0">Session Expired</h2>
+            </div>
+            <div class="card-body">
+                <p class="mb-3">
+                    Your form could not be submitted because the security token was missing or expired.
+                </p>
+                <p class="mb-3">
+                    Please refresh the page and try submitting the form again. If the problem persists, log out and
+                    log back in before retrying.
+                </p>
+                {% if reason %}
+                <p class="text-muted small mb-0">Details: {{ reason }}</p>
+                {% endif %}
+            </div>
+            <div class="card-footer text-end">
+                <a class="btn btn-primary" href="{{ request.path }}" onclick="window.location.reload(); return false;">
+                    Reload and Try Again
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

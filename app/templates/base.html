@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AssetFlow</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="{{ url_for('static', filename='js/jquery-3.5.1.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/numeric_inputs.js') }}"></script>
+    <style>
+        @media print {
+            nav,
+            .navbar,
+            .navbar-nav,
+            .navbar-toggler,
+            .offcanvas,
+            .alert {
+                display: none !important;
+            }
+
+            body,
+            .container {
+                margin: 0;
+                padding: 0;
+                max-width: 100%;
+                width: 100%;
+            }
+
+            .row {
+                display: flex !important;
+                flex-wrap: nowrap !important;
+            }
+
+            .col-md-6 {
+                flex: 0 0 50% !important;
+                max-width: 50% !important;
+            }
+
+            .table-responsive {
+                overflow: visible !important;
+            }
+
+            table.table-bordered {
+                border: 1px solid #000 !important;
+                border-collapse: collapse !important;
+                width: 100% !important;
+            }
+
+            table.table-bordered th,
+            table.table-bordered td {
+                border: 1px solid #000 !important;
+            }
+
+            .table-responsive > .table {
+                width: 100% !important;
+                min-width: 100% !important;
+            }
+
+            .table th,
+            .table td {
+                white-space: normal !important;
+            }
+        }
+
+        .suggestion {
+            padding: 10px;
+            cursor: pointer;
+            border-bottom: 1px solid #eee;
+            font-size: 17px;
+            font-weight: bold;
+        }
+
+        .suggestion:hover {
+            background-color: #f8f8f8;
+        }
+
+        #navbarNav .offcanvas-body .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        #navbarNav .offcanvas-body .nav-item .nav-link {
+            display: block;
+            width: 100%;
+        }
+
+        #navbarNav .offcanvas-body .nav-item .nav-link {
+            color: var(--sidebar-link-color);
+        }
+
+        #navbarNav .offcanvas-body .nav-item .nav-link:hover,
+        #navbarNav .offcanvas-body .nav-item .nav-link:focus {
+            color: var(--sidebar-link-color);
+            background-color: var(--sidebar-link-hover-bg);
+        }
+
+        #navbarNav .offcanvas-body .nav-group-wrapper {
+            border-top: 1px solid var(--sidebar-separator);
+            padding-top: 0.15rem;
+            margin-top: 0.2rem;
+        }
+
+        #navbarNav {
+            --sidebar-bg: rgb(var(--bs-body-bg-rgb));
+            --sidebar-border: rgba(var(--bs-emphasis-color-rgb), 0.16);
+            --sidebar-separator: rgba(var(--bs-emphasis-color-rgb), 0.12);
+            --sidebar-shadow: 0 0.4rem 1rem rgba(0, 0, 0, 0.08);
+            --bs-offcanvas-bg: var(--sidebar-bg);
+            background-color: var(--sidebar-bg) !important;
+            opacity: 1;
+            --sidebar-link-color: var(--bs-emphasis-color);
+            --sidebar-link-hover-bg: rgba(var(--bs-primary-rgb), 0.1);
+            --sidebar-link-active-bg: rgba(var(--bs-primary-rgb), 0.18);
+            --sidebar-link-active-color: var(--bs-primary-text-emphasis);
+        }
+
+        #navbarNav.offcanvas,
+        #navbarNav.offcanvas-start,
+        #navbarNav .offcanvas-header,
+        #navbarNav .offcanvas-body {
+            background-color: var(--sidebar-bg) !important;
+        }
+
+        #navbarNav .offcanvas-body .sidebar-primary-nav,
+        #navbarNav .offcanvas-body .sidebar-secondary-nav,
+        #navbarNav .offcanvas-body .nav-group-wrapper,
+        #navbarNav .offcanvas-body .nav-group-links,
+        #navbarNav .offcanvas-body .nav-item {
+            width: 100%;
+        }
+
+        #navbarNav .offcanvas-body .nav-group-toggle {
+            width: 100%;
+            text-align: left;
+            border: 0;
+            background-color: var(--sidebar-bg);
+            padding: 0.5rem 0.5rem;
+            min-height: 2.35rem;
+            font-size: 0.92rem;
+            font-weight: 560;
+            letter-spacing: 0.005em;
+            color: rgba(var(--bs-emphasis-color-rgb), 0.84);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-radius: 0.375rem;
+            line-height: 1.2;
+        }
+
+        #navbarNav .offcanvas-body .nav-group-toggle:hover,
+        #navbarNav .offcanvas-body .nav-group-toggle:focus-visible {
+            color: var(--sidebar-link-color);
+            background-color: var(--sidebar-link-hover-bg);
+        }
+
+        #navbarNav .offcanvas-body .nav-group-toggle:focus-visible,
+        #navbarNav .offcanvas-body .nav-link:focus-visible,
+        #navbarNav .offcanvas-body .nav-favorite-toggle:focus-visible {
+            outline: 2px solid var(--bs-primary);
+            outline-offset: 1px;
+            border-radius: 0.375rem;
+        }
+
+        #navbarNav .offcanvas-body .nav-group-toggle .nav-group-chevron {
+            font-size: 0.8rem;
+            transition: transform 0.2s ease;
+            color: var(--bs-body-color);
+        }
+
+        #navbarNav .offcanvas-body .nav-group-toggle[aria-expanded="true"] .nav-group-chevron {
+            transform: rotate(90deg);
+            color: var(--bs-body-color);
+        }
+
+        #navbarNav .offcanvas-body .nav-group-links {
+            padding-left: 0;
+            margin-bottom: 0.25rem;
+        }
+
+        #navbarNav .offcanvas-body .nav-group-links .nav-item {
+            padding-left: 0.95rem;
+            border-left: 2px solid transparent;
+            min-height: 2.35rem;
+            display: flex;
+            align-items: center;
+        }
+
+        #navbarNav .offcanvas-body .nav-group-links .nav-link {
+            flex: 1;
+            padding: 0.45rem 0.7rem;
+            border-radius: 0.375rem;
+            color: var(--sidebar-link-color);
+            font-size: 0.95rem;
+            line-height: 1.2;
+        }
+
+        #navbarNav .offcanvas-body .nav-group-links .nav-link:hover,
+        #navbarNav .offcanvas-body .nav-group-links .nav-link:focus-visible {
+            color: var(--sidebar-link-color);
+            background-color: var(--sidebar-link-hover-bg);
+        }
+
+        #navbarNav .offcanvas-body .nav-group-links .nav-link.active {
+            font-weight: 700;
+            color: var(--sidebar-link-active-color);
+            background-color: var(--sidebar-link-active-bg);
+            box-shadow: inset 0 0 0 1px rgba(var(--bs-primary-rgb), 0.58);
+        }
+
+        #navbarNav .offcanvas-body .nav-group-links .nav-item.nav-item-active {
+            border-left-color: var(--bs-primary);
+            background-color: rgba(var(--bs-primary-rgb), 0.09);
+            border-radius: 0 0.25rem 0.25rem 0;
+        }
+
+        #navbarNav .offcanvas-body .nav-favorite-toggle {
+            text-decoration: none;
+            width: 1.75rem;
+            min-width: 1.75rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.2rem;
+            line-height: 1;
+            border-radius: 0.375rem;
+            color: rgba(var(--bs-emphasis-color-rgb), 0.46);
+            transition: color 0.15s ease, background-color 0.15s ease;
+        }
+
+        #navbarNav .offcanvas-body .nav-favorite-toggle:hover,
+        #navbarNav .offcanvas-body .nav-favorite-toggle:focus-visible {
+            color: rgba(var(--bs-emphasis-color-rgb), 0.82);
+            background-color: rgba(var(--bs-primary-rgb), 0.08);
+        }
+
+        #navbarNav .offcanvas-body .nav-search-empty {
+            display: none;
+        }
+
+        #navbarNav .offcanvas-body .nav-search-empty.is-visible {
+            display: block;
+        }
+
+        #navbarNav .offcanvas-body .nav-search-empty {
+            color: var(--bs-body-color) !important;
+        }
+
+        #sidebarMenuSearch::placeholder {
+            color: var(--bs-body-color);
+            opacity: 0.82;
+        }
+
+        #navbarNav .offcanvas-body .nav-item.is-filtered-out {
+            display: none;
+        }
+
+        #navbarNav .offcanvas-body .nav-group-wrapper.is-filtered-out {
+            display: none;
+        }
+
+        #navbarNav .offcanvas-body {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            padding-top: 0.9rem;
+        }
+
+        #navbarNav .offcanvas-body .sidebar-primary-nav {
+            flex: 1 1 auto;
+            min-height: 0;
+        }
+
+        #navbarNav .offcanvas-body .sidebar-primary-nav .sidebar-search-row {
+            margin-bottom: 0.6rem;
+        }
+
+        #navbarNav .offcanvas-body .sidebar-primary-nav .nav-group-wrapper:first-of-type {
+            margin-top: 0.45rem;
+        }
+
+        #navbarNav .offcanvas-body .sidebar-secondary-nav {
+            margin-top: 0.75rem;
+            padding-top: 0.6rem;
+            border-top: 1px solid var(--sidebar-separator);
+        }
+
+        .navbar-nav.flex-row .nav-item {
+            margin-right: 0.5rem;
+        }
+
+        .table-responsive > .table {
+            width: max-content;
+            min-width: 100%;
+        }
+
+        .table th,
+        .table td {
+            white-space: nowrap;
+        }
+
+        .table .text-wrap {
+            white-space: normal;
+        }
+
+        .narrow-field {
+            max-width: 300px;
+        }
+
+        .navbar-icon-btn {
+            width: 2.75rem;
+            height: 2.75rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            border-radius: 0.25rem;
+            background-color: #fff;
+            color: inherit;
+        }
+
+        .navbar-icon-btn:hover,
+        .navbar-icon-btn:focus {
+            background-color: #f8f9fa;
+            text-decoration: none;
+        }
+
+        .sidebar-collapse-toggle {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .nav-top:hover {
+            background-color: #dedcdc;
+            color: black;
+            border-radius: 5%;
+        }
+
+        @media (min-width: 992px) {
+            .desktop-dense {
+                max-width: 1140px;
+                margin-left: auto;
+                margin-right: auto;
+            }
+
+            .desktop-dense .section-heading,
+            .desktop-dense h1 {
+                margin-bottom: 0.5rem;
+            }
+
+            .desktop-dense .section-block,
+            .desktop-dense section {
+                margin-bottom: 1.25rem !important;
+            }
+
+            .desktop-dense .card-body {
+                padding: 0.9rem 1rem;
+            }
+
+            .desktop-dense .compact-grid {
+                --bs-gutter-x: 0.9rem;
+                --bs-gutter-y: 0.75rem;
+            }
+
+            .desktop-dense .compact-controls .form-label {
+                margin-bottom: 0.25rem;
+            }
+
+            .desktop-dense .compact-controls .form-control,
+            .desktop-dense .compact-controls .form-select,
+            .desktop-dense .compact-controls .btn {
+                min-height: 2.25rem;
+                padding-top: 0.375rem;
+                padding-bottom: 0.375rem;
+            }
+
+            .desktop-dense .compact-table th,
+            .desktop-dense .compact-table td {
+                padding: 0.45rem 0.55rem;
+            }
+
+            body.has-auth-sidebar {
+                --desktop-sidebar-expanded-width: 19.5rem;
+                --top-navbar-height: 56px;
+            }
+
+            body.has-auth-sidebar #navbarNav.offcanvas-lg {
+                position: fixed;
+                left: 0;
+                width: var(--desktop-sidebar-expanded-width);
+                max-width: 100%;
+                top: 0;
+                height: 100vh;
+                border-right: 1px solid var(--bs-border-color);
+                background-color: var(--bs-body-bg);
+                opacity: 1;
+                border-right: 1px solid var(--sidebar-border);
+                background-color: var(--sidebar-bg);
+                box-shadow: var(--sidebar-shadow);
+                transform: translateX(-100%);
+                visibility: visible !important;
+                z-index: 1055;
+                transition: transform 0.25s ease;
+            }
+
+            body.has-auth-sidebar.sidebar-desktop-open #navbarNav.offcanvas-lg,
+            body.has-auth-sidebar #navbarNav.offcanvas-lg.show,
+            body.has-auth-sidebar #navbarNav.offcanvas-lg.showing {
+                visibility: visible;
+                transform: translateX(0);
+            }
+
+            body.has-auth-sidebar .offcanvas-backdrop.show {
+                display: none;
+            }
+
+            body.has-auth-sidebar #navbarNav.offcanvas-lg .offcanvas-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+
+            body.has-auth-sidebar #navbarNav .offcanvas-body {
+                padding-top: 1rem;
+                padding-bottom: 1rem;
+            }
+
+            body.has-auth-sidebar .container.mt-3 {
+                max-width: none;
+                width: auto;
+                transition: none;
+            }
+
+            body.has-auth-sidebar #sidebarCollapseToggle {
+                display: none !important;
+            }
+
+            body.has-auth-sidebar nav.navbar .container-fluid {
+                padding-left: 1rem;
+                padding-right: 1rem;
+            }
+        }
+
+        @media (max-width: 576px) {
+            .narrow-field {
+                max-width: 100%;
+            }
+            #navbarNav .offcanvas-body .nav-group-links .nav-item {
+                align-items: center;
+                flex-direction: row;
+            }
+            .btn {
+                width: 100%;
+                margin-bottom: .25rem;
+            }
+            .btn + .btn {
+                margin-left: 0;
+            }
+            .table {
+                font-size: 0.9rem;
+            }
+        }
+    </style>
+</head>
+
+<body class="{% if current_user.is_authenticated %}has-auth-sidebar{% endif %}">
+    <nav class="navbar navbar-light bg-light">
+        <div class="container-fluid">
+            <button class="navbar-toggler me-2" id="sidebarMenuToggle" type="button" data-bs-toggle="offcanvas" data-bs-target="#navbarNav"
+                aria-controls="navbarNav" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <a class="navbar-icon-btn me-2" href="{{ url_for('main.home') }}" aria-label="Dashboard home">
+                <span aria-hidden="true">&#8962;</span>
+            </a>
+            <button class="navbar-toggler d-md-none me-2" type="button" data-bs-toggle="offcanvas"
+                data-bs-target="#favoritesNav" aria-controls="favoritesNav" aria-label="Toggle favorites">
+                &#9733;
+            </button>
+            {% if current_user.is_authenticated %}
+            <div class="d-none d-md-block">
+            <ul class="navbar-nav flex-row me-auto">
+                {% for fav in current_user.get_favorites() %}
+                {% set label = NAV_LINKS.get(fav, fav.split('.')[-1].replace('_', ' ').title()) %}
+                {% set fav_url = safe_url_for(fav) %}
+                <li class="nav-item">
+                    {% if fav_url %}
+                    <a class="nav-link nav-top px-2" href="{{ fav_url }}">{{ label }}</a>
+                    {% else %}
+                    <span class="nav-link nav-top px-2 disabled" title="Unavailable in this build">{{ label }}</span>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+            </div>
+            {% endif %}
+            <div class="offcanvas offcanvas-start offcanvas-lg" tabindex="-1" id="navbarNav" aria-labelledby="offcanvasNavbarLabel">
+                <div class="offcanvas-header">
+                    <h5 class="offcanvas-title" id="offcanvasNavbarLabel">Menu</h5>
+                    {% if current_user.is_authenticated %}
+                    <button type="button" class="btn btn-sm btn-outline-secondary sidebar-collapse-toggle d-none d-lg-inline-flex me-2" id="sidebarCollapseToggle" aria-pressed="false">
+                        Collapse
+                    </button>
+                    {% endif %}
+                    <button type="button" class="btn-close text-reset" data-bs-dismiss="offcanvas"
+                        aria-label="Close"></button>
+                </div>
+                <div class="offcanvas-body">
+                    {% set current_endpoint = request.endpoint %}
+                    <ul class="navbar-nav sidebar-primary-nav me-auto">
+                        {% if current_user.is_authenticated %}
+                        {% set nav_groups = GROUPED_NAV_LINKS() %}
+                        <li class="mb-2 sidebar-search-row">
+                            <input
+                                type="search"
+                                id="sidebarMenuSearch"
+                                class="form-control form-control-sm"
+                                placeholder="Search menu..."
+                                aria-label="Search menu"
+                            >
+                        </li>
+                        <li id="sidebarMenuSearchEmptyState" class="nav-search-empty small px-1 py-2">
+                            No matches found
+                        </li>
+                        {% for group_label, links in nav_groups %}
+                        {% set group_namespace = group_label.lower().replace('/', '-').replace(' ', '-') %}
+                        {% set group_id = 'nav-group-' ~ group_namespace %}
+                        {% set ns = namespace(has_active=false) %}
+                        {% for endpoint, label in links %}
+                            {% if current_endpoint == endpoint %}
+                                {% set ns.has_active = true %}
+                            {% endif %}
+                        {% endfor %}
+                        <li class="nav-item d-block nav-group-wrapper" data-nav-group-wrapper data-nav-group-id="{{ group_id }}">
+                            <button
+                                class="nav-group-toggle"
+                                type="button"
+                                data-bs-toggle="collapse"
+                                data-bs-target="#{{ group_id }}"
+                                aria-expanded="{{ 'true' if ns.has_active else 'false' }}"
+                                aria-controls="{{ group_id }}"
+                                data-default-expanded="{{ 'true' if ns.has_active else 'false' }}"
+                            >
+                                <span>{{ group_label }}</span>
+                                <span class="nav-group-chevron" aria-hidden="true">&#8250;</span>
+                            </button>
+                            <ul class="collapse nav-group-links{% if ns.has_active %} show{% endif %}" id="{{ group_id }}">
+                                {% for endpoint, label in links %}
+                                {% set module_url = safe_url_for(endpoint) %}
+                                <li class="nav-item{% if current_endpoint == endpoint %} nav-item-active{% endif %}" data-nav-search-item data-nav-label="{{ label|lower|trim }}" data-nav-endpoint="{{ endpoint|lower }}">
+                                    {% if module_url %}
+                                    <a class="nav-link{% if current_endpoint == endpoint %} active fw-semibold{% endif %}" href="{{ module_url }}">
+                                        {{ label }}
+                                    </a>
+                                    {% else %}
+                                    <span class="nav-link disabled" title="Unavailable in this build">{{ label }}</span>
+                                    {% endif %}
+                                    <a href="{{ url_for('auth.toggle_favorite', link=endpoint) }}" class="ms-1 nav-favorite-toggle" aria-label="Toggle favorite for {{ label }}" title="Toggle favorite">
+                                        {% if endpoint in current_user.get_favorites() %}&#9733;{% else %}&#9734;{% endif %}
+                                    </a>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </li>
+                        {% endfor %}
+                        {% endif %}
+                    </ul>
+                    <ul class="navbar-nav sidebar-secondary-nav">
+                        {% if not current_user.is_authenticated %}
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('auth.login') }}">Login</a>
+                        </li>
+
+                        {% else %}
+                        {% if current_user.is_admin %}
+                        <li class="nav-item">
+                            <hr class="dropdown-divider">
+                        </li>
+                        {% endif %}
+                        {% set profile_url = safe_url_for('auth.profile') %}
+                        <li class="nav-item">
+                            {% if profile_url %}
+                            <a class="nav-link" href="{{ profile_url }}">Profile</a>
+                            {% else %}
+                            <span class="nav-link disabled" title="Unavailable in this build">Profile</span>
+                            {% endif %}
+                            <a href="{{ url_for('auth.toggle_favorite', link='auth.profile') }}" class="ms-1 nav-favorite-toggle" aria-label="Toggle favorite for Profile" title="Toggle favorite">
+                                {% if 'auth.profile' in current_user.get_favorites() %}&#9733;{% else %}&#9734;{% endif %}
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('auth.logout') }}">Logout</a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </div>
+            </div>
+            <div class="offcanvas offcanvas-start" tabindex="-1" id="favoritesNav" aria-labelledby="favoritesNavLabel">
+                <div class="offcanvas-header">
+                    <h5 class="offcanvas-title" id="favoritesNavLabel">Favorites</h5>
+                    <button type="button" class="btn-close text-reset" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+                </div>
+                <div class="offcanvas-body">
+                    <ul class="navbar-nav">
+                        {% if current_user.is_authenticated %}
+                        {% for fav in current_user.get_favorites() %}
+                        {% if not (fav.startswith('admin.') and not current_user.is_admin) %}
+                        {% set label = NAV_LINKS.get(fav, fav.split('.')[-1].replace('_', ' ').title()) %}
+                        {% set fav_url = safe_url_for(fav) %}
+                        <li class="nav-item">
+                            {% if fav_url %}
+                            <a class="nav-link" href="{{ fav_url }}">{{ label }}</a>
+                            {% else %}
+                            <span class="nav-link disabled" title="Unavailable in this build">{{ label }}</span>
+                            {% endif %}
+                        </li>
+                        {% endif %}
+                        {% endfor %}
+                        {% endif %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </nav>
+    <div class="container mt-3">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        {% set alert_class = 'info' %}
+        {% if category in ['error', 'danger'] %}
+        {% set alert_class = 'danger' %}
+        {% elif category == 'success' %}
+        {% set alert_class = 'success' %}
+        {% elif category == 'warning' %}
+        {% set alert_class = 'warning' %}
+        {% endif %}
+        <div class="alert alert-{{ alert_class }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </div>
+    <!-- Scripts: jQuery must be loaded before Bootstrap -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/table-sort.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/column_visibility.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/filter_defaults.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/security.js') }}" defer></script>
+    <script nonce="{{ csp_nonce }}">
+        document.addEventListener("DOMContentLoaded", () => {
+            const searchInput = document.getElementById("sidebarMenuSearch");
+            const emptyState = document.getElementById("sidebarMenuSearchEmptyState");
+            const sidebarElement = document.getElementById("navbarNav");
+            const sidebarCollapseToggle = document.getElementById("sidebarCollapseToggle");
+            const sidebarMenuToggle = document.getElementById("sidebarMenuToggle");
+            const sidebarHeaderCloseButton = document.querySelector(
+                "#navbarNav .offcanvas-header .btn-close[data-bs-dismiss=\"offcanvas\"]"
+            );
+            const desktopBreakpointQuery = window.matchMedia("(min-width: 992px)");
+            const storageKey = "assetflow.sidebarDesktopOpen";
+            let sidebarOffcanvasInstance = null;
+            const groupWrappers = Array.from(
+                document.querySelectorAll("[data-nav-group-wrapper]")
+            );
+            const searchItems = Array.from(
+                document.querySelectorAll("[data-nav-search-item]")
+            );
+
+            const setGroupExpanded = (wrapper, shouldExpand) => {
+                const toggle = wrapper.querySelector(".nav-group-toggle");
+                const targetSelector = toggle ? toggle.dataset.bsTarget : "";
+                const groupList = targetSelector ? document.querySelector(targetSelector) : null;
+                if (!toggle || !groupList) {
+                    return;
+                }
+                toggle.setAttribute("aria-expanded", shouldExpand ? "true" : "false");
+                groupList.classList.toggle("show", shouldExpand);
+            };
+
+            const expandActiveGroups = () => {
+                groupWrappers.forEach((wrapper) => {
+                    const activeItem = wrapper.querySelector(".nav-item-active");
+                    if (activeItem) {
+                        setGroupExpanded(wrapper, true);
+                    }
+                });
+            };
+
+            const initDesktopCollapseState = () => {
+                const applyDesktopSidebarState = () => {
+                    const shouldOpenDesktop = window.localStorage.getItem(storageKey) === "true";
+                    const shouldOpen = desktopBreakpointQuery.matches && shouldOpenDesktop;
+                    document.body.classList.toggle("sidebar-desktop-open", shouldOpen);
+                    if (sidebarMenuToggle) {
+                        sidebarMenuToggle.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+                    }
+                };
+
+                const configureSidebarOffcanvas = () => {
+                    if (!sidebarElement || !window.bootstrap?.Offcanvas) {
+                        return;
+                    }
+                    const shouldUseBackdrop = !desktopBreakpointQuery.matches;
+                    sidebarOffcanvasInstance?.dispose();
+                    sidebarOffcanvasInstance = new bootstrap.Offcanvas(sidebarElement, {
+                        backdrop: shouldUseBackdrop,
+                        keyboard: true,
+                        scroll: !shouldUseBackdrop
+                    });
+                };
+
+                const syncDesktopStateOnOffcanvasHide = () => {
+                    if (!desktopBreakpointQuery.matches) {
+                        return;
+                    }
+                    window.localStorage.setItem(storageKey, "false");
+                    applyDesktopSidebarState();
+                };
+
+                if (sidebarMenuToggle) {
+                    sidebarMenuToggle.addEventListener("click", (event) => {
+                        if (!desktopBreakpointQuery.matches) {
+                            return;
+                        }
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const currentlyOpen = window.localStorage.getItem(storageKey) === "true";
+                        window.localStorage.setItem(storageKey, currentlyOpen ? "false" : "true");
+                        applyDesktopSidebarState();
+                    });
+                }
+
+                if (sidebarCollapseToggle) {
+                    sidebarCollapseToggle.addEventListener("click", () => {
+                        const currentlyOpen = window.localStorage.getItem(storageKey) === "true";
+                        window.localStorage.setItem(storageKey, currentlyOpen ? "false" : "true");
+                        applyDesktopSidebarState();
+                    });
+                }
+
+                if (sidebarElement) {
+                    sidebarElement.addEventListener(
+                        "hide.bs.offcanvas",
+                        syncDesktopStateOnOffcanvasHide
+                    );
+                }
+
+                if (sidebarHeaderCloseButton) {
+                    sidebarHeaderCloseButton.addEventListener(
+                        "click",
+                        syncDesktopStateOnOffcanvasHide
+                    );
+                }
+
+                desktopBreakpointQuery.addEventListener("change", () => {
+                    applyDesktopSidebarState();
+                    configureSidebarOffcanvas();
+                });
+
+                document.querySelectorAll("#navbarNav .nav-link[href]").forEach((link) => {
+                    link.addEventListener("click", () => {
+                        if (desktopBreakpointQuery.matches) {
+                            window.localStorage.setItem(storageKey, "false");
+                            applyDesktopSidebarState();
+                            return;
+                        }
+                        if (sidebarElement) {
+                            sidebarOffcanvasInstance?.hide();
+                        }
+                    });
+                });
+
+                applyDesktopSidebarState();
+                configureSidebarOffcanvas();
+            };
+
+            const initMenuFilterSearch = () => {
+                const filterMenu = () => {
+                    const normalizedQuery = searchInput
+                        ? searchInput.value.trim().toLowerCase()
+                        : "";
+                    const hasQuery = normalizedQuery.length > 0;
+                    let totalVisibleMatches = 0;
+
+                    searchItems.forEach((item) => {
+                        const label = item.dataset.navLabel || "";
+                        const endpoint = item.dataset.navEndpoint || "";
+                        const matches = !hasQuery || label.includes(normalizedQuery) || endpoint.includes(normalizedQuery);
+                        item.classList.toggle("is-filtered-out", !matches);
+                        if (matches) {
+                            totalVisibleMatches += 1;
+                        }
+                    });
+
+                    groupWrappers.forEach((wrapper) => {
+                        const groupId = wrapper.dataset.navGroupId;
+                        const items = groupId
+                            ? Array.from(
+                                wrapper.querySelectorAll(`#${groupId} [data-nav-search-item]`)
+                            )
+                            : [];
+                        const visibleItems = items.filter(
+                            (item) => !item.classList.contains("is-filtered-out")
+                        );
+                        const hasVisibleItems = visibleItems.length > 0;
+                        wrapper.classList.toggle("is-filtered-out", !hasVisibleItems);
+
+                        if (hasQuery && hasVisibleItems) {
+                            setGroupExpanded(wrapper, true);
+                            return;
+                        }
+                        const toggle = wrapper.querySelector(".nav-group-toggle");
+                        const defaultExpanded = toggle?.dataset.defaultExpanded === "true";
+                        setGroupExpanded(wrapper, defaultExpanded);
+                    });
+
+                    if (emptyState) {
+                        emptyState.classList.toggle(
+                            "is-visible",
+                            hasQuery && totalVisibleMatches === 0
+                        );
+                    }
+                };
+
+                if (searchInput) {
+                    searchInput.addEventListener("input", filterMenu);
+                }
+                filterMenu();
+            };
+
+            const initActiveGroupExpansion = () => {
+                if (sidebarElement) {
+                    sidebarElement.addEventListener("show.bs.offcanvas", () => {
+                        if (desktopBreakpointQuery.matches) {
+                            const backdrop = document.querySelector(".offcanvas-backdrop");
+                            backdrop?.remove();
+                            document.body.classList.remove("offcanvas-backdrop");
+                        }
+                        expandActiveGroups();
+                    });
+                }
+                expandActiveGroups();
+            };
+
+            initDesktopCollapseState();
+            initMenuFilterSearch();
+            initActiveGroupExpansion();
+        });
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+
+</html>

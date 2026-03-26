@@ -1,0 +1,203 @@
+{% extends 'base.html' %}
+{% block content %}
+{% set unconfirmed_count = event.locations | selectattr('confirmed', 'equalto', False) | list | length %}
+<div class="container mt-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">{{ event.name }}</h2>
+            <p class="text-muted mb-0">Event detail and location workflow</p>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-outline-secondary" href="{{ url_for('event.edit_event', event_id=event.id) }}">Edit Event</a>
+        </div>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="badge rounded-pill text-bg-light border">Start: {{ event.start_date }}</span>
+        <span class="badge rounded-pill text-bg-light border">End: {{ event.end_date }}</span>
+        <span class="badge rounded-pill text-bg-light border">Type: {{ event_type_label }}</span>
+        <span class="badge rounded-pill text-bg-light border">
+            Estimated Sales:
+            {% if event.estimated_sales is not none %}${{ '{:,.2f}'.format(event.estimated_sales) }}{% else %}Not set{% endif %}
+        </span>
+        <span class="badge rounded-pill text-bg-light border">
+            Actual Confirmed Sales:
+            {% if confirmed_sales %}${{ '{:,.2f}'.format(confirmed_sales.amount) }}{% else %}Not available{% endif %}
+        </span>
+        <span class="badge rounded-pill text-bg-light border">
+            Physical vs Terminal Variance:
+            {% if physical_terminal_variance is not none %}${{ '{:,.2f}'.format(physical_terminal_variance) }}{% else %}Not available{% endif %}
+        </span>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        {% if not event.closed %}
+        <a class="btn btn-primary" href="{{ url_for('event.add_location', event_id=event.id) }}">Add Location</a>
+        {% endif %}
+        <a class="btn btn-outline-secondary" href="{{ url_for('event.bulk_stand_sheets', event_id=event.id) }}">Stand Sheets</a>
+        <button
+            type="button"
+            class="btn btn-outline-secondary"
+            data-email-stand-sheet
+            data-email-action="{{ url_for('event.email_bulk_stand_sheets', event_id=event.id) }}"
+            data-email-label="all stand sheets for {{ event.name }}"
+            data-email-success="Stand sheets emailed successfully."
+            data-location-ids="{{ event.locations | map(attribute='location_id') | join(',') }}"
+        >
+            Email Stand Sheets
+        </button>
+        <div class="dropdown">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                Reports
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                {% if event.closed %}
+                <li><a class="dropdown-item" href="{{ url_for('event.closed_event_report', event_id=event.id) }}">Closed Event Report</a></li>
+                {% endif %}
+                {% if event.event_type == 'inventory' %}
+                <li><a class="dropdown-item" href="{{ url_for('event.bulk_count_sheets', event_id=event.id) }}">Count Sheets</a></li>
+                {% endif %}
+            </ul>
+        </div>
+        {% if event.closed %}
+        {% endif %}
+        {% if not event.closed %}
+        <a class="btn btn-outline-secondary" href="{{ url_for('event.upload_terminal_sales', event_id=event.id) }}">Upload Sales</a>
+        {% if unconfirmed_count == 0 %}
+        <a class="btn btn-danger" id="close-event-btn" href="{{ url_for('event.close_event', event_id=event.id) }}">Close Event</a>
+        {% else %}
+        <button type="button" class="btn btn-danger" disabled title="All locations must be confirmed before closing this event.">Close Event</button>
+        {% endif %}
+        {% endif %}
+    </div>
+    {% if not event.closed %}
+    <form
+        id="opening-counts-form"
+        method="post"
+        action="{{ url_for('event.update_opening_counts', event_id=event.id) }}"
+    >
+        {{ opening_form.hidden_tag() }}
+    </form>
+    {% endif %}
+        <div class="table-responsive">
+            <table class="table align-middle" id="locations-table">
+                <thead>
+                    <tr>
+                        {% if not event.closed %}
+                            <th scope="col">Select</th>
+                        {% endif %}
+                        <th scope="col">Location</th>
+                        <th scope="col">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for el in event.locations %}
+                    <tr>
+                        {% if not event.closed %}
+                        <td class="text-center">
+                            {% if not el.confirmed %}
+                                <div class="form-check m-0 d-flex justify-content-center">
+                                    <input
+                                        class="form-check-input"
+                                        type="checkbox"
+                                        name="{{ opening_form.location_ids.name }}"
+                                        value="{{ el.id }}"
+                                        id="location-select-{{ el.id }}"
+                                        form="opening-counts-form"
+                                    >
+                                    <label class="visually-hidden" for="location-select-{{ el.id }}">Select {{ el.location.name }}</label>
+                                </div>
+                            {% else %}
+                                <span class="badge bg-secondary">Confirmed</span>
+                            {% endif %}
+                        </td>
+                        {% endif %}
+                        <td>
+                            {% if el.location %}
+                                <a href="{{ url_for('locations.edit_location', location_id=el.location_id, next=request.full_path) }}">{{ el.location.name }}</a>
+                                {% if el.notes %}
+                                    <div class="text-muted small mt-1" style="white-space: pre-wrap;">{{ el.notes }}</div>
+                                {% endif %}
+                            {% else %}
+                                <span class="text-muted">Unknown location</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if not el.confirmed and not event.closed %}
+                                <a href="{{ url_for('event.stand_sheet', event_id=event.id, location_id=el.location_id) }}">Stand Sheet</a>
+                                {% if el.location %}
+                                    | <a
+                                        href="#"
+                                        class="ms-1"
+                                        data-email-stand-sheet
+                                        data-email-action="/events/{{ event.id }}/stand_sheet/{{ el.location_id }}/email"
+                                        data-email-label="{{ el.location.name }}"
+                                    >Email Stand Sheet</a>
+                                {% endif %}
+                                {% if event.event_type == 'inventory' %}
+                                    | <a href="{{ url_for('event.count_sheet', event_id=event.id, location_id=el.location_id) }}">Count Sheet</a>
+                                    | <a href="{{ url_for('event.scan_counts', event_id=event.id, location_id=el.location_id) }}">Scan Counts</a>
+                                {% endif %} |
+                                <a href="{{ url_for('event.add_terminal_sale', event_id=event.id, el_id=el.id) }}">Enter Sales</a> |
+                                <a href="{{ url_for('event.confirm_location', event_id=event.id, el_id=el.id) }}">Confirm</a>
+                            {% else %}
+                                <span class="text-muted">Stand Sheet | Terminal Sales</span>
+                                {% if el.location %}
+                                    <span class="text-muted">|</span>
+                                    <a
+                                        href="#"
+                                        class="ms-1"
+                                        data-email-stand-sheet
+                                        data-email-action="/events/{{ event.id }}/stand_sheet/{{ el.location_id }}/email"
+                                        data-email-label="{{ el.location.name }}"
+                                    >Email Stand Sheet</a>
+                                {% endif %}
+                                {% if el.confirmed %}
+                                    <span class="text-muted">|</span>
+                                    <span class="badge bg-secondary">Confirmed</span>
+                                    {% if not event.closed %}
+                                        {% set undo_form = undo_confirm_form_factory() %}
+                                        <form
+                                            method="post"
+                                            action="{{ url_for('event.undo_confirm_location', event_id=event.id, el_id=el.id) }}"
+                                            class="d-inline"
+                                        >
+                                            {{ undo_form.hidden_tag() }}
+                                            {{ undo_form.submit(class_='btn btn-link p-0 ms-2 align-baseline') }}
+                                        </form>
+                                    {% endif %}
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if not event.closed %}
+        <div class="mt-3">
+            {{ opening_form.submit(class='btn btn-outline-primary', disabled=(unconfirmed_count == 0), form='opening-counts-form') }}
+        </div>
+    {% endif %}
+</div>
+{% if not event.closed and unconfirmed_count %}
+<script nonce="{{ csp_nonce }}">
+    document.addEventListener('DOMContentLoaded', function () {
+        const closeEventButton = document.getElementById('close-event-btn');
+        if (!closeEventButton) {
+            return;
+        }
+
+        const warningMessage = 'There are locations for this event that are still unconfirmed. Closing the event will prevent further updates. Do you want to continue?';
+        closeEventButton.addEventListener('click', function (event) {
+            if (!confirm(warningMessage)) {
+                event.preventDefault();
+            }
+        });
+    });
+</script>
+{% endif %}
+{% include 'shared/email_stand_sheet_modal.html' %}
+{% endblock %}
+{% block scripts %}
+    {{ super() }}
+    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='js/stand_sheet_email.js') }}"></script>
+{% endblock %}

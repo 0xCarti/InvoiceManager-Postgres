@@ -1,0 +1,76 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
+        <h2 class="mb-0">Transfer Details</h2>
+        <a class="btn btn-outline-secondary" href="{{ url_for('notes.entity_notes', entity_type='transfer', entity_id=transfer.id) }}">View Notes</a>
+    </div>
+    <br>
+    <div class="row">
+        <div class="col-md-6">
+            <h3><strong>From Location:</strong> {{ transfer.from_location.name }}</h3>
+        </div>
+        <div class="col-md-6">
+            <h3><strong>To Location:</strong> {{ transfer.to_location.name }}</h3>
+        </div>
+    </div>
+    <h5><strong>User:</strong> {{ transfer.creator.email }}</h5>
+    <div class="table-responsive">
+    <table class="table mt-4">
+        <thead>
+            <tr>
+                <th scope="col">Item</th>
+                <th scope="col">Quantity</th>
+                <th scope="col">Status</th>
+                <th scope="col">Mark Complete</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in transfer_items %}
+            {% set is_completed = item.completed_quantity >= item.quantity %}
+            <tr>
+                <td>{{ item.item.name }}</td>
+                <td>{{ item.quantity }}</td>
+                <td>
+                    {% if is_completed %}
+                        <span class="badge bg-success">Completed</span>
+                    {% else %}
+                        <span class="badge bg-warning text-dark">Pending</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <div class="form-check form-switch">
+                        <input
+                            class="form-check-input js-transfer-item-toggle"
+                            type="checkbox"
+                            role="switch"
+                            id="transfer-item-{{ item.id }}"
+                            data-complete-url="{{ url_for('transfer.complete_transfer_item', transfer_item_id=item.id) }}"
+                            data-uncomplete-url="{{ url_for('transfer.uncomplete_transfer_item', transfer_item_id=item.id) }}"
+                            {% if is_completed %}checked{% endif %}
+                        >
+                        <label class="form-check-label" for="transfer-item-{{ item.id }}">
+                            {% if is_completed %}Complete{% else %}Incomplete{% endif %}
+                        </label>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+<script nonce="{{ csp_nonce }}">
+    document.querySelectorAll('.js-transfer-item-toggle').forEach(function(toggle) {
+        toggle.addEventListener('change', function(event) {
+            const completeUrl = event.target.dataset.completeUrl;
+            const uncompleteUrl = event.target.dataset.uncompleteUrl;
+            if (!completeUrl || !uncompleteUrl) {
+                return;
+            }
+            window.location.href = event.target.checked ? completeUrl : uncompleteUrl;
+        });
+    });
+</script>
+{% endblock %}

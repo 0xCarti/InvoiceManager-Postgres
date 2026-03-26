@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-4">
+    <h2>{{ title }}</h2>
+    <ul>
+    {% for warn in warnings %}
+        <li>{{ warn }}</li>
+    {% endfor %}
+    </ul>
+    <form method="post" action="{{ action_url }}">
+        {{ form.csrf_token }}
+        {{ form.submit(class='btn btn-primary') }}
+        <a href="{{ cancel_url }}" class="btn btn-secondary ml-2">Cancel</a>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,404 @@
+{% extends 'base.html' %}
+{% from 'macros/column_visibility.html' import column_visibility_dropdown %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Transfers</h2>
+            <p class="text-muted mb-0">Track transfers between locations</p>
+        </div>
+        <div>
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addTransferModal">Add New Transfer</button>
+        </div>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <button id="new-transfer-alert" type="button" class="btn btn-warning" data-action="reload"
+                style="display: none;">
+                <img src="{{ url_for('static', filename='img/alert_icon.png') }}" alt="Reload"
+                     style="width: 20px; height: 20px;"/>
+        </button>
+        <div class="dropdown d-md-none">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                More actions
+            </button>
+            <ul class="dropdown-menu">
+                <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#searchModal">Search/Filter</button></li>
+            </ul>
+        </div>
+        <div class="dropdown">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                Reports
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="{{ url_for('transfer.generate_report') }}">Generate Report</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('transfer.view_report') }}">View Last Report</a></li>
+            </ul>
+        </div>
+        <div>
+            {{ column_visibility_dropdown(
+                table_id='transfer-table',
+                storage_key='transferTableColumnVisibility',
+                columns=[
+                    {'id': 'toggle-transfer-id', 'target': 'col-transfer-id', 'label': 'Transfer #', 'checked': True},
+                    {'id': 'toggle-transfer-from', 'target': 'col-transfer-from', 'label': 'From Location', 'checked': True},
+                    {'id': 'toggle-transfer-to', 'target': 'col-transfer-to', 'label': 'To Location', 'checked': True},
+                    {'id': 'toggle-transfer-completion', 'target': 'col-transfer-completion', 'label': 'Completion', 'checked': True},
+                    {'id': 'toggle-transfer-actions', 'target': 'col-transfer-actions', 'label': 'Actions', 'checked': True},
+                ]
+            ) }}
+        </div>
+        <button class="btn btn-outline-secondary d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#searchModal">Search/Filter</button>
+    </div>
+    <div class="table-responsive">
+    <table class="table sortable" id="transfer-table">
+        <thead>
+        <tr>
+            <th scope="col" class="col-transfer-id" data-type="number">#</th>
+            <th scope="col" class="col-transfer-from">From Location</th>
+            <th scope="col" class="col-transfer-to">To Location</th>
+            <th scope="col" class="col-transfer-completion" data-type="number">Completion</th>
+            <th scope="col" class="col-transfer-actions" data-sortable="false">Actions</th>
+        </tr>
+        </thead>
+        <tbody id="transfer-table-body">
+        {% set transfer_items = transfers.items if transfers is defined else [] %}
+        {% for transfer in transfer_items %}
+            {% include 'transfers/_transfer_row.html' %}
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% if transfers is defined %}
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
+        <nav aria-label="Transfer pagination">
+            <ul class="pagination mb-0">
+                <li class="page-item {% if not transfers.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('transfer.view_transfers', page=transfers.prev_num if transfers.has_prev else 1, **pagination_args) }}"{% if not transfers.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link">Page {{ transfers.page }} of {{ transfers.pages }}</span>
+                </li>
+                <li class="page-item {% if not transfers.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('transfer.view_transfers', page=transfers.next_num if transfers.has_next else transfers.pages or 1, **pagination_args) }}"{% if not transfers.has_next %} tabindex="-1" aria-disabled="true"{% endif %}>Next</a>
+                </li>
+            </ul>
+        </nav>
+        <form method="get" class="d-flex align-items-center gap-2">
+            {% for key, values in request.args.lists() %}
+                {% if key not in ['page', 'per_page'] %}
+                    {% for value in values %}
+                        <input type="hidden" name="{{ key }}" value="{{ value }}">
+                    {% endfor %}
+                {% endif %}
+            {% endfor %}
+            <input type="hidden" name="page" value="1">
+            <label for="transfers-per-page" class="form-label mb-0">Rows per page</label>
+            <select id="transfers-per-page" name="per_page" class="form-select js-auto-submit">
+                {% for option in PAGINATION_SIZES %}
+                    <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+    {% endif %}
+    </div>
+<!-- Add Transfer Modal -->
+<div class="modal fade" id="addTransferModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Add Transfer</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form id="add-transfer-form">
+          {{ add_form.hidden_tag() }}
+          <div class="row">
+            <div class="col-md-6">
+              <div class="form-group">
+                {{ add_form.from_location_id.label(class="form-label") }}
+                {{ add_form.from_location_id(class="form-control") }}
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="form-group">
+                {{ add_form.to_location_id.label(class="form-label") }}
+                {{ add_form.to_location_id(class="form-control") }}
+              </div>
+            </div>
+          </div>
+          <h3>Add Items</h3>
+          <div class="form-group">
+            <label for="add-item-name" class="form-label">Item Name</label>
+            <input type="text" id="add-item-name" class="form-control" autocomplete="off">
+            <div id="add-suggestions"></div>
+          </div>
+          <div id="add-item-list" class="mb-3"></div>
+          <button type="submit" class="btn btn-success">Save</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Transfer Modal -->
+<div class="modal fade" id="editTransferModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Edit Transfer</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form id="edit-transfer-form">
+          {{ edit_form.hidden_tag() }}
+          <input type="hidden" id="edit-transfer-id" name="transfer_id">
+          <div class="row">
+            <div class="col-md-6">
+              <div class="form-group">
+                {{ edit_form.from_location_id.label(class="form-label") }}
+                {{ edit_form.from_location_id(class="form-control") }}
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="form-group">
+                {{ edit_form.to_location_id.label(class="form-label") }}
+                {{ edit_form.to_location_id(class="form-control") }}
+              </div>
+            </div>
+          </div>
+          <h3>Edit Items</h3>
+          <div class="form-group">
+            <label for="edit-item-name" class="form-label">Item Name</label>
+            <input type="text" id="edit-item-name" class="form-control" autocomplete="off">
+            <div id="edit-suggestions"></div>
+          </div>
+          <div id="edit-item-list" class="mb-3"></div>
+          <button type="submit" class="btn btn-success">Save</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Search Modal -->
+<div class="modal fade" id="searchModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Search Transfers</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form action="{{ url_for('transfer.view_transfers') }}" method="get" class="d-flex flex-wrap align-items-end flex-grow-1">
+          {% if request.args.get('user_id') %}
+          <input type="hidden" name="user_id" value="{{ request.args.get('user_id') }}">
+          {% endif %}
+          <select name="filter" class="form-control me-2 mt-1 narrow-field">
+            <option value="not_completed">Not Completed</option>
+            <option value="completed" {% if request.args.get('filter') == 'completed' %}selected{% endif %}>Completed</option>
+            <option value="all" {% if request.args.get('filter') == 'all' %}selected{% endif %}>All Transfers</option>
+          </select>
+          <input type="text" name="transfer_id" class="form-control me-2 mt-1 narrow-field" placeholder="Transfer ID" value="{{ request.args.get('transfer_id', '') }}">
+          <input type="text" name="from_location" class="form-control me-2 mt-1 narrow-field" placeholder="From Location" value="{{ request.args.get('from_location', '') }}">
+          <input type="text" name="to_location" class="form-control me-2 mt-1 narrow-field" placeholder="To Location" value="{{ request.args.get('to_location', '') }}">
+          <button type="submit" class="btn btn-info mt-2">Search</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/transfer_workflow.js') }}" nonce="{{ csp_nonce }}"></script>
+<script nonce="{{ csp_nonce }}">
+    var socket = null;
+    if (window.io && typeof window.io.connect === 'function') {
+        var protocol = window.location.protocol;
+        socket = window.io.connect(protocol + '//' + document.domain + ':' + location.port);
+
+        socket.on('connect', function() {
+            console.log('Websocket connected!');
+        });
+
+        socket.on('new_transfer', function(data) {
+            document.getElementById('new-transfer-alert').style.display = 'inline-block';
+        });
+    } else {
+        console.warn('Socket.io not available, skipping live transfer notifications.');
+    }
+
+    let addItemIndex = 0;
+    document.getElementById('add-item-name').addEventListener('input', function() {
+        const input = this.value.trim();
+        if (input === '') {
+            document.getElementById('add-suggestions').innerHTML = '';
+            return;
+        }
+        fetch('/items/search?term=' + encodeURIComponent(input))
+            .then(response => response.json())
+            .then(data => {
+                const suggestionsDiv = document.getElementById('add-suggestions');
+                suggestionsDiv.innerHTML = '';
+                data.forEach(function(item) {
+                    const suggestion = document.createElement('div');
+                    suggestion.textContent = item.name;
+                    suggestion.dataset.id = item.id;
+                    suggestion.classList.add('suggestion');
+                    suggestionsDiv.appendChild(suggestion);
+                });
+            });
+    });
+
+    document.addEventListener('click', function(event) {
+        if (event.target && event.target.classList.contains('suggestion') && event.target.parentElement.id === 'add-suggestions') {
+            const itemName = event.target.textContent;
+            const itemId = event.target.dataset.id;
+            addItemToList(itemId, itemName);
+        }
+    });
+
+    function addItemToList(id, name) {
+        fetch(`/items/${id}/units`).then(r => r.json()).then(data => {
+            const listItem = TransferWorkflow.createRow({
+                prefix: 'add-items',
+                index: addItemIndex,
+                itemId: id,
+                itemName: name,
+                unitsData: data,
+            });
+            document.getElementById('add-item-list').appendChild(listItem);
+            document.getElementById('add-suggestions').innerHTML = '';
+            document.getElementById('add-item-name').value = '';
+            addItemIndex++;
+        }).catch(error => {
+            console.error('Error loading item units:', error);
+        });
+    }
+
+    document.getElementById('add-transfer-form').addEventListener('submit', function(e){
+        e.preventDefault();
+        fetch('/transfers/ajax_add', {
+            method: 'POST',
+            body: new FormData(this)
+        }).then(r => r.json()).then(data => {
+            if(data.success){
+                const table = document.getElementById('transfer-table');
+                table.querySelector('tbody').insertAdjacentHTML('afterbegin', data.html);
+                if (window.TableSort && typeof window.TableSort.bind === 'function') {
+                    window.TableSort.bind(table);
+                }
+                attachEditEvents();
+                var modal = bootstrap.Modal.getInstance(document.getElementById('addTransferModal'));
+                modal.hide();
+                this.reset();
+                document.getElementById('add-item-list').innerHTML = '';
+                addItemIndex = 0;
+            }else{
+                alert('Error adding transfer');
+            }
+        });
+    });
+
+    // Edit form functionality
+    let editItemIndex = 0;
+    document.getElementById('edit-item-name').addEventListener('input', function() {
+        const input = this.value.trim();
+        if (input === '') {
+            document.getElementById('edit-suggestions').innerHTML = '';
+            return;
+        }
+        fetch('/items/search?term=' + encodeURIComponent(input))
+            .then(response => response.json())
+            .then(data => {
+                const suggestionsDiv = document.getElementById('edit-suggestions');
+                suggestionsDiv.innerHTML = '';
+                data.forEach(function(item) {
+                    const suggestion = document.createElement('div');
+                    suggestion.textContent = item.name;
+                    suggestion.dataset.id = item.id;
+                    suggestion.classList.add('suggestion');
+                    suggestionsDiv.appendChild(suggestion);
+                });
+            });
+    });
+
+    document.addEventListener('click', function(event) {
+        if (event.target && event.target.classList.contains('suggestion') && event.target.parentElement.id === 'edit-suggestions') {
+            const itemName = event.target.textContent;
+            const itemId = event.target.dataset.id;
+            const rowIndex = editItemIndex++;
+            addEditItem({id: itemId, name: itemName, quantity: NaN}, rowIndex);
+        }
+    });
+
+    function addEditItem(item, index){
+        const rowIndex = typeof index === 'number' ? index : editItemIndex++;
+        fetch(`/items/${item.id}/units`).then(r => r.json()).then(data => {
+            const listItem = TransferWorkflow.createRow({
+                prefix: 'edit-items',
+                index: rowIndex,
+                itemId: item.id,
+                itemName: item.name,
+                unitsData: data,
+                existingValues: {
+                    unitId: item.unit_id,
+                    unitQuantity: item.unit_quantity,
+                    baseQuantity: item.base_quantity,
+                    totalQuantity: item.quantity,
+                },
+            });
+            document.getElementById('edit-item-list').appendChild(listItem);
+        }).catch(error => {
+            console.error('Error loading item units:', error);
+        });
+    }
+
+    function loadEditTransfer(id){
+        fetch(`/transfers/${id}/json`).then(r => r.json()).then(data => {
+            document.getElementById('edit-transfer-id').value = data.id;
+            document.getElementById('edit-from_location_id').value = data.from_location_id;
+            document.getElementById('edit-to_location_id').value = data.to_location_id;
+            document.getElementById('edit-item-list').innerHTML = '';
+            editItemIndex = 0;
+            data.items.forEach(function(it){
+                const rowIndex = editItemIndex++;
+                addEditItem(it, rowIndex);
+            });
+            var modal = new bootstrap.Modal(document.getElementById('editTransferModal'));
+            modal.show();
+        });
+    }
+
+    function attachEditEvents(){
+        document.querySelectorAll('.edit-transfer-btn').forEach(btn => {
+            btn.addEventListener('click', function(){
+                loadEditTransfer(this.dataset.id);
+            });
+        });
+    }
+    attachEditEvents();
+
+    document.getElementById('edit-transfer-form').addEventListener('submit', function(e){
+        e.preventDefault();
+        var id = document.getElementById('edit-transfer-id').value;
+        fetch(`/transfers/ajax_edit/${id}`, {
+            method: 'POST',
+            body: new FormData(this)
+        }).then(r => r.json()).then(data => {
+            if(data.success){
+                var row = document.getElementById(`transfer-row-${data.id}`);
+                row.outerHTML = data.html;
+                if (window.TableSort && typeof window.TableSort.bind === 'function') {
+                    window.TableSort.bind(document.getElementById('transfer-table'));
+                }
+                attachEditEvents();
+                var modal = bootstrap.Modal.getInstance(document.getElementById('editTransferModal'));
+                modal.hide();
+            } else {
+                alert('Error updating transfer');
+            }
+        });
+    });
+</script>
+{% endblock %}

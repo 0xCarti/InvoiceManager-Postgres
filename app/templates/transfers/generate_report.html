@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Generate Transfer Report</h2>
+    <form action="" method="post">
+        {{ form.hidden_tag() }}
+        <div class="form-group">
+            {{ form.start_datetime.label(class="form-label") }}
+            {{ form.start_datetime(class="form-control") }}
+            {% if form.start_datetime.errors %}
+                {% for error in form.start_datetime.errors %}
+                    <div class="alert alert-danger">{{ error }}</div>
+                {% endfor %}
+            {% endif %}
+        </div>
+        <div class="form-group">
+            {{ form.end_datetime.label(class="form-label") }}
+            {{ form.end_datetime(class="form-control") }}
+            {% if form.end_datetime.errors %}
+                {% for error in form.end_datetime.errors %}
+                    <div class="alert alert-danger">{{ error }}</div>
+                {% endfor %}
+            {% endif %}
+        </div>
+        <div class="form-group">
+            {{ form.from_location_ids.label(class="form-label") }}
+            {{ form.from_location_ids(class="form-select", multiple=true, size=6) }}
+            <small class="form-text text-muted">Leave empty to include all origin locations.</small>
+            {% if form.from_location_ids.errors %}
+                {% for error in form.from_location_ids.errors %}
+                    <div class="alert alert-danger">{{ error }}</div>
+                {% endfor %}
+            {% endif %}
+        </div>
+        <div class="form-group">
+            {{ form.to_location_ids.label(class="form-label") }}
+            {{ form.to_location_ids(class="form-select", multiple=true, size=6) }}
+            <small class="form-text text-muted">Leave empty to include all destination locations.</small>
+            {% if form.to_location_ids.errors %}
+                {% for error in form.to_location_ids.errors %}
+                    <div class="alert alert-danger">{{ error }}</div>
+                {% endfor %}
+            {% endif %}
+        </div>
+        <button type="submit" class="btn btn-primary mt-2">Generate Report</button>
+    </form>
+</div>
+<script nonce="{{ csp_nonce }}">
+flatpickr("#start_datetime", {
+    enableTime: true,
+    dateFormat: "Y-m-d H:i",
+    time_24hr: true
+});
+
+flatpickr("#end_datetime", {
+    enableTime: true,
+    dateFormat: "Y-m-d H:i",
+    time_24hr: true
+});
+</script>
+{% endblock %}

@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-4">
+    <h2>Recipe for {{ product.name }}</h2>
+    <form method="POST">
+        {{ form.hidden_tag() }}
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                {{ form.recipe_yield_quantity.label(class="form-label") }}
+                {{ form.recipe_yield_quantity(class="form-control") }}
+                <div class="form-text">Number of products produced by this recipe batch.</div>
+            </div>
+            <div class="col-md-6 mb-3">
+                {{ form.recipe_yield_unit.label(class="form-label") }}
+                {{ form.recipe_yield_unit(class="form-control", placeholder="e.g. cups") }}
+            </div>
+        </div>
+        <div id="item-list">
+            {% for item in form.items %}
+            <div class="row g-2 mb-2 align-items-center">
+                <div class="col">{{ item.item(class="form-control") }}</div>
+                <div class="col">{{ item.quantity(class="form-control") }}</div>
+                <div class="col-auto form-check d-flex align-items-center">
+                    {{ item.countable(class="form-check-input") }}
+                    {{ item.countable.label(class="form-check-label ms-1") }}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        <button type="submit" class="btn btn-primary mt-3">Submit</button>
+    </form>
+</div>
+{% endblock %}

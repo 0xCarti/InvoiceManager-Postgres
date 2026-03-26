@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Database Backups</h2>
+    <form action="{{ url_for('admin.create_backup_route') }}" method="post" class="mb-3">
+        {{ create_form.hidden_tag() }}
+        {{ create_form.submit(class='btn btn-primary') }}
+    </form>
+
+    <h4>Restore Backup</h4>
+    <div class="alert alert-info" role="alert">
+        <strong>Restore compatibility:</strong>
+        Backups are only supported for safe restore on the <em>same application release</em>.
+        Cross-version restores are blocked when compatibility checks fail (schema marker, required tables/settings, and enabled-module endpoint expectations).
+        If a backup was created by a different release, create a fresh backup from the current version before restoring.
+    </div>
+
+    <form action="{{ url_for('admin.restore_backup_route') }}" method="post" enctype="multipart/form-data" class="mb-4">
+        {{ restore_form.hidden_tag() }}
+        <div class="form-group">
+            {{ restore_form.file.label }}
+            {{ restore_form.file(class='form-control-file') }}
+        </div>
+        <div class="form-check mb-3">
+            {{ restore_form.ignore_favorites(class='form-check-input') }}
+            {{ restore_form.ignore_favorites.label(class='form-check-label') }}
+        </div>
+        {{ restore_form.submit(class='btn btn-danger') }}
+    </form>
+
+    <h4>Available Backups</h4>
+    <ul class="list-group">
+        {% for b in backups %}
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+            {{ b }}
+            <div>
+                <form action="{{ url_for('admin.restore_backup_file', filename=b) }}" method="post" class="d-inline">
+                    {{ restore_form.csrf_token }}
+                    <input type="hidden" name="ignore_favorites" value="0">
+                    <div class="form-check form-check-inline ms-2">
+                        <input class="form-check-input" type="checkbox" name="ignore_favorites" value="1" id="ignore-favorites-{{ loop.index }}">
+                        <label class="form-check-label" for="ignore-favorites-{{ loop.index }}">Ignore favorites</label>
+                    </div>
+                    <button type="submit" class="btn btn-sm btn-danger">Restore</button>
+                </form>
+                <a href="{{ url_for('admin.download_backup', filename=b) }}" class="btn btn-sm btn-secondary ms-1">Download</a>
+            </div>
+        </li>
+        {% else %}
+        <li class="list-group-item">No backups found.</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endblock %}

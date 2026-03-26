@@ -1,0 +1,389 @@
+{% set product_form_id = form_id or 'product-form' %}
+{% set form_action = form_action if form_action is defined else '' %}
+{% set embedded = embedded if embedded is defined else False %}
+{% set show_submit = show_submit if show_submit is defined else True %}
+{% set sales_field = form.sales_gl_code if form.sales_gl_code is defined else form.gl_code_id %}
+{% if not embedded %}
+<form id="{{ product_form_id }}" class="product-form" data-role="product-form" method="POST" action="{{ form_action }}">
+{% else %}
+<div id="{{ product_form_id }}" class="product-form" data-role="product-form" data-embedded="1">
+{% endif %}
+    {{ form.hidden_tag() }}
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            {{ form.name.label(class="form-label") }}
+            {{ form.name(class="form-control") }}
+        </div>
+        <div class="col-md-6 mb-3">
+            {{ form.price.label(class="form-label") }}
+            {{ form.price(class="form-control" + (" is-invalid" if form.price.errors else ""), placeholder="0.00", step="0.01", min="0") }}
+            {% for error in form.price.errors %}
+            <div class="invalid-feedback d-block">{{ error }}</div>
+            {% endfor %}
+        </div>
+        <div class="col-md-6 mb-3">
+            {{ form.invoice_sale_price.label(class="form-label") }}
+            {{ form.invoice_sale_price(class="form-control" + (" is-invalid" if form.invoice_sale_price.errors else ""), placeholder="0.00", step="0.01", min="0") }}
+            {% for error in form.invoice_sale_price.errors %}
+            <div class="invalid-feedback d-block">{{ error }}</div>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            {{ form.cost.label(class="form-label") }}
+            {{ form.cost(class="form-control", id="cost") }}
+        </div>
+        <div class="col-md-6 mb-3">
+            {% if sales_field is defined and sales_field is not none %}
+                <label for="{{ sales_field.id }}" class="form-label">Sales GL Code</label>
+                {{ sales_field(class="form-control") }}
+            {% else %}
+                <label class="form-label">Sales GL Code</label>
+                <input type="text" class="form-control" value="Not configurable" disabled>
+            {% endif %}
+            <div class="form-text">Revenue account recorded when this product is sold.</div>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            {{ form.recipe_yield_quantity.label(class="form-label") }}
+            {{ form.recipe_yield_quantity(class="form-control", id="recipe_yield_quantity") }}
+            <div class="form-text">Number of products produced by this recipe batch.</div>
+        </div>
+        <div class="col-md-6 mb-3">
+            {{ form.recipe_yield_unit.label(class="form-label") }}
+            {{ form.recipe_yield_unit(class="form-control", placeholder="e.g. cups") }}
+        </div>
+    </div>
+    <div data-role="item-list">
+        {% for item in form.items %}
+        {% set selected_name = item.item.choices | selectattr('0', 'equalto', item.item.data) | map(attribute=1) | first %}
+        <div class="row mb-2 align-items-center item-row">
+            <div class="col position-relative">
+                <input type="hidden" name="{{ item.item.name }}" value="{{ item.item.data or '' }}" class="item-id" data-item-name="{{ selected_name or '' }}">
+                <input type="text" class="form-control item-search" placeholder="Search item..." autocomplete="off" value="{{ selected_name or '' }}">
+                <div class="list-group item-suggestions"></div>
+                <div class="form-text mt-1">
+                    <a
+                        {% if item.item.data %}
+                            href="{{ url_for('item.view_item', item_id=item.item.data) }}"
+                        {% else %}
+                            href="#"
+                        {% endif %}
+                        class="item-link{% if not item.item.data %} d-none{% endif %}"
+                        target="_blank"
+                        rel="noopener"
+                    >{{ selected_name or '' }}</a>
+                </div>
+            </div>
+            <div class="col">
+                <select name="{{ item.unit.name }}" class="form-control unit-select" data-selected="{{ item.unit.data or '' }}"></select>
+            </div>
+            <div class="col">{{ item.quantity(class="form-control") }}</div>
+            <div class="col-auto">
+                {{ item.countable() }}
+                {{ item.countable.label(class="form-check-label ms-1") }}
+            </div>
+            <div class="col-auto">
+                <button type="button" class="btn btn-danger remove-item">Remove</button>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    <button type="button" class="btn btn-secondary" data-role="add-item">Add Item</button>
+    <button type="button" class="btn btn-secondary" data-role="calc-cost" {% if product_id %}data-product-id="{{ product_id }}"{% endif %}>Set Cost From Recipe</button>
+    {% if show_submit %}
+        <button type="submit" class="btn btn-primary">Submit</button>
+    {% endif %}
+{% if not embedded %}
+</form>
+{% else %}
+</div>
+{% endif %}
+<script nonce="{{ csp_nonce }}">
+(function() {
+    const scriptEl = document.currentScript;
+    if (!scriptEl) {
+        return;
+    }
+    const root = scriptEl.previousElementSibling;
+    if (!root || !root.matches('[data-role="product-form"]')) {
+        return;
+    }
+
+    const countableLabel = {{ form.countable_label|default('Countable', true)|tojson }};
+    let itemIndex = {{ form.items|length }};
+
+    function parseNumericInput(inputEl) {
+        if (!inputEl) {
+            return null;
+        }
+        if (window.NumericInput && typeof window.NumericInput.parseValue === 'function') {
+            const parsed = window.NumericInput.parseValue(inputEl);
+            if (Number.isFinite(parsed)) {
+                return parsed;
+            }
+        }
+        const fallback = parseFloat(inputEl.value);
+        return Number.isFinite(fallback) ? fallback : null;
+    }
+
+    function collectRecipeData() {
+        const items = [];
+        const itemRows = root.querySelectorAll('[data-role="item-list"] .item-row');
+        itemRows.forEach(row => {
+            const itemInput = row.querySelector('.item-id');
+            const quantityInput = row.querySelector('input[name$="-quantity"]');
+            const unitSelect = row.querySelector('.unit-select');
+            const itemId = itemInput ? parseInt(itemInput.value, 10) : NaN;
+            const quantity = parseNumericInput(quantityInput);
+            if (!itemId || Number.isNaN(itemId) || quantity === null) {
+                return;
+            }
+            let unitId = null;
+            if (unitSelect && unitSelect.value) {
+                const parsedUnit = parseInt(unitSelect.value, 10);
+                if (!Number.isNaN(parsedUnit)) {
+                    unitId = parsedUnit;
+                }
+            }
+            items.push({
+                item_id: itemId,
+                unit_id: unitId,
+                quantity: quantity,
+            });
+        });
+        const yieldInput = root.querySelector('#recipe_yield_quantity');
+        const yieldUnitInput = root.querySelector('#recipe_yield_unit');
+        return {
+            items: items,
+            yield_quantity: parseNumericInput(yieldInput),
+            yield_unit: yieldUnitInput ? yieldUnitInput.value : null,
+        };
+    }
+
+    function initializeCostButton() {
+        const btn = root.querySelector('[data-role="calc-cost"]');
+        if (!btn) {
+            return;
+        }
+        btn.addEventListener('click', function() {
+            const recipeData = collectRecipeData();
+            const costInput = root.querySelector('#cost');
+            if (!recipeData.items.length) {
+                if (costInput) {
+                    costInput.value = 0;
+                }
+                return;
+            }
+            const headers = { 'Content-Type': 'application/json' };
+            const csrfInput = root.querySelector('input[name="csrf_token"]');
+            if (csrfInput) {
+                headers['X-CSRFToken'] = csrfInput.value;
+            }
+            fetch('/products/calculate_cost_preview', {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(recipeData),
+            })
+                .then(resp => {
+                    if (!resp.ok) {
+                        throw new Error('Request failed');
+                    }
+                    return resp.json();
+                })
+                .then(data => {
+                    if (costInput && typeof data.cost !== 'undefined') {
+                        costInput.value = data.cost;
+                    }
+                    const yieldInput = root.querySelector('#recipe_yield_quantity');
+                    if (yieldInput && typeof data.yield_quantity !== 'undefined') {
+                        yieldInput.value = data.yield_quantity;
+                    }
+                })
+                .catch(() => {
+                    alert('Unable to calculate recipe cost. Please try again.');
+                });
+        });
+    }
+
+    function fetchUnits(row, itemId, selected) {
+        if (!itemId) {
+            const unitSelect = row.querySelector('.unit-select');
+            if (unitSelect) {
+                unitSelect.innerHTML = '';
+            }
+            return;
+        }
+        fetch(`/items/${itemId}/units`).then(r => r.json()).then(data => {
+            let opts = `<option value="">${data.base_unit}</option>`;
+            data.units.forEach(u => {
+                opts += `<option value="${u.id}">${u.name} of ${u.factor} ${data.base_unit}${u.factor != 1 ? 's' : ''}</option>`;
+            });
+            const sel = row.querySelector('.unit-select');
+            if (!sel) {
+                return;
+            }
+            sel.innerHTML = opts;
+            if (selected) {
+                sel.value = selected;
+            }
+        });
+    }
+
+    function updateItemLink(row, itemId, itemName) {
+        const link = row.querySelector('.item-link');
+        if (!link) {
+            return;
+        }
+        if (itemId && itemName) {
+            link.href = `/items/${encodeURIComponent(itemId)}`;
+            link.classList.remove('d-none');
+            link.textContent = itemName;
+        } else {
+            link.href = '#';
+            link.classList.add('d-none');
+            link.textContent = '';
+        }
+    }
+
+    function createRow(idx) {
+        const row = document.createElement('div');
+        row.className = 'row mb-2 align-items-center item-row';
+        row.innerHTML = `
+            <div class="col position-relative">
+                <input type="hidden" name="items-${idx}-item" value="" class="item-id" data-item-name="">
+                <input type="text" class="form-control item-search" placeholder="Search item..." autocomplete="off">
+                <div class="list-group item-suggestions"></div>
+                <div class="form-text mt-1">
+                    <a href="#" class="item-link d-none" target="_blank" rel="noopener"></a>
+                </div>
+            </div>
+            <div class="col">
+                <select name="items-${idx}-unit" class="form-control unit-select"></select>
+            </div>
+            <div class="col"><input type="number" name="items-${idx}-quantity" class="form-control" step="any"></div>
+            <div class="col-auto form-check d-flex align-items-center">
+                <input type="checkbox" name="items-${idx}-countable" class="form-check-input" id="items-${idx}-countable">
+                <label class="form-check-label ms-1" for="items-${idx}-countable">${countableLabel}</label>
+            </div>
+            <div class="col-auto"><button type="button" class="btn btn-danger remove-item">Remove</button></div>
+        `;
+        return row;
+    }
+
+    function initializeAddItem() {
+        const addItemBtn = root.querySelector('[data-role="add-item"]');
+        const itemList = root.querySelector('[data-role="item-list"]');
+        if (!addItemBtn || !itemList) {
+            return;
+        }
+        addItemBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            const row = createRow(itemIndex);
+            itemList.appendChild(row);
+            itemIndex++;
+        });
+    }
+
+    function initializeItemListInteractions() {
+        const itemList = root.querySelector('[data-role="item-list"]');
+        if (!itemList) {
+            return;
+        }
+        itemList.addEventListener('click', function(e) {
+            if (e.target && e.target.classList.contains('remove-item')) {
+                e.target.closest('.row').remove();
+            } else if (e.target && e.target.classList.contains('item-suggestion')) {
+                e.preventDefault();
+                const row = e.target.closest('.item-row');
+                const id = e.target.dataset.id;
+                const itemName = e.target.textContent;
+                const hiddenInput = row.querySelector('.item-id');
+                if (hiddenInput) {
+                    hiddenInput.value = id;
+                    hiddenInput.dataset.itemName = itemName;
+                }
+                const searchInput = row.querySelector('.item-search');
+                if (searchInput) {
+                    searchInput.value = itemName;
+                }
+                const suggestions = row.querySelector('.item-suggestions');
+                if (suggestions) {
+                    suggestions.innerHTML = '';
+                }
+                fetchUnits(row, id);
+                updateItemLink(row, id, itemName);
+            }
+        });
+
+        itemList.addEventListener('keyup', function(e) {
+            if (e.target && e.target.classList.contains('item-search')) {
+                const row = e.target.closest('.item-row');
+                const query = e.target.value;
+                updateItemLink(row);
+                const sugg = row.querySelector('.item-suggestions');
+                if (!sugg) {
+                    return;
+                }
+                if (!query) {
+                    const hiddenInput = row.querySelector('.item-id');
+                    if (hiddenInput) {
+                        hiddenInput.value = '';
+                        hiddenInput.dataset.itemName = '';
+                    }
+                    sugg.innerHTML = '';
+                    const unitSelect = row.querySelector('.unit-select');
+                    if (unitSelect) {
+                        unitSelect.innerHTML = '';
+                    }
+                    return;
+                }
+                fetch(`/items/search?term=${encodeURIComponent(query)}`)
+                    .then(r => r.json())
+                    .then(data => {
+                        sugg.innerHTML = data.map(it => `<a href="#" class="list-group-item list-group-item-action item-suggestion" data-id="${it.id}">${it.name}</a>`).join('');
+                    });
+            }
+        });
+
+        itemList.addEventListener('focusout', function(e) {
+            if (e.target && e.target.classList.contains('item-search')) {
+                const row = e.target.closest('.item-row');
+                const hiddenInput = row ? row.querySelector('.item-id') : null;
+                if (!hiddenInput) {
+                    return;
+                }
+                const itemId = hiddenInput.value;
+                const storedName = hiddenInput.dataset.itemName;
+                if (itemId && storedName) {
+                    updateItemLink(row, itemId, storedName);
+                }
+            }
+        });
+
+        itemList.querySelectorAll('.item-row').forEach(row => {
+            const hiddenInput = row.querySelector('.item-id');
+            const itemId = hiddenInput ? hiddenInput.value : null;
+            const sel = row.querySelector('.unit-select');
+            const selected = sel ? sel.dataset.selected : null;
+            if (itemId) {
+                fetchUnits(row, itemId, selected);
+            }
+        });
+    }
+
+    function init() {
+        initializeCostButton();
+        initializeAddItem();
+        initializeItemListInteractions();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init, { once: true });
+    } else {
+        init();
+    }
+})();
+</script>

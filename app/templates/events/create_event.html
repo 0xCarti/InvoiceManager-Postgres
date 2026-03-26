@@ -1,0 +1,70 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Create Event</h2>
+<form method="post">
+    {{ form.csrf_token }}
+    {{ form.name.label }} {{ form.name(class='form-control') }}
+    {{ form.start_date.label }} {{ form.start_date(class='form-control') }}
+    {{ form.end_date.label }} {{ form.end_date(class='form-control') }}
+    {{ form.event_type.label }} {{ form.event_type(class='form-control') }}
+    {{ form.estimated_sales.label }} {{ form.estimated_sales(class='form-control', placeholder='Optional') }}
+    {{ form.submit(class='btn btn-primary mt-2') }}
+</form>
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('DOMContentLoaded', function () {
+    const form = document.querySelector('form');
+
+    function syncDatePickerValues(formElement) {
+        if (!formElement) {
+            return;
+        }
+
+        formElement.querySelectorAll('input[name="start_date"], input[name="end_date"]').forEach((input) => {
+            const picker = input && input._flatpickr;
+            if (!picker) {
+                return;
+            }
+
+            if (picker.selectedDates && picker.selectedDates.length > 0) {
+                input.value = picker.formatDate(
+                    picker.selectedDates[0],
+                    picker.config.dateFormat
+                );
+                return;
+            }
+
+            const altInput = picker.altInput;
+            if (!altInput || !altInput.value) {
+                return;
+            }
+
+            const parsed = picker.parseDate(
+                altInput.value,
+                picker.config.altFormat || picker.config.dateFormat
+            );
+
+            if (parsed) {
+                input.value = picker.formatDate(parsed, picker.config.dateFormat);
+            }
+        });
+    }
+
+    document.querySelectorAll('input[name="start_date"], input[name="end_date"]').forEach((input) => {
+        if (input && !input._flatpickr) {
+            flatpickr(input, {
+                dateFormat: 'Y-m-d',
+                altInput: true,
+                altFormat: 'F j, Y',
+                allowInput: true
+            });
+        }
+    });
+
+    if (form) {
+        form.addEventListener('submit', function () {
+            syncDatePickerValues(form);
+        });
+    }
+});
+</script>
+{% endblock %}

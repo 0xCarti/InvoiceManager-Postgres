@@ -1,0 +1,104 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-4">
+    <h2>Create Purchase Order</h2>
+    {% if upload_state %}
+    <div class="alert alert-info d-flex justify-content-between align-items-start">
+        <div>
+            <p class="mb-1">This form is prefilled from your uploaded purchase order{% if upload_state.source_filename %} <strong>{{ upload_state.source_filename }}</strong>{% endif %}.</p>
+            <ul class="mb-0 small text-muted">
+                {% if upload_state.vendor_name %}<li>Vendor: {{ upload_state.vendor_name }}</li>{% endif %}
+                {% if upload_state.order_number %}<li>Order number: {{ upload_state.order_number }}</li>{% endif %}
+                {% if upload_state.expected_total %}<li>Expected total: ${{ '%.2f'|format(upload_state.expected_total) }}</li>{% endif %}
+            </ul>
+        </div>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('purchase.create_purchase_order', reset_upload=1) }}">Start over</a>
+    </div>
+    {% endif %}
+    <form method="POST">
+        {{ form.hidden_tag() }}
+        <div class="form-group">
+            {{ form.vendor.label(class="form-label") }}
+            {{ form.vendor(class="form-control narrow-field") }}
+        </div>
+        <div class="form-group">
+            {{ form.order_number.label(class="form-label") }}
+            {{ form.order_number(class="form-control narrow-field") }}
+        </div>
+        <div class="form-group">
+            {{ form.order_date.label(class="form-label") }}
+            {{ form.order_date(class="form-control narrow-field") }}
+        </div>
+        <div class="form-group">
+            {{ form.expected_date.label(class="form-label") }}
+            {{ form.expected_date(class="form-control narrow-field") }}
+        </div>
+        <div class="form-group">
+            {{ form.expected_total_cost.label(class="form-label") }}
+            {{ form.expected_total_cost(class="form-control narrow-field") }}
+        </div>
+        <div class="form-group">
+            {{ form.delivery_charge.label(class="form-label") }}
+            {{ form.delivery_charge(class="form-control narrow-field") }}
+        </div>
+        <h4>Items</h4>
+        <button id="quick-add-item" type="button" class="btn btn-link p-0">Create New Item</button>
+        <div id="items" data-next-index="{{ form.items|length }}">
+        {% for item in form.items %}
+        {% set item_id = item.item.data %}
+        {% set item_info = item_lookup.get(item_id|int) if item_id else None %}
+        {% set selected_name = item_info['name'] if item_info else '' %}
+        {% set selected_gl_code = item_info['gl_code'] if item_info else '' %}
+        {% set input_value = request.form.get('items-' ~ loop.index0 ~ '-item-label', selected_name) %}
+        <div class="row g-2 mt-2 item-row align-items-center">
+            <div class="col position-relative">
+                <input type="text" name="items-{{ loop.index0 }}-item-label" class="form-control item-search" placeholder="Search for an item" autocomplete="off" value="{{ input_value }}">
+                {{ item.item(class="item-id-field") }}
+                <input type="hidden" name="items-{{ loop.index0 }}-position" class="item-position" value="{{ item.position.data or loop.index0 }}">
+                <div class="list-group suggestion-list d-none position-absolute w-100" style="z-index: 1000; max-height: 200px; overflow-y: auto;"></div>
+            </div>
+            <div class="col-auto gl-code-column">
+                <span class="gl-code-display badge bg-light text-dark" data-gl-code="{{ selected_gl_code }}">{{ selected_gl_code or 'Unassigned' }}</span>
+            </div>
+            <div class="col">
+                <div class="d-flex flex-column gap-1">
+                    <select name="items-{{ loop.index0 }}-unit" class="form-control unit-select" data-selected="{{ item.unit.data or '' }}"></select>
+                    <button type="button" class="btn btn-link btn-sm p-0 text-start manage-units-button" aria-label="Edit units of measure"{% if not item_id %} disabled{% endif %}>Edit units</button>
+                </div>
+            </div>
+            <div class="col">{{ item.quantity(class="form-control quantity") }}</div>
+            <div class="col-auto">
+                <button type="button" class="btn btn-outline-secondary btn-sm drag-handle" aria-label="Drag to reorder" title="Drag to reorder">=</button>
+            </div>
+            <div class="col-auto">
+                <button type="button" class="btn btn-danger remove-item">Remove</button>
+            </div>
+        </div>
+        {% endfor %}
+        </div>
+        <button id="add-item" type="button" class="btn btn-secondary mt-3">Add Item</button>
+        <button type="submit" class="btn btn-primary mt-3">Submit</button>
+    </form>
+
+    {% include 'purchase_orders/_create_item_modal.html' %}
+    {% include 'purchase_orders/_manage_units_modal.html' %}
+</div>
+
+<script src="{{ url_for('static', filename='js/purchase_order_form.js') }}"></script>
+<script src="{{ url_for('static', filename='js/date_pickers.js') }}"></script>
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('DOMContentLoaded', function() {
+    initDatePickers({
+        fieldSelectors: ['#{{ form.order_date.id }}', '#{{ form.expected_date.id }}']
+    });
+    initPurchaseOrderForm({
+        container: document.getElementById('items'),
+        addRowButton: document.getElementById('add-item'),
+        quickAddButton: document.getElementById('quick-add-item'),
+        newItemModal: document.getElementById('newItemModal'),
+        saveNewItemButton: document.getElementById('save-new-item'),
+        nextIndex: {{ form.items|length }}
+    });
+});
+</script>
+{% endblock %}

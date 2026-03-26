@@ -1,0 +1,22 @@
+<tr id="location-row-{{ location.id }}" data-id="{{ location.id }}">
+    <td class="col-select"><input type="checkbox" name="location_ids" value="{{ location.id }}" style="transform: scale(1.5);"></td>
+    <td class="col-location-name">{{ location.name }}</td>
+    <td class="col-location-menu">
+        {% if location.current_menu %}
+        {{ location.current_menu.name }}
+        {% else %}
+        <span class="text-muted">No Menu</span>
+        {% endif %}
+    </td>
+    <td class="col-location-actions">
+        <button type="button" class="btn btn-info edit-location-btn" data-id="{{ location.id }}">Edit</button>
+        <a href="{{ url_for('locations.view_stand_sheet', location_id=location.id) }}" class="btn btn-secondary">Stand Sheet</a>
+        <a href="{{ url_for('locations.location_items', location_id=location.id) }}" class="btn btn-outline-secondary">Manage Items</a>
+        <a href="{{ url_for('notes.entity_notes', entity_type='location', entity_id=location.id) }}" class="btn btn-outline-secondary">Notes</a>
+        <button type="button" class="btn btn-warning copy-location-btn" data-id="{{ location.id }}">Copy Stand Sheet</button>
+        <form action="{{ url_for('locations.delete_location', location_id=location.id) }}" method="post" class="d-inline">
+            {{ delete_form.hidden_tag() }}
+            <button type="submit" class="btn btn-danger">Delete</button>
+        </form>
+    </td>
+</tr>

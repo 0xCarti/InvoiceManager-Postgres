@@ -1,0 +1,17 @@
+{% macro column_visibility_dropdown(table_id, storage_key=None, columns=[], button_label='Columns', dropdown_id=None, align='end') %}
+    {% set dropdown_id = dropdown_id or table_id ~ '-column-selector' %}
+    <div class="dropdown d-inline-block" data-column-visibility data-table-id="{{ table_id }}"{% if storage_key %} data-storage-key="{{ storage_key }}"{% endif %}>
+        <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="{{ dropdown_id }}" data-bs-toggle="dropdown" aria-expanded="false">
+            {{ button_label }}
+        </button>
+        <div class="dropdown-menu dropdown-menu-{{ align }} p-3" aria-labelledby="{{ dropdown_id }}">
+            {% for column in columns %}
+                {% set input_id = column.id or dropdown_id ~ '-option-' ~ loop.index %}
+                <div class="form-check">
+                    <input class="form-check-input column-toggle" type="checkbox" id="{{ input_id }}" data-column-target="{{ column.target }}"{% if column.checked %} checked{% endif %}>
+                    <label class="form-check-label" for="{{ input_id }}">{{ column.label }}</label>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+{% endmacro %}

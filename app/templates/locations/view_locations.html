@@ -1,0 +1,608 @@
+{% extends 'base.html' %}
+{% from 'macros/column_visibility.html' import column_visibility_dropdown %}
+{% from 'macros/filter_modal.html' import filter_modal %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Locations</h2>
+            <p class="text-muted mb-0">Manage active and archived locations</p>
+        </div>
+        <div>
+            <button id="addLocationBtn" class="btn btn-primary" type="button">Add New Location</button>
+        </div>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <button type="button" class="btn btn-outline-secondary" id="bulkEditLocationsBtn" disabled>Bulk Edit</button>
+        <button
+            type="button"
+            class="btn btn-outline-secondary"
+            id="emailStandSheetsBtn"
+            data-email-stand-sheet
+            data-email-action="{{ url_for('locations.email_stand_sheets') }}"
+            disabled
+        >
+            Email Stand Sheets
+        </button>
+        <div class="dropdown d-md-none">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                More actions
+            </button>
+            <ul class="dropdown-menu">
+                <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</button></li>
+            </ul>
+        </div>
+        <div>
+            {{ column_visibility_dropdown(
+                table_id='locations-table',
+                storage_key='locationsTableColumnVisibility',
+                columns=[
+                    {'id': 'toggle-location-name', 'target': 'col-location-name', 'label': 'Name', 'checked': True},
+                    {'id': 'toggle-location-menu', 'target': 'col-location-menu', 'label': 'Menu', 'checked': True},
+                    {'id': 'toggle-location-actions', 'target': 'col-location-actions', 'label': 'Actions', 'checked': True},
+                ]
+            ) }}
+        </div>
+        <button type="button" class="btn btn-outline-secondary d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#filterModal">
+            Filters
+        </button>
+    </div>
+    <input type="hidden" id="csrf_token" value="{{ csrf_token() }}" />
+    {% set menu_filters = namespace(values=[]) %}
+    {% if include_no_menu %}
+        {% set menu_filters.values = menu_filters.values + ['No Menu'] %}
+    {% endif %}
+    {% for menu in menus %}
+        {% if menu.id in selected_menu_ids %}
+            {% set menu_filters.values = menu_filters.values + [menu.name] %}
+        {% endif %}
+    {% endfor %}
+    {% if name_query or archived != 'active' or spoilage_filter != 'all' or menu_filters.values %}
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="text-muted small">Active filters:</span>
+        {% if name_query %}
+        <span class="badge rounded-pill text-bg-light border">Name: {{ name_query }}</span>
+        {% endif %}
+        {% if archived == 'archived' %}
+        <span class="badge rounded-pill text-bg-light border">Status: Archived</span>
+        {% elif archived == 'all' %}
+        <span class="badge rounded-pill text-bg-light border">Status: All</span>
+        {% endif %}
+        {% if spoilage_filter == 'spoilage' %}
+        <span class="badge rounded-pill text-bg-light border">Spoilage: Spoilage only</span>
+        {% elif spoilage_filter == 'non_spoilage' %}
+        <span class="badge rounded-pill text-bg-light border">Spoilage: Non-spoilage only</span>
+        {% endif %}
+        {% if menu_filters.values %}
+        <span class="badge rounded-pill text-bg-light border">Menus: {{ menu_filters.values | join(', ') }}</span>
+        {% endif %}
+    </div>
+    {% endif %}
+    <div class="table-responsive">
+    <table class="table sortable" id="locations-table">
+        <thead>
+            <tr>
+                <th scope="col" class="col-select"><input type="checkbox" id="select-all-locations" style="transform: scale(1.5);"></th>
+                <th scope="col" class="col-location-name">Name</th>
+                <th scope="col" class="col-location-menu">Menu</th>
+                <th scope="col" class="col-location-actions">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for location in locations.items %}
+            {% include 'locations/_location_row.html' %}
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
+        <nav aria-label="Location pagination">
+            <ul class="pagination mb-0">
+                <li class="page-item {% if not locations.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('locations.view_locations', page=locations.prev_num if locations.has_prev else 1, **pagination_args) }}"{% if not locations.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link">Page {{ locations.page }} of {{ locations.pages }}</span>
+                </li>
+                <li class="page-item {% if not locations.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('locations.view_locations', page=locations.next_num if locations.has_next else locations.pages or 1, **pagination_args) }}"{% if not locations.has_next %} tabindex="-1" aria-disabled="true"{% endif %}>Next</a>
+                </li>
+            </ul>
+        </nav>
+        <form method="get" class="d-flex align-items-center gap-2">
+            {% for key, values in request.args.lists() %}
+                {% if key not in ['page', 'per_page'] %}
+                    {% for value in values %}
+                        <input type="hidden" name="{{ key }}" value="{{ value }}">
+                    {% endfor %}
+                {% endif %}
+            {% endfor %}
+            <input type="hidden" name="page" value="1">
+            <label for="locations-per-page" class="form-label mb-0">Rows per page</label>
+            <select id="locations-per-page" name="per_page" class="form-select js-auto-submit">
+                {% for option in PAGINATION_SIZES %}
+                    <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+</div>
+<!-- Filter Modal -->
+{% call filter_modal(
+    'filterModal',
+    'Filters',
+    form_id='filter-form',
+    form_action=url_for('locations.view_locations'),
+    method='get',
+    reset_url=url_for('locations.view_locations'),
+    dialog_class='modal-lg',
+    scope=request.endpoint
+) %}
+    <div class="row g-3 mb-3">
+        <div class="col-md-6">
+            <label for="name_query" class="form-label">Name</label>
+            <input type="text" id="name_query" name="name_query" class="form-control" placeholder="Search name" value="{{ name_query or '' }}">
+        </div>
+        <div class="col-md-6">
+            <label for="match_mode" class="form-label">Match Mode</label>
+            <select id="match_mode" name="match_mode" class="form-select">
+                <option value="exact" {% if match_mode == 'exact' %}selected{% endif %}>Exact</option>
+                <option value="startswith" {% if match_mode == 'startswith' %}selected{% endif %}>Starts with</option>
+                <option value="contains" {% if match_mode == 'contains' %}selected{% endif %}>Contains</option>
+                <option value="not_contains" {% if match_mode == 'not_contains' %}selected{% endif %}>Does not contain</option>
+            </select>
+        </div>
+    </div>
+    <div class="row g-3 mb-3">
+        <div class="col-md-6">
+            <label for="archived" class="form-label">Status</label>
+            <select id="archived" name="archived" class="form-select">
+                <option value="active" {% if archived == 'active' %}selected{% endif %}>Active</option>
+                <option value="archived" {% if archived == 'archived' %}selected{% endif %}>Archived</option>
+                <option value="all" {% if archived == 'all' %}selected{% endif %}>All</option>
+            </select>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label d-block">Spoilage</label>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="spoilage" id="spoilage-all" value="all" {% if spoilage_filter == 'all' %}checked{% endif %}>
+                <label class="form-check-label" for="spoilage-all">All locations</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="spoilage" id="spoilage-only" value="spoilage" {% if spoilage_filter == 'spoilage' %}checked{% endif %}>
+                <label class="form-check-label" for="spoilage-only">Spoilage only</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="spoilage" id="spoilage-non" value="non_spoilage" {% if spoilage_filter == 'non_spoilage' %}checked{% endif %}>
+                <label class="form-check-label" for="spoilage-non">Non-spoilage only</label>
+            </div>
+        </div>
+    </div>
+    <div class="mb-3">
+        <label class="form-label d-block" for="menu-filter-options">Menus</label>
+        {% if menus %}
+        <div id="menu-filter-options" class="border rounded p-2" style="max-height: 250px; overflow-y: auto;">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="menu-option-none" name="menu_ids" value="0"{% if include_no_menu %}checked{% endif %}>
+                <label class="form-check-label" for="menu-option-none">No Menu</label>
+            </div>
+            {% for menu in menus %}
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="menu-option-{{ menu.id }}" name="menu_ids" value="{{ menu.id }}" {% if menu.id in selected_menu_ids %}checked{% endif %}>
+                <label class="form-check-label" for="menu-option-{{ menu.id }}">{{ menu.name }}</label>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted mb-0">No menus available.</p>
+        {% endif %}
+    </div>
+{% endcall %}
+<div class="modal fade" id="locationModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content"></div>
+    </div>
+</div>
+<div class="modal fade" id="locationBulkModal" tabindex="-1" aria-hidden="true" data-url="{{ url_for('locations.bulk_update_locations') }}">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Bulk Edit Locations</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" data-role="bulk-form"></div>
+        </div>
+    </div>
+</div>
+<!-- Copy Stand Sheet Modal -->
+<div class="modal fade" id="copyModal" tabindex="-1" aria-labelledby="copyModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="copyModalLabel">Copy Stand Sheet</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="copyForm">
+                    <div id="copyLocationList" class="mb-3"></div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" form="copyForm" class="btn btn-primary">Copy</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% include 'shared/email_stand_sheet_modal.html' %}
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('DOMContentLoaded', function() {
+    const csrfToken = document.getElementById('csrf_token').value;
+    const locationModalElement = document.getElementById('locationModal');
+    const $locationModal = $('#locationModal');
+    const locationModal = new bootstrap.Modal(locationModalElement);
+    const copyModal = new bootstrap.Modal(document.getElementById('copyModal'));
+    const productSearchUrl = "{{ url_for('product.search_products') }}";
+    let currentSourceId = null;
+
+    const bulkEditLocationsBtn = document.getElementById('bulkEditLocationsBtn');
+    const emailStandSheetsBtn = document.getElementById('emailStandSheetsBtn');
+    const selectAllLocations = document.getElementById('select-all-locations');
+
+    function updateLocationBulkButtonState() {
+        const ids = getSelectedLocationIds();
+        const selectedCount = ids.length;
+        if (bulkEditLocationsBtn) {
+            bulkEditLocationsBtn.disabled = selectedCount === 0;
+        }
+        if (emailStandSheetsBtn) {
+            emailStandSheetsBtn.disabled = selectedCount === 0;
+            emailStandSheetsBtn.setAttribute('data-location-ids', ids.join(','));
+            const names = getSelectedLocationNames();
+            const label = selectedCount === 1 ? (names[0] || 'this location') : `${selectedCount} locations`;
+            emailStandSheetsBtn.setAttribute('data-email-label', label);
+        }
+    }
+
+    window.updateLocationBulkButtonState = updateLocationBulkButtonState;
+
+    if (selectAllLocations) {
+        selectAllLocations.addEventListener('click', function() {
+            document.querySelectorAll('#locations-table tbody input[name="location_ids"]').forEach((checkbox) => {
+                checkbox.checked = selectAllLocations.checked;
+            });
+            updateLocationBulkButtonState();
+        });
+    }
+
+    document.addEventListener('change', function(event) {
+        if (event.target && event.target.matches('#locations-table tbody input[name="location_ids"]')) {
+            updateLocationBulkButtonState();
+        }
+    });
+
+    updateLocationBulkButtonState();
+
+    function initProductSelector(modalElement) {
+        const container = modalElement.find('.modal-content');
+        container.off('.productSelector');
+
+        const searchInput = container.find('#productSearch');
+        if (!searchInput.length) {
+            return;
+        }
+
+        const suggestions = container.find('#productSuggestions');
+        const selectedList = container.find('#selectedProducts');
+        const hiddenField = container.find('#products');
+        const selectedProducts = new Map();
+
+        function updateHidden() {
+            hiddenField.val(Array.from(selectedProducts.keys()).join(','));
+        }
+
+        function syncFromDom() {
+            selectedProducts.clear();
+            selectedList.children('li').each(function() {
+                const li = $(this);
+                const id = li.data('id');
+                const name = li.data('name');
+                if (id !== undefined && name !== undefined) {
+                    selectedProducts.set(String(id), name);
+                }
+            });
+            updateHidden();
+        }
+
+        function createListItem(id, name) {
+            return $('<li>')
+                .addClass('list-group-item d-flex justify-content-between align-items-center')
+                .attr('data-id', id)
+                .attr('data-name', name)
+                .append($('<span>').text(name))
+                .append(
+                    $('<button>')
+                        .attr('type', 'button')
+                        .addClass('btn btn-sm btn-danger remove-product')
+                        .text('Remove')
+                );
+        }
+
+        function addProduct(id, name) {
+            const key = String(id);
+            if (!selectedProducts.has(key)) {
+                selectedProducts.set(key, name);
+                selectedList.append(createListItem(id, name));
+                updateHidden();
+            }
+        }
+
+        syncFromDom();
+
+        container.on('keyup.productSelector', '#productSearch', function () {
+            const query = $(this).val() || '';
+            $.get(productSearchUrl, { query: query }, function (response) {
+                const products = Array.isArray(response) ? response : [];
+                const items = products.map(function (product) {
+                    return $('<a>')
+                        .addClass('list-group-item list-group-item-action')
+                        .attr('href', '#')
+                        .attr('data-id', product.id)
+                        .attr('data-name', product.name)
+                        .text(product.name);
+                });
+                suggestions.empty().append(items);
+            });
+        });
+
+        container.on('click.productSelector', '#productSuggestions .list-group-item', function (e) {
+            e.preventDefault();
+            const id = $(this).data('id');
+            const name = $(this).data('name');
+            if (id !== undefined && name !== undefined) {
+                addProduct(id, name);
+                searchInput.val('');
+                suggestions.empty();
+            }
+        });
+
+        container.on('click.productSelector', '.remove-product', function () {
+            const li = $(this).closest('li');
+            const id = li.data('id');
+            if (id !== undefined) {
+                selectedProducts.delete(String(id));
+            }
+            li.remove();
+            updateHidden();
+        });
+    }
+
+    function loadLocationForm(url) {
+        $.get(url, function(data) {
+            const modalContent = $locationModal.find('.modal-content');
+            modalContent.html(data);
+            initProductSelector($locationModal);
+            locationModal.show();
+        });
+    }
+
+    $('#addLocationBtn').on('click', function() {
+        loadLocationForm('{{ url_for('locations.add_location') }}');
+    });
+
+    $(document).on('click', '.edit-location-btn', function() {
+        const id = $(this).data('id');
+        loadLocationForm(`/locations/edit/${id}`);
+    });
+
+    $(document).on('submit', '#locationForm', function(e) {
+        e.preventDefault();
+        const form = $(this);
+        const modalContent = $locationModal.find('.modal-content');
+        $.post(form.attr('action'), form.serialize())
+            .done(function(response) {
+                if (response && typeof response === 'object' && response.success) {
+                    if (response.action === 'create') {
+                        addRow(response.location);
+                    } else {
+                        updateRow(response.location);
+                    }
+                    locationModal.hide();
+                } else {
+                    modalContent.html(response);
+                    initProductSelector($locationModal);
+                }
+            })
+            .fail(function(xhr) {
+                alert('Error: ' + (xhr.responseJSON?.errors ? JSON.stringify(xhr.responseJSON.errors) : 'Unknown error'));
+            });
+    });
+
+    function escapeAttribute(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    function addRow(loc) {
+        const menuLabel = loc.menu_name ? loc.menu_name : '<span class="text-muted">No Menu</span>';
+        const notesUrl = `/notes/location/${loc.id}`;
+        const locationLabel = escapeAttribute(loc.name || 'this location');
+        const row = `<tr id="location-row-${loc.id}" data-id="${loc.id}">
+            <td class=\"col-select\"><input type=\"checkbox\" name=\"location_ids\" value=\"${loc.id}\" style=\"transform: scale(1.5);\"></td>
+            <td class=\"col-location-name\">${loc.name}</td>
+            <td class=\"col-location-menu\">${menuLabel}</td>
+            <td class=\"col-location-actions\">
+                <button type=\"button\" class=\"btn btn-info edit-location-btn\" data-id=\"${loc.id}\">Edit</button>
+                <a href=\"/locations/${loc.id}/stand_sheet\" class=\"btn btn-secondary\">Stand Sheet</a>
+                <a href=\"/locations/${loc.id}/items\" class=\"btn btn-outline-secondary\">Manage Items</a>
+                <a href=\"${notesUrl}\" class=\"btn btn-outline-secondary\">Notes</a>
+                <button type=\"button\" class=\"btn btn-warning copy-location-btn\" data-id=\"${loc.id}\">Copy Stand Sheet</button>
+                <form action=\"/locations/delete/${loc.id}\" method=\"post\" class=\"d-inline\">
+                    <input type=\"hidden\" name=\"csrf_token\" value=\"${csrfToken}\">
+                    <button type=\"submit\" class=\"btn btn-danger\">Delete</button>
+                </form>
+            </td>
+        </tr>`;
+        $('#locations-table tbody').append(row);
+        updateLocationBulkButtonState();
+    }
+
+    function updateRow(loc) {
+        const row = $(`tr[data-id='${loc.id}']`);
+        row.find('.col-location-name').text(loc.name);
+        const menuCell = row.find('.col-location-menu');
+        if (loc.menu_name) {
+            menuCell.text(loc.menu_name);
+        } else {
+            menuCell.html('<span class="text-muted">No Menu</span>');
+        }
+        updateLocationBulkButtonState();
+    }
+
+    const locationBulkModalEl = document.getElementById('locationBulkModal');
+    const locationBulkModalBody = locationBulkModalEl ? locationBulkModalEl.querySelector('[data-role="bulk-form"]') : null;
+    const locationBulkModalUrl = locationBulkModalEl ? locationBulkModalEl.getAttribute('data-url') : null;
+
+    function getSelectedLocationIds() {
+        return Array.from(document.querySelectorAll('#locations-table tbody input[name="location_ids"]:checked')).map(cb => cb.value);
+    }
+
+    function getSelectedLocationNames() {
+        return getSelectedLocationIds().map(id => {
+            const row = document.getElementById(`location-row-${id}`);
+            if (!row) {
+                return '';
+            }
+            const nameCell = row.querySelector('.col-location-name');
+            return nameCell ? nameCell.textContent.trim() : '';
+        }).filter(Boolean);
+    }
+
+    function bindBulkLocationForm() {
+        if (!locationBulkModalEl) {
+            return;
+        }
+        const form = locationBulkModalEl.querySelector('form');
+        if (!form) {
+            return;
+        }
+        form.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const formData = new FormData(form);
+            fetch(locationBulkModalUrl, {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        if (Array.isArray(data.rows)) {
+                            data.rows.forEach((row) => {
+                                if (!row || !row.id || !row.html) {
+                                    return;
+                                }
+                                const existingRow = document.getElementById(`location-row-${row.id}`);
+                                let wasChecked = false;
+                                if (existingRow) {
+                                    const checkbox = existingRow.querySelector('input[name="location_ids"]');
+                                    wasChecked = checkbox ? checkbox.checked : false;
+                                    existingRow.outerHTML = row.html;
+                                }
+                                const updatedRow = document.getElementById(`location-row-${row.id}`);
+                                if (updatedRow) {
+                                    const updatedCheckbox = updatedRow.querySelector('input[name="location_ids"]');
+                                    if (updatedCheckbox) {
+                                        if (selectAllLocations && selectAllLocations.checked) {
+                                            updatedCheckbox.checked = true;
+                                        } else if (wasChecked) {
+                                            updatedCheckbox.checked = true;
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                        updateLocationBulkButtonState();
+                        bootstrap.Modal.getOrCreateInstance(locationBulkModalEl).hide();
+                    } else if (data.form_html) {
+                        locationBulkModalBody.innerHTML = data.form_html;
+                        bindBulkLocationForm();
+                    }
+                })
+                .catch(() => {});
+        });
+    }
+
+    if (bulkEditLocationsBtn && locationBulkModalEl && locationBulkModalBody && locationBulkModalUrl) {
+        bulkEditLocationsBtn.addEventListener('click', function(event) {
+            if (event.defaultPrevented || event.button !== 0) {
+                return;
+            }
+            const ids = getSelectedLocationIds();
+            if (!ids.length) {
+                return;
+            }
+            const params = new URLSearchParams();
+            ids.forEach(id => params.append('ids', id));
+            fetch(`${locationBulkModalUrl}?${params.toString()}`, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            })
+                .then(response => response.text())
+                .then(html => {
+                    locationBulkModalBody.innerHTML = html;
+                    bindBulkLocationForm();
+                    bootstrap.Modal.getOrCreateInstance(locationBulkModalEl).show();
+                });
+        });
+    }
+
+    $(document).on('click', '.copy-location-btn', function() {
+        currentSourceId = $(this).data('id');
+        const options = $('#locations-table tbody tr').map(function() {
+            const id = $(this).data('id');
+            const name = $(this).find('.col-location-name').text();
+            if (id === currentSourceId) {
+                return null;
+            }
+            return `<div class="form-check"><input class="form-check-input" type="checkbox" value="${id}" id="copy-${id}"><label class="form-check-label" for="copy-${id}">${name}</label></div>`;
+        }).get().join('');
+        $('#copyLocationList').html(options || '<p class="text-muted">No other locations available.</p>');
+        copyModal.show();
+    });
+
+    $('#copyForm').on('submit', function(e) {
+        e.preventDefault();
+        const ids = $('#copyLocationList input:checked').map(function() {
+            return $(this).val();
+        }).get();
+        if (ids.length === 0) {
+            alert('Please select at least one target location.');
+            return;
+        }
+        $.ajax({
+            url: `/locations/${currentSourceId}/copy_items`,
+            method: 'POST',
+            contentType: 'application/json',
+            headers: { 'X-CSRFToken': csrfToken },
+            data: JSON.stringify({ target_ids: ids }),
+            success: function(resp) {
+                copyModal.hide();
+                alert('Stand sheet copied successfully.');
+            },
+            error: function(xhr) {
+                alert('Error: ' + (xhr.responseJSON?.message || 'Unknown error'));
+            }
+        });
+    });
+});
+</script>
+{% endblock %}
+{% block scripts %}
+    {{ super() }}
+    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='js/stand_sheet_email.js') }}"></script>
+{% endblock %}

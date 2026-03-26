@@ -1,0 +1,156 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1>Sustainability Dashboard - {{ event.name }}</h1>
+    {% if not print_view %}
+    <div class="btn-group" role="group">
+      <a class="btn btn-outline-secondary" href="{{ url_for('event.sustainability_dashboard_csv', event_id=event.id) }}">Export CSV</a>
+      <a class="btn btn-outline-secondary" href="{{ url_for('event.sustainability_dashboard_print', event_id=event.id) }}" target="_blank">Print View</a>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="row mb-4">
+    <div class="col-md-4 mb-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <h5 class="card-title">Total Waste</h5>
+          <p class="display-6">{{ '%.2f'|format(report.totals.waste) }} units</p>
+          <p class="text-muted mb-0">Captured from stand sheet eaten and spoiled entries.</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4 mb-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <h5 class="card-title">Waste Cost</h5>
+          <p class="display-6">${{ '%.2f'|format(report.totals.cost) }}</p>
+          <p class="text-muted mb-0">Based on item costs associated with waste.</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4 mb-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <h5 class="card-title">Carbon Impact</h5>
+          <p class="display-6">{{ '%.2f'|format(report.totals.carbon) }} kg CO₂e</p>
+          <p class="text-muted mb-0">Calculated using configured carbon equivalence factors.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col-lg-8 mb-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <h5 class="card-title">Waste & Carbon by Location</h5>
+          {% if report.location_breakdown %}
+          <canvas id="wasteChart" height="200"></canvas>
+          {% else %}
+          <p class="text-muted mb-0">No stand sheet data yet. Encourage stands to submit closing sheets to populate this dashboard.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4 mb-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <h5 class="card-title">Waste Reduction Goal</h5>
+          {% if report.goal.target %}
+          <p class="mb-1">Target: {{ '%.2f'|format(report.goal.target) }} units</p>
+          <p class="mb-1">Remaining: {{ '%.2f'|format(report.goal.remaining) if report.goal.remaining is not none else 'N/A' }}</p>
+          {% if report.goal.progress_pct is not none %}
+          <div class="progress mb-2" style="height: 1.25rem;">
+            <div class="progress-bar bg-success" role="progressbar" style="width: {{ report.goal.progress_pct }}%;" aria-valuenow="{{ report.goal.progress_pct }}" aria-valuemin="0" aria-valuemax="100">{{ '%.2f'|format(report.goal.progress_pct) }}%</div>
+          </div>
+          {% endif %}
+          <p class="mb-0 {{ 'text-success' if report.goal.met else 'text-danger' }}">{{ 'On track' if report.goal.met else 'Over target' }}</p>
+          {% else %}
+          <p class="text-muted mb-0">Set <code>SUSTAINABILITY_WASTE_GOAL</code> in configuration to track goal progress.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Location Breakdown</h2>
+  <table class="table table-striped">
+    <thead>
+      <tr>
+        <th>Location</th>
+        <th>Waste (units)</th>
+        <th>Cost</th>
+        <th>Carbon (kg CO₂e)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for entry in report.location_breakdown %}
+      <tr>
+        <td>{{ entry.location }}</td>
+        <td>{{ '%.2f'|format(entry.waste) }}</td>
+        <td>${{ '%.2f'|format(entry.cost) }}</td>
+        <td>{{ '%.2f'|format(entry.carbon) }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="4" class="text-center text-muted">No stand sheet items recorded for this event.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Item Waste Leaderboard</h2>
+  <table class="table table-striped">
+    <thead>
+      <tr>
+        <th>Item</th>
+        <th>Waste (units)</th>
+        <th>Cost</th>
+        <th>Carbon (kg CO₂e)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for entry in report.item_leaderboard %}
+      <tr>
+        <td>{{ entry.item }}</td>
+        <td>{{ '%.2f'|format(entry.waste) }}</td>
+        <td>${{ '%.2f'|format(entry.cost) }}</td>
+        <td>{{ '%.2f'|format(entry.carbon) }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="4" class="text-center text-muted">No waste captured at the item level.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if not print_view and report.location_breakdown %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script nonce="{{ csp_nonce }}">
+  const chartPayload = {{ chart_json|safe }};
+  const ctx = document.getElementById('wasteChart');
+  if (ctx && chartPayload.labels.length) {
+    new Chart(ctx, {
+      type: 'bar',
+      data: chartPayload,
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { position: 'bottom' }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: { precision: 0 }
+          }
+        }
+      }
+    });
+  }
+</script>
+{% endif %}
+{% endblock %}

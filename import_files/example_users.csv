@@ -1,0 +1,3 @@
+email,password,is_admin,active
+admin2@example.com,adminpass,1,1
+user@example.com,userpass,0,1

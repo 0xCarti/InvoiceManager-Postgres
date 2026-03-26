@@ -1,0 +1,296 @@
+{% extends 'base.html' %}
+{% from 'macros/column_visibility.html' import column_visibility_dropdown %}
+{% from 'macros/filter_modal.html' import filter_modal %}
+{% block content %}
+<div class="container mt-5">
+<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+    <div>
+        <h2 class="mb-1">Events</h2>
+        <p class="text-muted mb-0">Manage events and monitor sales activity</p>
+    </div>
+    <div>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createEventModal">Create Event</button>
+    </div>
+</div>
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <div class="dropdown d-md-none">
+        <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+            More actions
+        </button>
+        <ul class="dropdown-menu">
+            <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#filterModal">Filter</button></li>
+        </ul>
+    </div>
+    <div class="dropdown">
+        <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+            Reports
+        </button>
+        <ul class="dropdown-menu dropdown-menu-end">
+            <li><a class="dropdown-item" href="{{ url_for('report.event_terminal_sales_report') }}">Event Terminal Sales Report</a></li>
+        </ul>
+    </div>
+    <div>
+        {{ column_visibility_dropdown(
+            table_id='events-table',
+            storage_key='eventsTableColumnVisibility',
+            columns=[
+                {'id': 'toggle-event-name', 'target': 'col-event-name', 'label': 'Name', 'checked': True},
+                {'id': 'toggle-event-type', 'target': 'col-event-type', 'label': 'Type', 'checked': True},
+                {'id': 'toggle-event-start', 'target': 'col-event-start', 'label': 'Start', 'checked': True},
+                {'id': 'toggle-event-end', 'target': 'col-event-end', 'label': 'End', 'checked': True},
+                {'id': 'toggle-event-estimated-sales', 'target': 'col-event-estimated-sales', 'label': 'Estimated Sales', 'checked': True},
+                {'id': 'toggle-event-closed', 'target': 'col-event-closed', 'label': 'Closed', 'checked': True},
+                {'id': 'toggle-event-actions', 'target': 'col-event-actions', 'label': 'Actions', 'checked': True},
+            ]
+        ) }}
+    </div>
+    <button class="btn btn-outline-secondary d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#filterModal">Filter</button>
+</div>
+{% if filter_values.type or filter_values.name_contains or filter_values.name_not_contains or filter_values.date_filter or filter_values.start_date_from or filter_values.start_date_to or filter_values.end_date_from or filter_values.end_date_to or filter_values.closed_status %}
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <span class="text-muted small">Active filters:</span>
+    {% if filter_values.type %}<span class="badge rounded-pill text-bg-light border">Type: {{ filter_values.type }}</span>{% endif %}
+    {% if filter_values.name_contains %}<span class="badge rounded-pill text-bg-light border">Name contains: {{ filter_values.name_contains }}</span>{% endif %}
+    {% if filter_values.name_not_contains %}<span class="badge rounded-pill text-bg-light border">Name not contains: {{ filter_values.name_not_contains }}</span>{% endif %}
+    {% if filter_values.date_filter %}<span class="badge rounded-pill text-bg-light border">Date includes: {{ filter_values.date_filter }}</span>{% endif %}
+    {% if filter_values.start_date_from or filter_values.start_date_to %}
+    <span class="badge rounded-pill text-bg-light border">Start date: {{ filter_values.start_date_from or '...' }} to {{ filter_values.start_date_to or '...' }}</span>
+    {% endif %}
+    {% if filter_values.end_date_from or filter_values.end_date_to %}
+    <span class="badge rounded-pill text-bg-light border">End date: {{ filter_values.end_date_from or '...' }} to {{ filter_values.end_date_to or '...' }}</span>
+    {% endif %}
+    {% if filter_values.closed_status %}<span class="badge rounded-pill text-bg-light border">Status: {{ filter_values.closed_status|capitalize }}</span>{% endif %}
+</div>
+{% endif %}
+<div class="table-responsive">
+<table class="table mt-3 sortable" id="events-table">
+    <thead>
+        <tr>
+            <th scope="col" class="col-event-name">Name</th>
+            <th scope="col" class="col-event-type">Type</th>
+            <th scope="col" class="col-event-start">Start</th>
+            <th scope="col" class="col-event-end">End</th>
+            <th scope="col" class="col-event-estimated-sales">Estimated Sales</th>
+            <th scope="col" class="col-event-closed">Closed</th>
+            <th scope="col" class="col-event-actions">Actions</th>
+        </tr>
+    </thead>
+    <tbody id="events-table-body">
+        {% include 'events/_events_table.html' %}
+    </tbody>
+</table>
+</div>
+
+<!-- Filter Modal -->
+{% call filter_modal(
+    'filterModal',
+    'Filter Events',
+    form_id='filterForm',
+    form_action=url_for('event.filter_events_ajax'),
+    method='post',
+    reset_url=url_for('event.view_events'),
+    ajax=True,
+    scope=request.endpoint
+) %}
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+    <div class="mb-3">
+        <label for="filter-type" class="form-label">Event Type</label>
+        <select name="type" id="filter-type" class="form-control">
+            <option value="">All Types</option>
+            {% for val, label in event_types %}
+                <option value="{{ val }}" {% if filter_values.type == val %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="mb-3">
+        <label for="filter-name-contains" class="form-label">Name Contains</label>
+        <input type="text" name="name_contains" id="filter-name-contains" class="form-control" value="{{ filter_values.name_contains }}" placeholder="e.g. Summer" />
+    </div>
+    <div class="mb-3">
+        <label for="filter-name-not-contains" class="form-label">Name Does Not Contain</label>
+        <input type="text" name="name_not_contains" id="filter-name-not-contains" class="form-control" value="{{ filter_values.name_not_contains }}" placeholder="e.g. Test" />
+    </div>
+    <div class="mb-3">
+        <label for="filter-date" class="form-label">Date Includes</label>
+        <input type="date" name="date_filter" id="filter-date" class="form-control" value="{{ filter_values.date_filter }}" />
+        <div class="form-text">Shows events active on the selected date.</div>
+    </div>
+    <div class="row g-2 mb-3">
+        <div class="col-sm-6">
+            <label for="filter-start-date-from" class="form-label">Start Date From</label>
+            <input type="date" name="start_date_from" id="filter-start-date-from" class="form-control" value="{{ filter_values.start_date_from }}" />
+        </div>
+        <div class="col-sm-6">
+            <label for="filter-start-date-to" class="form-label">Start Date To</label>
+            <input type="date" name="start_date_to" id="filter-start-date-to" class="form-control" value="{{ filter_values.start_date_to }}" />
+        </div>
+    </div>
+    <div class="row g-2 mb-3">
+        <div class="col-sm-6">
+            <label for="filter-end-date-from" class="form-label">End Date From</label>
+            <input type="date" name="end_date_from" id="filter-end-date-from" class="form-control" value="{{ filter_values.end_date_from }}" />
+        </div>
+        <div class="col-sm-6">
+            <label for="filter-end-date-to" class="form-label">End Date To</label>
+            <input type="date" name="end_date_to" id="filter-end-date-to" class="form-control" value="{{ filter_values.end_date_to }}" />
+        </div>
+    </div>
+    <div class="mb-3">
+        <label for="filter-closed-status" class="form-label">Status</label>
+        <select name="closed_status" id="filter-closed-status" class="form-control">
+            <option value="" {% if not filter_values.closed_status %}selected{% endif %}>All</option>
+            <option value="open" {% if filter_values.closed_status == 'open' %}selected{% endif %}>Open</option>
+            <option value="closed" {% if filter_values.closed_status == 'closed' %}selected{% endif %}>Closed</option>
+        </select>
+    </div>
+{% endcall %}
+
+<!-- Create Event Modal -->
+<div class="modal fade" id="createEventModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Create Event</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form id="createEventForm">
+        <div class="modal-body">
+          <div id="createEventErrors" class="alert alert-danger d-none" role="alert"></div>
+          {{ create_form.csrf_token }}
+          {{ create_form.name.label }} {{ create_form.name(class='form-control') }}
+          {{ create_form.start_date.label }} {{ create_form.start_date(class='form-control') }}
+          {{ create_form.end_date.label }} {{ create_form.end_date(class='form-control') }}
+          {{ create_form.event_type.label }} {{ create_form.event_type(class='form-control') }}
+          {{ create_form.estimated_sales.label }} {{ create_form.estimated_sales(class='form-control', placeholder='Optional') }}
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-primary">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script nonce="{{ csp_nonce }}">
+$(function(){
+    function initializeDatePickers(root) {
+        root.querySelectorAll('input[name="start_date"], input[name="end_date"]').forEach((input) => {
+            if (input && !input._flatpickr) {
+                flatpickr(input, {
+                    dateFormat: 'Y-m-d',
+                    altInput: true,
+                    altFormat: 'F j, Y',
+                    allowInput: true
+                });
+            }
+        });
+    }
+
+    function syncDatePickerValues(formElement) {
+        if (!formElement) {
+            return;
+        }
+
+        formElement.querySelectorAll('input[name="start_date"], input[name="end_date"]').forEach((input) => {
+            const picker = input && input._flatpickr;
+            if (!picker) {
+                return;
+            }
+
+            if (picker.selectedDates && picker.selectedDates.length > 0) {
+                input.value = picker.formatDate(
+                    picker.selectedDates[0],
+                    picker.config.dateFormat
+                );
+                return;
+            }
+
+            const altInput = picker.altInput;
+            if (!altInput || !altInput.value) {
+                return;
+            }
+
+            const parsed = picker.parseDate(
+                altInput.value,
+                picker.config.altFormat || picker.config.dateFormat
+            );
+
+            if (parsed) {
+                input.value = picker.formatDate(parsed, picker.config.dateFormat);
+            }
+        });
+    }
+
+    initializeDatePickers(document);
+
+    const createEventModal = document.getElementById('createEventModal');
+    if (createEventModal) {
+        createEventModal.addEventListener('shown.bs.modal', () => {
+            initializeDatePickers(createEventModal);
+        });
+    }
+
+    const filterModalEl = document.querySelector('[data-filter-modal]');
+    const filterFormEl = filterModalEl ? filterModalEl.querySelector('[data-filter-form]') : null;
+    if (filterFormEl) {
+        const $filterForm = $(filterFormEl);
+        $filterForm.on('submit', function(e){
+            e.preventDefault();
+            const action = $filterForm.attr('action') || '{{ url_for('event.filter_events_ajax') }}';
+            $.post(action, $filterForm.serialize(), function(data){
+                $('#events-table-body').html(data);
+                const modal = bootstrap.Modal.getInstance(filterModalEl);
+                if (modal) { modal.hide(); }
+            });
+        });
+    }
+    const $createEventForm = $('#createEventForm');
+    const $createEventErrors = $('#createEventErrors');
+    $createEventForm.on('submit', function(e){
+        e.preventDefault();
+        $createEventErrors.addClass('d-none').empty();
+        syncDatePickerValues($createEventForm[0]);
+
+        $.ajax({
+            url: '{{ url_for('event.create_event_ajax') }}',
+            method: 'POST',
+            data: $createEventForm.serialize(),
+            success: function(row){
+                $('#events-table-body').append(row);
+                const modalEl = document.getElementById('createEventModal');
+                const modal = bootstrap.Modal.getInstance(modalEl);
+                if (modal) { modal.hide(); }
+                $createEventForm[0].reset();
+                const dateInputs = modalEl ? modalEl.querySelectorAll('input[name="start_date"], input[name="end_date"]') : [];
+                dateInputs.forEach((input) => {
+                    if (input && input._flatpickr) {
+                        input._flatpickr.clear();
+                    }
+                });
+            },
+            error: function(xhr){
+                let message = 'Unable to create event. Please review the form and try again.';
+                if (xhr.responseJSON && xhr.responseJSON.errors) {
+                    const errors = xhr.responseJSON.errors;
+                    const parts = [];
+                    Object.values(errors).forEach((msgs) => {
+                        if (Array.isArray(msgs)) {
+                            msgs.forEach((msg) => parts.push(msg));
+                        } else if (msgs) {
+                            parts.push(msgs);
+                        }
+                    });
+                    if (parts.length) {
+                        message = parts.join('<br>');
+                    }
+                } else if (xhr.responseText) {
+                    message = xhr.responseText;
+                }
+                $createEventErrors.html(message).removeClass('d-none');
+            }
+        });
+    });
+});
+</script>
+</div>
+{% endblock %}

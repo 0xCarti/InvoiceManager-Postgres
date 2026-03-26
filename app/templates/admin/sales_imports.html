@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h1 class="mb-1">Sales Imports</h1>
+        <p class="text-muted mb-0">Review staged POS sales imports and their current workflow status.</p>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="get" class="row g-2 align-items-end">
+            <div class="col-sm-4 col-md-3">
+                <label class="form-label" for="status">Status</label>
+                <select class="form-select" id="status" name="status">
+                    <option value="">All statuses</option>
+                    {% for status in available_statuses %}
+                    <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status|replace('_', ' ')|title }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary">Filter</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Imports</span>
+        <span class="badge bg-secondary">{{ imports|length }}</span>
+    </div>
+    <div class="card-body p-0">
+        {% if imports %}
+        <div class="table-responsive">
+            <table class="table table-sm table-striped mb-0 align-middle">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Received</th>
+                        <th>Status</th>
+                        <th>Source</th>
+                        <th>Attachment</th>
+                        <th class="text-end">Locations</th>
+                        <th class="text-end">Rows (excl. totals)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for import in imports %}
+                    <tr>
+                        <td><a href="{{ url_for('admin.sales_import_detail', import_id=import.id) }}">#{{ import.id }}</a></td>
+                        <td>
+                            {% if import.received_at %}
+                            {{ import.received_at.strftime('%Y-%m-%d %H:%M') }}
+                            {% else %}
+                            <span class="text-muted">Unknown</span>
+                            {% endif %}
+                        </td>
+                        <td><span class="badge bg-light text-dark border">{{ import.status|replace('_', ' ')|title }}</span></td>
+                        <td>{{ import.source_provider or 'Unknown' }}</td>
+                        <td class="text-break">{{ import.attachment_filename }}</td>
+                        <td class="text-end">{{ import.locations|length }}</td>
+                        <td class="text-end">{{ import.rows|length }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted p-3 mb-0">No sales imports found for the selected filter.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

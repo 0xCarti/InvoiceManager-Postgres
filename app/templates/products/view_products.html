@@ -1,0 +1,812 @@
+{% extends "base.html" %}
+{% from 'macros/filter_modal.html' import filter_modal %}
+
+{% block title %}View Products{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Products</h2>
+            <p class="text-muted mb-0">Manage product pricing, recipes, and sales configuration</p>
+        </div>
+        <div>
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createProductModal">Create Product</button>
+        </div>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <button type="submit" class="btn btn-warning" form="bulk-cost-form">Set Cost From Recipe</button>
+        <button type="button" class="btn btn-outline-secondary" id="bulkEditProductsBtn" disabled>Bulk Edit</button>
+        <div class="dropdown d-md-none">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                More actions
+            </button>
+            <ul class="dropdown-menu">
+                <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</button></li>
+            </ul>
+        </div>
+        <div class="dropdown">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                Reports
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="{{ url_for('report.product_recipe_report') }}">Recipe Report</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('report.product_sales_report') }}">Revenue Report</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('report.product_stock_usage_report') }}">Stock Usage Report</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('report.department_sales_forecast') }}">Department Sales Forecast</a></li>
+            </ul>
+        </div>
+        <div>
+            <div class="dropdown d-inline-block mb-3 me-2" data-column-visibility data-table-id="product-table" data-storage-key="productTableColumnVisibility">
+                <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="productColumnSelector"
+                    data-bs-toggle="dropdown" aria-expanded="false">
+                    Columns
+                </button>
+                <div class="dropdown-menu dropdown-menu-end p-3" aria-labelledby="productColumnSelector">
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-id"
+                            data-column-target="col-product-id">
+                        <label class="form-check-label" for="toggle-product-column-id">Product ID</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-name"
+                            data-column-target="col-product-name" checked>
+                        <label class="form-check-label" for="toggle-product-column-name">Name</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-price"
+                            data-column-target="col-product-price" checked>
+                        <label class="form-check-label" for="toggle-product-column-price">Terminal/Event Sell Price</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-invoice-price"
+                            data-column-target="col-product-invoice-price" checked>
+                        <label class="form-check-label" for="toggle-product-column-invoice-price">Sales Invoice Price (3rd-party customer)</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-cost"
+                            data-column-target="col-product-cost" checked>
+                        <label class="form-check-label" for="toggle-product-column-cost">Cost</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-food-cost"
+                            data-column-target="col-product-food-cost" checked>
+                        <label class="form-check-label" for="toggle-product-column-food-cost">Food Cost %</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-last-sold"
+                            data-column-target="col-product-last-sold" checked>
+                        <label class="form-check-label" for="toggle-product-column-last-sold">Last Sold</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-quantity"
+                            data-column-target="col-product-quantity">
+                        <label class="form-check-label" for="toggle-product-column-quantity">Quantity</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-profit"
+                            data-column-target="col-product-profit">
+                        <label class="form-check-label" for="toggle-product-column-profit">Profit</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-sales-gl"
+                            data-column-target="col-product-sales-gl-code">
+                        <label class="form-check-label" for="toggle-product-column-sales-gl">Sales GL Code</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-sales-gl-desc"
+                            data-column-target="col-product-sales-gl-desc">
+                        <label class="form-check-label" for="toggle-product-column-sales-gl-desc">Sales GL Description</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-gl-code"
+                            data-column-target="col-product-gl-code">
+                        <label class="form-check-label" for="toggle-product-column-gl-code">Inventory GL Code</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-gl-desc"
+                            data-column-target="col-product-gl-desc">
+                        <label class="form-check-label" for="toggle-product-column-gl-desc">Inventory GL Description</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-locations"
+                            data-column-target="col-product-locations">
+                        <label class="form-check-label" for="toggle-product-column-locations">Locations</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-recipe-count"
+                            data-column-target="col-product-recipe-count">
+                        <label class="form-check-label" for="toggle-product-column-recipe-count">Recipe Item Count</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-recipe-details"
+                            data-column-target="col-product-recipe-details">
+                        <label class="form-check-label" for="toggle-product-column-recipe-details">Recipe Details</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <button type="button" class="btn btn-outline-secondary d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</button>
+    </div>
+
+    <!-- Edit Product Modal -->
+    <div class="modal fade" id="editProductModal" tabindex="-1" aria-labelledby="editProductModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editProductModalLabel">Edit Product</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" data-role="edit-product-body"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter Modal -->
+    {% call filter_modal(
+        'filterModal',
+        'Filters',
+        form_id='filter-form',
+        form_action=url_for('product.view_products'),
+        method='get',
+        reset_url=url_for('product.view_products', reset=1),
+        dialog_class='modal-lg',
+        scope=request.endpoint
+    ) %}
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
+                <label for="name_query" class="form-label">Name</label>
+                <input type="text" id="name_query" name="name_query" class="form-control" placeholder="Search name" value="{{ name_query or '' }}">
+            </div>
+            <div class="col-md-6">
+                <label for="match_mode" class="form-label">Match Mode</label>
+                <select id="match_mode" name="match_mode" class="form-select">
+                    <option value="exact" {% if match_mode == 'exact' %}selected{% endif %}>Exact</option>
+                    <option value="startswith" {% if match_mode == 'startswith' %}selected{% endif %}>Starts with</option>
+                    <option value="contains" {% if match_mode == 'contains' %}selected{% endif %}>Contains</option>
+                    <option value="not_contains" {% if match_mode == 'not_contains' %}selected{% endif %}>Does not contain</option>
+                </select>
+            </div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
+                <label for="sales_gl_code_id" class="form-label">Sales GL Code</label>
+                <select id="sales_gl_code_id" name="sales_gl_code_id" class="form-select" multiple>
+                    <option value="" {% if not sales_gl_code_ids %}selected{% endif %}>All Sales GL Codes</option>
+                    {% for gl in sales_gl_codes %}
+                    <option value="{{ gl.id }}" {% if gl.id in sales_gl_code_ids %}selected{% endif %}>{{ gl.code }} - {{ gl.description }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label for="customer_id" class="form-label">Customer</label>
+                <select id="customer_id" name="customer_id" class="form-select">
+                    <option value="" {% if not customer_id %}selected{% endif %}>All Customers</option>
+                    {% for cust in customers %}
+                    <option value="{{ cust.id }}" {% if cust.id == customer_id %}selected{% endif %}>{{ cust.first_name }} {{ cust.last_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
+                <label for="cost_min" class="form-label">Cost ≥</label>
+                <input type="number" step="0.01" id="cost_min" name="cost_min" class="form-control" value="{{ cost_min if cost_min is not none else '' }}">
+            </div>
+            <div class="col-md-6">
+                <label for="cost_max" class="form-label">Cost ≤</label>
+                <input type="number" step="0.01" id="cost_max" name="cost_max" class="form-control" value="{{ cost_max if cost_max is not none else '' }}">
+            </div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
+                <label for="price_min" class="form-label">Price ≥</label>
+                <input type="number" step="0.01" id="price_min" name="price_min" class="form-control" value="{{ price_min if price_min is not none else '' }}">
+            </div>
+            <div class="col-md-6">
+                <label for="price_max" class="form-label">Price ≤</label>
+                <input type="number" step="0.01" id="price_max" name="price_max" class="form-control" value="{{ price_max if price_max is not none else '' }}">
+            </div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
+                <label for="last_sold_before" class="form-label">Last Sold Before</label>
+                <input type="text" id="last_sold_before" name="last_sold_before" class="form-control"
+                    placeholder="YYYY-MM-DD" value="{{ last_sold_before or '' }}">
+            </div>
+            <div class="col-md-6 d-flex align-items-end">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="include_unsold" name="include_unsold" value="1" {% if include_unsold %}checked{% endif %}>
+                    <label class="form-check-label" for="include_unsold">Include Unsold</label>
+                </div>
+            </div>
+        </div>
+    {% endcall %}
+
+    <!-- Create Product Modal -->
+    <div class="modal fade" id="createProductModal" tabindex="-1" aria-labelledby="createProductModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="createProductModalLabel">Create Product</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    {% set form_action = url_for('product.ajax_create_product') %}
+                    {% set form_id = 'create-product-form' %}
+                    {% include 'products/_create_product_form.html' %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal fade" id="productBulkModal" tabindex="-1" aria-hidden="true" data-url="{{ url_for('product.bulk_update_products') }}">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Bulk Edit Products</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" data-role="bulk-form"></div>
+            </div>
+        </div>
+    </div>
+    {% if selected_sales_gl_codes or selected_customer %}
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="text-muted small">Active filters:</span>
+        {% if selected_sales_gl_codes %}
+        <span class="badge rounded-pill text-bg-light border">Sales GL Code: {{ selected_sales_gl_codes | map(attribute='code') | join(', ') }}</span>
+        {% endif %}
+        {% if selected_customer %}
+        <span class="badge rounded-pill text-bg-light border">Customer: {{ selected_customer.first_name }} {{ selected_customer.last_name }}</span>
+        {% endif %}
+    </div>
+    {% endif %}
+    <form id="bulk-cost-form" action="{{ url_for('product.bulk_set_cost_from_recipe') }}" method="post">
+        {{ bulk_cost_form.hidden_tag() }}
+        <div class="table-responsive">
+        <table class="table sortable" id="product-table">
+        <thead>
+            <tr>
+                <th class="col-select"><input type="checkbox" id="select-all-products" style="transform: scale(1.5);"></th>
+                <th class="col-product-id" data-type="number">ID</th>
+                <th class="col-product-name">Name</th>
+                <th class="col-product-price" data-type="number">Terminal/Event Sell Price</th>
+                <th class="col-product-invoice-price" data-type="number">Sales Invoice Price (3rd-party customer)</th>
+                <th class="col-product-cost" data-type="number">Cost</th>
+                <th class="col-product-food-cost" data-type="number">Food Cost %</th>
+                <th class="col-product-last-sold">Last Sold</th>
+                <th class="col-product-quantity" data-type="number">Quantity</th>
+                <th class="col-product-profit" data-type="number">Profit</th>
+                <th class="col-product-sales-gl-code">Sales GL Code</th>
+                <th class="col-product-sales-gl-desc">Sales GL Description</th>
+                <th class="col-product-gl-code">Inventory GL Code</th>
+                <th class="col-product-gl-desc">Inventory GL Description</th>
+                <th class="col-product-locations">Locations</th>
+                <th class="col-product-recipe-count" data-type="number">Recipe Item Count</th>
+                <th class="col-product-recipe-details">Recipe Details</th>
+                <th class="col-product-actions">Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for product in products.items %}
+            {% include 'products/_product_row.html' %}
+            {% endfor %}
+        </tbody>
+        </table>
+        </div>
+    </form>
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
+        <nav aria-label="Product pagination">
+            <ul class="pagination mb-0">
+                <li class="page-item {% if not products.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('product.view_products', page=products.prev_num if products.has_prev else 1, **pagination_args) }}"{% if not products.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link">Page {{ products.page }} of {{ products.pages }}</span>
+                </li>
+                <li class="page-item {% if not products.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('product.view_products', page=products.next_num if products.has_next else products.pages or 1, **pagination_args) }}"{% if not products.has_next %} tabindex="-1" aria-disabled="true"{% endif %}>Next</a>
+                </li>
+            </ul>
+        </nav>
+        <form method="get" class="d-flex align-items-center gap-2">
+            {% for key, values in request.args.lists() %}
+                {% if key not in ['page', 'per_page'] %}
+                    {% for value in values %}
+                        <input type="hidden" name="{{ key }}" value="{{ value }}">
+                    {% endfor %}
+                {% endif %}
+            {% endfor %}
+            <input type="hidden" name="page" value="1">
+            <label for="products-per-page" class="form-label mb-0">Rows per page</label>
+            <select id="products-per-page" name="per_page" class="form-select js-auto-submit">
+                {% for option in PAGINATION_SIZES %}
+                    <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+</div>
+<div class="modal fade" id="productMenusModal" tabindex="-1" aria-labelledby="productMenusModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="productMenusModalLabel">Menus</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" data-list-container="menus"></div>
+        </div>
+    </div>
+</div>
+<div class="modal fade" id="productLocationsModal" tabindex="-1" aria-labelledby="productLocationsModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="productLocationsModalLabel">Locations</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" data-list-container="locations"></div>
+        </div>
+    </div>
+</div>
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('DOMContentLoaded', function() {
+    function initializeLastSoldBeforePicker(root) {
+        const context = root || document;
+        if (typeof flatpickr !== 'function') {
+            return;
+        }
+        const input = context.querySelector('#last_sold_before');
+        if (!input) {
+            return;
+        }
+        if (!input._flatpickr) {
+            flatpickr(input, {
+                dateFormat: 'Y-m-d',
+                altInput: true,
+                altFormat: 'F j, Y',
+                allowInput: true,
+                defaultDate: input.value || null
+            });
+            return;
+        }
+        const picker = input._flatpickr;
+        if (input.value) {
+            picker.setDate(input.value, false, 'Y-m-d');
+        } else {
+            const altInput = picker.altInput;
+            const altValue = altInput ? altInput.value.trim() : '';
+            if (altValue) {
+                const parsed = picker.parseDate(altValue, picker.config.altFormat || picker.config.dateFormat);
+                if (parsed) {
+                    picker.setDate(parsed, false);
+                }
+            }
+            if (!picker.selectedDates || !picker.selectedDates.length) {
+                picker.clear();
+            }
+        }
+
+        if (picker.selectedDates && picker.selectedDates.length) {
+            input.value = picker.formatDate(picker.selectedDates[0], picker.config.dateFormat);
+        } else {
+            input.value = '';
+            if (picker.altInput) {
+                picker.altInput.value = '';
+            }
+        }
+    }
+
+    initializeLastSoldBeforePicker(document);
+
+    const filterModalEl = document.querySelector('[data-filter-modal]');
+    if (filterModalEl) {
+        filterModalEl.addEventListener('shown.bs.modal', function() {
+            initializeLastSoldBeforePicker(filterModalEl);
+        });
+    }
+
+    const bulkEditProductsBtn = document.getElementById('bulkEditProductsBtn');
+    function updateBulkProductsButtonState() {
+        if (!bulkEditProductsBtn) {
+            return;
+        }
+        const selectedCount = document.querySelectorAll('#product-table tbody input[name="product_ids"]:checked').length;
+        bulkEditProductsBtn.disabled = selectedCount === 0;
+    }
+
+    window.updateProductBulkButtonState = updateBulkProductsButtonState;
+
+    const selectAllProducts = document.getElementById('select-all-products');
+    if (selectAllProducts) {
+        selectAllProducts.addEventListener('click', function() {
+            document.querySelectorAll('#product-table tbody input[type="checkbox"][name="product_ids"]').forEach(cb => {
+                cb.checked = selectAllProducts.checked;
+            });
+            updateBulkProductsButtonState();
+        });
+    }
+
+    document.addEventListener('change', function(event) {
+        if (event.target && event.target.matches('#product-table tbody input[name="product_ids"]')) {
+            updateBulkProductsButtonState();
+        }
+    });
+
+    updateBulkProductsButtonState();
+
+    const salesGlSelect = document.getElementById('sales_gl_code_id');
+    if (salesGlSelect) {
+        const emptyOption = salesGlSelect.querySelector('option[value=""]');
+        const syncSalesGlSelectionState = () => {
+            const hasNonEmptySelection = Array.from(salesGlSelect.selectedOptions || [])
+                .some(option => option.value.trim() !== '');
+            if (hasNonEmptySelection) {
+                if (emptyOption) {
+                    emptyOption.selected = false;
+                }
+            } else if (emptyOption) {
+                emptyOption.selected = true;
+            }
+        };
+        salesGlSelect.addEventListener('change', () => {
+            syncSalesGlSelectionState();
+        });
+        syncSalesGlSelectionState();
+    }
+
+    const form = document.getElementById('create-product-form');
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(form);
+            fetch('{{ url_for('product.validate_product_form') }}', {
+                method: 'POST',
+                body: formData,
+                credentials: 'same-origin'
+            }).then(resp => resp.json()).then(data => {
+                if (data.success) {
+                    fetch('{{ url_for('product.ajax_create_product') }}', {
+                        method: 'POST',
+                        body: new FormData(form),
+                        credentials: 'same-origin'
+                    }).then(r => r.json()).then(res => {
+                        if (res.success) {
+                            document.querySelector('#product-table tbody').insertAdjacentHTML('beforeend', res.html);
+                            if (selectAllProducts && selectAllProducts.checked) {
+                                const lastRowCheckbox = document.querySelector('#product-table tbody tr:last-child input[type="checkbox"][name="product_ids"]');
+                                if (lastRowCheckbox) {
+                                    lastRowCheckbox.checked = true;
+                                }
+                            }
+                            if (typeof updateBulkProductsButtonState === 'function') {
+                                updateBulkProductsButtonState();
+                            }
+                            form.reset();
+                            const modalEl = document.getElementById('createProductModal');
+                            bootstrap.Modal.getInstance(modalEl).hide();
+                        } else {
+                            alert(JSON.stringify(res.errors));
+                        }
+                    });
+                } else {
+                    alert(JSON.stringify(data.errors));
+                }
+            });
+        });
+    }
+
+    const productBulkModalEl = document.getElementById('productBulkModal');
+    const productBulkModalBody = productBulkModalEl ? productBulkModalEl.querySelector('[data-role="bulk-form"]') : null;
+    const productBulkModalUrl = productBulkModalEl ? productBulkModalEl.getAttribute('data-url') : null;
+
+    function getSelectedProductIds() {
+        return Array.from(document.querySelectorAll('#product-table tbody input[name="product_ids"]:checked')).map(cb => cb.value);
+    }
+
+    function bindBulkProductForm() {
+        if (!productBulkModalEl) {
+            return;
+        }
+        const bulkForm = productBulkModalEl.querySelector('form');
+        if (!bulkForm) {
+            return;
+        }
+        bulkForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const formData = new FormData(bulkForm);
+            fetch(productBulkModalUrl, {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        if (Array.isArray(data.rows)) {
+                            data.rows.forEach((row) => {
+                                if (!row || !row.id || !row.html) {
+                                    return;
+                                }
+                                const existingRow = document.getElementById(`product-row-${row.id}`);
+                                let wasChecked = false;
+                                if (existingRow) {
+                                    const checkbox = existingRow.querySelector('input[name="product_ids"]');
+                                    wasChecked = checkbox ? checkbox.checked : false;
+                                    existingRow.outerHTML = row.html;
+                                }
+                                const updatedRow = document.getElementById(`product-row-${row.id}`);
+                                if (updatedRow) {
+                                    const updatedCheckbox = updatedRow.querySelector('input[name="product_ids"]');
+                                    if (updatedCheckbox) {
+                                        if (selectAllProducts && selectAllProducts.checked) {
+                                            updatedCheckbox.checked = true;
+                                        } else if (wasChecked) {
+                                            updatedCheckbox.checked = true;
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                        if (typeof updateBulkProductsButtonState === 'function') {
+                            updateBulkProductsButtonState();
+                        }
+                        bootstrap.Modal.getOrCreateInstance(productBulkModalEl).hide();
+                    } else if (data.form_html) {
+                        productBulkModalBody.innerHTML = data.form_html;
+                        bindBulkProductForm();
+                    }
+                })
+                .catch(() => {});
+        });
+    }
+
+    if (bulkEditProductsBtn && productBulkModalEl && productBulkModalBody && productBulkModalUrl) {
+        bulkEditProductsBtn.addEventListener('click', function(event) {
+            if (event.defaultPrevented || event.button !== 0) {
+                return;
+            }
+            const ids = getSelectedProductIds();
+            if (!ids.length) {
+                return;
+            }
+            const params = new URLSearchParams();
+            ids.forEach(id => params.append('ids', id));
+            fetch(`${productBulkModalUrl}?${params.toString()}`, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            })
+                .then(response => response.text())
+                .then(html => {
+                    productBulkModalBody.innerHTML = html;
+                    bindBulkProductForm();
+                    bootstrap.Modal.getOrCreateInstance(productBulkModalEl).show();
+                });
+        });
+    }
+
+    const scriptNonce = {{ csp_nonce | tojson }};
+    const editProductModalEl = document.getElementById('editProductModal');
+    const editProductModalBody = editProductModalEl ? editProductModalEl.querySelector('[data-role="edit-product-body"]') : null;
+
+    function updateEditProductModalBody(html) {
+        if (!editProductModalBody) {
+            return;
+        }
+        const template = document.createElement('template');
+        template.innerHTML = html || '';
+        const fragment = template.content;
+        const scripts = fragment.querySelectorAll('script');
+        scripts.forEach((originalScript) => {
+            const newScript = document.createElement('script');
+            Array.from(originalScript.attributes).forEach((attr) => {
+                if (attr.name.toLowerCase() === 'nonce') {
+                    return;
+                }
+                newScript.setAttribute(attr.name, attr.value);
+            });
+            if (originalScript.src) {
+                const srcValue = originalScript.src;
+                const alreadyLoaded = Array.from(document.querySelectorAll('script[src]'))
+                    .some((scriptEl) => scriptEl.src === srcValue);
+                if (!alreadyLoaded) {
+                    if (scriptNonce) {
+                        newScript.setAttribute('nonce', scriptNonce);
+                    }
+                    newScript.src = srcValue;
+                    document.head.appendChild(newScript);
+                }
+                originalScript.remove();
+                return;
+            }
+            newScript.textContent = originalScript.textContent;
+            if (scriptNonce) {
+                newScript.setAttribute('nonce', scriptNonce);
+            }
+            originalScript.replaceWith(newScript);
+        });
+        editProductModalBody.innerHTML = '';
+        editProductModalBody.appendChild(fragment);
+    }
+
+    function bindEditProductForm(actionUrl) {
+        if (!editProductModalEl) {
+            return;
+        }
+        const formEl = editProductModalEl.querySelector('form[data-role="product-form"]');
+        if (!formEl || formEl.dataset.bound === 'true') {
+            return;
+        }
+        formEl.dataset.bound = 'true';
+        formEl.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(formEl);
+            fetch(actionUrl, {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                body: formData,
+            }).then(response => {
+                return response.json().then(data => ({ ok: response.ok, data }));
+            }).then(({ ok, data }) => {
+                if (ok && data.success) {
+                    const productId = data.product_id;
+                    const existingRow = document.getElementById(`product-row-${productId}`);
+                    let wasChecked = false;
+                    if (existingRow) {
+                        const existingCheckbox = existingRow.querySelector('input[name="product_ids"]');
+                        wasChecked = existingCheckbox ? existingCheckbox.checked : false;
+                        existingRow.outerHTML = data.row_html;
+                    }
+                    const updatedRow = document.getElementById(`product-row-${productId}`);
+                    if (updatedRow) {
+                        const updatedCheckbox = updatedRow.querySelector('input[name="product_ids"]');
+                        if (updatedCheckbox) {
+                            if (selectAllProducts && selectAllProducts.checked) {
+                                updatedCheckbox.checked = true;
+                            } else {
+                                updatedCheckbox.checked = wasChecked;
+                            }
+                        }
+                    }
+                    if (typeof updateBulkProductsButtonState === 'function') {
+                        updateBulkProductsButtonState();
+                    }
+                    const modalInstance = bootstrap.Modal.getInstance(editProductModalEl);
+                    if (modalInstance) {
+                        modalInstance.hide();
+                    }
+                } else if (data && data.form_html) {
+                    updateEditProductModalBody(data.form_html);
+                    bindEditProductForm(actionUrl);
+                } else {
+                    throw new Error('Invalid response');
+                }
+            }).catch(() => {
+                window.location.href = actionUrl;
+            });
+        });
+    }
+
+    const productTableEl = document.getElementById('product-table');
+    if (productTableEl && editProductModalEl) {
+        productTableEl.addEventListener('click', function(event) {
+            const target = event.target.closest('.edit-product-link');
+            if (!target) {
+                return;
+            }
+            if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                return;
+            }
+            event.preventDefault();
+            const url = target.getAttribute('href');
+            fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to load');
+                    }
+                    return response.text();
+                })
+                .then(html => {
+                    updateEditProductModalBody(html);
+                    const modalInstance = bootstrap.Modal.getOrCreateInstance(editProductModalEl);
+                    modalInstance.show();
+                    bindEditProductForm(url);
+                })
+                .catch(() => {
+                    window.location.href = url;
+                });
+        });
+    }
+
+    if (editProductModalEl && editProductModalBody) {
+        editProductModalEl.addEventListener('hidden.bs.modal', function() {
+            editProductModalBody.innerHTML = '';
+        });
+    }
+
+    function renderLinkedList(container, items, emptyText) {
+        container.innerHTML = '';
+        if (!items || !items.length) {
+            const message = document.createElement('p');
+            message.className = 'mb-0 text-muted';
+            message.textContent = emptyText;
+            container.appendChild(message);
+            return;
+        }
+        const list = document.createElement('ul');
+        list.className = 'list-unstyled mb-0';
+        items.forEach(item => {
+            if (!item || !item.name || !item.url) {
+                return;
+            }
+            const li = document.createElement('li');
+            const link = document.createElement('a');
+            link.href = item.url;
+            link.textContent = item.name;
+            link.className = 'link-primary';
+            li.appendChild(link);
+            list.appendChild(li);
+        });
+        if (!list.childElementCount) {
+            const message = document.createElement('p');
+            message.className = 'mb-0 text-muted';
+            message.textContent = emptyText;
+            container.appendChild(message);
+            return;
+        }
+        container.appendChild(list);
+    }
+
+    const productMenusModal = document.getElementById('productMenusModal');
+    if (productMenusModal) {
+        productMenusModal.addEventListener('show.bs.modal', function(event) {
+            const button = event.relatedTarget;
+            if (!button) {
+                return;
+            }
+            const menusRaw = button.getAttribute('data-product-menus') || '[]';
+            let menus = [];
+            try {
+                menus = JSON.parse(menusRaw);
+            } catch (err) {
+                menus = [];
+            }
+            const productName = button.getAttribute('data-product-name') || '';
+            const title = productMenusModal.querySelector('.modal-title');
+            if (title) {
+                title.textContent = productName ? `Menus for ${productName}` : 'Menus';
+            }
+            const container = productMenusModal.querySelector('[data-list-container]');
+            if (container) {
+                renderLinkedList(container, menus, 'This product is not assigned to any menus.');
+            }
+        });
+    }
+
+    const productLocationsModal = document.getElementById('productLocationsModal');
+    if (productLocationsModal) {
+        productLocationsModal.addEventListener('show.bs.modal', function(event) {
+            const button = event.relatedTarget;
+            if (!button) {
+                return;
+            }
+            const locationsRaw = button.getAttribute('data-product-locations') || '[]';
+            let locations = [];
+            try {
+                locations = JSON.parse(locationsRaw);
+            } catch (err) {
+                locations = [];
+            }
+            const productName = button.getAttribute('data-product-name') || '';
+            const title = productLocationsModal.querySelector('.modal-title');
+            if (title) {
+                title.textContent = productName ? `Locations for ${productName}` : 'Locations';
+            }
+            const container = productLocationsModal.querySelector('[data-list-container]');
+            if (container) {
+                renderLinkedList(container, locations, 'This product is not assigned to any locations.');
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,16 @@
+{% set menu_help_text = menu_help_text if menu_help_text is defined else None %}
+<div class="mb-3">
+    {{ form.name.label(class="form-label") }}
+    {{ form.name(class="form-control") }}
+</div>
+<div class="mb-3">
+    {{ form.menu_id.label(class="form-label") }}
+    {{ form.menu_id(class="form-select") }}
+    {% if menu_help_text %}
+    <div class="form-text">{{ menu_help_text }}</div>
+    {% endif %}
+</div>
+<div class="form-check mb-3">
+    {{ form.is_spoilage(class="form-check-input") }}
+    {{ form.is_spoilage.label(class="form-check-label") }}
+</div>

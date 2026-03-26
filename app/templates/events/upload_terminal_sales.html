@@ -1,0 +1,863 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Upload Terminal Sales for {{ event.name }}</h2>
+
+{% set wizard_stage = wizard_stage if wizard_stage is defined else 'upload' %}
+{% set resolving_issues = wizard_stage == 'menus' and current_issue is defined and current_issue %}
+{% set issue_total = issue_total if issue_total is defined else 0 %}
+{% set countable_products = countable_products if countable_products is defined else [] %}
+{% set countable_item_options = countable_item_options if countable_item_options is defined else [] %}
+{% set countable_selection_errors = countable_selection_errors if countable_selection_errors is defined else [] %}
+{% set product_mapping_preview = product_mapping_preview | default([]) %}
+{% set menu_candidates = menu_candidates if menu_candidates is defined else [] %}
+{% set menu_candidate_selection = menu_candidate_selection if menu_candidate_selection is defined else {} %}
+
+{% set stage_order = [
+    {'id': 'upload', 'label': 'Upload File'},
+    {'id': 'locations', 'label': 'Map Locations'},
+    {'id': 'products', 'label': 'Match Products'},
+    {'id': 'menus', 'label': 'Assign Menus'}
+] %}
+{% set stage_index = 1 %}
+{% for step in stage_order %}
+    {% if step.id == wizard_stage %}
+        {% set stage_index = loop.index %}
+    {% endif %}
+{% endfor %}
+
+{% if wizard_stage != 'upload' %}
+    <div class="mb-4" aria-label="Terminal sales upload steps">
+        <div class="d-flex flex-wrap align-items-center gap-3">
+            {% for step in stage_order %}
+                {% set is_active = loop.index == stage_index %}
+                {% set is_complete = loop.index < stage_index %}
+                {% set badge_classes = 'badge rounded-pill me-2' %}
+                {% if is_active %}
+                    {% set badge_classes = badge_classes ~ ' bg-primary' %}
+                {% elif is_complete %}
+                    {% set badge_classes = badge_classes ~ ' bg-success' %}
+                {% else %}
+                    {% set badge_classes = badge_classes ~ ' bg-secondary' %}
+                {% endif %}
+                {% set label_classes = 'mb-0' %}
+                {% if is_active %}
+                    {% set label_classes = label_classes ~ ' fw-semibold text-primary' %}
+                {% elif is_complete %}
+                    {% set label_classes = label_classes ~ ' text-success' %}
+                {% else %}
+                    {% set label_classes = label_classes ~ ' text-muted' %}
+                {% endif %}
+                <div class="d-flex align-items-center">
+                    <span class="{{ badge_classes }}">{{ loop.index }}</span>
+                    <span class="{{ label_classes }}">{{ step.label }}</span>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="alert alert-info">
+        {% if resolving_issues %}
+            <p class="mb-0">
+                Resolve the discrepancies detected in the uploaded terminal sales
+                before importing them. Each location must be handled separately.
+            </p>
+        {% elif wizard_stage == 'products' %}
+            <p class="mb-0">
+                Match any unknown products from the uploaded file to products in
+                the app or choose to skip them. Use the buttons below to update
+                each product, or go back to adjust your location selections.
+            </p>
+        {% else %}
+            <p class="mb-0">
+                Review the sales locations detected in the uploaded file and link
+                them to the open event locations below. A blank selection will skip
+                updating that event location.
+            </p>
+        {% endif %}
+    </div>
+    {% if mapping_filename %}
+        <p><strong>Source file:</strong> {{ mapping_filename }}</p>
+    {% endif %}
+    {% if sales_location_names %}
+        {% if not resolving_issues and wizard_stage == 'locations' %}
+            <div class="mb-3">
+                <button type="button"
+                        class="btn btn-outline-secondary btn-sm"
+                        data-role="toggle-sales-summary"
+                        data-show-text="Show sales summary"
+                        data-hide-text="Hide sales summary"
+                        aria-controls="sales-summary-panel"
+                        aria-expanded="false">
+                    Show sales summary
+                </button>
+            </div>
+        {% endif %}
+        <div class="mb-4 {% if not resolving_issues %}d-none{% endif %}"
+             id="sales-summary-panel"
+             data-role="sales-summary-panel">
+            {% if not resolving_issues %}
+                <div class="alert alert-secondary">
+                    <strong>Detected sales locations:</strong>
+                    {{ sales_location_names | join(', ') }}
+                </div>
+            {% endif %}
+            <div class="table-responsive">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th scope="col">Sales Location</th>
+                            <th scope="col">Total Quantity</th>
+                            <th scope="col">Total Amount</th>
+                            <th scope="col">Products</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for location_name in sales_location_names %}
+                            {% set data = sales_summary[location_name] %}
+                            <tr>
+                                <th scope="row">{{ location_name }}</th>
+                                <td>{{ '%.2f'|format(data.total) }}</td>
+                                <td>
+                                    {% if data.total_amount %}
+                                        {{ '%.2f'|format(data.total_amount) }}
+                                    {% else %}
+                                        &mdash;
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <ul class="mb-0 ps-3">
+                                        {% for product_name, info in data.products.items() %}
+                                            <li>
+                                                {{ product_name }} &mdash; {{ '%.2f'|format(info.quantity) }}
+                                                {% if info.prices %}
+                                                    @ $
+                                                    {% for price in info.prices %}
+                                                        {{ '%.2f'|format(price) }}{% if not loop.last %}, {% endif %}
+                                                    {% endfor %}
+                                                {% endif %}
+                                                {% if info.amount %}
+                                                    <span class="text-muted">(Total ${{ '%.2f'|format(info.amount) }})</span>
+                                                {% endif %}
+                                            </li>
+                                        {% endfor %}
+                                    </ul>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+
+    {% if resolving_issues %}
+        {% set current_step = issue_index + 1 %}
+        {% set unresolved_prices = current_issue.price_issues | selectattr('resolution', 'equalto', None) | list %}
+        {% set unresolved_menu = current_issue.menu_issues | selectattr('resolution', 'equalto', None) | list %}
+        {% set unresolved_total = unresolved_prices|length + unresolved_menu|length %}
+        <div class="alert alert-warning">
+            <p class="mb-1">
+                Resolving issues for <strong>{{ current_issue.location_name }}</strong>
+                (file location "{{ current_issue.sales_location }}").
+            </p>
+            <p class="mb-0">
+                Location {{ current_step }} of {{ issue_total }}. Remaining locations:
+                {{ remaining_locations if remaining_locations > 0 else 0 }}.
+            </p>
+        </div>
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="step" value="resolve">
+            <input type="hidden" name="payload" value="{{ mapping_payload }}">
+            <input type="hidden" name="state_token" value="{{ state_token }}">
+            <input type="hidden" name="mapping_filename" value="{{ mapping_filename }}">
+            {% if current_issue.price_issues %}
+                <div class="card mb-3">
+                    <div class="card-header">Price Differences</div>
+                    <div class="card-body">
+                        {% for issue in current_issue.price_issues %}
+                            <div class="mb-3">
+                                <h6 class="mb-1">{{ issue.product }}</h6>
+                                <p class="mb-1">
+                                    <span class="fw-semibold">Terminal price from POS:</span>
+                                    {% if issue.terminal_price is not none %}
+                                        ${{ '%.2f'|format(issue.terminal_price) }}
+                                    {% elif issue.file_prices %}
+                                        {% for price in issue.file_prices %}
+                                            ${{ '%.2f'|format(price) }}{% if not loop.last %}, {% endif %}
+                                        {% endfor %}
+                                    {% else %}
+                                        <span class="text-muted">Not provided</span>
+                                    {% endif %}
+                                </p>
+                                <p class="mb-2">
+                                    <span class="fw-semibold">Catalog price in app:</span>
+                                    {% if issue.catalog_price is not none %}
+                                        ${{ '%.2f'|format(issue.catalog_price) }}
+                                    {% elif issue.app_price is not none %}
+                                        ${{ '%.2f'|format(issue.app_price) }}
+                                    {% else %}
+                                        <span class="text-muted">Not set</span>
+                                    {% endif %}
+                                </p>
+                                {% if issue.resolution == 'update' %}
+                                    <span class="badge bg-success">
+                                        Using terminal price
+                                        {% if issue.selected_price is not none %}
+                                            (${{ '%.2f'|format(issue.selected_price) }})
+                                        {% endif %}
+                                    </span>
+                                {% elif issue.resolution == 'skip' %}
+                                    <span class="badge bg-secondary">
+                                        Keeping catalog price
+                                        {% if issue.catalog_price is not none %}
+                                            (${{ '%.2f'|format(issue.catalog_price) }})
+                                        {% endif %}
+                                    </span>
+                                {% else %}
+                                    <div class="btn-group" role="group" aria-label="Price resolution">
+                                        <button type="submit"
+                                                class="btn btn-sm btn-primary"
+                                                name="action"
+                                                value="price:{{ issue.product_id }}:update"
+                                                {% if issue.terminal_price is none %}disabled{% endif %}>
+                                            Use terminal price
+                                            {% if issue.terminal_price is not none %}
+                                                (${{ '%.2f'|format(issue.terminal_price) }})
+                                            {% endif %}
+                                        </button>
+                                        <button type="submit"
+                                                class="btn btn-sm btn-outline-secondary"
+                                                name="action"
+                                                value="price:{{ issue.product_id }}:skip">
+                                            Keep catalog price
+                                            {% if issue.catalog_price is not none %}
+                                                (${{ '%.2f'|format(issue.catalog_price) }})
+                                            {% endif %}
+                                        </button>
+                                    </div>
+                                    {% if issue.terminal_price is none %}
+                                        <div class="form-text text-muted">
+                                            Terminal sales did not include a unit price; keep the catalog price to continue.
+                                        </div>
+                                    {% endif %}
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+            {% if current_issue.menu_issues %}
+                <div class="card mb-3">
+                    <div class="card-header">Menu Availability</div>
+                    <div class="card-body">
+                        {% for issue in current_issue.menu_issues %}
+                            <div class="mb-3">
+                                <h6 class="mb-1">{{ issue.product }}</h6>
+                                <p class="mb-2">
+                                    This product is not on the menu{% if issue.menu_name %} ({{ issue.menu_name }}){% endif %}
+                                    for {{ current_issue.location_name }}.
+                                </p>
+                                {% if issue.resolution == 'add' %}
+                                    <span class="badge bg-success">Will add product to the menu</span>
+                                {% elif issue.resolution == 'skip' %}
+                                    <span class="badge bg-secondary">Will leave menu unchanged</span>
+                                {% else %}
+                                    <div class="btn-group" role="group" aria-label="Menu resolution">
+                                        <button type="submit" class="btn btn-sm btn-primary" name="action" value="menu:{{ issue.product_id }}:add">
+                                            Add to menu
+                                        </button>
+                                        <button type="submit" class="btn btn-sm btn-outline-secondary" name="action" value="menu:{{ issue.product_id }}:skip">
+                                            Skip for now
+                                        </button>
+                                    </div>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+            <div class="d-flex align-items-center mb-3">
+                <button type="submit" class="btn btn-primary" name="action" value="next_location" {% if unresolved_total > 0 %}disabled{% endif %}>
+                    {% if remaining_locations > 0 %}
+                        Next Location
+                    {% else %}
+                        Finish Import
+                    {% endif %}
+                </button>
+                <button type="submit"
+                        class="btn btn-outline-secondary ms-2"
+                        name="action"
+                        value="back_to_mapping">
+                    Back to Mapping
+                </button>
+                {% if unresolved_total > 0 %}
+                    <span class="ms-3 text-danger">Resolve all issues above to continue.</span>
+                {% endif %}
+            </div>
+            <a href="{{ url_for('event.upload_terminal_sales', event_id=event.id) }}" class="btn btn-link">Start Over</a>
+        </form>
+    {% elif wizard_stage == 'menus' %}
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="step" value="confirm_menus">
+            {% if state_token %}
+                <input type="hidden" name="state_token" value="{{ state_token }}">
+            {% endif %}
+            <div class="card mb-3">
+                <div class="card-header">Review Menu Additions</div>
+                <div class="card-body">
+                    {% if menu_candidates %}
+                        <p class="mb-3">
+                            Select the matched products that should be added to the
+                            event menus. Unchecked products will be skipped.
+                        </p>
+                        {% for candidate in menu_candidates %}
+                            <div class="mb-4">
+                                <h6 class="mb-2">{{ candidate.location_name }}</h6>
+                                {% if candidate.menu_name %}
+                                    <div class="form-text mb-2">Current menu: {{ candidate.menu_name }}</div>
+                                {% endif %}
+                                {% for product in candidate.products %}
+                                    {% set key = candidate.event_location_id ~ ':' ~ product.product_id %}
+                                    {% set checkbox_id = 'menu-add-' ~ key|replace(':', '-') %}
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input"
+                                               type="checkbox"
+                                               id="{{ checkbox_id }}"
+                                               name="menu_additions"
+                                               value="{{ key }}"
+                                               {% if menu_candidate_selection.get(key, True) %}checked{% endif %}>
+                                        <label class="form-check-label" for="{{ checkbox_id }}">
+                                            <span class="fw-semibold">{{ product.product_name }}</span>
+                                            {% if product.sales_location %}
+                                                <span class="text-muted">(from {{ product.sales_location }})</span>
+                                            {% endif %}
+                                        </label>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="alert alert-success mb-0">
+                            All matched products are already available on their menus.
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="d-flex align-items-center mb-3">
+                <button type="submit" class="btn btn-primary" name="action" value="finish">
+                    Finish Import
+                </button>
+                <a href="{{ url_for('event.upload_terminal_sales', event_id=event.id) }}" class="btn btn-link ms-2">
+                    Start Over
+                </a>
+            </div>
+        </form>
+    {% else %}
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="step" value="map">
+            <input type="hidden" name="payload" value="{{ mapping_payload }}">
+            <input type="hidden" name="stage" value="{{ wizard_stage }}">
+            {% if state_token %}
+                <input type="hidden" name="state_token" value="{{ state_token }}">
+            {% endif %}
+            {% if assignment_errors %}
+                <div class="alert alert-danger">
+                    <ul class="mb-0 ps-3">
+                        {% for message in assignment_errors %}
+                            <li>{{ message }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
+            {% if product_resolution_required and wizard_stage == 'products' %}
+                <input type="hidden" name="product-resolution-step" value="1">
+                {% if countable_products %}
+                    <input type="hidden" name="countable-selection-step" value="1">
+                {% endif %}
+                <div data-role="created-product-container">
+                    {% for created_id in created_product_ids|default([], true) %}
+                        <input type="hidden" name="created_product_ids" value="{{ created_id }}">
+                    {% endfor %}
+                </div>
+                <div class="alert alert-warning">
+                    <p class="mb-2">
+                        We couldn't automatically match every product in the terminal
+                        sales file. Please select the matching product from the app
+                        for each unknown entry below.
+                    </p>
+                    {% if resolution_errors %}
+                        <ul class="mb-0 ps-3">
+                            {% for message in resolution_errors %}
+                                <li>{{ message }}</li>
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+                </div>
+                {% set search_options = product_search_options|default([], true) %}
+                {% set skip_value = skip_selection_value|default('__skip__') %}
+                {% set create_value = create_selection_value|default('__create__') %}
+                <div class="card mb-3">
+                    <div class="card-header">Match Unknown Products</div>
+                    <div class="card-body">
+                        <p class="text-muted small mb-3">
+                            Start typing to search by product name, then choose the matching product
+                            or use the buttons to skip or create a new product.
+                        </p>
+                        <datalist id="terminal-product-options">
+                            {% for option in search_options %}
+                                <option value="{{ option.value }}" data-id="{{ option.id }}" label="{{ option.label }}"></option>
+                            {% endfor %}
+                        </datalist>
+                        {% for product in unresolved_products %}
+                            {% set selected_value = product.selected|default('', true) %}
+                            {% set selected_value = '%s' % selected_value %}
+                            {% set selected_display = '' %}
+                            {% if selected_value and selected_value not in [skip_value, create_value] %}
+                                {% set match = (search_options | selectattr('id', 'equalto', selected_value) | list) %}
+                                {% if match %}
+                                    {% set selected_display = match[0].value %}
+                                {% endif %}
+                            {% endif %}
+                            <div class="mb-3 terminal-product-mapping"
+                                 data-terminal-product-mapping
+                                 data-skip-value="{{ skip_value }}"
+                                 data-create-value="{{ create_value }}"
+                                 data-product-field="{{ product.field }}"
+                                 data-product-name="{{ product.name }}"
+                                 data-product-price="{{ '%.2f'|format(product.price) if product.price is not none else '' }}"
+                                 data-created-product-id="{{ product.created_product_id|default('', true) }}">
+                                <label class="form-label" for="{{ product.field }}-search">
+                                    {{ product.name }}
+                                </label>
+                                <div class="input-group">
+                                    <input type="search"
+                                           class="form-control"
+                                           id="{{ product.field }}-search"
+                                           name="{{ product.field }}-search"
+                                           list="terminal-product-options"
+                                           data-role="product-search-input"
+                                           placeholder="Start typing to search by product name..."
+                                           value="{{ selected_display }}">
+                                    <button type="button" class="btn btn-outline-secondary" data-action="clear">Clear</button>
+                                </div>
+                                <input type="hidden"
+                                       name="{{ product.field }}"
+                                       id="{{ product.field }}"
+                                       value="{{ selected_value }}"
+                                       data-role="product-value">
+                                <div class="btn-group mt-2" role="group" aria-label="Mapping actions">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" data-action="skip">
+                                        Skip this product
+                                    </button>
+                                    <button type="button" class="btn btn-outline-primary btn-sm" data-action="create">
+                                        Create a new product
+                                    </button>
+                                </div>
+                                <div class="form-text" data-role="selection-status"></div>
+                                <div class="form-text text-danger d-none" data-role="selection-error">
+                                    Select a product from the suggestions or choose Skip/Create.
+                                </div>
+                                {% if product.price is not none %}
+                                    <div class="form-text">
+                                        Creating a new product will use the sale price of ${{ '%.2f'|format(product.price) }} from the uploaded file.
+                                    </div>
+                                {% else %}
+                                    <div class="form-text">
+                                        Creating a new product will use the uploaded sale price when available; otherwise the price will default to $0.00.
+                                    </div>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% if countable_products %}
+                    <div class="card mb-3">
+                        <div class="card-header">Assign Countable Items</div>
+                    <div class="card-body" data-countable-selection>
+                        <p class="text-muted small mb-3">
+                            Choose the countable inventory item that should be added to the
+                            stand sheet when creating each new product. Use the
+                            <span class="fw-semibold">Create new item</span> links if you need to
+                            add an item that does not exist yet.
+                        </p>
+                            {% if countable_selection_errors %}
+                                <div class="alert alert-danger" role="alert">
+                                    <ul class="mb-0 ps-3">
+                                        {% for message in countable_selection_errors %}
+                                            <li>{{ message }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                            {% endif %}
+                            {% for entry in countable_products %}
+                                <div class="mb-3">
+                                    <label class="form-label" for="{{ entry.field }}">
+                                        {{ entry.product_name }}
+                                    </label>
+                                    <div class="d-flex flex-column flex-sm-row align-items-start gap-2">
+                                        <select class="form-select"
+                                                id="{{ entry.field }}"
+                                                name="{{ entry.field }}"
+                                                data-countable-select
+                                                required>
+                                            <option value="">
+                                                Select a countable item to track on the stand sheet...
+                                            </option>
+                                            {% for option in countable_item_options %}
+                                                <option value="{{ option.id }}"
+                                                        {% if option.id == entry.selected %}selected{% endif %}>
+                                                    {{ option.label }}
+                                                </option>
+                                            {% endfor %}
+                                        </select>
+                                        <button type="button"
+                                                class="btn btn-link btn-sm p-0"
+                                                data-countable-action="quick-add-item"
+                                                data-target-select="{{ entry.field }}"
+                                                aria-label="Create a new item for {{ entry.product_name }}">
+                                            Create new item
+                                        </button>
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+        {% elif wizard_stage == 'products' %}
+                <div class="alert alert-success">
+                    <p class="mb-0">All products in the uploaded file have been matched automatically.</p>
+                </div>
+                {% if product_mapping_preview %}
+                    <div class="mb-3">
+                        <button type="button"
+                                class="btn btn-outline-secondary btn-sm"
+                                data-role="toggle-product-preview"
+                                data-show-text="Show matched products"
+                                data-hide-text="Hide matched products"
+                                aria-controls="product-mapping-preview"
+                                aria-expanded="false">
+                            Show matched products
+                        </button>
+                    </div>
+                    <div class="card mb-3 d-none"
+                         id="product-mapping-preview"
+                         data-role="product-mapping-preview">
+                        <div class="card-body">
+                            <p class="text-muted small mb-3">
+                                Review the automatically matched products before finishing the
+                                import.
+                            </p>
+                            {% for group in product_mapping_preview %}
+                                <div class="{% if not loop.last %}mb-4{% endif %}">
+                                    <h6 class="mb-2">
+                                        {{ group.event_location_name }}
+                                        {% if group.sales_location_name %}
+                                            <span class="ms-2 text-muted">
+                                                Source: {{ group.sales_location_name }}
+                                            </span>
+                                        {% endif %}
+                                    </h6>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-striped align-middle">
+                                            <thead>
+                                                <tr>
+                                                    <th scope="col">Uploaded product</th>
+                                                    <th scope="col">Matched product</th>
+                                                    <th scope="col" class="text-end">Quantity</th>
+                                                    <th scope="col" class="text-end">File price(s)</th>
+                                                    <th scope="col" class="text-end">App price</th>
+                                                    <th scope="col" class="text-end">File total</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for entry in group.products %}
+                                                    <tr>
+                                                        <td>{{ entry.source_name }}</td>
+                                                        <td>
+                                                            {{ entry.matched_product_name }}
+                                                            <span class="text-muted">
+                                                                (ID: {{ entry.matched_product_id }})
+                                                            </span>
+                                                        </td>
+                                                        <td class="text-end">
+                                                            {% if entry.quantity is not none %}
+                                                                {{ '%.2f'|format(entry.quantity) }}
+                                                            {% else %}
+                                                                &mdash;
+                                                            {% endif %}
+                                                        </td>
+                                                        <td class="text-end">
+                                                            {% if entry.file_prices %}
+                                                                {% for price in entry.file_prices %}
+                                                                    ${{ '%.2f'|format(price) }}{% if not loop.last %}<br>{% endif %}
+                                                                {% endfor %}
+                                                            {% else %}
+                                                                &mdash;
+                                                            {% endif %}
+                                                        </td>
+                                                        <td class="text-end">
+                                                            {% if entry.app_price is not none %}
+                                                                ${{ '%.2f'|format(entry.app_price) }}
+                                                            {% else %}
+                                                                &mdash;
+                                                            {% endif %}
+                                                        </td>
+                                                        <td class="text-end">
+                                                            {% if entry.file_amount is not none %}
+                                                                ${{ '%.2f'|format(entry.file_amount) }}
+                                                            {% else %}
+                                                                &mdash;
+                                                            {% endif %}
+                                                        </td>
+                                                    </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+            {% endif %}
+            {% if sales_location_names %}
+                <div class="card mb-3 {% if wizard_stage != 'locations' %}d-none{% endif %}">
+                    <div class="card-header">Manage Terminal Sales Locations</div>
+                    <div class="card-body">
+                        <p class="mb-3">
+                            Select any locations from the uploaded file that should be
+                            ignored for this import.
+                        </p>
+                        {% if unassigned_sales_locations %}
+                            <div class="alert alert-warning">
+                                <strong>Unassigned locations:</strong>
+                                {{ unassigned_sales_locations | join(', ') }}
+                            </div>
+                        {% endif %}
+                        {% for location_name in sales_location_names %}
+                            {% set checkbox_id = 'ignore-location-' ~ loop.index %}
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox"
+                                       id="{{ checkbox_id }}"
+                                       name="ignored_locations"
+                                       value="{{ location_name }}"
+                                       {% if location_name in ignored_sales_locations %}checked{% endif %}>
+                                <label class="form-check-label" for="{{ checkbox_id }}">
+                                    Ignore <strong>{{ location_name }}</strong>
+                                    {% if location_name in assigned_sales_locations %}
+                                        <span class="badge bg-success ms-2">Linked</span>
+                                    {% elif location_name in unassigned_sales_locations %}
+                                        <span class="badge bg-warning text-dark ms-2">Unassigned</span>
+                                    {% endif %}
+                                </label>
+                            </div>
+                        {% endfor %}
+                        <div class="form-text">
+                            Ignored locations and their products will not be imported.
+                        </div>
+                    </div>
+                </div>
+            {% endif %}
+            {% if wizard_stage == 'products' %}
+                <div class="card mb-3">
+                    <div class="card-header">Location Mapping Summary</div>
+                    <div class="card-body">
+                        {% if ignored_sales_locations %}
+                            <p class="mb-2">
+                                <strong>Ignored locations:</strong>
+                                {{ ignored_sales_locations | join(', ') }}
+                            </p>
+                        {% endif %}
+                        {% if open_locations %}
+                            <ul class="mb-0 ps-3">
+                                {% for el in open_locations %}
+                                    {% set selected_location = default_mapping.get(el.id) %}
+                                    <li>
+                                        <strong>{{ el.location.name }}</strong>
+                                        {% if selected_location %}
+                                            &rarr; {{ selected_location }}
+                                        {% else %}
+                                            <span class="text-muted">&rarr; Skipped</span>
+                                        {% endif %}
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p class="mb-0 text-muted">There are no open event locations to link.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endif %}
+            {% if open_locations %}
+                <div class="card mb-3 {% if wizard_stage != 'locations' %}d-none{% endif %}">
+                    <div class="card-header">Link Event Locations</div>
+                    <div class="card-body">
+                        {% for el in open_locations %}
+                            <div class="mb-3">
+                                <label class="form-label" for="mapping-{{ el.id }}">
+                                    {{ el.location.name }}
+                                </label>
+                                <select class="form-select" id="mapping-{{ el.id }}" name="mapping-{{ el.id }}">
+                                    <option value="">Skip</option>
+                                    {% for location_name in sales_location_names %}
+                                        <option value="{{ location_name }}" {% if default_mapping[el.id] == location_name %}selected{% endif %}>
+                                            {{ location_name }}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="d-flex flex-wrap align-items-center">
+                    {% if wizard_stage == 'locations' %}
+                        <button type="submit" class="btn btn-primary" name="navigate" value="next">
+                            Next: Match Products
+                        </button>
+                        <a href="{{ url_for('event.upload_terminal_sales', event_id=event.id) }}"
+                           class="btn btn-outline-secondary ms-2">
+                            Start Over
+                        </a>
+                    {% else %}
+                        <button type="submit"
+                                class="btn btn-outline-secondary"
+                                name="navigate"
+                                value="back">
+                            Back to Locations
+                        </button>
+                        <button type="submit"
+                                class="btn btn-primary ms-2"
+                                name="navigate"
+                                value="finish">
+                            Next: Assign Menus
+                        </button>
+                        <a href="{{ url_for('event.upload_terminal_sales', event_id=event.id) }}"
+                           class="btn btn-link ms-2">
+                            Start Over
+                        </a>
+                    {% endif %}
+                </div>
+            {% else %}
+                <div class="alert alert-warning">
+                    There are no open locations for this event available for mapping.
+                </div>
+                <a href="{{ url_for('event.view_event', event_id=event.id) }}" class="btn btn-secondary">Back to Event</a>
+            {% endif %}
+        </form>
+    {% endif %}
+{% else %}
+    <form method="post" enctype="multipart/form-data" class="mb-4">
+        {{ form.hidden_tag() }}
+        <div class="mb-3">
+            {{ form.program.label(class="form-label") }}
+            {{ form.program(class="form-select") }}
+            <div class="form-text">Select the point of sale system the sales file was exported from.</div>
+        </div>
+        <div class="mb-3">
+            {{ form.file.label(class="form-label") }}
+            {{ form.file(class="form-control") }}
+            <div class="form-text">Accepted format: IdealPOS Excel export (.xls).</div>
+        </div>
+        {{ form.submit(class="btn btn-primary") }}
+    </form>
+    <div class="card">
+        <div class="card-body">
+            <h5 class="card-title mb-3">IdealPOS sales export example</h5>
+            <p class="mb-2">File type: <span class="fw-semibold">Excel spreadsheet (.xls)</span></p>
+            <p class="mb-3">The IdealPOS export groups sales by location. Each location is followed by item rows with the columns shown below (values are taken from <code>sales(1).xls</code>).</p>
+            <div class="table-responsive">
+                <table class="table table-sm table-bordered mb-3 text-nowrap">
+                    <thead class="table-light">
+                        <tr>
+                            <th scope="col">Product Code</th>
+                            <th scope="col">Product Description</th>
+                            <th scope="col" class="text-end">Unit Price (incl. tax)</th>
+                            <th scope="col" class="text-end">Unit Tax</th>
+                            <th scope="col" class="text-end">Quantity Sold</th>
+                            <th scope="col" class="text-end">Net Sales (ex tax)</th>
+                            <th scope="col" class="text-end">Tax Total</th>
+                            <th scope="col" class="text-end">Gross Sales (incl. tax)</th>
+                            <th scope="col" class="text-end">Discounts (incl. tax)</th>
+                            <th scope="col" class="text-end">Net Sales After Discounts (ex tax)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="table-secondary">
+                            <th scope="row" colspan="10" class="text-uppercase">PRIVATE SUITES</th>
+                        </tr>
+                        <tr>
+                            <td>799</td>
+                            <td>17oz Draft Beer - Pilsner BWK</td>
+                            <td class="text-end">9.441765</td>
+                            <td class="text-end">1.010588</td>
+                            <td class="text-end">17</td>
+                            <td class="text-end">143.33</td>
+                            <td class="text-end">17.18</td>
+                            <td class="text-end">160.51</td>
+                            <td class="text-end">-24.51</td>
+                            <td class="text-end">118.82</td>
+                        </tr>
+                        <tr>
+                            <td>1169</td>
+                            <td>473ml Farmery Light</td>
+                            <td class="text-end">9.73</td>
+                            <td class="text-end">1.04</td>
+                            <td class="text-end">6</td>
+                            <td class="text-end">52.14</td>
+                            <td class="text-end">6.24</td>
+                            <td class="text-end">58.38</td>
+                            <td class="text-end">-8.88</td>
+                            <td class="text-end">43.26</td>
+                        </tr>
+                        <tr>
+                            <td>353</td>
+                            <td>Can - Blue Moon</td>
+                            <td class="text-end">10.62</td>
+                            <td class="text-end">1.136667</td>
+                            <td class="text-end">3</td>
+                            <td class="text-end">28.45</td>
+                            <td class="text-end">3.41</td>
+                            <td class="text-end">31.86</td>
+                            <td class="text-end">-4.86</td>
+                            <td class="text-end">23.59</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <p class="mb-0 text-muted">Totals rows and the trailing cost/margin columns that IdealPOS adds after the net sales figures can remain in the spreadsheet—the importer ignores them.</p>
+        </div>
+    </div>
+{% endif %}
+<div class="modal fade" id="terminalCreateProductModal" tabindex="-1" aria-labelledby="terminalCreateProductModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="terminalCreateProductModalLabel">Create Product from Terminal Sales</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                {% with form=product_form %}
+                    {% set form_action = url_for('product.ajax_create_product') %}
+                    {% set form_id = 'terminal-create-product-form' %}
+                    {% include 'products/_create_product_form.html' %}
+                {% endwith %}
+            </div>
+        </div>
+    </div>
+</div>
+{% if mapping_payload and product_mapping_preview %}
+<script src="{{ url_for('static', filename='js/terminal_product_preview_toggle.js') }}" defer></script>
+{% endif %}
+{% if mapping_payload %}
+<script src="{{ url_for('static', filename='js/terminal_sales_summary_toggle.js') }}" defer></script>
+{% endif %}
+{% if mapping_payload and product_resolution_required and wizard_stage == 'products' %}
+<script src="{{ url_for('static', filename='js/terminal_sales_mapping.js') }}" defer></script>
+{% endif %}
+{% if countable_products %}
+{% include 'purchase_orders/_create_item_modal.html' %}
+<script src="{{ url_for('static', filename='js/countable_item_quick_create.js') }}" defer></script>
+{% endif %}
+{% endblock %}

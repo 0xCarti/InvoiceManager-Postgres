@@ -1,0 +1,157 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style>
+@page {
+  margin: 0.5in;
+}
+body {
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.report {
+  width: 100%;
+}
+.meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  border-bottom: 1px solid #000;
+  padding-bottom: 4px;
+  margin-bottom: 10px;
+}
+.table table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.table th,
+.table td {
+  border: 1px solid #000;
+  padding: 2px 4px;
+}
+.table th {
+  text-align: center;
+}
+.table td:first-child {
+  text-align: left;
+}
+.table td:not(:first-child) {
+  text-align: right;
+}
+.table .border-right {
+  border-right: 1px solid #000;
+}
+.table tbody tr:nth-child(even) {
+  background: #fafafa;
+}
+.signoffs {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 20px;
+}
+.signoffs .left,
+.signoffs .right {
+  width: 48%;
+}
+.signoffs .left div,
+.signoffs .right div {
+  margin-bottom: 8px;
+}
+.standsheet-page {
+  page-break-after: always;
+}
+.standsheet-page:last-child {
+  page-break-after: auto;
+}
+@media print {
+  .no-print { display: none; }
+}
+</style>
+
+<section class="report standsheet-page">
+  <div class="meta">
+    <div>Location: {{ location.name }}</div>
+  </div>
+  <div class="table">
+    <table>
+      <colgroup>
+        <col style="width:35%">
+        <col style="width:7%">
+        <col style="width:7%">
+        <col style="width:5%">
+        <col style="width:5%">
+        <col style="width:7%">
+        <col style="width:7%">
+        <col style="width:7%">
+        <col style="width:7%">
+        <col style="width:6%">
+        <col style="width:7%">
+      </colgroup>
+      <thead>
+        <tr>
+          <th rowspan="2">Stock Item (Report Unit)</th>
+          <th rowspan="2">Expected Opening Count</th>
+          <th rowspan="2">Opening Count</th>
+          <th colspan="2" class="border-right">Event Transfers</th>
+          <th rowspan="2">Eaten</th>
+          <th rowspan="2" class="border-right">Spoilage</th>
+          <th rowspan="2">Closing Count</th>
+          <th rowspan="2">Units Sold</th>
+          <th rowspan="2">Price</th>
+          <th rowspan="2">Variance</th>
+        </tr>
+        <tr>
+          <th class="border-right">In</th>
+          <th>Out</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in stand_items %}
+        {% set price = namespace(value=None) %}
+        {% for product in location.products %}
+          {% if price.value is none %}
+            {% for ri in product.recipe_items %}
+              {% if price.value is none and ri.item_id == s.item.id %}
+                {% set price.value = product.price %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+        {% endfor %}
+        <tr>
+          <td>{{ s.item.name }}{% if s.report_unit_label %} ({{ s.report_unit_label }}){% endif %}</td>
+          <td>{% if s.expected is not none %}{{ '%.2f'|format(s.expected) }}{% endif %}</td>
+          <td></td>
+          <td class="border-right"></td>
+          <td></td>
+          <td></td>
+          <td class="border-right"></td>
+          <td></td>
+          <td></td>
+          <td>{% if price.value is not none %}${{ '%.2f'|format(price.value) }}{% endif %}</td>
+          <td></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="signoffs">
+    <div class="left">
+      <div>Opening Stand Manager  ______________________________</div>
+      <div>Opening Supervisor     ______________________________</div>
+      <div>Closing Stand Manager  ______________________________</div>
+      <div>Closing Supervisor     ______________________________</div>
+      <div>Audit/Review Signature ______________________________</div>
+    </div>
+    <div class="right">
+      <div>Total Sales  ______________________________</div>
+      <div>Total Cash   ______________________________</div>
+      <div>Credit Cards ______________________________</div>
+      <div>Coupons      ______________________________</div>
+      <div>Over/Short   ______________________________</div>
+    </div>
+  </div>
+</section>
+{% endblock %}

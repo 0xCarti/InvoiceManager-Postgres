@@ -1,0 +1,107 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Edit Transfer</h2>
+    <form method="POST">
+        {{ form.hidden_tag() }}
+        <div class="row">
+            <div class="col-md-6">
+                <div class="form-group">
+                    {{ form.from_location_id.label(class="form-label") }}
+                    {{ form.from_location_id(class="form-control") }}
+                    {% for error in form.from_location_id.errors %}
+                    <div class="alert alert-danger">{{ error }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="form-group">
+                    {{ form.to_location_id.label(class="form-label") }}
+                    {{ form.to_location_id(class="form-control") }}
+                    {% for error in form.to_location_id.errors %}
+                    <div class="alert alert-danger">{{ error }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        <h3>Add Items</h3>
+        <div class="form-group">
+            <label for="item-name" class="form-label">Item Name</label>
+            <input type="text" id="item-name" class="form-control" name="item-name" autocomplete="off">
+            <div id="suggestions"></div>
+        </div>
+        <div id="item-list" class="mb-3"></div>
+        {{ form.submit(class="btn btn-success") }}
+    </form>
+</div>
+<script src="{{ url_for('static', filename='js/transfer_workflow.js') }}" nonce="{{ csp_nonce }}"></script>
+<script nonce="{{ csp_nonce }}">
+    let itemIndex = 0;
+
+    window.addEventListener('DOMContentLoaded', function() {
+        const existingItems = {{ items | tojson | safe }};
+        existingItems.forEach(function(item, index) {
+            addItemToList(item, index);
+        });
+        itemIndex = existingItems.length;
+    });
+
+    document.getElementById('item-name').addEventListener('input', function() {
+        const input = this.value.trim();
+        if (input === '') {
+            document.getElementById('suggestions').innerHTML = '';
+            return;
+        }
+        fetch('/items/search?term=' + encodeURIComponent(input))
+            .then(response => response.json())
+            .then(data => {
+                const suggestionsDiv = document.getElementById('suggestions');
+                suggestionsDiv.innerHTML = '';
+                data.forEach(function(item) {
+                    const suggestion = document.createElement('div');
+                    suggestion.textContent = item.name;
+                    suggestion.dataset.id = item.id;
+                    suggestion.classList.add('suggestion');
+                    suggestionsDiv.appendChild(suggestion);
+                });
+            })
+            .catch(error => {
+                console.error('Error fetching item suggestions:', error);
+            });
+    });
+
+    document.addEventListener('click', function(event) {
+        if (event.target && event.target.classList.contains('suggestion')) {
+            const itemName = event.target.textContent;
+            const itemId = event.target.dataset.id;
+            addItemToList({ id: itemId, name: itemName }, itemIndex);
+            itemIndex++;
+        }
+    });
+
+    function addItemToList(item, index) {
+        fetch(`/items/${item.id}/units`)
+            .then(r => r.json())
+            .then(data => {
+                const listItem = TransferWorkflow.createRow({
+                    prefix: 'items',
+                    index: index,
+                    itemId: item.id,
+                    itemName: item.name,
+                    unitsData: data,
+                    existingValues: {
+                        unitId: item.unit_id,
+                        unitQuantity: item.unit_quantity,
+                        baseQuantity: item.base_quantity,
+                        totalQuantity: item.quantity,
+                    },
+                });
+                document.getElementById('item-list').appendChild(listItem);
+            })
+            .catch(error => {
+                console.error('Error loading item units:', error);
+            });
+    }
+</script>
+{% endblock %}

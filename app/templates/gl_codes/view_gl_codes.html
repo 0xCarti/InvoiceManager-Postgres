@@ -1,0 +1,231 @@
+{% extends 'base.html' %}
+{% from 'macros/column_visibility.html' import column_visibility_dropdown %}
+{% from 'macros/filter_modal.html' import filter_modal %}
+{% block title %}GL Codes{% endblock %}
+{% block content %}
+<div class="container mt-5">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">GL Codes</h2>
+            <p class="text-muted mb-0">Manage general ledger codes used across the app</p>
+        </div>
+        <div>
+            <button id="add-gl-code" type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#glCodeModal">Add GL Code</button>
+        </div>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <div class="dropdown d-md-none">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                More actions
+            </button>
+            <ul class="dropdown-menu">
+                <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</button></li>
+            </ul>
+        </div>
+        <div>
+            {{ column_visibility_dropdown(
+                table_id='gl-codes-table',
+                storage_key='glCodesTableColumnVisibility',
+                columns=[
+                    {'id': 'toggle-gl-code', 'target': 'col-gl-code', 'label': 'Code', 'checked': True},
+                    {'id': 'toggle-gl-description', 'target': 'col-gl-description', 'label': 'Description', 'checked': True},
+                    {'id': 'toggle-gl-actions', 'target': 'col-gl-actions', 'label': 'Actions', 'checked': True},
+                ]
+            ) }}
+        </div>
+        <button type="button" class="btn btn-outline-secondary d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</button>
+    </div>
+
+    <!-- Filter Modal -->
+    {% call filter_modal(
+        'filterModal',
+        'Filters',
+        form_id='filter-form',
+        form_action=url_for('glcode.view_gl_codes'),
+        method='get',
+        reset_url=url_for('glcode.view_gl_codes'),
+        scope=request.endpoint
+    ) %}
+        <div class="mb-3">
+            <label for="code_query" class="form-label">Code</label>
+            <input type="text" id="code_query" name="code_query" class="form-control" value="{{ code_query or '' }}">
+        </div>
+        <div class="mb-3">
+            <label for="description_query" class="form-label">Description</label>
+            <input type="text" id="description_query" name="description_query" class="form-control" value="{{ description_query or '' }}">
+        </div>
+    {% endcall %}
+
+    {% if code_query or description_query %}
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="text-muted small">Active filters:</span>
+        {% if code_query %}
+        <span class="badge rounded-pill text-bg-light border">Code: {{ code_query }}</span>
+        {% endif %}
+        {% if description_query %}
+        <span class="badge rounded-pill text-bg-light border">Description: {{ description_query }}</span>
+        {% endif %}
+    </div>
+    {% endif %}
+    <div class="table-responsive">
+    <table class="table sortable" id="gl-codes-table">
+        <thead>
+            <tr>
+                <th scope="col" class="col-gl-code">Code</th>
+                <th scope="col" class="col-gl-description">Description</th>
+                <th scope="col" class="col-gl-actions" data-sortable="false">Actions</th>
+            </tr>
+        </thead>
+        <tbody id="gl-code-body">
+            {% for code in codes.items %}
+            <tr data-id="{{ code.id }}">
+                <td class="col-gl-code gl-code">{{ code.code }}</td>
+                <td class="col-gl-description gl-description">{{ code.description or '' }}</td>
+                <td class="col-gl-actions">
+                    <button type="button" class="btn btn-secondary btn-sm edit-gl-code" data-id="{{ code.id }}" data-code="{{ code.code }}" data-description="{{ code.description or '' }}">Edit</button>
+                    <form action="{{ url_for('glcode.delete_gl_code', code_id=code.id) }}" method="post" class="d-inline">
+                        {{ delete_form.hidden_tag() }}
+                        <button type="submit" class="btn btn-danger btn-sm" data-confirm-message="Are you sure?">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
+        <nav aria-label="GL code pagination">
+            <ul class="pagination mb-0">
+                <li class="page-item {% if not codes.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('glcode.view_gl_codes', page=codes.prev_num if codes.has_prev else 1, **pagination_args) }}"{% if not codes.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link">Page {{ codes.page }} of {{ codes.pages }}</span>
+                </li>
+                <li class="page-item {% if not codes.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('glcode.view_gl_codes', page=codes.next_num if codes.has_next else codes.pages or 1, **pagination_args) }}"{% if not codes.has_next %} tabindex="-1" aria-disabled="true"{% endif %}>Next</a>
+                </li>
+            </ul>
+        </nav>
+        <form method="get" class="d-flex align-items-center gap-2">
+            {% for key, values in request.args.lists() %}
+                {% if key not in ['page', 'per_page'] %}
+                    {% for value in values %}
+                        <input type="hidden" name="{{ key }}" value="{{ value }}">
+                    {% endfor %}
+                {% endif %}
+            {% endfor %}
+            <input type="hidden" name="page" value="1">
+            <label for="glcodes-per-page" class="form-label mb-0">Rows per page</label>
+            <select id="glcodes-per-page" name="per_page" class="form-select js-auto-submit">
+                {% for option in PAGINATION_SIZES %}
+                    <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+</div>
+
+<div class="modal fade" id="glCodeModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="glCodeModalLabel">Add GL Code</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="gl-code-form">
+          {{ form.hidden_tag() }}
+          <div class="mb-3">
+            {{ form.code.label(class="form-label") }}
+            {{ form.code(class="form-control", id="gl-code-field") }}
+          </div>
+          <div class="mb-3">
+            {{ form.description.label(class="form-label") }}
+            {{ form.description(class="form-control", id="gl-description-field") }}
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" form="gl-code-form" class="btn btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('DOMContentLoaded', function() {
+    const modalEl = document.getElementById('glCodeModal');
+    const modal = new bootstrap.Modal(modalEl);
+    const form = document.getElementById('gl-code-form');
+    const title = document.getElementById('glCodeModalLabel');
+    const csrfToken = '{{ delete_form.csrf_token._value() if delete_form.csrf_token is defined else '' }}';
+
+    document.getElementById('add-gl-code').addEventListener('click', () => {
+        form.reset();
+        form.dataset.id = '';
+        title.textContent = 'Add GL Code';
+    });
+
+    function attachEditHandlers() {
+        document.querySelectorAll('.edit-gl-code').forEach(btn => {
+            btn.addEventListener('click', () => {
+                form.reset();
+                form.dataset.id = btn.dataset.id;
+                form.querySelector('[name="code"]').value = btn.dataset.code;
+                form.querySelector('[name="description"]').value = btn.dataset.description;
+                title.textContent = 'Edit GL Code';
+                modal.show();
+            });
+        });
+    }
+    attachEditHandlers();
+
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const id = form.dataset.id;
+        const url = id ? `/gl_codes/${id}/ajax/update` : '/gl_codes/ajax/create';
+        fetch(url, {
+            method: 'POST',
+            body: new FormData(form)
+        }).then(r => {
+            if (!r.ok) return r.json().then(data => Promise.reject(data));
+            return r.json();
+        }).then(data => {
+            const tbody = document.getElementById('gl-code-body');
+            if (id) {
+                const row = tbody.querySelector(`tr[data-id="${id}"]`);
+                row.querySelector('.gl-code').textContent = data.code;
+                row.querySelector('.gl-description').textContent = data.description;
+                const btn = row.querySelector('.edit-gl-code');
+                btn.dataset.code = data.code;
+                btn.dataset.description = data.description;
+            } else {
+                const row = document.createElement('tr');
+                row.setAttribute('data-id', data.id);
+                row.innerHTML = `
+                    <td class="col-gl-code gl-code">${data.code}</td>
+                    <td class="col-gl-description gl-description">${data.description}</td>
+                    <td class="col-gl-actions">
+                        <button type="button" class="btn btn-secondary btn-sm edit-gl-code" data-id="${data.id}" data-code="${data.code}" data-description="${data.description}">Edit</button>
+                        <form action="/gl_codes/${data.id}/delete" method="post" class="d-inline">
+                            <input type="hidden" name="csrf_token" value="${csrfToken}">
+                            <button type="submit" class="btn btn-danger btn-sm" data-confirm-message="Are you sure?">Delete</button>
+                        </form>
+                    </td>`;
+                tbody.prepend(row);
+                attachEditHandlers();
+            }
+            if (window.TableSort && typeof window.TableSort.bind === 'function') {
+                window.TableSort.bind(document.getElementById('gl-codes-table'));
+            }
+            modal.hide();
+        }).catch(err => {
+            console.error(err);
+        });
+    });
+});
+</script>
+
+{% endblock %}

@@ -1,0 +1,349 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style>
+    .profile-section-card {
+        --profile-card-padding: calc(var(--bs-spacer) * 1.5);
+    }
+
+    .profile-section-card .card-body {
+        padding: var(--profile-card-padding);
+    }
+
+    .profile-section-card .card-body > h3 {
+        margin-bottom: calc(var(--bs-spacer) * 1.125) !important;
+    }
+
+    .profile-form {
+        display: grid;
+        gap: calc(var(--bs-spacer) * 0.875);
+    }
+
+    .profile-field {
+        display: grid;
+        gap: calc(var(--bs-spacer) * 0.5);
+    }
+
+    .profile-feedback {
+        min-height: 1.05rem;
+        font-size: 0.78rem;
+        line-height: 1.05rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-top: 0;
+    }
+
+    .profile-password-input-wrap {
+        position: relative;
+    }
+
+    .profile-password-input-wrap .form-control {
+        padding-right: 4.5rem;
+    }
+
+    .profile-password-toggle {
+        position: absolute;
+        right: 0.35rem;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 0.72rem;
+        line-height: 1;
+        padding: 0.2rem 0.45rem;
+    }
+
+    .profile-actions {
+        margin-top: calc(var(--bs-spacer) * 0.25);
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .profile-actions .btn {
+        min-width: 11rem;
+    }
+
+    .profile-header {
+        margin-bottom: calc(var(--bs-spacer) * 0.75);
+    }
+
+    .profile-header-title {
+        margin-bottom: 0;
+        line-height: 1.2;
+    }
+
+    .profile-header-subtitle {
+        margin: 0;
+        font-size: 0.9rem;
+        line-height: 1.2;
+    }
+
+    .profile-activity-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+    }
+
+    .profile-activity-list {
+        max-height: 16.5rem;
+        overflow-y: auto;
+        overflow-x: auto;
+        border: 1px solid var(--bs-border-color-translucent);
+        border-radius: var(--bs-border-radius);
+    }
+
+    .profile-activity-row {
+        padding: 0.55rem 0.75rem;
+        border-bottom: 1px solid var(--bs-border-color-translucent);
+    }
+
+    .profile-activity-row:last-child {
+        border-bottom: 0;
+    }
+
+    .profile-activity-link {
+        display: block;
+        text-decoration: none;
+    }
+
+    .profile-activity-main {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        line-height: 1.2;
+    }
+
+    .profile-activity-meta {
+        margin-top: 0.15rem;
+        font-size: 0.78rem;
+        color: var(--bs-secondary-color);
+        line-height: 1.2;
+    }
+
+    .profile-activity-table {
+        margin-bottom: 0;
+        font-size: 0.88rem;
+    }
+
+    .profile-activity-table th,
+    .profile-activity-table td {
+        padding: 0.5rem 0.65rem;
+        vertical-align: middle;
+        line-height: 1.15;
+        white-space: nowrap;
+    }
+
+    .profile-activity-table th:last-child,
+    .profile-activity-table td:last-child {
+        text-align: right;
+    }
+</style>
+<div class="container px-0">
+    <div class="profile-header">
+        <h1 class="h4 profile-header-title">User Profile</h1>
+        <p class="text-muted profile-header-subtitle">{{ user.email }}</p>
+    </div>
+
+    <div class="row g-3 g-lg-4">
+        <div class="col-12 col-lg-8">
+            <div class="vstack gap-3">
+                <div class="card profile-section-card">
+                    <div class="card-body">
+                        <h3 class="h5 mb-3">Account Security</h3>
+                        <form method="post" class="profile-form">
+                            {{ form.hidden_tag() }}
+                            {% if form.current_password %}
+                            <div class="form-group profile-field">
+                                {{ form.current_password.label(class_='form-label mb-0') }}
+                                <div class="profile-password-input-wrap">
+                                    {{ form.current_password(class_='form-control' + (' is-invalid' if password_submitted and form.current_password.errors else ''), data_password_input='true') }}
+                                    <button type="button" class="btn btn-outline-secondary profile-password-toggle" data-password-toggle="true" aria-label="Toggle password visibility">Show</button>
+                                </div>
+                                {% if password_submitted and form.current_password.errors %}
+                                <div class="profile-feedback text-danger">{{ form.current_password.errors[0] }}</div>
+                                {% else %}
+                                <div class="profile-feedback text-muted">Required to confirm this password change.</div>
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                            <div class="form-group profile-field">
+                                {{ form.new_password.label(class_='form-label mb-0') }}
+                                <div class="profile-password-input-wrap">
+                                    {{ form.new_password(class_='form-control' + (' is-invalid' if password_submitted and form.new_password.errors else ''), data_password_input='true') }}
+                                    <button type="button" class="btn btn-outline-secondary profile-password-toggle" data-password-toggle="true" aria-label="Toggle password visibility">Show</button>
+                                </div>
+                                {% if password_submitted and form.new_password.errors %}
+                                <div class="profile-feedback text-danger">{{ form.new_password.errors[0] }}</div>
+                                {% else %}
+                                <div class="profile-feedback text-muted">Use a strong password you do not reuse elsewhere.</div>
+                                {% endif %}
+                            </div>
+                            <div class="form-group profile-field">
+                                {{ form.confirm_password.label(class_='form-label mb-0') }}
+                                <div class="profile-password-input-wrap">
+                                    {{ form.confirm_password(class_='form-control' + (' is-invalid' if password_submitted and form.confirm_password.errors else ''), data_password_input='true') }}
+                                    <button type="button" class="btn btn-outline-secondary profile-password-toggle" data-password-toggle="true" aria-label="Toggle password visibility">Show</button>
+                                </div>
+                                {% if password_submitted and form.confirm_password.errors %}
+                                <div class="profile-feedback text-danger">{{ form.confirm_password.errors[0] }}</div>
+                                {% elif status_messages.get('password') %}
+                                <div class="profile-feedback text-success">{{ status_messages.get('password')[1] }}</div>
+                                {% else %}
+                                <div class="profile-feedback text-muted">Must match the new password exactly.</div>
+                                {% endif %}
+                            </div>
+                            <div class="profile-actions">
+                                <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card profile-section-card">
+                    <div class="card-body">
+                        <h3 class="h5 mb-3">Preferences</h3>
+                        <form method="post" class="profile-form">
+                            {{ tz_form.hidden_tag() }}
+                            <div class="form-group profile-field">
+                                {{ tz_form.timezone.label(class_='form-label mb-0') }}
+                                {{ tz_form.timezone(class_='form-control' + (' is-invalid' if timezone_submitted and tz_form.timezone.errors else '')) }}
+                                {% if timezone_submitted and tz_form.timezone.errors %}
+                                <div class="profile-feedback text-danger">{{ tz_form.timezone.errors[0] }}</div>
+                                {% elif status_messages.get('timezone') %}
+                                <div class="profile-feedback text-success">{{ status_messages.get('timezone')[1] }}</div>
+                                {% else %}
+                                <div class="profile-feedback text-muted">Used for reports, timestamps, and schedule defaults.</div>
+                                {% endif %}
+                            </div>
+                            <div class="profile-actions">
+                                <button type="submit" class="btn btn-primary">{{ tz_form.submit.label.text }}</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card profile-section-card">
+                    <div class="card-body">
+                        <h3 class="h5 mb-3">Contact / Notifications</h3>
+                        <form method="post" class="profile-form">
+                            {{ notif_form.hidden_tag() }}
+                            <div class="form-group profile-field">
+                                {{ notif_form.phone_number.label(class_='form-label mb-0') }}
+                                {{ notif_form.phone_number(class_='form-control' + (' is-invalid' if notifications_submitted and notif_form.phone_number.errors else '')) }}
+                                {% if notifications_submitted and notif_form.phone_number.errors %}
+                                <div class="profile-feedback text-danger">{{ notif_form.phone_number.errors[0] }}</div>
+                                {% elif status_messages.get('notifications') %}
+                                <div class="profile-feedback text-success">{{ status_messages.get('notifications')[1] }}</div>
+                                {% else %}
+                                <div class="profile-feedback text-muted">Set this to enable transfer SMS alerts.</div>
+                                {% endif %}
+                            </div>
+                            <div class="form-check mt-1">
+                                {{ notif_form.notify_transfers(class_='form-check-input') }}
+                                {{ notif_form.notify_transfers.label(class_='form-check-label') }}
+                            </div>
+                            <div class="profile-actions">
+                                <button type="submit" class="btn btn-primary">{{ notif_form.submit.label.text }}</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-4">
+            <div class="vstack gap-3">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="profile-activity-header">
+                            <h3 class="h5 mb-0">Transfers</h3>
+                            {% if transfers %}
+                            <a class="small" href="{{ url_for('transfer.view_transfers', user_id=user.id) }}">View all</a>
+                            {% endif %}
+                        </div>
+                        <div class="profile-activity-list">
+                            {% for t in transfers %}
+                            <div class="profile-activity-row">
+                                <a class="profile-activity-link" href="{{ url_for('transfer.view_transfer', transfer_id=t.id) }}">
+                                    <div class="profile-activity-main">
+                                        <span class="fw-semibold">Transfer #{{ t.id }}</span>
+                                        <span class="badge text-bg-{{ 'success' if t.completed else 'secondary' }}">
+                                            {{ 'Completed' if t.completed else 'Open' }}
+                                        </span>
+                                    </div>
+                                    <div class="profile-activity-meta">
+                                        {{ t.from_location_name }} → {{ t.to_location_name }}
+                                        {% if t.date_created %}
+                                        · {{ t.date_created.strftime('%Y-%m-%d') }}
+                                        {% endif %}
+                                    </div>
+                                </a>
+                            </div>
+                            {% else %}
+                            <div class="profile-activity-row text-muted">No transfers found.</div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-body">
+                        <div class="profile-activity-header">
+                            <h3 class="h5 mb-0">Invoices</h3>
+                            {% if invoices %}
+                            <a class="small" href="{{ url_for('invoice.view_invoices', user_id=user.id) }}">View all</a>
+                            {% endif %}
+                        </div>
+                        <div class="profile-activity-list">
+                            <table class="table table-sm table-hover profile-activity-table">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th scope="col">ID</th>
+                                        <th scope="col">Date</th>
+                                        <th scope="col">Status</th>
+                                        <th scope="col">Amount</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                            {% for inv in invoices %}
+                                <tr>
+                                    <td>
+                                        <a href="{{ url_for('invoice.view_invoice', invoice_id=inv.id) }}">#{{ inv.id }}</a>
+                                    </td>
+                                    <td>{{ inv.date_created.strftime('%Y-%m-%d') if inv.date_created else '—' }}</td>
+                                    <td>
+                                        <span class="badge text-bg-{{ 'success' if inv.is_paid else 'secondary' }}">
+                                            {{ 'Paid' if inv.is_paid else 'Unpaid' }}
+                                        </span>
+                                    </td>
+                                    <td>${{ '%.2f'|format(inv.total) }}</td>
+                                </tr>
+                            {% else %}
+                                <tr>
+                                    <td colspan="4" class="text-muted">No invoices found.</td>
+                                </tr>
+                            {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    document.querySelectorAll('[data-password-toggle="true"]').forEach(function (toggleButton) {
+        toggleButton.addEventListener('click', function () {
+            const inputWrapper = toggleButton.closest('.profile-password-input-wrap');
+            const passwordInput = inputWrapper ? inputWrapper.querySelector('[data-password-input="true"]') : null;
+            if (!passwordInput) return;
+            const isHidden = passwordInput.type === 'password';
+            passwordInput.type = isHidden ? 'text' : 'password';
+            toggleButton.textContent = isHidden ? 'Hide' : 'Show';
+        });
+    });
+</script>
+{% endblock %}

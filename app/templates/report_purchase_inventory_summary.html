@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <h2 class="mb-0">Purchase Inventory Summary</h2>
+        <a class="btn btn-outline-secondary" href="{{ url_for('purchase.view_purchase_invoices') }}">Back to Purchase Invoices</a>
+    </div>
+    <p class="text-muted">Review the quantity and spend for received purchase invoices across a chosen date range. Select specific items or GL codes to narrow the results.</p>
+
+    <form method="POST" class="mb-4">
+        {{ form.hidden_tag() }}
+        <div class="row g-3">
+            <div class="col-md-6">
+                {{ form.start_date.label(class="form-label") }}
+                {{ form.start_date(class="form-control") }}
+                {% if form.start_date.errors %}
+                    <div class="text-danger small">{{ form.start_date.errors[0] }}</div>
+                {% endif %}
+            </div>
+            <div class="col-md-6">
+                {{ form.end_date.label(class="form-label") }}
+                {{ form.end_date(class="form-control") }}
+                {% if form.end_date.errors %}
+                    <div class="text-danger small">{{ form.end_date.errors[0] }}</div>
+                {% endif %}
+            </div>
+        </div>
+        <div class="row g-3 mt-1">
+            <div class="col-md-6">
+                {{ form.items.label(class="form-label") }}
+                {{ form.items(class="form-select", multiple=true) }}
+                <div class="form-text">Leave blank to include all items.</div>
+                {% if form.items.errors %}
+                    <div class="text-danger small">{{ form.items.errors[0] }}</div>
+                {% endif %}
+            </div>
+            <div class="col-md-6">
+                {{ form.gl_codes.label(class="form-label") }}
+                {{ form.gl_codes(class="form-select", multiple=true) }}
+                <div class="form-text">Hold Ctrl (Windows) or Command (Mac) to select multiple GL codes.</div>
+                {% if form.gl_codes.errors %}
+                    <div class="text-danger small">{{ form.gl_codes.errors[0] }}</div>
+                {% endif %}
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary mt-3">Generate Report</button>
+    </form>
+
+    {% if results is not none %}
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <h3 class="mb-0">Report Results</h3>
+            {% if start and end %}
+            <span class="text-muted">{{ start.strftime('%Y-%m-%d') }} to {{ end.strftime('%Y-%m-%d') }}</span>
+            {% endif %}
+        </div>
+
+        {% if results %}
+        {% if selected_item_names or selected_gl_labels %}
+        <div class="alert alert-secondary" role="status">
+            <div class="fw-semibold">Filters Applied</div>
+            <ul class="mb-0 small">
+                {% if selected_item_names %}
+                <li><span class="fw-semibold">Items:</span> {{ selected_item_names | join(', ') }}</li>
+                {% endif %}
+                {% if selected_gl_labels %}
+                <li><span class="fw-semibold">GL Codes:</span> {{ selected_gl_labels | join(', ') }}</li>
+                {% endif %}
+            </ul>
+        </div>
+        {% endif %}
+        <div class="table-responsive">
+            <table class="table table-bordered table-striped align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th scope="col">Item</th>
+                        <th scope="col">GL Code</th>
+                        <th scope="col" class="text-end">Total Quantity</th>
+                        <th scope="col" class="text-end">Amount Spent</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in results %}
+                    <tr>
+                        <td>{{ row.item_name }}</td>
+                        <td>
+                            {{ row.gl_code }}
+                            {% if row.gl_description %}
+                                <div class="text-muted small">{{ row.gl_description }}</div>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">{{ '%.2f'|format(row.total_quantity) }}{% if row.unit_name %} {{ row.unit_name }}{% endif %}</td>
+                        <td class="text-end">${{ '%.2f'|format(row.total_spend) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <th colspan="2" class="text-end">Totals</th>
+                        <th class="text-end">{{ '%.2f'|format(totals.quantity) }}</th>
+                        <th class="text-end">${{ '%.2f'|format(totals.spend) }}</th>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+        {% else %}
+            <div class="alert alert-info" role="alert">
+                No purchase invoice items matched the selected filters.
+            </div>
+        {% endif %}
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h2 class="mb-0">Received Invoice Report</h2>
+        <a class="btn btn-outline-secondary" href="{{ url_for('report.received_invoice_report') }}">Change Dates</a>
+    </div>
+    <p class="text-muted mt-2 mb-4">
+        Report period: {{ start.strftime('%Y-%m-%d') }} to {{ end.strftime('%Y-%m-%d') }}
+    </p>
+    {% if results %}
+    <div class="table-responsive">
+    <table class="table table-bordered table-striped align-middle">
+        <thead class="table-light">
+            <tr>
+                <th scope="col">Order Date</th>
+                <th scope="col">Received By</th>
+                <th scope="col">Received Date</th>
+                <th scope="col">Vendor</th>
+                <th scope="col">Department</th>
+                <th scope="col" class="text-end">Invoice Total</th>
+                <th scope="col">Invoice Number</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% set totals = namespace(amount=0) %}
+            {% for row in results %}
+                {% set totals.amount = totals.amount + row.invoice.total %}
+                <tr>
+                    <td>{{ row.order_date|format_datetime('%Y-%m-%d') }}</td>
+                    <td>{{ row.received_by }}</td>
+                    <td>{{ row.invoice.received_date|format_datetime('%Y-%m-%d') }}</td>
+                    <td>{{ row.invoice.vendor_name }}</td>
+                    <td>{{ row.invoice.department or '—' }}</td>
+                    <td class="text-end">${{ '%.2f'|format(row.invoice.total) }}</td>
+                    <td>{{ row.invoice.invoice_number or '' }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr>
+                <th colspan="5" class="text-end">Total for {{ results|length }} invoice{% if results|length != 1 %}s{% endif %}:</th>
+                <th class="text-end">${{ '%.2f'|format(totals.amount) }}</th>
+                <th></th>
+            </tr>
+        </tfoot>
+    </table>
+    </div>
+    {% else %}
+    <div class="alert alert-info" role="alert">
+        No received invoices were found for the selected date range.
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,16 @@
+<form id="locationForm" action="{{ form_action }}" method="post">
+    {{ form.hidden_tag() }}
+    <div class="modal-header">
+        <h5 class="modal-title">Edit Location: {{ location.name }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    </div>
+    <div class="modal-body">
+        {% with menu_help_text="Changing the menu updates the products and stand sheet for this location." %}
+            {% include 'locations/_location_form_fields.html' %}
+        {% endwith %}
+    </div>
+    <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        {{ form.submit(class="btn btn-primary") }}
+    </div>
+</form>

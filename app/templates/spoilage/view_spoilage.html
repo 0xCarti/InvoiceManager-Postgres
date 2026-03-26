@@ -1,0 +1,108 @@
+{% extends 'base.html' %}
+{% from 'macros/column_visibility.html' import column_visibility_dropdown %}
+{% from 'macros/filter_modal.html' import filter_modal %}
+
+{% block content %}
+<div class="container mt-5">
+    <h2>Spoilage</h2>
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+        <div class="d-flex flex-wrap gap-2">
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#filterModal">
+                Filters
+            </button>
+            <button type="button" data-action="print" class="btn btn-secondary">Print</button>
+        </div>
+        <div class="text-md-end">
+            {{ column_visibility_dropdown(
+                table_id='spoilage-table',
+                storage_key='spoilageTableColumnVisibility',
+                columns=[
+                    {'id': 'toggle-spoilage-date', 'target': 'col-spoilage-date', 'label': 'Date', 'checked': True},
+                    {'id': 'toggle-spoilage-from', 'target': 'col-spoilage-from', 'label': 'From Location', 'checked': True},
+                    {'id': 'toggle-spoilage-item', 'target': 'col-spoilage-item', 'label': 'Item', 'checked': True},
+                    {'id': 'toggle-spoilage-quantity', 'target': 'col-spoilage-quantity', 'label': 'Quantity', 'checked': True},
+                    {'id': 'toggle-spoilage-gl', 'target': 'col-spoilage-gl', 'label': 'Purchase GL Code', 'checked': True},
+                ]
+            ) }}
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table sortable" id="spoilage-table">
+            <thead>
+                <tr>
+                    <th scope="col" class="col-spoilage-date">Date</th>
+                    <th scope="col" class="col-spoilage-from">From Location</th>
+                    <th scope="col" class="col-spoilage-item">Item</th>
+                    <th scope="col" class="col-spoilage-quantity" data-type="number">Quantity</th>
+                    <th scope="col" class="col-spoilage-gl">Purchase GL Code</th>
+                </tr>
+            </thead>
+            <tbody id="spoilage-table-body">
+                {% include 'spoilage/_table.html' %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Filter Modal -->
+{% call filter_modal(
+    'filterModal',
+    'Filters',
+    form_id='filterForm',
+    form_action=url_for('spoilage.view_spoilage'),
+    method='get',
+    reset_url=url_for('spoilage.view_spoilage'),
+    ajax=True,
+    scope=request.endpoint
+) %}
+    <div class="row g-3">
+        <div class="col-12">
+            {{ form.start_date.label }}
+            {{ form.start_date(class='form-control') }}
+        </div>
+        <div class="col-12">
+            {{ form.end_date.label }}
+            {{ form.end_date(class='form-control') }}
+        </div>
+        <div class="col-12">
+            {{ form.purchase_gl_code.label }}
+            {{ form.purchase_gl_code(class='form-select') }}
+        </div>
+        <div class="col-12">
+            {{ form.items.label }}
+            {{ form.items(class='form-select', multiple=True) }}
+        </div>
+    </div>
+{% endcall %}
+
+<script nonce="{{ csp_nonce }}">
+    $(function () {
+        const filterModalEl = document.querySelector('[data-filter-modal]');
+        const filterFormEl = filterModalEl ? filterModalEl.querySelector('[data-filter-form]') : null;
+        if (filterFormEl) {
+            const $filterForm = $(filterFormEl);
+            $filterForm.on('submit', function (e) {
+                e.preventDefault();
+                const params = $filterForm.serialize();
+                const action = $filterForm.attr('action') || '{{ url_for('spoilage.view_spoilage') }}';
+                const method = ($filterForm.attr('method') || 'GET').toUpperCase();
+                $.ajax({
+                    url: action,
+                    type: method,
+                    data: params,
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    success: function (response) {
+                        $('#spoilage-table-body').html(response);
+                        const modal = bootstrap.Modal.getInstance(filterModalEl);
+                        if (modal) { modal.hide(); }
+                        if (window.TableSort && typeof window.TableSort.bind === 'function') {
+                            window.TableSort.bind(document.getElementById('spoilage-table'));
+                        }
+                    }
+                });
+            });
+        }
+    });
+</script>
+{% endblock %}

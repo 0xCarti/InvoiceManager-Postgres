@@ -1,0 +1,21 @@
+{% if results %}
+    {% for ti, tr, item, from_loc, lsi in results %}
+    <tr>
+        <td class="col-spoilage-date">{{ tr.date_created.date() }}</td>
+        <td class="col-spoilage-from">{{ from_loc.name }}</td>
+        <td class="col-spoilage-item">{{ item.name }}</td>
+        <td class="col-spoilage-quantity">{{ ti.quantity }}</td>
+        <td class="col-spoilage-gl">
+            {{
+                lsi.purchase_gl_code.code
+                if lsi and lsi.purchase_gl_code
+                else (item.purchase_gl_code.code if item.purchase_gl_code else '')
+            }}
+        </td>
+    </tr>
+    {% endfor %}
+{% else %}
+    <tr>
+        <td class="text-center text-muted" colspan="5">No spoilage records found.</td>
+    </tr>
+{% endif %}

@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style>
+    .navbar { display: none; }
+    .page-break { page-break-after: always; }
+    @media print {
+        .no-print { display: none; }
+    }
+</style>
+<h2 class="no-print">Inventory Count Sheets - {{ event.name }}</h2>
+{% for block in data %}
+    <h4 class="mt-4">
+        {{ block.location.name }}
+        {% if block.page_count > 1 %}
+            <small class="text-muted">Page {{ block.page_number }} of {{ block.page_count }}</small>
+        {% endif %}
+    </h4>
+    <div class="table-responsive">
+    <table class="table table-bordered">
+        <thead>
+            <tr>
+                <th>Item</th>
+                <th>Receiving Quantity</th>
+                <th>Transfer Quantity</th>
+                <th>Base Quantity</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for entry in block.stand_items %}
+            <tr>
+                <td>{{ entry.item.name }}</td>
+                <td>{% if entry.recv_unit %} _____ {{ entry.recv_unit.name }} of {{ entry.recv_unit.factor }} {{ entry.item.base_unit }}{% endif %}</td>
+                <td>{% if entry.trans_unit %} _____ {{ entry.trans_unit.name }} of {{ entry.trans_unit.factor }} {{ entry.item.base_unit }}{% endif %}</td>
+                <td>_____ {{ entry.item.base_unit }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% if not loop.last %}<div class="page-break"></div>{% endif %}
+{% endfor %}
+{% endblock %}

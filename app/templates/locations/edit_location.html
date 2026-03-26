@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-8 col-xl-6">
+            <h1 class="h3 mb-4">Edit Location</h1>
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <form action="{{ form_action }}" method="post">
+                        {{ form.hidden_tag() }}
+                        <h2 class="h4 mb-3">{{ location.name }}</h2>
+                        {% with menu_help_text="Changing the menu updates the products and stand sheet for this location." %}
+                            {% include 'locations/_location_form_fields.html' %}
+                        {% endwith %}
+                        <div class="d-flex flex-wrap gap-2 mt-4">
+                            <a class="btn btn-outline-secondary" href="{{ cancel_url }}">Cancel</a>
+                            {{ form.submit(class="btn btn-primary") }}
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

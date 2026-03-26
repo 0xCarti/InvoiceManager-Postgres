@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <div>
+            <h2 class="mb-0">Invoice GL Code Report</h2>
+            <p class="text-muted mb-0">Breakdown of the invoice total by purchasing GL code with tax and delivery allocations.</p>
+        </div>
+        <a class="btn btn-outline-secondary" href="{{ url_for('purchase.view_purchase_invoices') }}">Back to Purchase Invoices</a>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <div class="fw-semibold text-uppercase small text-muted">Invoice</div>
+                    <div>{{ invoice.invoice_number or invoice.id }}</div>
+                </div>
+                <div class="col-md-4">
+                    <div class="fw-semibold text-uppercase small text-muted">Vendor</div>
+                    <div>{{ invoice.vendor_name or (invoice.purchase_order.vendor.first_name ~ ' ' ~ invoice.purchase_order.vendor.last_name if invoice.purchase_order and invoice.purchase_order.vendor else '—') }}</div>
+                </div>
+                <div class="col-md-4">
+                    <div class="fw-semibold text-uppercase small text-muted">Received Date</div>
+                    <div>{{ invoice.received_date.strftime('%Y-%m-%d') if invoice.received_date else '—' }}</div>
+                </div>
+            </div>
+            <div class="row g-3 mt-2">
+                <div class="col-md-4">
+                    <div class="fw-semibold text-uppercase small text-muted">Location</div>
+                    <div>{{ invoice.location.name if invoice.location else invoice.location_name or '—' }}</div>
+                </div>
+                <div class="col-md-4">
+                    <div class="fw-semibold text-uppercase small text-muted">Item Subtotal</div>
+                    <div>${{ '%.2f'|format(invoice.item_total or 0) }}</div>
+                </div>
+                <div class="col-md-4">
+                    <div class="fw-semibold text-uppercase small text-muted">Invoice Total</div>
+                    <div class="fw-semibold">${{ '%.2f'|format(invoice.total or 0) }}</div>
+                </div>
+            </div>
+            <div class="row g-3 mt-2">
+                <div class="col-md-4">
+                    <div class="fw-semibold text-uppercase small text-muted">Delivery Charge</div>
+                    <div>${{ '%.2f'|format(invoice.delivery_charge or 0) }}</div>
+                </div>
+                <div class="col-md-4">
+                    <div class="fw-semibold text-uppercase small text-muted">GST</div>
+                    <div>${{ '%.2f'|format(invoice.gst or 0) }}</div>
+                </div>
+                <div class="col-md-4">
+                    <div class="fw-semibold text-uppercase small text-muted">PST</div>
+                    <div>${{ '%.2f'|format(invoice.pst or 0) }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="alert alert-secondary" role="note">
+        GST is booked entirely to GL code <strong>102702</strong>. Delivery charges and PST are prorated across the remaining GL codes based on their pre-tax spend.
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-bordered table-striped align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th scope="col">GL Code</th>
+                    <th scope="col">Description</th>
+                    <th scope="col" class="text-end">Pre-Tax Amount</th>
+                    <th scope="col" class="text-end">Delivery Allocation</th>
+                    <th scope="col" class="text-end">PST Allocation</th>
+                    <th scope="col" class="text-end">GST Allocation</th>
+                    <th scope="col" class="text-end">Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr>
+                    <td>{{ row.code }}</td>
+                    <td>
+                        {% if row.description %}
+                            {{ row.description }}
+                        {% elif row.code == 'Unassigned' %}
+                            <span class="text-muted">No GL code resolved</span>
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-end">${{ '%.2f'|format(row.base_amount) }}</td>
+                    <td class="text-end">${{ '%.2f'|format(row.delivery) }}</td>
+                    <td class="text-end">${{ '%.2f'|format(row.pst) }}</td>
+                    <td class="text-end">${{ '%.2f'|format(row.gst) }}</td>
+                    <td class="text-end">${{ '%.2f'|format(row.total) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr class="table-secondary fw-semibold">
+                    <td colspan="2" class="text-end">Totals</td>
+                    <td class="text-end">${{ '%.2f'|format(totals.base_amount) }}</td>
+                    <td class="text-end">${{ '%.2f'|format(totals.delivery) }}</td>
+                    <td class="text-end">${{ '%.2f'|format(totals.pst) }}</td>
+                    <td class="text-end">${{ '%.2f'|format(totals.gst) }}</td>
+                    <td class="text-end">${{ '%.2f'|format(totals.total) }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+{% endblock %}

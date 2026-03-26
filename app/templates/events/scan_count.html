@@ -1,0 +1,193 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Scan Inventory Counts - {{ location.name }}</h2>
+    <form method="post"
+          action="{{ url_for('event.scan_counts', event_id=event.id, location_id=location.id) }}"
+          data-scan-form>
+        {{ form.hidden_tag() }}
+        <div class="row g-3 align-items-end">
+            <div class="col-md-6">
+                {{ form.upc.label(class="form-label") }}
+                {{ form.upc(class="form-control", placeholder="Scan UPC", autofocus=True) }}
+            </div>
+            <div class="col-md-3">
+                {{ form.quantity.label(class="form-label") }}
+                {{ form.quantity(class="form-control", step="any") }}
+            </div>
+            <div class="col-md-3">
+                {{ form.submit(class="btn btn-primary w-100") }}
+            </div>
+        </div>
+    </form>
+    <div class="mt-3" data-scan-feedback></div>
+
+    <div class="d-flex align-items-center justify-content-between mt-4">
+        <h3 class="h5 mb-0">Running Totals</h3>
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-scan-refresh>
+            Refresh Totals
+        </button>
+    </div>
+    <div class="table-responsive mt-2">
+        <table class="table table-striped align-middle">
+            <thead>
+                <tr>
+                    <th scope="col">Item</th>
+                    <th scope="col">Counted</th>
+                    <th scope="col">Expected</th>
+                </tr>
+            </thead>
+            <tbody data-scan-totals>
+                {% for entry in totals %}
+                <tr data-item-id="{{ entry.item_id }}">
+                    <td>
+                        <div class="fw-semibold">{{ entry.name }}</div>
+                        {% if entry.upc %}
+                        <div class="text-muted small">UPC: {{ entry.upc }}</div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {{ "{:.2f}".format(entry.counted) }} {{ entry.base_unit }}
+                    </td>
+                    <td>
+                        {{ "{:.2f}".format(entry.expected) }} {{ entry.base_unit }}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="3" class="text-center text-muted">No counts recorded yet.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script nonce="{{ csp_nonce }}">
+    document.addEventListener('DOMContentLoaded', () => {
+        const form = document.querySelector('[data-scan-form]');
+        const feedback = document.querySelector('[data-scan-feedback]');
+        const totalsBody = document.querySelector('[data-scan-totals]');
+        const refreshButton = document.querySelector('[data-scan-refresh]');
+        if (!form) {
+            return;
+        }
+
+        const upcInput = form.querySelector('input[name="{{ form.upc.name }}"]');
+        const quantityInput = form.querySelector('input[name="{{ form.quantity.name }}"]');
+        const csrfInput = form.querySelector('input[name="csrf_token"]');
+
+        if (upcInput) {
+            upcInput.focus();
+        }
+
+        const showMessage = (message, type = 'success') => {
+            if (!feedback) {
+                return;
+            }
+            feedback.innerHTML = `
+                <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            `;
+        };
+
+        const renderTotals = (totals) => {
+            if (!totalsBody) {
+                return;
+            }
+            if (!totals || totals.length === 0) {
+                totalsBody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No counts recorded yet.</td></tr>';
+                return;
+            }
+            const rows = totals.map((entry) => {
+                const counted = Number.isFinite(entry.counted) ? entry.counted.toFixed(2) : '0.00';
+                const expected = Number.isFinite(entry.expected) ? entry.expected.toFixed(2) : '0.00';
+                const upcLine = entry.upc ? `<div class="text-muted small">UPC: ${entry.upc}</div>` : '';
+                return `
+                    <tr data-item-id="${entry.item_id}">
+                        <td><div class="fw-semibold">${entry.name}</div>${upcLine}</td>
+                        <td>${counted} ${entry.base_unit || ''}</td>
+                        <td>${expected} ${entry.base_unit || ''}</td>
+                    </tr>
+                `;
+            });
+            totalsBody.innerHTML = rows.join('');
+        };
+
+        const refreshTotals = async (notify = false) => {
+            try {
+                const response = await fetch(form.action, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' },
+                    credentials: 'same-origin'
+                });
+                if (!response.ok) {
+                    throw new Error('Unable to refresh totals.');
+                }
+                const data = await response.json();
+                if (data && data.success) {
+                    renderTotals(data.totals || []);
+                    if (notify) {
+                        showMessage('Totals refreshed.', 'info');
+                    }
+                } else if (notify) {
+                    showMessage(data && data.error ? data.error : 'Unable to refresh totals.', 'danger');
+                }
+            } catch (err) {
+                if (notify) {
+                    showMessage('Unable to refresh totals.', 'danger');
+                }
+            }
+        };
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const upcValue = upcInput ? upcInput.value.trim() : '';
+            const quantityValue = quantityInput ? quantityInput.value : '0';
+            const headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            };
+            if (csrfInput) {
+                headers['X-CSRFToken'] = csrfInput.value;
+            }
+
+            try {
+                const response = await fetch(form.action, {
+                    method: 'POST',
+                    headers,
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        upc: upcValue,
+                        quantity: quantityValue
+                    })
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    const message = data && data.error ? data.error : 'Unable to record the count.';
+                    showMessage(message, 'danger');
+                    return;
+                }
+                renderTotals(data.totals || []);
+                showMessage(`Recorded ${data.item.total.toFixed(2)} ${data.item.base_unit || ''} total for ${data.item.name}.`, 'success');
+                if (upcInput) {
+                    upcInput.value = '';
+                    upcInput.focus();
+                }
+                if (quantityInput) {
+                    quantityInput.value = '1';
+                }
+            } catch (error) {
+                showMessage('Unable to record the count.', 'danger');
+            }
+        });
+
+        if (refreshButton) {
+            refreshButton.addEventListener('click', () => refreshTotals(true));
+        }
+    });
+</script>
+{% endblock %}

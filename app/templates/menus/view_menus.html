@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% from 'macros/column_visibility.html' import column_visibility_dropdown %}
+{% block content %}
+<div class="container my-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Menus</h2>
+            <p class="text-muted mb-0">Manage menu definitions and assignments</p>
+        </div>
+        <div>
+            <a href="{{ url_for('menu.add_menu') }}" class="btn btn-primary">Create Menu</a>
+        </div>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <div class="dropdown d-md-none">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                More actions
+            </button>
+            <ul class="dropdown-menu">
+                <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#menuFilterModal">Filters</button></li>
+            </ul>
+        </div>
+        <div>
+            {{ column_visibility_dropdown(
+                table_id='menus-table',
+                storage_key='menusTableColumnVisibility',
+                columns=[
+                    {'id': 'toggle-menu-name', 'target': 'col-menu-name', 'label': 'Name', 'checked': True},
+                    {'id': 'toggle-menu-description', 'target': 'col-menu-description', 'label': 'Description', 'checked': True},
+                    {'id': 'toggle-menu-products', 'target': 'col-menu-products', 'label': 'Products', 'checked': True},
+                    {'id': 'toggle-menu-locations', 'target': 'col-menu-locations', 'label': 'Active Locations', 'checked': True},
+                    {'id': 'toggle-menu-last-used', 'target': 'col-menu-last-used', 'label': 'Last Used', 'checked': True},
+                    {'id': 'toggle-menu-actions', 'target': 'col-menu-actions', 'label': 'Actions', 'checked': True},
+                ]
+            ) }}
+        </div>
+        <button type="button" class="btn btn-outline-secondary d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#menuFilterModal">Filters</button>
+    </div>
+
+    {% if name_query or assigned_status != 'all' or product_status != 'all' %}
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="text-muted small">Active filters:</span>
+        {% if name_query %}
+        <span class="badge rounded-pill text-bg-light border">Name ({{ match_mode.replace('_', ' ')|title }}): {{ name_query }}</span>
+        {% endif %}
+        {% if assigned_status != 'all' %}
+        <span class="badge rounded-pill text-bg-light border">Assigned Status: {{ 'Assigned to locations' if assigned_status == 'assigned' else 'Not assigned to any location' }}</span>
+        {% endif %}
+        {% if product_status != 'all' %}
+        <span class="badge rounded-pill text-bg-light border">Product Status: {{ 'Has products' if product_status == 'with' else 'No products' }}</span>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if menus %}
+    <div class="table-responsive">
+        <table class="table table-striped align-middle" id="menus-table">
+            <thead>
+                <tr>
+                    <th scope="col" class="col-menu-name">Name</th>
+                    <th scope="col" class="col-menu-description">Description</th>
+                    <th scope="col" class="col-menu-products">Products</th>
+                    <th scope="col" class="col-menu-locations">Active Locations</th>
+                    <th scope="col" class="col-menu-last-used">Last Used</th>
+                    <th scope="col" class="col-menu-actions text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for menu in menus %}
+                {% set active_assignments = menu.assignments | selectattr('unassigned_at', 'equalto', None) | list %}
+                <tr>
+                    <td class="col-menu-name fw-semibold">{{ menu.name }}</td>
+                    <td class="col-menu-description text-wrap">{{ menu.description or '—' }}</td>
+                    <td class="col-menu-products">
+                        {% if menu.products %}
+                        <ul class="mb-0 ps-3 small">
+                            {% for product in menu.products %}
+                            <li>{{ product.name }}</li>
+                            {% endfor %}
+                        </ul>
+                        {% else %}
+                        <span class="text-muted">No products</span>
+                        {% endif %}
+                    </td>
+                    <td class="col-menu-locations">
+                        {% if active_assignments %}
+                        <ul class="mb-0 ps-3 small">
+                            {% for assignment in active_assignments %}
+                            <li>{{ assignment.location.name }}</li>
+                            {% endfor %}
+                        </ul>
+                        {% else %}
+                        <span class="text-muted">Not assigned</span>
+                        {% endif %}
+                    </td>
+                    <td class="col-menu-last-used">
+                        {% if menu.last_used_at %}
+                        {{ menu.last_used_at.strftime('%Y-%m-%d %H:%M') }}
+                        {% else %}
+                        <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td class="col-menu-actions text-end">
+                        <div class="btn-group" role="group">
+                            <a href="{{ url_for('menu.edit_menu', menu_id=menu.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                            <a href="{{ url_for('menu.assign_menu', menu_id=menu.id) }}" class="btn btn-sm btn-outline-primary">Assign</a>
+                            <form method="post" action="{{ url_for('menu.delete_menu', menu_id=menu.id) }}" class="d-inline">
+                                {{ delete_form.hidden_tag() }}
+                                <button type="submit" class="btn btn-sm btn-outline-danger" data-confirm-message="Delete this menu?">Delete</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="alert alert-info">No menus have been created yet.</div>
+    {% endif %}
+</div>
+
+<div class="modal fade" id="menuFilterModal" tabindex="-1" aria-labelledby="menuFilterModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="menuFilterModalLabel">Filters</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="menu-filter-form" method="get">
+                    <div class="mb-3">
+                        <label for="name_query" class="form-label">Name</label>
+                        <input type="text" id="name_query" name="name_query" class="form-control" value="{{ name_query }}" placeholder="Search name">
+                    </div>
+                    <div class="mb-3">
+                        <label for="match_mode" class="form-label">Match Mode</label>
+                        <select id="match_mode" name="match_mode" class="form-select">
+                            <option value="exact" {% if match_mode == 'exact' %}selected{% endif %}>Exact</option>
+                            <option value="startswith" {% if match_mode == 'startswith' %}selected{% endif %}>Starts with</option>
+                            <option value="contains" {% if match_mode == 'contains' %}selected{% endif %}>Contains</option>
+                            <option value="not_contains" {% if match_mode == 'not_contains' %}selected{% endif %}>Does not contain</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="assigned_status" class="form-label">Assigned Status</label>
+                        <select id="assigned_status" name="assigned_status" class="form-select">
+                            <option value="all" {% if assigned_status == 'all' %}selected{% endif %}>All</option>
+                            <option value="assigned" {% if assigned_status == 'assigned' %}selected{% endif %}>Assigned to locations</option>
+                            <option value="unassigned" {% if assigned_status == 'unassigned' %}selected{% endif %}>Not assigned</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="product_status" class="form-label">Product Status</label>
+                        <select id="product_status" name="product_status" class="form-select">
+                            <option value="all" {% if product_status == 'all' %}selected{% endif %}>All</option>
+                            <option value="with" {% if product_status == 'with' %}selected{% endif %}>Has products</option>
+                            <option value="without" {% if product_status == 'without' %}selected{% endif %}>No products</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <a href="{{ url_for('menu.view_menus') }}" class="btn btn-outline-secondary">Reset</a>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" form="menu-filter-form" class="btn btn-primary">Apply</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

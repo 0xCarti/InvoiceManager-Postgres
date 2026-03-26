@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+{% from "macros/column_visibility.html" import column_visibility_dropdown %}
+{% from 'macros/filter_modal.html' import filter_modal %}
+
+{% block title %}View Customers{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Customers</h2>
+            <p class="text-muted mb-0">Browse and manage customer records</p>
+        </div>
+        <div>
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createCustomerModal">Create Customer</button>
+        </div>
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <div class="dropdown d-md-none">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                More actions
+            </button>
+            <ul class="dropdown-menu">
+                <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</button></li>
+            </ul>
+        </div>
+
+        <div>
+            {{ column_visibility_dropdown(
+                table_id='customerTable',
+                storage_key='customerTableColumnVisibility',
+                columns=[
+                    {'id': 'toggle-customer-name', 'target': 'col-customer-name', 'label': 'Name', 'checked': True},
+                    {'id': 'toggle-customer-gst', 'target': 'col-customer-gst', 'label': 'GST Exempt', 'checked': True},
+                    {'id': 'toggle-customer-pst', 'target': 'col-customer-pst', 'label': 'PST Exempt', 'checked': True},
+                    {'id': 'toggle-customer-actions', 'target': 'col-customer-actions', 'label': 'Actions', 'checked': True},
+                ]
+            ) }}
+        </div>
+        <button type="button" class="btn btn-outline-secondary d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</button>
+    </div>
+
+    <!-- Filter Modal -->
+    {% call filter_modal(
+        'filterModal',
+        'Filters',
+        form_id='filter-form',
+        form_action=url_for('customer.view_customers'),
+        method='get',
+        reset_url=url_for('customer.view_customers'),
+        scope=request.endpoint
+    ) %}
+        <div class="mb-3">
+            <label for="name_query" class="form-label">Name</label>
+            <input type="text" id="name_query" name="name_query" class="form-control" placeholder="Search name" value="{{ name_query or '' }}">
+        </div>
+        <div class="mb-3">
+            <label for="match_mode" class="form-label">Match Mode</label>
+            <select id="match_mode" name="match_mode" class="form-select">
+                <option value="exact" {% if match_mode == 'exact' %}selected{% endif %}>Exact</option>
+                <option value="startswith" {% if match_mode == 'startswith' %}selected{% endif %}>Starts with</option>
+                <option value="contains" {% if match_mode == 'contains' %}selected{% endif %}>Contains</option>
+                <option value="not_contains" {% if match_mode == 'not_contains' %}selected{% endif %}>Does not contain</option>
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="gst_exempt" class="form-label">GST Exempt</label>
+            <select id="gst_exempt" name="gst_exempt" class="form-select">
+                <option value="all" {% if gst_exempt == 'all' %}selected{% endif %}>All</option>
+                <option value="yes" {% if gst_exempt == 'yes' %}selected{% endif %}>Yes</option>
+                <option value="no" {% if gst_exempt == 'no' %}selected{% endif %}>No</option>
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="pst_exempt" class="form-label">PST Exempt</label>
+            <select id="pst_exempt" name="pst_exempt" class="form-select">
+                <option value="all" {% if pst_exempt == 'all' %}selected{% endif %}>All</option>
+                <option value="yes" {% if pst_exempt == 'yes' %}selected{% endif %}>Yes</option>
+                <option value="no" {% if pst_exempt == 'no' %}selected{% endif %}>No</option>
+            </select>
+        </div>
+    {% endcall %}
+
+    {% if name_query or gst_exempt != 'all' or pst_exempt != 'all' %}
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="text-muted small">Active filters:</span>
+        {% if name_query %}
+        <span class="badge rounded-pill text-bg-light border">Name: {{ name_query }}</span>
+        {% endif %}
+        {% if gst_exempt != 'all' %}
+        <span class="badge rounded-pill text-bg-light border">GST Exempt: {{ 'Yes' if gst_exempt == 'yes' else 'No' }}</span>
+        {% endif %}
+        {% if pst_exempt != 'all' %}
+        <span class="badge rounded-pill text-bg-light border">PST Exempt: {{ 'Yes' if pst_exempt == 'yes' else 'No' }}</span>
+        {% endif %}
+    </div>
+    {% endif %}
+    <div class="table-responsive">
+    <table class="table sortable" id="customerTable">
+        <thead>
+            <tr>
+                <th scope="col" class="col-customer-name">Name</th>
+                <th scope="col" class="col-customer-gst">GST Exempt</th>
+                <th scope="col" class="col-customer-pst">PST Exempt</th>
+                <th scope="col" class="col-customer-actions" data-sortable="false">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for customer in customers.items %}
+            <tr>
+                <td class="col-customer-name">{{ customer.first_name }} {{ customer.last_name }}</td>
+                <td class="col-customer-gst">{{ 'Yes' if customer.gst_exempt else 'No' }}</td>
+                <td class="col-customer-pst">{{ 'Yes' if customer.pst_exempt else 'No' }}</td>
+                <td class="col-customer-actions">
+                    <a href="{{ url_for('customer.edit_customer', customer_id=customer.id) }}" class="btn btn-primary mr-2">Edit</a>
+                    <a href="{{ url_for('notes.entity_notes', entity_type='customer', entity_id=customer.id) }}" class="btn btn-outline-secondary mr-2">Notes</a>
+                    <form action="{{ url_for('customer.delete_customer', customer_id=customer.id) }}" method="post" class="d-inline">
+                        {{ delete_form.hidden_tag() }}
+                        <button type="submit" class="btn btn-danger mr-2" data-confirm-message="Are you sure you want to delete this customer?">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
+        <nav aria-label="Customer pagination">
+            <ul class="pagination mb-0">
+                <li class="page-item {% if not customers.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('customer.view_customers', page=customers.prev_num if customers.has_prev else 1, **pagination_args) }}"{% if not customers.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link">Page {{ customers.page }} of {{ customers.pages }}</span>
+                </li>
+                <li class="page-item {% if not customers.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('customer.view_customers', page=customers.next_num if customers.has_next else customers.pages or 1, **pagination_args) }}"{% if not customers.has_next %} tabindex="-1" aria-disabled="true"{% endif %}>Next</a>
+                </li>
+            </ul>
+        </nav>
+        <form method="get" class="d-flex align-items-center gap-2">
+            {% for key, values in request.args.lists() %}
+                {% if key not in ['page', 'per_page'] %}
+                    {% for value in values %}
+                        <input type="hidden" name="{{ key }}" value="{{ value }}">
+                    {% endfor %}
+                {% endif %}
+            {% endfor %}
+            <input type="hidden" name="page" value="1">
+            <label for="customers-per-page" class="form-label mb-0">Rows per page</label>
+            <select id="customers-per-page" name="per_page" class="form-select js-auto-submit">
+                {% for option in PAGINATION_SIZES %}
+                    <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+
+    <!-- Create Customer Modal -->
+    <div class="modal fade" id="createCustomerModal" tabindex="-1" aria-labelledby="createCustomerModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="createCustomerModalLabel">Create Customer</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    {% include 'customers/customer_form.html' %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script nonce="{{ csp_nonce }}">
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.getElementById('customerForm');
+        if (!form) return;
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const response = await fetch('{{ url_for('customer.create_customer_modal') }}', {
+                method: 'POST',
+                body: new FormData(form)
+            });
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success) {
+                    const tbody = document.querySelector('table tbody');
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td class="col-customer-name">${data.customer.first_name} ${data.customer.last_name}</td>
+                        <td class="col-customer-gst">${data.customer.gst_exempt ? 'Yes' : 'No'}</td>
+                        <td class="col-customer-pst">${data.customer.pst_exempt ? 'Yes' : 'No'}</td>
+                        <td class="col-customer-actions">
+                            <a href="/customers/${data.customer.id}/edit" class="btn btn-primary mr-2">Edit</a>
+                            <a href="/notes/customer/${data.customer.id}" class="btn btn-outline-secondary mr-2">Notes</a>
+                            <form action="/customers/${data.customer.id}/delete" method="post" class="d-inline">
+                                <input type="hidden" name="csrf_token" value="${data.delete_csrf_token}">
+                                <button type="submit" class="btn btn-danger mr-2" data-confirm-message="Are you sure you want to delete this customer?">Delete</button>
+                            </form>
+                        </td>`;
+                    tbody.appendChild(row);
+                    if (window.TableSort && typeof window.TableSort.bind === 'function') {
+                        window.TableSort.bind(document.getElementById('customerTable'));
+                    }
+                    form.reset();
+                    const modalEl = document.getElementById('createCustomerModal');
+                    bootstrap.Modal.getInstance(modalEl).hide();
+                }
+            } else {
+                console.error('Error creating customer');
+            }
+        });
+    });
+    </script>
+</div>
+{% endblock %}

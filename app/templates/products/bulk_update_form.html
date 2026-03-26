@@ -1,0 +1,109 @@
+<form method="post">
+    {{ form.hidden_tag() }}
+    {{ form.selected_ids }}
+    {% if form.form_errors %}
+    <div class="alert alert-danger">
+        <ul class="mb-0">
+            {% for error in form.form_errors %}
+            <li>{{ error }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+    <div class="row align-items-center mb-3">
+        <div class="col-md-3">
+            <div class="form-check form-switch">
+                {{ form.apply_name(class_='form-check-input', id='bulk-product-apply-name', **{'data-toggle-target': '#bulk-product-name'}) }}
+                <label class="form-check-label" for="bulk-product-apply-name">Update Name</label>
+            </div>
+        </div>
+        <div class="col-md-9">
+            <label class="form-label" for="bulk-product-name">Name</label>
+            {{ form.name(class_='form-control' + (' is-invalid' if form.name.errors else ''), id='bulk-product-name') }}
+            {% for error in form.name.errors %}
+            <div class="invalid-feedback d-block">{{ error }}</div>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="row align-items-center mb-3">
+        <div class="col-md-3">
+            <div class="form-check form-switch">
+                {{ form.apply_price(class_='form-check-input', id='bulk-product-apply-price', **{'data-toggle-target': '#bulk-product-price'}) }}
+                <label class="form-check-label" for="bulk-product-apply-price">Update Price</label>
+            </div>
+        </div>
+        <div class="col-md-9">
+            <label class="form-label" for="bulk-product-price">Price</label>
+            {{ form.price(class_='form-control' + (' is-invalid' if form.price.errors else ''), id='bulk-product-price', step='0.01', min='0') }}
+            {% for error in form.price.errors %}
+            <div class="invalid-feedback d-block">{{ error }}</div>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="row align-items-center mb-3">
+        <div class="col-md-3">
+            <div class="form-check form-switch">
+                {{ form.apply_cost(class_='form-check-input', id='bulk-product-apply-cost', **{'data-toggle-target': '#bulk-product-cost'}) }}
+                <label class="form-check-label" for="bulk-product-apply-cost">Update Cost</label>
+            </div>
+        </div>
+        <div class="col-md-9">
+            <label class="form-label" for="bulk-product-cost">Cost</label>
+            {{ form.cost(class_='form-control' + (' is-invalid' if form.cost.errors else ''), id='bulk-product-cost', step='0.01', min='0') }}
+            {% for error in form.cost.errors %}
+            <div class="invalid-feedback d-block">{{ error }}</div>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="row align-items-center mb-3">
+        <div class="col-md-3">
+            <div class="form-check form-switch">
+                {{ form.apply_sales_gl_code_id(class_='form-check-input', id='bulk-product-apply-sales-gl', **{'data-toggle-target': '#bulk-product-sales-gl'}) }}
+                <label class="form-check-label" for="bulk-product-apply-sales-gl">Update Sales GL</label>
+            </div>
+        </div>
+        <div class="col-md-9">
+            <label class="form-label" for="bulk-product-sales-gl">Sales GL Code</label>
+            {{ form.sales_gl_code_id(class_='form-select', id='bulk-product-sales-gl') }}
+        </div>
+    </div>
+    <div class="row align-items-center mb-3">
+        <div class="col-md-3">
+            <div class="form-check form-switch">
+                {{ form.apply_gl_code_id(class_='form-check-input', id='bulk-product-apply-inventory-gl', **{'data-toggle-target': '#bulk-product-inventory-gl'}) }}
+                <label class="form-check-label" for="bulk-product-apply-inventory-gl">Update Inventory GL</label>
+            </div>
+        </div>
+        <div class="col-md-9">
+            <label class="form-label" for="bulk-product-inventory-gl">Inventory GL Code</label>
+            {{ form.gl_code_id(class_='form-select', id='bulk-product-inventory-gl') }}
+        </div>
+    </div>
+    <div class="text-end">
+        {{ form.submit(class_='btn btn-primary') }}
+    </div>
+</form>
+<script nonce="{{ csp_nonce }}">
+(function() {
+    const form = document.currentScript.previousElementSibling && document.currentScript.previousElementSibling.tagName === 'FORM'
+        ? document.currentScript.previousElementSibling
+        : document.currentScript.closest('form');
+    if (!form) {
+        return;
+    }
+    form.querySelectorAll('[data-toggle-target]').forEach(function(toggle) {
+        const targetSelector = toggle.getAttribute('data-toggle-target');
+        if (!targetSelector) {
+            return;
+        }
+        const field = form.querySelector(targetSelector);
+        if (!field) {
+            return;
+        }
+        field.disabled = !toggle.checked;
+        toggle.addEventListener('change', function() {
+            field.disabled = !toggle.checked;
+        });
+    });
+})();
+</script>

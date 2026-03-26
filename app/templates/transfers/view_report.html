@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+{% from 'macros/column_visibility.html' import column_visibility_dropdown %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Completed Transfer Report</h2>
+            <p class="text-muted mb-0">Summary of completed transfer quantities</p>
+        </div>
+        <div>
+            <a class="btn btn-outline-secondary" href="{{ url_for('transfer.generate_report') }}">Generate New Report</a>
+        </div>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="badge rounded-pill text-bg-light border">Period: {{ session.report_start_datetime }} to {{ session.report_end_datetime }}</span>
+        <span class="badge rounded-pill text-bg-light border">
+            From:
+            {% if from_locations %}{{ from_locations | join(', ') }}{% else %}All locations{% endif %}
+        </span>
+        <span class="badge rounded-pill text-bg-light border">
+            To:
+            {% if to_locations %}{{ to_locations | join(', ') }}{% else %}All locations{% endif %}
+        </span>
+    </div>
+    <div class="d-flex justify-content-end mb-3">
+        {{ column_visibility_dropdown(
+            table_id='transfer-report-table',
+            storage_key='transferReportTableColumnVisibility',
+            align='end',
+            columns=[
+                {'id': 'toggle-transfer-report-from', 'target': 'col-transfer-report-from', 'label': 'From Location', 'checked': True},
+                {'id': 'toggle-transfer-report-to', 'target': 'col-transfer-report-to', 'label': 'To Location', 'checked': True},
+                {'id': 'toggle-transfer-report-item', 'target': 'col-transfer-report-item', 'label': 'Item', 'checked': True},
+                {'id': 'toggle-transfer-report-qty', 'target': 'col-transfer-report-quantity', 'label': 'Completed Quantity', 'checked': True},
+            ]
+        ) }}
+    </div>
+    <p class="text-muted">Totals reflect completed transfer quantities, including partially completed transfers.</p>
+    <div class="table-responsive">
+    <table class="table" id="transfer-report-table">
+        <thead>
+            <tr>
+                <th scope="col" class="col-transfer-report-from">From Location</th>
+                <th scope="col" class="col-transfer-report-to">To Location</th>
+                <th scope="col" class="col-transfer-report-item">Item</th>
+                <th scope="col" class="col-transfer-report-quantity">Completed Quantity</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for transfer in session.aggregated_transfers %}
+            <tr>
+                <td class="col-transfer-report-from">{{ transfer.from_location_name }}</td>
+                <td class="col-transfer-report-to">{{ transfer.to_location_name }}</td>
+                <td class="col-transfer-report-item">{{ transfer.item_name }}</td>
+                <td class="col-transfer-report-quantity">{{ transfer.total_quantity }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endblock %}

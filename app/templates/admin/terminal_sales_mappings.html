@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-3">Terminal Sales Mappings</h1>
+        <p class="text-muted">
+            Remove saved product or location mappings that were created while importing terminal sales files.
+            Deleting a mapping prevents it from being suggested automatically during future imports.
+        </p>
+    </div>
+</div>
+<div class="row">
+    <div class="col-lg-6">
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Product Mappings</span>
+                {% if product_aliases %}
+                <span class="badge bg-secondary">{{ product_aliases|length }}</span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                {% if product_aliases %}
+                <form method="post">
+                    {{ product_form.hidden_tag() }}
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped align-middle mb-3">
+                            <thead>
+                                <tr>
+                                    <th scope="col" class="text-center" style="width: 3rem;">Select</th>
+                                    <th scope="col">Terminal Product Name</th>
+                                    <th scope="col">Mapped Product</th>
+                                    <th scope="col">Saved On</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for alias in product_aliases %}
+                                <tr>
+                                    <td class="text-center">
+                                        <input class="form-check-input" type="checkbox"
+                                               name="{{ product_form.selected_ids.name }}"
+                                               id="product-alias-{{ alias.id }}"
+                                               value="{{ alias.id }}"
+                                               {% if alias.id in (product_form.selected_ids.data or []) %}checked{% endif %}>
+                                    </td>
+                                    <td class="text-wrap">{{ alias.source_name }}</td>
+                                    <td class="text-wrap">{{ alias.product.name if alias.product else 'Unknown product' }}</td>
+                                    <td>
+                                        {% if alias.created_at %}
+                                        {{ alias.created_at.strftime('%Y-%m-%d %H:%M') }}
+                                        {% else %}
+                                        <span class="text-muted">Unknown</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button type="submit" name="{{ product_form.delete_selected.name }}" value="y" class="btn btn-danger">Delete Selected</button>
+                        <button type="submit" name="{{ product_form.delete_all.name }}" value="y" class="btn btn-outline-danger"
+                                data-confirm-message="Delete all stored product mappings? This cannot be undone.">
+                            Delete All
+                        </button>
+                    </div>
+                </form>
+                {% else %}
+                <p class="mb-0 text-muted">There are no saved product mappings.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Location Mappings</span>
+                {% if location_aliases %}
+                <span class="badge bg-secondary">{{ location_aliases|length }}</span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                {% if location_aliases %}
+                <form method="post">
+                    {{ location_form.hidden_tag() }}
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped align-middle mb-3">
+                            <thead>
+                                <tr>
+                                    <th scope="col" class="text-center" style="width: 3rem;">Select</th>
+                                    <th scope="col">Terminal Location Name</th>
+                                    <th scope="col">Mapped Location</th>
+                                    <th scope="col">Saved On</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for alias in location_aliases %}
+                                <tr>
+                                    <td class="text-center">
+                                        <input class="form-check-input" type="checkbox"
+                                               name="{{ location_form.selected_ids.name }}"
+                                               id="location-alias-{{ alias.id }}"
+                                               value="{{ alias.id }}"
+                                               {% if alias.id in (location_form.selected_ids.data or []) %}checked{% endif %}>
+                                    </td>
+                                    <td class="text-wrap">{{ alias.source_name }}</td>
+                                    <td class="text-wrap">{{ alias.location.name if alias.location else 'Unknown location' }}</td>
+                                    <td>
+                                        {% if alias.created_at %}
+                                        {{ alias.created_at.strftime('%Y-%m-%d %H:%M') }}
+                                        {% else %}
+                                        <span class="text-muted">Unknown</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button type="submit" name="{{ location_form.delete_selected.name }}" value="y" class="btn btn-danger">Delete Selected</button>
+                        <button type="submit" name="{{ location_form.delete_all.name }}" value="y" class="btn btn-outline-danger"
+                                data-confirm-message="Delete all stored location mappings? This cannot be undone.">
+                            Delete All
+                        </button>
+                    </div>
+                </form>
+                {% else %}
+                <p class="mb-0 text-muted">There are no saved location mappings.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

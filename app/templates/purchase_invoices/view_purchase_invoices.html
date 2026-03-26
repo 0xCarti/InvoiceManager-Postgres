@@ -1,0 +1,354 @@
+{% extends 'base.html' %}
+{% from 'macros/filter_modal.html' import filter_modal %}
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Purchase Invoices</h2>
+            <p class="text-muted mb-0">Review received vendor invoices and related details</p>
+        </div>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <div class="dropdown d-md-none">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                More actions
+            </button>
+            <ul class="dropdown-menu">
+                <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</button></li>
+            </ul>
+        </div>
+        <div class="dropdown">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                Reports
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="{{ url_for('report.received_invoice_report') }}">Received Invoice Report</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('report.purchase_inventory_summary') }}">Purchase Inventory Summary</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('report.inventory_variance_report') }}">Inventory Variance Report</a></li>
+            </ul>
+        </div>
+        <div>
+            <div class="dropdown d-inline-block mb-3 me-2" data-column-visibility data-table-id="purchase-invoices-table" data-storage-key="purchaseInvoiceTableColumnVisibility">
+                <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="purchaseInvoiceColumnSelector"
+                    data-bs-toggle="dropdown" aria-expanded="false">
+                    Columns
+                </button>
+                <div class="dropdown-menu dropdown-menu-end p-3" aria-labelledby="purchaseInvoiceColumnSelector">
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-invoice-column-id"
+                            data-column-target="col-invoice-id" checked>
+                        <label class="form-check-label" for="toggle-invoice-column-id">Invoice ID</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-invoice-column-po"
+                            data-column-target="col-invoice-po" checked>
+                        <label class="form-check-label" for="toggle-invoice-column-po">PO Number</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-invoice-column-vendor"
+                            data-column-target="col-invoice-vendor" checked>
+                        <label class="form-check-label" for="toggle-invoice-column-vendor">Vendor</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-invoice-column-vendor-name"
+                            data-column-target="col-invoice-vendor-name">
+                        <label class="form-check-label" for="toggle-invoice-column-vendor-name">Vendor (Recorded)</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-invoice-column-location"
+                            data-column-target="col-invoice-location" checked>
+                        <label class="form-check-label" for="toggle-invoice-column-location">Location</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-invoice-column-date"
+                            data-column-target="col-invoice-date" checked>
+                        <label class="form-check-label" for="toggle-invoice-column-date">Received Date</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-invoice-column-number"
+                            data-column-target="col-invoice-number" checked>
+                        <label class="form-check-label" for="toggle-invoice-column-number">Invoice #</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-invoice-column-item-total"
+                            data-column-target="col-invoice-item-total">
+                        <label class="form-check-label" for="toggle-invoice-column-item-total">Item Subtotal</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-invoice-column-delivery"
+                            data-column-target="col-invoice-delivery">
+                        <label class="form-check-label" for="toggle-invoice-column-delivery">Delivery Charge</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-invoice-column-gst"
+                            data-column-target="col-invoice-gst">
+                        <label class="form-check-label" for="toggle-invoice-column-gst">GST</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-invoice-column-pst"
+                            data-column-target="col-invoice-pst">
+                        <label class="form-check-label" for="toggle-invoice-column-pst">PST</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-invoice-column-taxes"
+                            data-column-target="col-invoice-taxes">
+                        <label class="form-check-label" for="toggle-invoice-column-taxes">Taxes</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-invoice-column-total"
+                            data-column-target="col-invoice-total" checked>
+                        <label class="form-check-label" for="toggle-invoice-column-total">Total</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-invoice-column-item-count"
+                            data-column-target="col-invoice-item-count">
+                        <label class="form-check-label" for="toggle-invoice-column-item-count">Item Count</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-invoice-column-item-details"
+                            data-column-target="col-invoice-item-details">
+                        <label class="form-check-label" for="toggle-invoice-column-item-details">Item Details</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-invoice-column-user"
+                            data-column-target="col-invoice-user">
+                        <label class="form-check-label" for="toggle-invoice-column-user">Processed By (User ID)</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <button type="button" class="btn btn-outline-secondary d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</button>
+    </div>
+
+    <!-- Filter Modal -->
+    {% call filter_modal(
+        'filterModal',
+        'Filters',
+        form_id='filter-form',
+        form_action=url_for('purchase.view_purchase_invoices'),
+        method='get',
+        reset_url=url_for('purchase.view_purchase_invoices'),
+        dialog_class='modal-lg',
+        scope=request.endpoint
+    ) %}
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
+                <label for="invoice_number" class="form-label">Invoice #</label>
+                <input type="text" id="invoice_number" name="invoice_number" class="form-control" value="{{ invoice_number or '' }}">
+            </div>
+            <div class="col-md-6">
+                <label for="po_number" class="form-label">PO Number</label>
+                <input type="number" id="po_number" name="po_number" class="form-control" value="{{ po_number or '' }}">
+            </div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
+                <label for="vendor_id" class="form-label">Vendor</label>
+                <select id="vendor_id" name="vendor_id" class="form-select">
+                    <option value="">All Vendors</option>
+                    {% for v in vendors %}
+                    <option value="{{ v.id }}" {% if vendor_id == v.id %}selected{% endif %}>{{ v.first_name }}{{ v.last_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label for="location_id" class="form-label">Location</label>
+                <select id="location_id" name="location_id" class="form-select">
+                    <option value="">All Locations</option>
+                    {% for loc in locations %}
+                    <option value="{{ loc.id }}" {% if location_id == loc.id %}selected{% endif %}>{{ loc.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-12">
+                <label for="item_id" class="form-label">Items</label>
+                <select id="item_id" name="item_id" class="form-select" multiple size="8">
+                    {% for itm in items %}
+                    <option value="{{ itm.id }}" {% if itm.id in selected_item_ids %}selected{% endif %}>{{ itm.name }}</option>
+                    {% endfor %}
+                </select>
+                <div class="form-text">Use Ctrl (Windows) or Command (macOS) to select multiple items.</div>
+            </div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
+                <label for="start_date" class="form-label">Start Date</label>
+                <input type="text" id="start_date" name="start_date" class="form-control" data-flatpickr autocomplete="off" value="{{ start_date or '' }}">
+            </div>
+            <div class="col-md-6">
+                <label for="end_date" class="form-label">End Date</label>
+                <input type="text" id="end_date" name="end_date" class="form-control" data-flatpickr autocomplete="off" value="{{ end_date or '' }}">
+            </div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
+                <label for="amount_filter" class="form-label">Amount Filter</label>
+                <select id="amount_filter" name="amount_filter" class="form-select">
+                    <option value="">Any Amount</option>
+                    <option value="gt" {% if amount_filter == 'gt' %}selected{% endif %}>Greater than</option>
+                    <option value="lt" {% if amount_filter == 'lt' %}selected{% endif %}>Less than</option>
+                    <option value="eq" {% if amount_filter == 'eq' %}selected{% endif %}>Equal to</option>
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label for="amount_value" class="form-label">Amount</label>
+                <input type="number" id="amount_value" name="amount_value" class="form-control" step="0.01" min="0" value="{{ amount_value if amount_value is not none else '' }}">
+            </div>
+        </div>
+    {% endcall %}
+    {% if invoice_number or po_number or active_vendor or active_location or selected_item_names or start_date or end_date or (amount_filter and amount_value is not none) %}
+    {% set comparator_labels = {'gt': 'Greater than', 'lt': 'Less than', 'eq': 'Equal to'} %}
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="text-muted small">Active filters:</span>
+        {% if invoice_number %}
+        <span class="badge rounded-pill text-bg-light border">Invoice #: {{ invoice_number }}</span>
+        {% endif %}
+        {% if po_number %}
+        <span class="badge rounded-pill text-bg-light border">PO Number: {{ po_number }}</span>
+        {% endif %}
+        {% if active_vendor %}
+        <span class="badge rounded-pill text-bg-light border">Vendor: {{ active_vendor.first_name }} {{ active_vendor.last_name }}</span>
+        {% endif %}
+        {% if active_location %}
+        <span class="badge rounded-pill text-bg-light border">Location: {{ active_location.name }}</span>
+        {% endif %}
+        {% if selected_item_names %}
+        <span class="badge rounded-pill text-bg-light border">Items: {{ selected_item_names | join(', ') }}</span>
+        {% endif %}
+        {% if start_date or end_date %}
+        <span class="badge rounded-pill text-bg-light border">
+            Date:
+            {% if start_date %}From {{ start_date }}{% endif %}
+            {% if end_date %} to {{ end_date }}{% endif %}
+        </span>
+        {% endif %}
+        {% if amount_filter and amount_value is not none %}
+        <span class="badge rounded-pill text-bg-light border">Amount: {{ comparator_labels[amount_filter] }} {{ amount_value }}</span>
+        {% endif %}
+    </div>
+    {% endif %}
+    <div class="table-responsive">
+    <table class="table sortable" id="purchase-invoices-table">
+        <thead>
+            <tr>
+                <th class="col-invoice-id" data-type="number">ID</th>
+                <th class="col-invoice-po" data-type="number">PO</th>
+                <th class="col-invoice-vendor">Vendor</th>
+                <th class="col-invoice-vendor-name">Vendor (Recorded)</th>
+                <th class="col-invoice-location">Location</th>
+                <th class="col-invoice-date">Received Date</th>
+                <th class="col-invoice-number">Invoice #</th>
+                <th class="col-invoice-item-total" data-type="number">Item Subtotal</th>
+                <th class="col-invoice-delivery" data-type="number">Delivery</th>
+                <th class="col-invoice-gst" data-type="number">GST</th>
+                <th class="col-invoice-pst" data-type="number">PST</th>
+                <th class="col-invoice-taxes" data-type="number">Taxes</th>
+                <th class="col-invoice-total" data-type="number">Total</th>
+                <th class="col-invoice-item-count" data-type="number">Item Count</th>
+                <th class="col-invoice-item-details">Item Details</th>
+                <th class="col-invoice-user" data-type="number">Processed By</th>
+                <th class="col-invoice-actions">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for inv in invoices.items %}
+            <tr>
+                <td class="col-invoice-id" data-sort-value="{{ inv.id }}">{{ inv.id }}</td>
+                <td class="col-invoice-po" data-sort-value="{{ inv.purchase_order_id }}">{{ inv.purchase_order_id }}</td>
+                <td class="col-invoice-vendor">
+                    {% if inv.purchase_order and inv.purchase_order.vendor %}
+                        {{ inv.purchase_order.vendor.first_name }} {{ inv.purchase_order.vendor.last_name }}
+                    {% else %}
+                        <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                <td class="col-invoice-vendor-name">{{ inv.vendor_name or '—' }}</td>
+                <td class="col-invoice-location">{{ inv.location_name or '—' }}</td>
+                <td class="col-invoice-date" data-sort-value="{{ inv.received_date.strftime('%Y%m%d') if inv.received_date else '' }}">{{ inv.received_date.strftime('%Y-%m-%d') if inv.received_date else '—' }}</td>
+                <td class="col-invoice-number">{{ inv.invoice_number or '—' }}</td>
+                <td class="col-invoice-item-total" data-sort-value="{{ '%.6f'|format(inv.item_total or 0) }}">{{ '%.2f'|format(inv.item_total or 0) }}</td>
+                <td class="col-invoice-delivery" data-sort-value="{{ '%.6f'|format(inv.delivery_charge or 0) }}">{{ '%.2f'|format(inv.delivery_charge or 0) }}</td>
+                <td class="col-invoice-gst" data-sort-value="{{ '%.6f'|format(inv.gst or 0) }}">{{ '%.2f'|format(inv.gst or 0) }}</td>
+                <td class="col-invoice-pst" data-sort-value="{{ '%.6f'|format(inv.pst or 0) }}">{{ '%.2f'|format(inv.pst or 0) }}</td>
+                {% set total_tax = (inv.gst or 0) + (inv.pst or 0) %}
+                <td class="col-invoice-taxes" data-sort-value="{{ '%.6f'|format(total_tax) }}">{{ '%.2f'|format(total_tax) }}</td>
+                <td class="col-invoice-total" data-sort-value="{{ '%.6f'|format(inv.total or 0) }}">{{ '%.2f'|format(inv.total or 0) }}</td>
+                {% set invoice_item_count = inv.items | length %}
+                <td class="col-invoice-item-count" data-sort-value="{{ invoice_item_count }}">{{ invoice_item_count }}</td>
+                <td class="col-invoice-item-details text-wrap">
+                    {% if inv.items %}
+                        <ul class="mb-0 ps-3">
+                            {% for item in inv.items %}
+                                <li>
+                                    {% set location_label = item.location.name if item.location else (inv.location_name if not item.location_id else 'Deleted Location (#' ~ item.location_id ~ ')') %}
+                                    {{ item.item_name }} — {{ '%.4f'|format(item.quantity) }}
+                                    {% if item.unit_name %}
+                                        {{ item.unit_name }}
+                                    {% endif %}
+                                    @ {{ '%.2f'|format(item.cost) }} — {{ location_label }}
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <span class="text-muted">No items</span>
+                    {% endif %}
+                </td>
+                <td class="col-invoice-user" data-sort-value="{{ inv.user_id or '' }}">{{ inv.user_id or '—' }}</td>
+                <td class="col-invoice-actions">
+                    <a href="{{ url_for('purchase.view_purchase_invoice', invoice_id=inv.id) }}" class="btn btn-sm btn-primary">View</a>
+                    <a href="{{ url_for('report.invoice_gl_code_report', invoice_id=inv.id) }}" class="btn btn-sm btn-outline-primary">Invoice GL Code Report</a>
+                    <a href="{{ url_for('notes.entity_notes', entity_type='purchase_invoice', entity_id=inv.id) }}" class="btn btn-sm btn-outline-secondary">Notes</a>
+                    <a href="{{ url_for('purchase.reverse_purchase_invoice', invoice_id=inv.id) }}" class="btn btn-sm btn-danger">Reverse</a>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
+        <nav aria-label="Purchase invoice pagination">
+            <ul class="pagination mb-0">
+                <li class="page-item {% if not invoices.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('purchase.view_purchase_invoices', page=invoices.prev_num if invoices.has_prev else 1, **pagination_args) }}"{% if not invoices.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link">Page {{ invoices.page }} of {{ invoices.pages }}</span>
+                </li>
+                <li class="page-item {% if not invoices.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('purchase.view_purchase_invoices', page=invoices.next_num if invoices.has_next else invoices.pages or 1, **pagination_args) }}"{% if not invoices.has_next %} tabindex="-1" aria-disabled="true"{% endif %}>Next</a>
+                </li>
+            </ul>
+        </nav>
+        <form method="get" class="d-flex align-items-center gap-2">
+            {% for key, values in request.args.lists() %}
+                {% if key not in ['page', 'per_page'] %}
+                    {% for value in values %}
+                        <input type="hidden" name="{{ key }}" value="{{ value }}">
+                    {% endfor %}
+                {% endif %}
+            {% endfor %}
+            <input type="hidden" name="page" value="1">
+            <label for="purchase-invoices-per-page" class="form-label mb-0">Rows per page</label>
+            <select id="purchase-invoices-per-page" name="per_page" class="form-select js-auto-submit">
+                {% for option in PAGINATION_SIZES %}
+                    <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="{{ url_for('static', filename='js/date_pickers.js') }}"></script>
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('DOMContentLoaded', function() {
+    initDatePickers({
+        modalSelectors: ['[data-filter-modal]']
+    });
+});
+</script>
+{% endblock %}

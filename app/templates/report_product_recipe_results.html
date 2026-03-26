@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-5">
+    <h2>Product Recipe Report</h2>
+    <div class="table-responsive">
+    <table class="table table-bordered">
+        <thead>
+            <tr>
+                <th>Product</th>
+                <th>Sale Price</th>
+                <th>Cost</th>
+                <th>Recipe Items</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in report %}
+            <tr>
+                <td>{{ row.name }}</td>
+                <td>${{ "%.2f"|format(row.price) }}</td>
+                <td>${{ "%.2f"|format(row.cost) }}</td>
+                <td>
+                    <ul class="mb-0">
+                    {% for it in row.recipe %}
+                        <li>{{ it.item_name }} - {{ it.quantity }}{% if it.unit %} {{ it.unit }}{% endif %} - ${{ "%.2f"|format(it.cost) }}</li>
+                    {% endfor %}
+                    </ul>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endblock %}

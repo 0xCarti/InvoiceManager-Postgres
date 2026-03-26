@@ -1,0 +1,10 @@
+1. When a user saves standsheet data that they have entered, the app should redirect back to the event page.
+2. When a user opens a standsheet for a location to enter data, it currently will update teh variance column as the user enters data, but if they save and reopen the standsheet page, the variance defaults to zero until they update a cell fo data. Please fix this so the variance is also calcualted when the page loads.
+3. Currently locations in an event have a "upload sales" link for each, this needs to be fixed so thatt the sales are uploaded for the event as a whole and the system will read the whole file and split the sales into their respective locations.
+4. Currently users need to upload standsheets for each location in an event. This needs to be fixed so they can upload a pdf file of N amount of location in an event. If they want to upload 1 standsheet the system should be able to read the scanned sheet and know what location it's for in the event, and also if they want to upload 10 locations in 1 pdf.
+5. Users cannot submit transfers right now, it says "Error adding transfer". This needs to be fixed.
+6. The navigation bar and text on the bar on the bulk standsheet page is samller then all the other pages. Please fix this.
+7. On the locations page, users can view and print individual standsheets for locations. Please format these standsheets to look the same as the bulk standsheets page for an event, without the QR code and event metadata. 
+8. The pruchase orders creation and edit page doesn't list the UOM ratio. It just says "cases" when it should say "Case of X base units"
+9. Purchase invoice page needs filter modals like the items and products pages.
+10. Purchase orders page needs filter modals like the items and products pages.

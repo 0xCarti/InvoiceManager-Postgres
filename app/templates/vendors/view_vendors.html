@@ -1,0 +1,138 @@
+<!-- templates=view_vendors.html -->
+{% extends "base.html" %}
+{% from "macros/column_visibility.html" import column_visibility_dropdown %}
+
+{% block title %}View Vendors{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Vendors</h2>
+            <p class="text-muted mb-0">Browse and manage vendor records</p>
+        </div>
+        <div>
+            <button type="button" class="btn btn-primary" id="createVendorBtn">Create Vendor</button>
+        </div>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <div>
+            {{ column_visibility_dropdown(
+                table_id='vendorTable',
+                storage_key='vendorTableColumnVisibility',
+                columns=[
+                    {'id': 'toggle-vendor-name', 'target': 'col-vendor-name', 'label': 'Name', 'checked': True},
+                    {'id': 'toggle-vendor-gst', 'target': 'col-vendor-gst', 'label': 'GST Exempt', 'checked': True},
+                    {'id': 'toggle-vendor-pst', 'target': 'col-vendor-pst', 'label': 'PST Exempt', 'checked': True},
+                    {'id': 'toggle-vendor-actions', 'target': 'col-vendor-actions', 'label': 'Actions', 'checked': True},
+                ]
+            ) }}
+        </div>
+    </div>
+    <div class="table-responsive">
+    <table class="table sortable" id="vendorTable">
+        <thead>
+            <tr>
+                <th scope="col" class="col-vendor-name">Name</th>
+                <th scope="col" class="col-vendor-gst">GST Exempt</th>
+                <th scope="col" class="col-vendor-pst">PST Exempt</th>
+                <th scope="col" class="col-vendor-actions" data-sortable="false">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for vendor in vendors.items %}
+            {% include 'vendors/_vendor_row.html' with context %}
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
+        <nav aria-label="Vendor pagination">
+            <ul class="pagination mb-0">
+                <li class="page-item {% if not vendors.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('vendor.view_vendors', page=vendors.prev_num if vendors.has_prev else 1, **pagination_args) }}"{% if not vendors.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link">Page {{ vendors.page }} of {{ vendors.pages }}</span>
+                </li>
+                <li class="page-item {% if not vendors.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('vendor.view_vendors', page=vendors.next_num if vendors.has_next else vendors.pages or 1, **pagination_args) }}"{% if not vendors.has_next %} tabindex="-1" aria-disabled="true"{% endif %}>Next</a>
+                </li>
+            </ul>
+        </nav>
+        <form method="get" class="d-flex align-items-center gap-2">
+            {% for key, values in request.args.lists() %}
+                {% if key not in ['page', 'per_page'] %}
+                    {% for value in values %}
+                        <input type="hidden" name="{{ key }}" value="{{ value }}">
+                    {% endfor %}
+                {% endif %}
+            {% endfor %}
+            <input type="hidden" name="page" value="1">
+            <label for="vendors-per-page" class="form-label mb-0">Rows per page</label>
+            <select id="vendors-per-page" name="per_page" class="form-select js-auto-submit">
+                {% for option in PAGINATION_SIZES %}
+                    <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+</div>
+
+<!-- Vendor Modal -->
+<div class="modal fade" id="vendorModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Create Vendor</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body"></div>
+        </div>
+    </div>
+</div>
+
+<script nonce="{{ csp_nonce }}">
+const modalEl = document.getElementById('vendorModal');
+
+function bindVendorForm() {
+    const form = modalEl.querySelector('form');
+    if (!form) return;
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const formData = new FormData(form);
+        fetch('{{ url_for('vendor.create_vendor') }}', {
+            method: 'POST',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRFToken': formData.get('csrf_token')
+            },
+            body: formData
+        }).then(r => r.json()).then(data => {
+            if (data.success) {
+                const table = document.getElementById('vendorTable');
+                table.querySelector('tbody').insertAdjacentHTML('beforeend', data.row_html);
+                if (window.TableSort && typeof window.TableSort.bind === 'function') {
+                    window.TableSort.bind(table);
+                }
+                bootstrap.Modal.getInstance(modalEl).hide();
+            } else if (data.form_html) {
+                modalEl.querySelector('.modal-body').innerHTML = data.form_html;
+                bindVendorForm();
+            }
+        });
+    });
+}
+
+document.getElementById('createVendorBtn').addEventListener('click', function() {
+    fetch('{{ url_for('vendor.create_vendor') }}', {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    }).then(r => r.text()).then(html => {
+        modalEl.querySelector('.modal-body').innerHTML = html;
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+        bindVendorForm();
+    });
+});
+</script>
+{% endblock %}

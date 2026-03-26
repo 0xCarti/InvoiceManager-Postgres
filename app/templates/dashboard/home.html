@@ -1,0 +1,181 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="desktop-dense py-3 py-lg-2">
+    <header class="d-flex flex-column flex-md-row align-items-md-center justify-content-between mb-3 section-block">
+        <div>
+            <h1 class="mb-1">Operations Dashboard</h1>
+            <p class="text-muted mb-0">Monitor transfers, purchasing, invoicing, and upcoming events at a glance.</p>
+        </div>
+        <div class="d-flex gap-2 mt-3 mt-md-0">
+            <a class="btn btn-primary" href="{{ url_for('transfer.view_transfers') }}">Transfer Center</a>
+            <a class="btn btn-outline-secondary" href="{{ url_for('event.view_events') }}">Events</a>
+        </div>
+    </header>
+
+    <section aria-labelledby="metric-overview" class="section-block">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+            <h2 class="h5 mb-0" id="metric-overview">Key Metrics</h2>
+            <span class="text-muted small">Updated daily</span>
+        </div>
+        <div class="row compact-grid row-cols-1 row-cols-sm-2 row-cols-lg-4">
+            <div class="col">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h3 class="h6 text-uppercase text-muted">Transfers</h3>
+                        <p class="fs-4 fw-semibold mb-1">{{ context.transfers.total }}</p>
+                        <p class="mb-0"><span class="text-success fw-semibold">{{ context.transfers.completed }}</span> completed · <span class="text-warning fw-semibold">{{ context.transfers.pending }}</span> pending</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h3 class="h6 text-uppercase text-muted">Purchase Orders</h3>
+                        <p class="fs-4 fw-semibold mb-1">{{ context.purchase_orders.open_count }}</p>
+                        <p class="mb-0">{{ context.purchase_orders.overdue_count }} overdue · Expected ${{ '%.2f'|format(context.purchase_orders.expected_total) }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h3 class="h6 text-uppercase text-muted">Purchase Invoices</h3>
+                        <p class="fs-4 fw-semibold mb-1">{{ context.purchase_invoices.count }}</p>
+                        <p class="mb-0">Spend ${{ '%.2f'|format(context.purchase_invoices.total) }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h3 class="h6 text-uppercase text-muted">Invoices</h3>
+                        <p class="fs-4 fw-semibold mb-1">{{ context.invoices.count }}</p>
+                        <p class="mb-0">Total billed ${{ '%.2f'|format(context.invoices.total) }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="row compact-grid">
+        <div class="col-lg-8">
+            <section aria-labelledby="charts-title" class="section-block">
+                <div class="d-flex align-items-center justify-content-between mb-3">
+                    <h2 class="h5 mb-0" id="charts-title">Trends &amp; Charts</h2>
+                    <span class="text-muted small">Rolling 30 days</span>
+                </div>
+                <div class="row compact-grid">
+                    <div class="col-md-6">
+                        <div class="card h-100">
+                            <div class="card-body">
+                                <h3 class="h6" id="transfer-trend-title">Transfer Volume</h3>
+                                <p class="text-muted small">Visualize transfer counts over time.</p>
+                                <div class="bg-light border rounded p-3" role="img" aria-labelledby="transfer-trend-title">
+                                    <span class="text-muted">Chart placeholder</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card h-100">
+                            <div class="card-body">
+                                <h3 class="h6" id="spend-trend-title">Spend vs. Billing</h3>
+                                <p class="text-muted small">Track purchase spend against invoices.</p>
+                                <div class="bg-light border rounded p-3" role="img" aria-labelledby="spend-trend-title">
+                                    <span class="text-muted">Chart placeholder</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section aria-labelledby="queue-title" class="section-block">
+                <div class="d-flex align-items-center justify-content-between mb-3">
+                    <h2 class="h5 mb-0" id="queue-title">Work Queues</h2>
+                    <span class="text-muted small">Stay ahead of deadlines</span>
+                </div>
+                <div class="row compact-grid row-cols-1 row-cols-md-2">
+                    <div class="col">
+                        <div class="card h-100">
+                            <div class="card-body">
+                                <h3 class="h6">Transfers to Reconcile</h3>
+                                <ul class="list-unstyled mb-0">
+                                    <li class="mb-2">Pending approvals: {{ context.transfers.pending }}</li>
+                                    <li class="mb-2">Recently completed: {{ context.transfers.completed }}</li>
+                                    <li class="text-muted">Review daily variance logs.</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col">
+                        <div class="card h-100">
+                            <div class="card-body">
+                                <h3 class="h6">Invoices to Process</h3>
+                                <ul class="list-unstyled mb-0">
+                                    <li class="mb-2">Open purchase orders: {{ context.purchase_orders.open_count }}</li>
+                                    <li class="mb-2">New purchase invoices: {{ context.purchase_invoices.count }}</li>
+                                    <li class="text-muted">Reconcile against expected totals.</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section aria-labelledby="quick-links-title" class="section-block">
+                <div class="d-flex align-items-center justify-content-between mb-3">
+                    <h2 class="h5 mb-0" id="quick-links-title">Quick Links</h2>
+                    <span class="text-muted small">Common actions</span>
+                </div>
+                <div class="row compact-grid row-cols-1 row-cols-sm-2 row-cols-lg-4">
+                    <div class="col">
+                        <a class="btn btn-primary w-100" href="{{ url_for('transfer.view_transfers') }}">Transfers</a>
+                    </div>
+                    <div class="col">
+                        <a class="btn btn-outline-primary w-100" href="{{ url_for('purchase.view_purchase_orders') }}">Purchase Orders</a>
+                    </div>
+                    <div class="col">
+                        <a class="btn btn-outline-secondary w-100" href="{{ url_for('invoice.view_invoices') }}">Invoices</a>
+                    </div>
+                    <div class="col">
+                        <a class="btn btn-light border w-100" href="{{ url_for('event.view_events') }}">Events</a>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <div class="col-lg-4">
+            <section aria-labelledby="calendar-rail-title">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h2 class="h5" id="calendar-rail-title">Calendar</h2>
+                        {% if context.events.next_event %}
+                        <div class="mb-3">
+                            <p class="fw-semibold mb-1">Next: {{ context.events.next_event.name }}</p>
+                            <p class="text-muted mb-0">{{ context.events.next_event.start_date.strftime('%Y-%m-%d') }} – {{ context.events.next_event.end_date.strftime('%Y-%m-%d') }}</p>
+                        </div>
+                        {% endif %}
+                        <div class="list-group list-group-flush">
+                            {% set upcoming_events = context.events.upcoming if context.events is defined and context.events.upcoming is defined else [] %}
+                            {% if upcoming_events %}
+                                {% for event in upcoming_events %}
+                                <div class="list-group-item px-0">
+                                    <p class="mb-1 fw-semibold">{{ event.name }}</p>
+                                    <p class="mb-0 text-muted">{{ event.start_date.strftime('%Y-%m-%d') }} – {{ event.end_date.strftime('%Y-%m-%d') }}</p>
+                                </div>
+                                {% endfor %}
+                            {% else %}
+                                <p class="text-muted mb-0">No additional events scheduled.</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,106 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Application Settings</h2>
+    <form method="post">
+        {{ form.hidden_tag() }}
+        <div class="form-group">
+            {{ form.gst_number.label }}
+            {{ form.gst_number(class='form-control') }}
+        </div>
+        <div class="form-group mt-2">
+            {{ form.retail_pop_price.label }}
+            <div class="input-group">
+                <span class="input-group-text">$</span>
+                {{ form.retail_pop_price(class='form-control') }}
+            </div>
+            {% if form.retail_pop_price.errors %}
+                <div class="text-danger small">{{ form.retail_pop_price.errors[0] }}</div>
+            {% endif %}
+        </div>
+        <div class="form-group mt-2">
+            {{ form.default_timezone.label }}
+            {{ form.default_timezone(class='form-control') }}
+        </div>
+        <div class="form-check form-switch mt-2">
+            {{ form.auto_backup_enabled(class='form-check-input') }}
+            {{ form.auto_backup_enabled.label(class='form-check-label') }}
+        </div>
+        <div class="row mt-2">
+            <div class="col">
+                {{ form.auto_backup_interval_value.label }}
+                {{ form.auto_backup_interval_value(class='form-control') }}
+            </div>
+            <div class="col">
+                {{ form.auto_backup_interval_unit.label }}
+                {{ form.auto_backup_interval_unit(class='form-control') }}
+            </div>
+        </div>
+        <div class="form-group mt-2">
+            {{ form.max_backups.label }}
+            {{ form.max_backups(class='form-control') }}
+        </div>
+        <div class="mt-4">
+            <h3>Purchase Receiving Defaults</h3>
+            <p class="text-muted">Select default locations for each department.</p>
+            <div class="row g-3">
+                {% for label, field in form.iter_receive_location_defaults() %}
+                <div class="col-md-6">
+                    <label class="form-label">{{ label }}</label>
+                    {{ field(class='form-select') }}
+                    {% if field.errors %}
+                        <div class="text-danger small">{{ field.errors[0] }}</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="mt-4">
+            <h3>Purchase Order Imports</h3>
+            <p class="text-muted">Choose which preset vendors can be selected when importing purchase orders.</p>
+            <div class="row g-3">
+                {% for label, field in form.iter_purchase_import_vendors() %}
+                <div class="col-md-4">
+                    <div class="form-check form-switch">
+                        {{ field(class='form-check-input') }}
+                        <label class="form-check-label" for="{{ field.id }}">{{ label }}</label>
+                    </div>
+                    {% if field.errors %}
+                        <div class="text-danger small">{{ field.errors[0] }}</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="mt-4">
+            <h3>Reporting Units</h3>
+            <p class="text-muted">Choose how base units should appear in reports.</p>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th scope="col">Base Unit</th>
+                            <th scope="col">Report As</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for key, label, field in form.iter_base_unit_conversions() %}
+                        <tr>
+                            <th scope="row" class="w-50">{{ label }}</th>
+                            <td>
+                                {{ field(class='form-select') }}
+                                {% if field.errors %}
+                                    <div class="text-danger small">{{ field.errors[0] }}</div>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {{ form.submit(class='btn btn-primary') }}
+    </form>
+</div>
+{% endblock %}
