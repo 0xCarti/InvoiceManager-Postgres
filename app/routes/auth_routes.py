@@ -649,16 +649,19 @@ def restore_backup_route():
         try:
             restore_summary = restore_backup(filepath, restore_mode=restore_mode)
         except RestoreBackupError as exc:
+            failure_class = type(exc.__cause__).__name__ if exc.__cause__ else type(exc).__name__
+            restore_details = str(exc)
             current_app.logger.exception(
-                "Restore runtime failure for %s: %s",
+                "Restore runtime failure for %s (%s): %s",
                 filename,
-                exc,
+                failure_class,
+                restore_details,
             )
             log_activity(
-                f"Restore failed for {filename}: {exc}"
+                f"Restore failed for {filename} [{failure_class}]: {restore_details}"
             )
             flash(
-                "Restore could not proceed due to a database constraint violation or data/driver mismatch; see logs for table details.",
+                f"Restore failed ({failure_class}): {restore_details}",
                 "danger",
             )
             return redirect(url_for("admin.backups"))
@@ -772,16 +775,19 @@ def restore_backup_file(filename):
     try:
         restore_summary = restore_backup(filepath, restore_mode=restore_mode)
     except RestoreBackupError as exc:
+        failure_class = type(exc.__cause__).__name__ if exc.__cause__ else type(exc).__name__
+        restore_details = str(exc)
         current_app.logger.exception(
-            "Restore runtime failure for %s: %s",
+            "Restore runtime failure for %s (%s): %s",
             fname,
-            exc,
+            failure_class,
+            restore_details,
         )
         log_activity(
-            f"Restore failed for {fname}: {exc}"
+            f"Restore failed for {fname} [{failure_class}]: {restore_details}"
         )
         flash(
-            "Restore could not proceed due to a database constraint violation or data/driver mismatch; see logs for table details.",
+            f"Restore failed ({failure_class}): {restore_details}",
             "danger",
         )
         return redirect(url_for("admin.backups"))

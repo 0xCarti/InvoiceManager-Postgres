@@ -25,6 +25,64 @@ class RestoreBackupError(RuntimeError):
     """Raised when a restore fails during runtime schema rebuild."""
 
 
+def _truncate_value(value, max_length: int = 80) -> str:
+    """Return a compact string representation for diagnostic messages."""
+
+    text = str(value)
+    if len(text) <= max_length:
+        return text
+    return f"{text[: max_length - 3]}..."
+
+
+def _extract_dbapi_diagnostics(error) -> dict[str, str | None]:
+    """Extract common DBAPI diagnostic fields from wrapped driver errors."""
+
+    details: dict[str, str | None] = {
+        "error_type": type(error).__name__,
+        "sqlstate": getattr(error, "pgcode", None) or getattr(error, "sqlstate", None),
+        "constraint": None,
+        "table": None,
+        "column": None,
+        "detail": None,
+    }
+
+    diag = getattr(error, "diag", None)
+    if diag is not None:
+        details["constraint"] = getattr(diag, "constraint_name", None)
+        details["table"] = getattr(diag, "table_name", None)
+        details["column"] = getattr(diag, "column_name", None)
+        details["detail"] = getattr(diag, "message_detail", None)
+
+    details["constraint"] = details["constraint"] or getattr(
+        error, "constraint_name", None
+    )
+    details["table"] = details["table"] or getattr(error, "table_name", None)
+    details["column"] = details["column"] or getattr(error, "column_name", None)
+    details["detail"] = details["detail"] or getattr(error, "detail", None)
+    return details
+
+
+def _summarize_offending_row(row: dict, limit: int = 3) -> dict[str, str]:
+    """Return a tiny identifier-only sample from a failing insert row."""
+
+    preferred_keys = ("id", "uuid", "email", "name", "code", "invoice_number")
+    selected: dict[str, str] = {}
+
+    for key in preferred_keys:
+        if key in row and row.get(key) is not None:
+            selected[key] = _truncate_value(row.get(key))
+        if len(selected) >= limit:
+            return selected
+
+    for key, value in row.items():
+        if value is None:
+            continue
+        selected[key] = _truncate_value(value)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
 @dataclass
 class RestoreCompatibilityResult:
     compatible: bool
@@ -636,6 +694,64 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
                 insert_rows.append(record)
 
             if insert_rows:
+                try:
+                    target_conn.execute(table.insert(), insert_rows)
+                except IntegrityError as exc:
+                    first_row = insert_rows[0] if insert_rows else {}
+                    dbapi_details = _extract_dbapi_diagnostics(exc.orig)
+                    diagnostic_payload = {
+                        "phase": "insert_rows",
+                        "table": dbapi_details.get("table") or table_name,
+                        "constraint": dbapi_details.get("constraint"),
+                        "column": dbapi_details.get("column"),
+                        "sqlstate": dbapi_details.get("sqlstate"),
+                        "driver_error": dbapi_details.get("error_type"),
+                        "detail": _truncate_value(
+                            dbapi_details.get("detail") or "", max_length=180
+                        ),
+                        "sample_row_identifiers": _summarize_offending_row(first_row),
+                    }
+                    logger.error(
+                        "Restore integrity violation diagnostics: %s",
+                        json.dumps(diagnostic_payload, sort_keys=True),
+                    )
+                    concise_detail = ", ".join(
+                        [
+                            f"constraint={dbapi_details['constraint']}"
+                            if dbapi_details.get("constraint")
+                            else "",
+                            f"column={dbapi_details['column']}"
+                            if dbapi_details.get("column")
+                            else "",
+                            f"detail={_truncate_value(dbapi_details['detail'])}"
+                            if dbapi_details.get("detail")
+                            else "",
+                            (
+                                "keys="
+                                + ",".join(
+                                    f"{k}:{v}"
+                                    for k, v in diagnostic_payload[
+                                        "sample_row_identifiers"
+                                    ].items()
+                                )
+                            )
+                            if diagnostic_payload["sample_row_identifiers"]
+                            else "",
+                        ]
+                    ).strip(", ")
+                    raise RestoreBackupError(
+                        "Restore failed while inserting rows into table "
+                        f"'{diagnostic_payload['table']}' due to integrity violation "
+                        f"({dbapi_details.get('error_type', 'IntegrityError')}). "
+                        f"{concise_detail or 'No additional DBAPI diagnostics available.'}"
+                    ) from exc
+                except (DataError, DBAPIError) as exc:
+                    raise RestoreBackupError(
+                        "Restore failed while inserting rows into table "
+                        f"'{table_name}'. This likely indicates a column length/type "
+                        "mismatch or driver-level database error while loading backup "
+                        "data. Please run the latest database migrations and retry."
+                    ) from exc
                 if restore_mode == "permissive":
                     inserted = _insert_rows_permissive(
                         target_conn=target_conn,
