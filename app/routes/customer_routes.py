@@ -15,6 +15,7 @@ from app.forms import CustomerForm, DeleteForm
 from app.models import Customer
 from app.utils.activity import log_activity
 from app.utils.pagination import build_pagination_args, get_per_page
+from app.utils.text import build_text_match_predicate, normalize_text_match_mode
 from sqlalchemy import func
 
 customer = Blueprint("customer", __name__)
@@ -26,21 +27,16 @@ def view_customers():
     """Display all customers."""
     page = request.args.get("page", 1, type=int)
     name_query = request.args.get("name_query", "")
-    match_mode = request.args.get("match_mode", "contains")
+    match_mode = normalize_text_match_mode(request.args.get("match_mode"))
     gst_exempt = request.args.get("gst_exempt", "all")
     pst_exempt = request.args.get("pst_exempt", "all")
 
     query = Customer.query.filter_by(archived=False)
     if name_query:
         full_name = func.concat(Customer.first_name, " ", Customer.last_name)
-        if match_mode == "exact":
-            query = query.filter(func.lower(full_name) == name_query.lower())
-        elif match_mode == "startswith":
-            query = query.filter(full_name.ilike(f"{name_query}%"))
-        elif match_mode == "not_contains":
-            query = query.filter(full_name.notilike(f"%{name_query}%"))
-        else:
-            query = query.filter(full_name.ilike(f"%{name_query}%"))
+        query = query.filter(
+            build_text_match_predicate(full_name, name_query, match_mode)
+        )
     if gst_exempt == "yes":
         query = query.filter(Customer.gst_exempt.is_(True))
     elif gst_exempt == "no":

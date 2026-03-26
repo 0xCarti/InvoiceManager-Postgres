@@ -71,7 +71,7 @@ from app.utils.units import (
     convert_quantity_for_reporting,
     get_unit_label,
 )
-from app.utils.text import normalize_name_for_sorting
+from app.utils.text import build_text_match_predicate, normalize_name_for_sorting
 from app.utils.email import send_email
 from itsdangerous import BadSignature, URLSafeSerializer
 from sqlalchemy import func, or_
@@ -918,11 +918,17 @@ def _apply_event_filters(query, filters):
 
     name_contains = filters.get("name_contains")
     if name_contains:
-        query = query.filter(Event.name.ilike(f"%{name_contains}%"))
+        query = query.filter(
+            build_text_match_predicate(Event.name, name_contains, "contains")
+        )
 
     name_not_contains = filters.get("name_not_contains")
     if name_not_contains:
-        query = query.filter(~Event.name.ilike(f"%{name_not_contains}%"))
+        query = query.filter(
+            build_text_match_predicate(
+                Event.name, name_not_contains, "not_contains"
+            )
+        )
 
     start_date_from = _parse_date(filters.get("start_date_from"))
     if start_date_from:

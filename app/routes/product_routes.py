@@ -44,6 +44,7 @@ from app.utils.filter_state import (
 )
 from app.utils.numeric import coerce_float
 from app.utils.pagination import build_pagination_args, get_per_page
+from app.utils.text import build_text_match_predicate, normalize_text_match_mode
 
 product = Blueprint("product", __name__)
 
@@ -101,7 +102,7 @@ def view_products():
     page = request.args.get("page", 1, type=int)
     per_page = get_per_page()
     name_query = request.args.get("name_query", "")
-    match_mode = request.args.get("match_mode", "contains")
+    match_mode = normalize_text_match_mode(request.args.get("match_mode"))
     sales_gl_code_ids = [
         int(x) for x in request.args.getlist("sales_gl_code_id") if x.isdigit()
     ]
@@ -131,16 +132,9 @@ def view_products():
 
     query = Product.query
     if name_query:
-        if match_mode == "exact":
-            query = query.filter(func.lower(Product.name) == name_query.lower())
-        elif match_mode == "startswith":
-            query = query.filter(Product.name.ilike(f"{name_query}%"))
-        elif match_mode == "contains":
-            query = query.filter(Product.name.ilike(f"%{name_query}%"))
-        elif match_mode == "not_contains":
-            query = query.filter(Product.name.notilike(f"%{name_query}%"))
-        else:
-            query = query.filter(Product.name.ilike(f"%{name_query}%"))
+        query = query.filter(
+            build_text_match_predicate(Product.name, name_query, match_mode)
+        )
 
     if sales_gl_code_ids:
         query = query.filter(Product.sales_gl_code_id.in_(sales_gl_code_ids))
