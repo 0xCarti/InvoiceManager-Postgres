@@ -6,6 +6,7 @@ from datetime import date
 import json
 from io import BytesIO
 
+from sqlalchemy.exc import CompileError
 from werkzeug.security import generate_password_hash
 
 from app import db
@@ -35,6 +36,7 @@ from app.models import (
 from app.utils.activity import flush_activity_logs
 from app.utils.backup import (
     BACKUP_SCHEMA_VERSION,
+    RestoreBackupError,
     _backup_loop,
     create_backup,
     restore_backup,
@@ -549,6 +551,75 @@ def test_restore_with_older_schema_marker_value_proceeds(client, app):
     assert response.status_code == 200
     assert b"Restored with compatibility warnings." in response.data
     assert b"Backup restored from older_marker.db" in response.data
+
+
+def test_restore_sqlite_backup_into_postgres_restores_key_tables(app):
+    with app.app_context():
+        populate_data()
+        backup_path = _create_sqlite_backup_copy(app, "sqlite_to_postgres.db")
+
+        Product.query.delete()
+        PurchaseInvoice.query.delete()
+        TerminalSale.query.delete()
+        db.session.commit()
+
+        restore_backup(backup_path)
+
+        assert Product.query.filter_by(name="BackupProduct").count() == 1
+        assert PurchaseInvoice.query.filter_by(invoice_number="VN001").count() == 1
+        assert TerminalSale.query.count() == 1
+
+
+def test_restore_backup_wraps_drop_constraint_compile_error(app, monkeypatch):
+    with app.app_context():
+        backup_path = _create_sqlite_backup_copy(
+            app, "drop_constraint_compile_error.db"
+        )
+
+        def raise_compile_error(*args, **kwargs):
+            raise CompileError(
+                "Can't emit DROP CONSTRAINT for constraint ForeignKeyConstraint(); "
+                "it has no name"
+            )
+
+        monkeypatch.setattr(db.metadata, "drop_all", raise_compile_error)
+
+        try:
+            restore_backup(backup_path)
+            assert False, "Expected RestoreBackupError for unnamed DROP CONSTRAINT"
+        except RestoreBackupError as exc:
+            assert "schema" in str(exc).lower()
+            assert isinstance(exc.__cause__, CompileError)
+
+
+def test_restore_backup_file_route_handles_runtime_compile_error(
+    client, app, monkeypatch
+):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    _create_sqlite_backup_copy(app, "route_compile_error.db")
+
+    def raise_compile_error(*args, **kwargs):
+        raise CompileError(
+            "Can't emit DROP CONSTRAINT for constraint ForeignKeyConstraint(); "
+            "it has no name"
+        )
+
+    monkeypatch.setattr(db.metadata, "drop_all", raise_compile_error)
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            "/controlpanel/backups/restore/route_compile_error.db",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert (
+        b"Restore could not proceed due to a database schema/constraint mismatch."
+        in response.data
+    )
+    assert b"CompileError" not in response.data
 
 
 def test_restore_backup_prunes_invalid_favorites_and_backups_page_loads(client, app):
