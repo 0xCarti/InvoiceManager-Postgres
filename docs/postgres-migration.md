@@ -108,3 +108,28 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/invoice_manager_test 
 ## Merge requirement
 
 All checklist items above must be checked (`[x]`) before merge approval.
+
+---
+
+## Restore compatibility requirement (SQLite backup → Postgres runtime)
+
+Restores continue to accept SQLite `.db` backup files as the source artifact.
+The running application database is PostgreSQL; restore logic rebuilds the
+runtime schema and then imports backup rows into matching Postgres tables.
+
+Before any restore attempt, migrations **must** include revision
+`d2f7a1b9c8e0` (`fix_invoice_product_invoice_fk`), which corrects the
+`invoice_product.invoice_id` foreign key behavior expected during row import.
+
+### Quick pre-restore check
+
+```bash
+docker compose run --rm web flask db current
+docker compose run --rm web flask db upgrade
+```
+
+### Restore troubleshooting note
+
+If a restore fails with foreign-key or constraint errors, treat it first as a
+schema migration state issue: verify `d2f7a1b9c8e0` (and later revisions) are
+applied on the target Postgres database, then retry restore.
