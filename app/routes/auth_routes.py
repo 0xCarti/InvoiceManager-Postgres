@@ -1,7 +1,6 @@
 import json
 import os
 import platform
-import sqlite3
 import subprocess
 import uuid
 from datetime import datetime
@@ -20,6 +19,7 @@ from flask import (
     url_for,
 )
 from flask_login import current_user, login_required, login_user, logout_user
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import selectinload
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.exceptions import NotFound
@@ -600,9 +600,9 @@ def restore_backup_route():
         file.save(filepath)
         try:
             compatibility = validate_backup_file_compatibility(filepath)
-        except sqlite3.Error:
+        except SQLAlchemyError:
             os.remove(filepath)
-            flash("Invalid SQLite database.", "error")
+            flash("Invalid backup database file.", "error")
             return redirect(url_for("admin.backups"))
         if not compatibility.compatible:
             details = "; ".join(compatibility.issues)
@@ -687,8 +687,8 @@ def restore_backup_file(filename):
     fname = os.path.basename(filepath)
     try:
         compatibility = validate_backup_file_compatibility(filepath)
-    except sqlite3.Error:
-        flash("Invalid SQLite database.", "error")
+    except SQLAlchemyError:
+        flash("Invalid backup database file.", "error")
         return redirect(url_for("admin.backups"))
 
     if not compatibility.compatible:
