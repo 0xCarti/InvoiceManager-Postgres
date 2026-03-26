@@ -11,6 +11,7 @@ from threading import Event, Thread
 
 from flask import current_app
 from sqlalchemy import MetaData, Table, create_engine, inspect
+from sqlalchemy.exc import DBAPIError, DataError
 
 from app import db
 from app.models import Setting
@@ -417,7 +418,15 @@ def restore_backup(file_path):
                             except ValueError:
                                 pass
 
-                insert_rows.append(record)
+            insert_rows.append(record)
 
             if insert_rows:
-                target_conn.execute(table.insert(), insert_rows)
+                try:
+                    target_conn.execute(table.insert(), insert_rows)
+                except (DataError, DBAPIError) as exc:
+                    raise RestoreBackupError(
+                        "Restore failed while inserting rows into table "
+                        f"'{table_name}'. This likely indicates a column length/type "
+                        "mismatch between the backup data and the current schema. "
+                        "Please run the latest database migrations and retry."
+                    ) from exc

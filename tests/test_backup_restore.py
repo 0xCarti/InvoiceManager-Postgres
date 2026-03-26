@@ -6,7 +6,8 @@ from datetime import date
 import json
 from io import BytesIO
 
-from sqlalchemy.exc import CompileError
+from sqlalchemy.engine import Connection
+from sqlalchemy.exc import CompileError, DataError
 from werkzeug.security import generate_password_hash
 
 from app import db
@@ -682,10 +683,70 @@ def test_restore_backup_file_route_handles_runtime_compile_error(
 
     assert response.status_code == 200
     assert (
-        b"Restore could not proceed due to a database schema/constraint mismatch."
+        b"Restore could not proceed due to a database schema/constraint mismatch; "
+        b"see logs for table/column details."
         in response.data
     )
     assert b"CompileError" not in response.data
+
+
+def test_restore_backup_wraps_insert_data_errors(app, monkeypatch):
+    with app.app_context():
+        backup_path = _create_sqlite_backup_copy(app, "insert_data_error.db")
+        original_execute = Connection.execute
+
+        def fail_on_insert(self, statement, *args, **kwargs):
+            if getattr(statement, "is_insert", False):
+                raise DataError(
+                    "INSERT INTO fake_table VALUES (?)",
+                    {"value": "x" * 999},
+                    ValueError("value too long for column"),
+                )
+            return original_execute(self, statement, *args, **kwargs)
+
+        monkeypatch.setattr(Connection, "execute", fail_on_insert)
+
+        try:
+            restore_backup(backup_path)
+            assert False, "Expected RestoreBackupError for insert DataError"
+        except RestoreBackupError as exc:
+            assert "table" in str(exc).lower()
+            assert "mismatch" in str(exc).lower()
+            assert "migrations" in str(exc).lower()
+            assert isinstance(exc.__cause__, DataError)
+
+
+def test_restore_backup_file_route_handles_insert_data_error(client, app, monkeypatch):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    _create_sqlite_backup_copy(app, "route_insert_data_error.db")
+    original_execute = Connection.execute
+
+    def fail_on_insert(self, statement, *args, **kwargs):
+        if getattr(statement, "is_insert", False):
+            raise DataError(
+                "INSERT INTO fake_table VALUES (?)",
+                {"value": "x" * 999},
+                ValueError("value too long for column"),
+            )
+        return original_execute(self, statement, *args, **kwargs)
+
+    monkeypatch.setattr(Connection, "execute", fail_on_insert)
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            "/controlpanel/backups/restore/route_insert_data_error.db",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert (
+        b"Restore could not proceed due to a database schema/constraint mismatch; "
+        b"see logs for table/column details."
+        in response.data
+    )
+    assert b"Internal Server Error" not in response.data
 
 
 def test_restore_backup_prunes_invalid_favorites_and_backups_page_loads(client, app):
