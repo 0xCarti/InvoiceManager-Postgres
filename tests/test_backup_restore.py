@@ -553,6 +553,23 @@ def test_restore_with_older_schema_marker_value_proceeds(client, app):
     assert b"Backup restored from older_marker.db" in response.data
 
 
+def test_restore_backup_with_long_activity_log_entry(app):
+    with app.app_context():
+        backup_path = _create_sqlite_backup_copy(app, "long_activity_log.db")
+        long_activity = "restored-activity-" + ("x" * 320)
+
+        with sqlite3.connect(backup_path) as conn:
+            conn.execute(
+                "INSERT INTO activity_log (user_id, activity, timestamp) VALUES (?, ?, ?)",
+                (None, long_activity, "2026-03-26 00:00:00"),
+            )
+            conn.commit()
+
+        restore_backup(backup_path)
+
+        restored_log = ActivityLog.query.filter_by(activity=long_activity).one()
+        assert len(restored_log.activity) > 255
+
 def test_restore_sqlite_backup_into_postgres_restores_key_tables(app):
     with app.app_context():
         populate_data()
