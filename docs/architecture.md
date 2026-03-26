@@ -5,6 +5,8 @@ application. It is intended to help contributors understand how the
 application is assembled and where to look when adding new features or fixing
 bugs.
 
+> PostgreSQL is the only supported runtime database path.
+
 ## Application Factory (`app/__init__.py`)
 
 InvoiceManager is built around a Flask application factory defined in
@@ -14,8 +16,8 @@ feature module.
 
 Key responsibilities include:
 
-* Loading environment variables and critical settings (secret key, database
-  location, upload paths, backup directories).
+* Loading environment variables and critical settings (secret key, PostgreSQL connection settings, upload
+  paths, backup directories).
 * Configuring global extensions: SQLAlchemy for persistence, Flask-Login for
   authentication, Flask-Limiter for rate limiting, Flask-Bootstrap for UI
   helpers, Flask-SocketIO for real-time updates, and CSRF protection for forms.

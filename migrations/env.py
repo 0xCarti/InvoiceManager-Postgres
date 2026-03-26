@@ -99,8 +99,7 @@ def run_migrations_online():
     connectable = get_engine()
 
     with connectable.connect() as connection:
-        render_as_batch = connection.dialect.name == "sqlite"
-        conf_args.setdefault("render_as_batch", render_as_batch)
+        conf_args.setdefault("render_as_batch", False)
         context.configure(
             connection=connection,
             target_metadata=get_metadata(),
