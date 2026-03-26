@@ -1063,10 +1063,10 @@ def delete_product(product_id):
 def search_products():
     """Return products matching a search query."""
     # Retrieve query parameter from the URL
-    query = normalize_request_text_filter(request.args.get("query")).lower()
+    query = normalize_request_text_filter(request.args.get("query"))
     # Query the database for products that match the search query
     matched_products = Product.query.filter(
-        Product.name.ilike(f"%{query}%")
+        build_text_match_predicate(Product.name, query, "contains")
     ).all()
     # Include id so that search results can be referenced elsewhere
     product_data = [

@@ -56,6 +56,7 @@ from app.models import (
 )
 from app.utils.forecasting import DemandForecastingHelper
 from app.utils.pos_import import parse_department_sales_forecast
+from app.utils.text import build_text_match_predicate, normalize_request_text_filter
 from app.utils.text import normalize_request_text_filter
 from app.utils.units import (
     DEFAULT_BASE_UNIT_CONVERSIONS,
@@ -2256,7 +2257,9 @@ def product_recipe_report():
 
     if search:
         search_products = (
-            Product.query.filter(Product.name.ilike(f"%{search}%"))
+            Product.query.filter(
+                build_text_match_predicate(Product.name, search, "contains")
+            )
             .order_by(Product.name)
             .limit(50)
             .all()

@@ -47,6 +47,7 @@ from app.routes.report_routes import (
 )
 from app.utils.forecasting import DemandForecastingHelper
 from app.utils.pagination import build_pagination_args, get_per_page
+from app.utils.text import build_text_match_predicate
 from app.utils.text import normalize_request_text_filter
 from app.services.purchase_merge import (
     PurchaseMergeError,
@@ -1700,7 +1701,9 @@ def view_purchase_invoices():
     )
     if invoice_number:
         query = query.filter(
-            PurchaseInvoice.invoice_number.ilike(f"%{invoice_number}%")
+            build_text_match_predicate(
+                PurchaseInvoice.invoice_number, invoice_number, "contains"
+            )
         )
     if po_number:
         query = query.filter(PurchaseInvoice.purchase_order_id == po_number)

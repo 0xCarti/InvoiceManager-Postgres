@@ -60,14 +60,14 @@ List and search pages must use a **single shared text-match policy** implemented
 in [`app/utils/text.py`](../app/utils/text.py):
 
 * Supported match modes are `exact`, `startswith`, `contains`, and `not_contains`.
-* `startswith`, `contains`, and `not_contains` are always case-insensitive and
-  must be built via `build_text_match_predicate(...)` (which uses `ILIKE` /
-  `NOT ILIKE` semantics).
+* `exact`, `startswith`, `contains`, and `not_contains` are all case-insensitive
+  and must be built via `build_text_match_predicate(...)` (which uses
+  `LOWER(...)`, `ILIKE`, and `NOT ILIKE` semantics depending on mode).
 * Unknown or missing match modes normalize to `contains` via
   `normalize_text_match_mode(...)`.
 
 Do not hand-roll route-specific `.like(...)` or `.ilike(...)` conditions for
-list/search name filters. Reusing the shared helper prevents accidental
+list/search text filters. Reusing the shared helper prevents accidental
 case-sensitive regressions and keeps behavior consistent across pages.
 
 Dashboard aggregation logic is intentionally grouped in
