@@ -76,7 +76,7 @@ class LocationStandItem(db.Model):
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
-    password = db.Column(db.String(80), nullable=False)
+    password = db.Column(db.String(255), nullable=False)
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
     transfers = db.relationship("Transfer", backref="creator", lazy=True)
     invoices = db.relationship("Invoice", backref="creator", lazy=True)
