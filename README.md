@@ -13,6 +13,7 @@ PostgreSQL is the only supported runtime database backend.
 - [Environment Variables](#required-environment-variables)
 - [Database Setup (Migrations)](#database-setup)
 - [Docker Setup](#docker-setup)
+- [Choose Your Setup Path](#choose-your-setup-path)
 - [Backups and Restore](#backups-and-restore-postgres-runtime)
 - [Testing](#running-tests)
 - [Code Style](#code-style)
@@ -261,6 +262,12 @@ This starts both `postgres` and `web`, waits for PostgreSQL health checks, runs
 database migrations from the web container entrypoint, and serves the app on
 `http://localhost:${PORT:-5000}`.
 
+## Choose Your Setup Path
+
+- **I want the fastest Docker Compose path** → Start with [Docker Setup](#docker-setup), then follow [Canonical local startup order (Docker Compose)](#canonical-local-startup-order-docker-compose).
+- **I want a host/venv install** → Follow [Installation](#installation) and then [Database Setup](#database-setup).
+- **I need production/runtime notes** → Review [Running the Application](#running-the-application) and [Backups and Restore (Postgres runtime)](#backups-and-restore-postgres-runtime).
+- **I am troubleshooting startup or DB issues** → Jump to [Troubleshooting database connection issues](#troubleshooting-database-connection-issues).
 
 ### Migration command inventory
 
