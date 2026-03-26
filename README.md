@@ -140,7 +140,8 @@ Mailgun should post inbound events to `POST /webhooks/mailgun/inbound`.
 - **Default (`POS_IMPORT_INGEST_MODE=webhook`)**: inbound email attachments are pushed by Mailgun to `POST /webhooks/mailgun/inbound`.
 - **Fallback (`POS_IMPORT_INGEST_MODE=poll`)**: a background worker polls the configured mailbox provider every hour (or `POS_IMPORT_POLL_INTERVAL_SECONDS`), fetches unseen messages, and stages `.xls` / `.xlsx` attachments through the **same parser and staging pipeline** used by webhook ingestion.
 
-#### Poll mode operational setup
+<details>
+<summary><strong>Advanced: Poll mode operational setup</strong></summary>
 
 1. Set `POS_IMPORT_INGEST_MODE=poll`.
 2. Configure provider settings:
@@ -149,11 +150,16 @@ Mailgun should post inbound events to `POST /webhooks/mailgun/inbound`.
 3. Keep `MAILGUN_ALLOWED_ATTACHMENT_EXTENSIONS` configured as needed; the same extension allowlist is applied in poll mode.
 4. Ensure the process remains running continuously so the background poller thread can execute hourly checks.
 
-#### Failure handling and idempotency
+</details>
+
+<details>
+<summary><strong>Advanced: Failure handling and idempotency</strong></summary>
 
 - Each attachment is hashed and staged with idempotency on `(source_provider, message_id, attachment_sha256)`, so duplicate polling runs do not create duplicate imports.
 - Parse failures produce a `failed` `PosSalesImport` record with a `failure_reason`, while successful parses remain `pending` for the standard mapping/approval workflow.
 - Messages are acknowledged only after all supported attachments in that message are processed without staging errors; failed messages remain unseen/unacknowledged for retry on the next polling pass.
+
+</details>
 
 ## Database Setup
 
@@ -208,13 +214,16 @@ from the `DATABASE_*` environment variables. You can override this with
   ./scripts/docker_migrate.sh
   ```
 
-### Restore troubleshooting
+<details>
+<summary><strong>Advanced: Restore troubleshooting</strong></summary>
 
 If restore fails with FK/constraint errors (especially around
 `invoice_product.invoice_id`), verify the target Postgres database has applied
 revision `d2f7a1b9c8e0` and any later migrations, then retry the restore.
 After migration `e3b7c9a1f4d2` is applied, long `activity_log.activity` entries
 (>255 chars) are supported during restore.
+
+</details>
 
 For production deployments using Gunicorn, use the provided configuration to enable WebSocket support and prevent worker timeouts:
 
@@ -247,7 +256,8 @@ runs migrations before Gunicorn starts.
 - **I need production/runtime notes** → Review [Running the Application](#running-the-application) and [Backups and Restore (Postgres runtime)](#backups-and-restore-postgres-runtime).
 - **I am troubleshooting startup or DB issues** → Jump to [Troubleshooting database connection issues](#troubleshooting-database-connection-issues).
 
-### Migration command inventory
+<details>
+<summary><strong>Advanced: Migration command inventory and fallback validation</strong></summary>
 
 Migration execution points (single reference list):
 
@@ -266,6 +276,8 @@ validate fallback URL assembly with:
 
 For the full Compose startup sequence (including when to seed data), use
 [Canonical local startup order (Docker Compose)](#canonical-local-startup-order-docker-compose).
+
+</details>
 
 ### Canonical local startup order (Docker Compose)
 
@@ -311,6 +323,9 @@ data is deleted and recreated on the next startup.
 
 ### Troubleshooting database connection issues
 
+<details>
+<summary><strong>Advanced: Troubleshooting database connection issues</strong></summary>
+
 - **Wrong host from your machine vs. containers:** use `DATABASE_HOST=postgres`
   in `.env` when the app runs inside Docker Compose; use `localhost` only for
   tools running directly on your host.
@@ -328,6 +343,8 @@ data is deleted and recreated on the next startup.
 - **Explicit connection string override:** if `DATABASE_URL` is set, it takes
   precedence over individual `DATABASE_*` values. Ensure the URL points to the
   correct host/port/user/password/database.
+
+</details>
 
 The repository includes an `import_files` directory containing example CSV files
 that can be used as templates for data imports.
