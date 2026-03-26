@@ -834,83 +834,72 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
                 insert_rows.append(record)
 
             if insert_rows:
-                try:
-                    target_conn.execute(table.insert(), insert_rows)
-                except IntegrityError as exc:
-                    first_row = insert_rows[0] if insert_rows else {}
-                    dbapi_details = _extract_dbapi_diagnostics(exc.orig)
-                    diagnostic_payload = {
-                        "phase": "insert_rows",
-                        "table": dbapi_details.get("table") or table_name,
-                        "constraint": dbapi_details.get("constraint"),
-                        "column": dbapi_details.get("column"),
-                        "sqlstate": dbapi_details.get("sqlstate"),
-                        "driver_error": dbapi_details.get("error_type"),
-                        "detail": _truncate_value(
-                            dbapi_details.get("detail") or "", max_length=180
-                        ),
-                        "sample_row_identifiers": _summarize_offending_row(first_row),
-                    }
-                    logger.error(
-                        "Restore integrity violation diagnostics: %s",
-                        json.dumps(diagnostic_payload, sort_keys=True),
-                    )
-                    concise_detail = ", ".join(
-                        [
-                            f"constraint={dbapi_details['constraint']}"
-                            if dbapi_details.get("constraint")
-                            else "",
-                            f"column={dbapi_details['column']}"
-                            if dbapi_details.get("column")
-                            else "",
-                            f"detail={_truncate_value(dbapi_details['detail'])}"
-                            if dbapi_details.get("detail")
-                            else "",
-                            (
-                                "keys="
-                                + ",".join(
-                                    f"{k}:{v}"
-                                    for k, v in diagnostic_payload[
-                                        "sample_row_identifiers"
-                                    ].items()
-                                )
-                            )
-                            if diagnostic_payload["sample_row_identifiers"]
-                            else "",
-                        ]
-                    ).strip(", ")
-                    raise RestoreBackupError(
-                        "Restore failed while inserting rows into table "
-                        f"'{diagnostic_payload['table']}' due to integrity violation "
-                        f"({dbapi_details.get('error_type', 'IntegrityError')}). "
-                        f"{concise_detail or 'No additional DBAPI diagnostics available.'}"
-                    ) from exc
-                except (DataError, DBAPIError) as exc:
-                    raise RestoreBackupError(
-                        "Restore failed while inserting rows into table "
-                        f"'{table_name}'. This likely indicates a column length/type "
-                        "mismatch or driver-level database error while loading backup "
-                        "data. Please run the latest database migrations and retry."
-                    ) from exc
                 if restore_mode == "permissive":
-                    inserted = _insert_rows_permissive(
-                        target_conn=target_conn,
-                        table=table,
-                        rows=insert_rows,
-                        skipped_rows=skipped_rows,
-                        logger=logger,
-                    )
+                    try:
+                        inserted = _insert_rows_permissive(
+                            target_conn=target_conn,
+                            table=table,
+                            rows=insert_rows,
+                            skipped_rows=skipped_rows,
+                            logger=logger,
+                        )
+                    except Exception as exc:
+                        raise RestoreBackupError(
+                            "Restore failed while inserting rows into table "
+                            f"'{table_name}' in permissive mode."
+                        ) from exc
                 else:
                     try:
                         target_conn.execute(table.insert(), insert_rows)
                         inserted = len(insert_rows)
                     except IntegrityError as exc:
+                        first_row = insert_rows[0] if insert_rows else {}
+                        dbapi_details = _extract_dbapi_diagnostics(exc.orig)
+                        diagnostic_payload = {
+                            "phase": "insert_rows",
+                            "table": dbapi_details.get("table") or table_name,
+                            "constraint": dbapi_details.get("constraint"),
+                            "column": dbapi_details.get("column"),
+                            "sqlstate": dbapi_details.get("sqlstate"),
+                            "driver_error": dbapi_details.get("error_type"),
+                            "detail": _truncate_value(
+                                dbapi_details.get("detail") or "", max_length=180
+                            ),
+                            "sample_row_identifiers": _summarize_offending_row(first_row),
+                        }
+                        logger.error(
+                            "Restore integrity violation diagnostics: %s",
+                            json.dumps(diagnostic_payload, sort_keys=True),
+                        )
+                        concise_detail = ", ".join(
+                            [
+                                f"constraint={dbapi_details['constraint']}"
+                                if dbapi_details.get("constraint")
+                                else "",
+                                f"column={dbapi_details['column']}"
+                                if dbapi_details.get("column")
+                                else "",
+                                f"detail={_truncate_value(dbapi_details['detail'])}"
+                                if dbapi_details.get("detail")
+                                else "",
+                                (
+                                    "keys="
+                                    + ",".join(
+                                        f"{k}:{v}"
+                                        for k, v in diagnostic_payload[
+                                            "sample_row_identifiers"
+                                        ].items()
+                                    )
+                                )
+                                if diagnostic_payload["sample_row_identifiers"]
+                                else "",
+                            ]
+                        ).strip(", ")
                         raise RestoreBackupError(
                             "Restore failed while inserting rows into table "
-                            f"'{table_name}' due to a constraint failure "
-                            "(for example: foreign key, unique, or not-null). "
-                            "Please verify backup data integrity and schema compatibility "
-                            "before retrying."
+                            f"'{diagnostic_payload['table']}' due to integrity violation "
+                            f"({dbapi_details.get('error_type', 'IntegrityError')}). "
+                            f"{concise_detail or 'No additional DBAPI diagnostics available.'}"
                         ) from exc
                     except (DataError, DBAPIError) as exc:
                         raise RestoreBackupError(
@@ -918,6 +907,11 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
                             f"'{table_name}'. This likely indicates a column length/type "
                             "mismatch or driver-level database error while loading backup "
                             "data. Please run the latest database migrations and retry."
+                        ) from exc
+                    except Exception as exc:
+                        raise RestoreBackupError(
+                            "Restore failed while inserting rows into table "
+                            f"'{table_name}' due to an unexpected error."
                         ) from exc
 
                 if inserted:
