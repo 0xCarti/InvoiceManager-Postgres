@@ -531,7 +531,7 @@ class MenuAssignment(db.Model):
 
 class Invoice(db.Model):
     id = db.Column(
-        db.String(10), primary_key=True
+        db.String(32), primary_key=True
     )  # Adjust length based on your requirements
     user_id = db.Column(
         db.Integer, db.ForeignKey("user.id"), nullable=False
@@ -570,7 +570,7 @@ class Invoice(db.Model):
 class InvoiceProduct(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     invoice_id = db.Column(
-        db.String(10),
+        db.String(32),
         db.ForeignKey("invoice.id", ondelete="CASCADE"),
         nullable=False,
     )

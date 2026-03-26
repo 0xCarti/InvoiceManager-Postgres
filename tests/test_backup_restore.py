@@ -13,12 +13,15 @@ from app import db
 from app.forms import MAX_BACKUP_SIZE
 from app.models import (
     ActivityLog,
+    Customer,
     Event,
     EventLocation,
     EventStandSheetItem,
     GLCode,
     Item,
     ItemUnit,
+    Invoice,
+    InvoiceProduct,
     Location,
     Product,
     ProductRecipeItem,
@@ -177,6 +180,8 @@ def populate_data():
         GLCode,
         Item,
         ItemUnit,
+        Invoice,
+        InvoiceProduct,
         Product,
         ProductRecipeItem,
         Vendor,
@@ -570,6 +575,48 @@ def test_restore_backup_with_long_activity_log_entry(app):
         restored_logs = ActivityLog.query.filter_by(activity=long_activity).all()
         assert len(restored_logs) == 1
         assert len(restored_logs[0].activity) > 255
+
+
+def test_restore_backup_with_long_invoice_ids(app):
+    with app.app_context():
+        populate_data()
+        customer = Customer(first_name="Long", last_name="Invoice")
+        user = User.query.filter_by(email="backup@example.com").first()
+        product = Product.query.filter_by(name="BackupProduct").first()
+        assert user is not None
+        assert product is not None
+
+        long_invoice_id = "INV-2026-LONG-IDENTIFIER-0001"
+        invoice = Invoice(id=long_invoice_id, customer=customer, user_id=user.id)
+        invoice_product = InvoiceProduct(
+            invoice_id=long_invoice_id,
+            product_id=product.id,
+            product_name=product.name,
+            quantity=1,
+            unit_price=1.0,
+            line_subtotal=1.0,
+            line_gst=0.0,
+            line_pst=0.0,
+        )
+        db.session.add_all([customer, invoice, invoice_product])
+        db.session.commit()
+
+        backup_path = _create_sqlite_backup_copy(app, "long_invoice_id_restore.db")
+
+        InvoiceProduct.query.delete()
+        Invoice.query.delete()
+        Customer.query.filter_by(first_name="Long", last_name="Invoice").delete()
+        db.session.commit()
+
+        restore_backup(backup_path)
+
+        restored_invoice = db.session.get(Invoice, long_invoice_id)
+        assert restored_invoice is not None
+        assert len(restored_invoice.id) > 10
+        assert (
+            InvoiceProduct.query.filter_by(invoice_id=long_invoice_id).count() == 1
+        )
+        assert Product.query.filter_by(name="BackupProduct").count() == 1
 
 
 def test_restore_sqlite_backup_into_postgres_restores_key_tables(app):
