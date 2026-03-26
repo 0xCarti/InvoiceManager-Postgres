@@ -99,6 +99,7 @@ from app.utils.units import (
     serialize_conversion_setting,
 )
 from app.utils.pos_import import normalize_pos_alias
+from app.utils.text import build_text_match_predicate
 
 auth = Blueprint("auth", __name__)
 admin = Blueprint("admin", __name__)
@@ -1086,7 +1087,11 @@ def activity_logs():
 
     activity_filter = (form.activity.data or "").strip()
     if activity_filter:
-        query = query.filter(ActivityLog.activity.ilike(f"%{activity_filter}%"))
+        query = query.filter(
+            build_text_match_predicate(
+                ActivityLog.activity, activity_filter, "contains"
+            )
+        )
 
     if form.start_date.data:
         start_dt = datetime.combine(form.start_date.data, datetime.min.time())

@@ -35,6 +35,7 @@ from app.utils.activity import log_activity
 from app.utils.numeric import coerce_float
 from app.utils.pagination import build_pagination_args, get_per_page
 from app.utils.sms import send_sms
+from app.utils.text import build_text_match_predicate, normalize_request_text_filter
 
 transfer = Blueprint("transfer", __name__)
 
@@ -260,11 +261,11 @@ def view_transfers():
     transfer_id = request.args.get(
         "transfer_id", "", type=int
     )  # Optional: Search by Transfer ID
-    from_location_name = request.args.get(
-        "from_location", ""
+    from_location_name = normalize_request_text_filter(
+        request.args.get("from_location")
     )  # Optional: Search by From Location
-    to_location_name = request.args.get(
-        "to_location", ""
+    to_location_name = normalize_request_text_filter(
+        request.args.get("to_location")
     )  # Optional: Search by To Location
     page = request.args.get("page", 1, type=int)
 
@@ -277,12 +278,18 @@ def view_transfers():
     if from_location_name != "":
         query = query.join(
             Location, Transfer.from_location_id == Location.id
-        ).filter(Location.name.ilike(f"%{from_location_name}%"))
+        ).filter(
+            build_text_match_predicate(
+                Location.name, from_location_name, "contains"
+            )
+        )
 
     if to_location_name != "":
         query = query.join(
             Location, Transfer.to_location_id == Location.id
-        ).filter(Location.name.ilike(f"%{to_location_name}%"))
+        ).filter(
+            build_text_match_predicate(Location.name, to_location_name, "contains")
+        )
 
     if filter_option == "completed":
         query = query.filter(Transfer.completed)

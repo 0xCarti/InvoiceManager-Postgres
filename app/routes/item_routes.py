@@ -971,10 +971,10 @@ def bulk_delete_items():
 @login_required
 def search_items():
     """Search items by name for autocomplete fields."""
-    search_term = request.args.get("term", "")
+    search_term = normalize_request_text_filter(request.args.get("term"))
     items = (
         Item.query.options(selectinload(Item.purchase_gl_code))
-        .filter(Item.name.ilike(f"%{search_term}%"))
+        .filter(build_text_match_predicate(Item.name, search_term, "contains"))
         .order_by(Item.name)
         .limit(20)
         .all()

@@ -13,7 +13,7 @@ from app import db
 from app.forms import DeleteForm, GLCodeForm
 from app.models import GLCode
 from app.utils.pagination import build_pagination_args, get_per_page
-from app.utils.text import normalize_request_text_filter
+from app.utils.text import build_text_match_predicate, normalize_request_text_filter
 
 glcode_bp = Blueprint("glcode", __name__)
 
@@ -30,9 +30,15 @@ def view_gl_codes():
 
     query = GLCode.query
     if code_query:
-        query = query.filter(GLCode.code.ilike(f"%{code_query}%"))
+        query = query.filter(
+            build_text_match_predicate(GLCode.code, code_query, "contains")
+        )
     if description_query:
-        query = query.filter(GLCode.description.ilike(f"%{description_query}%"))
+        query = query.filter(
+            build_text_match_predicate(
+                GLCode.description, description_query, "contains"
+            )
+        )
 
     per_page = get_per_page()
     codes = query.order_by(GLCode.code).paginate(page=page, per_page=per_page)

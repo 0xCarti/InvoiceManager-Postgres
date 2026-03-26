@@ -56,6 +56,7 @@ from app.models import (
 )
 from app.utils.forecasting import DemandForecastingHelper
 from app.utils.pos_import import parse_department_sales_forecast
+from app.utils.text import build_text_match_predicate, normalize_request_text_filter
 from app.utils.units import (
     DEFAULT_BASE_UNIT_CONVERSIONS,
     convert_cost_for_reporting,
@@ -2245,7 +2246,7 @@ def product_stock_usage_report():
 @login_required
 def product_recipe_report():
     """List products with their recipe items, price and cost."""
-    search = request.args.get("search")
+    search = normalize_request_text_filter(request.args.get("search"))
     selected_ids = request.form.getlist("products", type=int)
     product_choices = []
 
@@ -2255,7 +2256,9 @@ def product_recipe_report():
 
     if search:
         search_products = (
-            Product.query.filter(Product.name.ilike(f"%{search}%"))
+            Product.query.filter(
+                build_text_match_predicate(Product.name, search, "contains")
+            )
             .order_by(Product.name)
             .limit(50)
             .all()
