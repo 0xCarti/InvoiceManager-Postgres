@@ -215,13 +215,16 @@ The team currently runs migrations in three places:
    (or `./scripts/docker_migrate.sh`) for explicit migration runs.
 
 For Docker Compose workflows, scripts should always run with a
-Postgres-backed `DATABASE_URL` pointing to the Compose `postgres` service.
+Postgres-backed `DATABASE_URL` pointing to the Compose `postgres` service
+name (not `container_name`). Keep `DATABASE_HOST=postgres` for these flows.
 `./scripts/docker_migrate.sh` enforces that automatically.
 
 ### First-time database initialization and migrations
 
 On first boot, migrations run automatically. If you want to run the steps
-manually (for example while debugging), use container-aware commands:
+manually (for example while debugging), use container-aware commands. Keep
+`DATABASE_HOST=postgres` so the web service can resolve the Postgres service
+via Docker Compose DNS:
 
 ```bash
 docker compose up -d postgres
@@ -235,7 +238,8 @@ runs with a Compose-compatible `DATABASE_URL`.
 
 ### Canonical local startup order (Docker Compose)
 
-Use this order for consistent local boots:
+Use this order for consistent local boots. For Compose startup, keep
+`DATABASE_HOST=postgres` (service DNS name):
 
 1. **Start services needed for DB access**
    ```bash

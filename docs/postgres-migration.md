@@ -6,6 +6,8 @@ Use this document during validation runs and attach command output to the PR whe
 
 ## Checklist
 
+> For Docker Compose migration/startup workflows, keep `DATABASE_HOST=postgres` because Compose service discovery uses service names (not `container_name`).
+
 - [ ] Fresh `docker compose up` succeeds.
 - [ ] `flask db upgrade` succeeds from an empty DB.
 - [ ] App boots and basic CRUD paths work.
