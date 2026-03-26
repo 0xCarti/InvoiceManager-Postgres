@@ -9,30 +9,34 @@ PostgreSQL is the only supported runtime database backend.
 
 ## Table of Contents
 
-- [Installation](#installation)
-- [Gotchas](#gotchas)
-- [Environment Variables](#required-environment-variables)
-- [Database Setup (Migrations)](#database-setup)
+- [Quick Gotchas](#quick-gotchas)
+- [Installation (Detailed)](#installation-detailed)
+- [Environment Variables](#environment-variables)
+- [Database Setup & Migrations](#database-setup--migrations)
+- [Run the Application](#run-the-application)
+- [Backups & Restore (Postgres Runtime)](#backups--restore-postgres-runtime)
+- [Project Architecture](#project-architecture)
 - [Docker Setup](#docker-setup)
-- [Common Commands](#common-commands)
-- [Choose Your Setup Path](#choose-your-setup-path)
-- [Backups and Restore](#backups-and-restore-postgres-runtime)
-- [Testing](#running-tests)
+- [Command Reference](#command-reference)
+- [Setup Paths](#setup-paths)
+- [Testing](#testing)
 - [Code Style](#code-style)
 - [Features](#features)
 - [Documentation](#documentation)
+- [Data Import](#data-import)
+- [Test Defaults](#test-defaults)
 - [Documentation Index](#documentation-index)
 - [License](#license)
 
 
-## Gotchas
+## Quick Gotchas
 
 - ⚠️ **Docker Compose DB host:** when app/tools run **inside Compose services**, set `DATABASE_HOST=postgres` (service DNS name), not `localhost`.
 - ⚠️ **Host-run tools:** when running commands from your host shell/venv (for example `flask db upgrade`), use `localhost` for DB host/URL unless you are targeting another host.
 - ⚠️ **Connection var precedence:** `DATABASE_URL` (and `SQLALCHEMY_DATABASE_URI`) override individual `DATABASE_*` parts when set.
 - ⚠️ **Restore prerequisite:** run migrations to latest **before** restoring a backup (`python -m flask --app run.py db upgrade` or `./scripts/docker_migrate.sh`).
 
-## Installation
+## Installation (Detailed)
 
 You can perform the steps below manually or run one of the setup scripts provided in the repository. `setup.sh` works on Linux/macOS and `setup.ps1` works on Windows. Each script optionally accepts a repository URL and target directory, clones the project, installs dependencies, prepares a `.env` file, runs the database migrations, and seeds the default admin account and settings.
 
@@ -54,7 +58,7 @@ You can perform the steps below manually or run one of the setup scripts provide
    This installs Flask-SQLAlchemy plus the PostgreSQL driver
    `psycopg[binary]`, which is the default runtime database adapter.
 
-## Required Environment Variables
+## Environment Variables
 
 The application requires several variables to be present in your environment:
 
@@ -171,7 +175,7 @@ Mailgun should post inbound events to `POST /webhooks/mailgun/inbound`.
 
 </details>
 
-## Database Setup
+## Database Setup & Migrations
 
 Use this sequence for **host/venv installs** (not Docker Compose):
 
@@ -186,9 +190,9 @@ Use this sequence for **host/venv installs** (not Docker Compose):
 
 > **Note:** `setup.sh` and `setup.ps1` already run these steps. Only run them manually if you performed installation yourself.
 >
-> For Docker Compose flows, use the canonical Compose startup order in [Canonical local startup order (Docker Compose)](#canonical-local-startup-order-docker-compose).
+> For Docker Compose flows, use the canonical Compose startup order in [Canonical Startup Order (Docker Compose)](#canonical-startup-order-docker-compose).
 
-## Running the Application
+## Run the Application
 
 After installing the dependencies and setting the environment variables, start the development server with:
 
@@ -204,7 +208,7 @@ from the `DATABASE_*` environment variables. You can override this with
 `DATABASE_URL` or `SQLALCHEMY_DATABASE_URI`. The app also creates `uploads` and
 `backups` directories automatically on startup.
 
-## Backups and Restore (Postgres runtime)
+## Backups & Restore (Postgres Runtime)
 
 - **Backup artifact format remains SQLite `.db`.** The backup files in the
   `backups/` folder are still SQLite databases and remain the expected format
@@ -253,13 +257,13 @@ Create a `.env` file with the variables listed above (including Redis-backed
 `RATELIMIT_STORAGE_URI` for production rate limiting).
 
 For day-to-day local development, follow the canonical sequence in
-[Canonical local startup order (Docker Compose)](#canonical-local-startup-order-docker-compose).
+[Canonical Startup Order (Docker Compose)](#canonical-startup-order-docker-compose).
 
 If you want a one-command boot that builds images and starts services,
 `docker compose up --build` remains supported; the web container entrypoint
 runs migrations before Gunicorn starts.
 
-## Common Commands
+## Command Reference
 
 Use these as quick-reference commands depending on whether you are running on
 your host (virtualenv) or with Docker Compose.
@@ -278,12 +282,12 @@ your host (virtualenv) or with Docker Compose.
 | Run pre-commit (Docker) | `docker compose run --rm web pre-commit run --all-files` | Requires `pre-commit` available in the container image. |
 | Docker reset workflow | `docker compose down -v && docker compose up --build` | Docker only; removes local Postgres volume and rebuilds containers. |
 
-## Choose Your Setup Path
+## Setup Paths
 
-- **I want the fastest Docker Compose path** → Start with [Docker Setup](#docker-setup), then follow [Canonical local startup order (Docker Compose)](#canonical-local-startup-order-docker-compose).
-- **I want a host/venv install** → Follow [Installation](#installation) and then the host/venv canonical steps in [Database Setup](#database-setup).
-- **I need production/runtime notes** → Review [Running the Application](#running-the-application) and [Backups and Restore (Postgres runtime)](#backups-and-restore-postgres-runtime).
-- **I am troubleshooting startup or DB issues** → Jump to [Troubleshooting database connection issues](#troubleshooting-database-connection-issues).
+- **I want the fastest Docker Compose path** → Start with [Docker Setup](#docker-setup), then follow [Canonical Startup Order (Docker Compose)](#canonical-startup-order-docker-compose).
+- **I want a host/venv install** → Follow [Installation (Detailed)](#installation-detailed) and then the host/venv canonical steps in [Database Setup & Migrations](#database-setup--migrations).
+- **I need production/runtime notes** → Review [Run the Application](#run-the-application) and [Backups & Restore (Postgres Runtime)](#backups--restore-postgres-runtime).
+- **I am troubleshooting startup or DB issues** → Jump to [Troubleshooting Database Connection Issues](#troubleshooting-database-connection-issues).
 
 <details>
 <summary><strong>Advanced: Migration command inventory and fallback validation</strong></summary>
@@ -304,11 +308,11 @@ validate fallback URL assembly with:
 ```
 
 For the full Compose startup sequence (including when to seed data), use
-[Canonical local startup order (Docker Compose)](#canonical-local-startup-order-docker-compose).
+[Canonical Startup Order (Docker Compose)](#canonical-startup-order-docker-compose).
 
 </details>
 
-### Canonical local startup order (Docker Compose)
+### Canonical Startup Order (Docker Compose)
 
 Use this order for consistent local boots. For Compose startup, keep
 `DATABASE_HOST=postgres` (service DNS name):
@@ -338,7 +342,7 @@ You can run phases 1, 2, and 4 with:
 ./scripts/docker_start_verify.sh
 ```
 
-### Reset workflow (fresh local database)
+### Reset Workflow (Fresh Local Database)
 
 To reset local state and reinitialize PostgreSQL from scratch:
 
@@ -350,7 +354,7 @@ docker compose up --build
 `docker compose down -v` removes the `postgres_data` volume, so all database
 data is deleted and recreated on the next startup.
 
-### Troubleshooting database connection issues
+### Troubleshooting Database Connection Issues
 
 <details>
 <summary><strong>Advanced: Troubleshooting database connection issues</strong></summary>
@@ -384,7 +388,7 @@ in `uploads`, `backups`, and `import_files`. PostgreSQL data is persisted in the
 `postgres_data` Docker volume. These locations are created automatically when
 the container starts.
 
-## Running Tests
+## Testing
 
 The project includes a suite of `pytest` tests. Execute them with:
 
