@@ -16,7 +16,6 @@ from app.models import Customer
 from app.utils.activity import log_activity
 from app.utils.pagination import build_pagination_args, get_per_page
 from app.utils.text import (
-    build_text_match_predicate,
     normalize_request_text_filter,
     normalize_text_match_mode,
 )
@@ -38,9 +37,15 @@ def view_customers():
     query = Customer.query.filter_by(archived=False)
     if name_query:
         full_name = func.concat(Customer.first_name, " ", Customer.last_name)
-        query = query.filter(
-            build_text_match_predicate(full_name, name_query, match_mode)
-        )
+        if match_mode == "exact":
+            name_filter = func.lower(full_name) == name_query.lower()
+        elif match_mode == "startswith":
+            name_filter = full_name.ilike(f"{name_query}%")
+        elif match_mode == "not_contains":
+            name_filter = full_name.notilike(f"%{name_query}%")
+        else:
+            name_filter = full_name.ilike(f"%{name_query}%")
+        query = query.filter(name_filter)
     if gst_exempt == "yes":
         query = query.filter(Customer.gst_exempt.is_(True))
     elif gst_exempt == "no":
