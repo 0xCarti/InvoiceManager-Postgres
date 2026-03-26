@@ -45,10 +45,8 @@ def downgrade() -> None:
             "ALTER TABLE activity_log ALTER COLUMN activity TYPE VARCHAR(255)"
         )
     else:
-        op.alter_column(
-            "activity_log",
-            "activity",
-            existing_type=sa.Text(),
-            type_=sa.String(length=255),
-            existing_nullable=False,
+        raise RuntimeError(
+            "Downgrade for e3b7c9a1f4d2 is only supported on PostgreSQL; "
+            "run against PostgreSQL to safely truncate activity_log.activity "
+            "to 255 characters before reverting the column type."
         )
