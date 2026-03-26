@@ -150,6 +150,13 @@ def _apply_restore_favorites_mode(ignore_favorites: bool) -> tuple[str, int]:
     return "cleaned", cleaned_count
 
 
+def _resolve_restore_mode(raw_mode: str | None) -> str:
+    mode = (raw_mode or "").strip().lower()
+    if mode in {"permissive", "lenient"}:
+        return "permissive"
+    return current_app.config.get("RESTORE_MODE_DEFAULT", "strict")
+
+
 def _serializer():
     from flask import current_app
 
@@ -551,6 +558,9 @@ def backups():
     files = sorted(os.listdir(backups_dir))
     create_form = CreateBackupForm()
     restore_form = RestoreBackupForm()
+    restore_form.restore_mode.data = _resolve_restore_mode(
+        current_app.config.get("RESTORE_MODE_DEFAULT")
+    )
     return render_template(
         "admin/backups.html",
         backups=files,
@@ -635,8 +645,9 @@ def restore_backup_route():
             )
             flash(f"Compatibility warnings: {warning_details}", "warning")
 
+        restore_mode = _resolve_restore_mode(form.restore_mode.data)
         try:
-            restore_backup(filepath)
+            restore_summary = restore_backup(filepath, restore_mode=restore_mode)
         except RestoreBackupError as exc:
             current_app.logger.exception(
                 "Restore runtime failure for %s: %s",
@@ -674,11 +685,28 @@ def restore_backup_route():
                 f"Backup restored from {filename}. Favorites mode: pruned invalid favorites.",
                 "success",
             )
+        if restore_summary.skipped_count:
+            flash(
+                "Partial restore completed in permissive mode: "
+                f"inserted {restore_summary.inserted_count} rows, skipped "
+                f"{restore_summary.skipped_count} invalid row(s). "
+                f"Quarantine report: {restore_summary.quarantine_report}.",
+                "warning",
+            )
+            log_activity(
+                f"Restore partial outcome for {filename}: inserted={restore_summary.inserted_count}, "
+                f"skipped={restore_summary.skipped_count}, quarantine={restore_summary.quarantine_report}, "
+                f"tables={','.join(restore_summary.affected_tables)}"
+            )
         restore_message = (
             f"Restored backup {filename} with compatibility warnings "
             f"(favorites_mode={mode})"
             if compatibility.warnings
             else f"Restored backup {filename} (favorites_mode={mode})"
+        )
+        restore_message += (
+            f" [restore_mode={restore_summary.mode}, inserted={restore_summary.inserted_count}, "
+            f"skipped={restore_summary.skipped_count}]"
         )
         log_activity(restore_message)
     else:
@@ -739,8 +767,10 @@ def restore_backup_file(filename):
         )
         flash(f"Compatibility warnings: {warning_details}", "warning")
 
+    raw_mode = flask.request.values.get("restore_mode")
+    restore_mode = _resolve_restore_mode(raw_mode)
     try:
-        restore_backup(filepath)
+        restore_summary = restore_backup(filepath, restore_mode=restore_mode)
     except RestoreBackupError as exc:
         current_app.logger.exception(
             "Restore runtime failure for %s: %s",
@@ -782,11 +812,28 @@ def restore_backup_file(filename):
             f"Backup restored from {fname}. Favorites mode: pruned invalid favorites.",
             "success",
         )
+    if restore_summary.skipped_count:
+        flash(
+            "Partial restore completed in permissive mode: "
+            f"inserted {restore_summary.inserted_count} rows, skipped "
+            f"{restore_summary.skipped_count} invalid row(s). "
+            f"Quarantine report: {restore_summary.quarantine_report}.",
+            "warning",
+        )
+        log_activity(
+            f"Restore partial outcome for {fname}: inserted={restore_summary.inserted_count}, "
+            f"skipped={restore_summary.skipped_count}, quarantine={restore_summary.quarantine_report}, "
+            f"tables={','.join(restore_summary.affected_tables)}"
+        )
     restore_message = (
         f"Restored backup {fname} with compatibility warnings "
         f"(favorites_mode={mode})"
         if compatibility.warnings
         else f"Restored backup {fname} (favorites_mode={mode})"
+    )
+    restore_message += (
+        f" [restore_mode={restore_summary.mode}, inserted={restore_summary.inserted_count}, "
+        f"skipped={restore_summary.skipped_count}]"
     )
     log_activity(restore_message)
     return redirect(url_for("admin.backups"))

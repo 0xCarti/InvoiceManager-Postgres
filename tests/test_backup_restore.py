@@ -694,6 +694,67 @@ def test_restore_sqlite_backup_into_postgres_restores_key_tables(app):
         assert TerminalSale.query.count() == 1
 
 
+def test_restore_backup_permissive_mode_skips_invalid_rows_and_writes_quarantine(app):
+    with app.app_context():
+        populate_data()
+        backup_path = _create_sqlite_backup_copy(app, "permissive_invalid_row.db")
+        backups_dir = app.config["BACKUP_FOLDER"]
+
+        with sqlite3.connect(backup_path) as conn:
+            duplicate = conn.execute(
+                "SELECT email, password, is_admin, active, id FROM user ORDER BY id LIMIT 1"
+            ).fetchone()
+            assert duplicate is not None
+            conn.execute(
+                "INSERT INTO user (email, password, is_admin, active) VALUES (?, ?, ?, ?)",
+                (duplicate[0], duplicate[1], duplicate[2], duplicate[3]),
+            )
+            conn.commit()
+
+        for entry in os.listdir(backups_dir):
+            if entry.startswith("restore_quarantine_") and entry.endswith(".json"):
+                os.remove(os.path.join(backups_dir, entry))
+
+        summary = restore_backup(backup_path, restore_mode="permissive")
+
+        assert summary.mode == "permissive"
+        assert summary.skipped_count == 1
+        assert summary.inserted_count > 0
+        assert "user" in summary.affected_tables
+        assert summary.quarantine_report is not None
+
+        report_path = os.path.join(backups_dir, summary.quarantine_report)
+        assert os.path.exists(report_path)
+        with open(report_path, encoding="utf-8") as fp:
+            report_data = json.load(fp)
+        assert report_data["skipped_count"] == 1
+        assert report_data["skipped_rows"][0]["table"] == "user"
+        assert "email" in report_data["skipped_rows"][0]["primary_key"]
+
+
+def test_restore_backup_strict_mode_still_fails_on_invalid_rows(app):
+    with app.app_context():
+        populate_data()
+        backup_path = _create_sqlite_backup_copy(app, "strict_invalid_row.db")
+
+        with sqlite3.connect(backup_path) as conn:
+            duplicate = conn.execute(
+                "SELECT email, password, is_admin, active FROM user ORDER BY id LIMIT 1"
+            ).fetchone()
+            assert duplicate is not None
+            conn.execute(
+                "INSERT INTO user (email, password, is_admin, active) VALUES (?, ?, ?, ?)",
+                (duplicate[0], duplicate[1], duplicate[2], duplicate[3]),
+            )
+            conn.commit()
+
+        try:
+            restore_backup(backup_path, restore_mode="strict")
+            assert False, "Expected RestoreBackupError in strict mode"
+        except RestoreBackupError as exc:
+            assert "constraint failure" in str(exc)
+
+
 def test_restore_backup_wraps_drop_constraint_compile_error(app, monkeypatch):
     with app.app_context():
         backup_path = _create_sqlite_backup_copy(

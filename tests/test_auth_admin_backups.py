@@ -3,7 +3,7 @@ import shutil
 import sqlite3
 
 from app.models import ActivityLog, User
-from app.utils.backup import RestoreCompatibilityResult
+from app.utils.backup import RestoreCompatibilityResult, RestoreSummary
 from tests.utils import login
 from app.utils.activity import flush_activity_logs
 from app.utils.backup import create_backup
@@ -183,3 +183,39 @@ def test_admin_backups_renders_when_menu_endpoint_missing(client, app):
     assert response.status_code == 200
     assert b"Database Backups" in response.data
     assert b"BuildError" not in response.data
+
+
+def test_restore_backup_file_permissive_mode_shows_partial_restore_message(
+    client, app, monkeypatch
+):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    _create_sqlite_backup(app, "permissive_partial.db")
+
+    monkeypatch.setattr(
+        "app.routes.auth_routes.validate_backup_file_compatibility",
+        lambda *_args, **_kwargs: RestoreCompatibilityResult(compatible=True, issues=[]),
+    )
+    monkeypatch.setattr(
+        "app.routes.auth_routes.restore_backup",
+        lambda *_args, **_kwargs: RestoreSummary(
+            mode="permissive",
+            inserted_count=12,
+            skipped_count=2,
+            affected_tables=["user", "setting"],
+            quarantine_report="restore_quarantine_20260326_123456.json",
+        ),
+    )
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            "/controlpanel/backups/restore/permissive_partial.db?restore_mode=permissive",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"Backup restored from permissive_partial.db" in response.data
+    assert b"Partial restore completed in permissive mode" in response.data
+    assert b"restore_quarantine_20260326_123456.json" in response.data
