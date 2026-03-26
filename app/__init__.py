@@ -374,17 +374,22 @@ def create_app(args=None):
 
     base_dir = os.getcwd()
     repo_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-    # Allow overriding the database location via the DATABASE_PATH environment
-    # variable.  This is useful for container deployments where the database
-    # may reside in a mounted volume.  If the provided path is a directory,
-    # store the SQLite file inside that directory.
-    default_db_path = os.path.join(base_dir, "inventory.db")
-    db_path = os.getenv("DATABASE_PATH", default_db_path)
-    if os.path.isdir(db_path):
-        db_path = os.path.join(db_path, "inventory.db")
-
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path}"
+    # Default to PostgreSQL for local and containerized development.
+    # The default host intentionally uses the Docker Compose service name.
+    db_driver = os.getenv("DATABASE_DRIVER", "postgresql+psycopg")
+    db_user = os.getenv("DATABASE_USER", "invoicemanager")
+    db_password = os.getenv("DATABASE_PASSWORD", "invoicemanager")
+    db_host = os.getenv("DATABASE_HOST", "postgres")
+    db_port = os.getenv("DATABASE_PORT", "5432")
+    db_name = os.getenv("DATABASE_NAME", "invoicemanager")
+    default_database_uri = (
+        f"{db_driver}://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+    )
+    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
+        "SQLALCHEMY_DATABASE_URI",
+        os.getenv("DATABASE_URL", default_database_uri),
+    )
+    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["UPLOAD_FOLDER"] = os.path.join(base_dir, "uploads")
     app.config["BACKUP_FOLDER"] = os.path.join(base_dir, "backups")
     app.config["IMPORT_FILES_FOLDER"] = os.path.join(repo_dir, "import_files")
