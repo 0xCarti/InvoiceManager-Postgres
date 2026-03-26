@@ -200,9 +200,9 @@ from the `DATABASE_*` environment variables. You can override this with
 
 If restore fails with FK/constraint errors (especially around
 `invoice_product.invoice_id`), verify the target Postgres database has applied
-revision `d2f7a1b9c8e0` and any later migrations, then retry the restore. Long
-`activity_log.activity` entries (>255 chars) are supported after migration
-`e3b7c9a1f4d2`.
+revision `d2f7a1b9c8e0` and any later migrations, then retry the restore.
+After migration `e3b7c9a1f4d2` is applied, long `activity_log.activity` entries
+(>255 chars) are supported during restore.
 
 For production deployments using Gunicorn, use the provided configuration to enable WebSocket support and prevent worker timeouts:
 

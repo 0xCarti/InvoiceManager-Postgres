@@ -567,8 +567,10 @@ def test_restore_backup_with_long_activity_log_entry(app):
 
         restore_backup(backup_path)
 
-        restored_log = ActivityLog.query.filter_by(activity=long_activity).one()
-        assert len(restored_log.activity) > 255
+        restored_logs = ActivityLog.query.filter_by(activity=long_activity).all()
+        assert len(restored_logs) == 1
+        assert len(restored_logs[0].activity) > 255
+
 
 def test_restore_sqlite_backup_into_postgres_restores_key_tables(app):
     with app.app_context():
