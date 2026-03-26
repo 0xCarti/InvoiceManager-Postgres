@@ -8,6 +8,7 @@ from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import Column, Integer, MetaData, Table
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import CompileError, DataError, IntegrityError
 from werkzeug.security import generate_password_hash
@@ -44,6 +45,7 @@ from app.utils.backup import (
     BACKUP_SCHEMA_VERSION,
     RestoreBackupError,
     _backup_loop,
+    check_and_fix_pk_sequences,
     create_backup,
     restore_backup,
     validate_backup_file_compatibility,
@@ -251,6 +253,60 @@ def test_restore_backup_allows_creating_product_without_pk_collision(app):
         db.session.commit()
 
         assert created.id not in existing_ids
+
+
+def test_check_and_fix_pk_sequences_detects_and_repairs_drift():
+    class _ScalarResult:
+        def __init__(self, value):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+        def scalar_one(self):
+            return self.value
+
+    class _RowResult:
+        def __init__(self, row):
+            self.row = row
+
+        def first(self):
+            return self.row
+
+    class _FakeConn:
+        def __init__(self):
+            self.setval_calls = []
+
+        def execute(self, statement, params=None):
+            sql = str(statement)
+            if "pg_get_serial_sequence" in sql:
+                return _ScalarResult("public.product_id_seq")
+            if "COALESCE(MAX" in sql:
+                return _ScalarResult(10)
+            if "SELECT last_value, is_called" in sql:
+                return _RowResult((5, True))
+            if "setval" in sql:
+                self.setval_calls.append(params)
+                return _ScalarResult(None)
+            raise AssertionError(f"Unexpected SQL: {sql}")
+
+    fake_conn = _FakeConn()
+    product_table = Table(
+        "product",
+        MetaData(),
+        Column("id", Integer, primary_key=True),
+    )
+
+    summary = check_and_fix_pk_sequences(
+        fake_conn,
+        tables=[product_table],
+        auto_fix=True,
+    )
+
+    assert summary == {"checked": 1, "drifted": 1, "fixed": 1, "skipped": 0}
+    assert fake_conn.setval_calls == [
+        {"sequence_name": "public.product_id_seq", "max_value": 10}
+    ]
 
 
 def test_restore_backup_file_rejects_path_traversal(client, app):

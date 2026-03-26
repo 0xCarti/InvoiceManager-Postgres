@@ -666,6 +666,7 @@ __all__ = [
     "BACKUP_SCHEMA_VERSION",
     "RestoreBackupError",
     "RestoreSummary",
+    "check_and_fix_pk_sequences",
     "create_backup",
     "ensure_backup_schema_marker",
     "reconcile_postgres_table_pk_sequence",
@@ -927,6 +928,112 @@ def reconcile_postgres_table_pk_sequence(
     return True
 
 
+def check_and_fix_pk_sequences(
+    conn,
+    *,
+    tables: list[Table] | None = None,
+    auto_fix: bool = False,
+    logger: logging.Logger | None = None,
+) -> dict[str, int]:
+    """Check (and optionally repair) PostgreSQL integer PK sequence drift."""
+
+    active_logger = logger or logging.getLogger(__name__)
+    table_list = tables or list(db.metadata.sorted_tables)
+    summary = {"checked": 0, "drifted": 0, "fixed": 0, "skipped": 0}
+
+    for table in table_list:
+        pk_column = _is_single_integer_primary_key(table)
+        if pk_column is None:
+            continue
+
+        summary["checked"] += 1
+        table_name = table.name
+        pk_column_name = pk_column.name
+
+        sequence_name = conn.execute(
+            db.text("SELECT pg_get_serial_sequence(:table_name, :column_name)"),
+            {"table_name": table_name, "column_name": pk_column_name},
+        ).scalar_one_or_none()
+
+        if not sequence_name:
+            summary["skipped"] += 1
+            active_logger.info(
+                "PK sequence check skipped for %s.%s; no serial/identity sequence found",
+                table_name,
+                pk_column_name,
+            )
+            continue
+
+        max_pk_value = conn.execute(
+            db.text(f'SELECT COALESCE(MAX("{pk_column_name}"), 0) FROM "{table_name}"')
+        ).scalar_one()
+        sequence_state = conn.execute(
+            db.text(f"SELECT last_value, is_called FROM {sequence_name}")
+        ).first()
+        if sequence_state is None:
+            summary["skipped"] += 1
+            active_logger.warning(
+                "PK sequence check skipped for %s.%s; unable to read sequence state for %s",
+                table_name,
+                pk_column_name,
+                sequence_name,
+            )
+            continue
+
+        sequence_last_value, sequence_is_called = sequence_state
+        next_sequence_value = (
+            int(sequence_last_value) + 1 if sequence_is_called else int(sequence_last_value)
+        )
+        is_drifted = next_sequence_value <= int(max_pk_value)
+
+        if is_drifted:
+            summary["drifted"] += 1
+            if auto_fix:
+                conn.execute(
+                    db.text(
+                        "SELECT setval(CAST(:sequence_name AS regclass), :max_value, true)"
+                    ),
+                    {"sequence_name": sequence_name, "max_value": int(max_pk_value)},
+                )
+                summary["fixed"] += 1
+                active_logger.warning(
+                    "PK sequence drift detected+fixed for %s.%s sequence=%s nextval=%s max_id=%s",
+                    table_name,
+                    pk_column_name,
+                    sequence_name,
+                    next_sequence_value,
+                    max_pk_value,
+                )
+            else:
+                active_logger.warning(
+                    "PK sequence drift detected for %s.%s sequence=%s nextval=%s max_id=%s",
+                    table_name,
+                    pk_column_name,
+                    sequence_name,
+                    next_sequence_value,
+                    max_pk_value,
+                )
+        else:
+            active_logger.info(
+                "PK sequence check OK for %s.%s sequence=%s nextval=%s max_id=%s",
+                table_name,
+                pk_column_name,
+                sequence_name,
+                next_sequence_value,
+                max_pk_value,
+            )
+
+    active_logger.info(
+        "PK sequence check summary: checked=%s drifted=%s fixed=%s skipped=%s auto_fix=%s",
+        summary["checked"],
+        summary["drifted"],
+        summary["fixed"],
+        summary["skipped"],
+        auto_fix,
+    )
+    return summary
+
+
 def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> RestoreSummary:
     restore_mode = _normalize_restore_mode(restore_mode)
     backup_engine = create_engine(f"sqlite+pysqlite:///{file_path}")
@@ -1168,17 +1275,13 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
                     affected_tables.add(table_name)
 
         if target_conn.dialect.name == "postgresql":
-            logger.info("Running post-restore sequence reconciliation for PostgreSQL")
-            for table in db.metadata.sorted_tables:
-                pk_column = _is_single_integer_primary_key(table)
-                if pk_column is None:
-                    continue
-                reconcile_postgres_table_pk_sequence(
-                    target_conn,
-                    table_name=table.name,
-                    pk_column_name=pk_column.name,
-                    logger=logger,
-                )
+            logger.info("Running post-restore PK sequence drift check for PostgreSQL")
+            check_and_fix_pk_sequences(
+                target_conn,
+                tables=list(db.metadata.sorted_tables),
+                auto_fix=True,
+                logger=logger,
+            )
 
     quarantine_report = None
     if skipped_rows:
