@@ -1362,6 +1362,14 @@ class RestoreBackupForm(FlaskForm):
     ignore_favorites = BooleanField(
         "Ignore favorites from backup (clear all user favorites)"
     )
+    restore_mode = SelectField(
+        "Restore mode",
+        choices=[
+            ("strict", "Strict (stop on first invalid row)"),
+            ("permissive", "Permissive (skip invalid rows and continue)"),
+        ],
+        default="strict",
+    )
     submit = SubmitField("Restore")
 
     def validate_file(self, field):
