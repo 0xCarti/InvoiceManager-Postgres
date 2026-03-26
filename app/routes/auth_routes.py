@@ -630,6 +630,7 @@ def restore_backup_route():
                 "structures and cannot be restored safely.",
                 "danger",
             )
+            flash(f"Compatibility errors: {details}", "danger")
             return redirect(url_for("admin.backups"))
 
         if compatibility.warnings:
@@ -642,6 +643,7 @@ def restore_backup_route():
             log_activity(
                 f"Restore compatibility warnings detected for {filename}: {warning_details}"
             )
+            flash(f"Compatibility warnings: {warning_details}", "warning")
 
         restore_mode = _resolve_restore_mode(form.restore_mode.data)
         try:
@@ -750,6 +752,7 @@ def restore_backup_file(filename):
             "structures and cannot be restored safely.",
             "danger",
         )
+        flash(f"Compatibility errors: {details}", "danger")
         return redirect(url_for("admin.backups"))
 
     if compatibility.warnings:
@@ -762,6 +765,7 @@ def restore_backup_file(filename):
         log_activity(
             f"Restore compatibility warnings detected for {fname}: {warning_details}"
         )
+        flash(f"Compatibility warnings: {warning_details}", "warning")
 
     raw_mode = flask.request.values.get("restore_mode")
     restore_mode = _resolve_restore_mode(raw_mode)

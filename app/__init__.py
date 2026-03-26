@@ -459,6 +459,7 @@ def create_app(args=None):
     )
     app.config.setdefault("RESTORE_REQUIRED_FEATURE_FLAGS", [])
     app.config.setdefault("RESTORE_MODE_DEFAULT", "strict")
+    app.config.setdefault("RESTORE_PREFLIGHT_STRICT_FK_VALIDATION", False)
     app.config.setdefault(
         "RESTORE_ENDPOINT_EXPECTATIONS",
         [
