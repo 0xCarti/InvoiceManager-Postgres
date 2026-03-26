@@ -47,42 +47,59 @@ You can perform the steps below manually or run one of the setup scripts provide
 
 The application requires several variables to be present in your environment:
 
-- `SECRET_KEY` – Flask secret key used for sessions.
-- `ADMIN_EMAIL` – email address for the initial administrator account.
-- `ADMIN_PASS` – password for the administrator account.
-- `PORT` – port the web server listens on (optional, defaults to 5000).
-- `DATABASE_DRIVER` – SQLAlchemy driver name (defaults to `postgresql+psycopg`).
-- `DATABASE_HOST` – PostgreSQL host (defaults to `postgres`).
-- `DATABASE_PORT` – PostgreSQL port (defaults to `5432`).
-- `DATABASE_USER` – PostgreSQL username (defaults to `invoicemanager`).
-- `DATABASE_PASSWORD` – PostgreSQL password (defaults to `invoicemanager`).
-- `DATABASE_NAME` – PostgreSQL database name (defaults to `invoicemanager`).
-- `DATABASE_URL` / `SQLALCHEMY_DATABASE_URI` – optional full SQLAlchemy URI
-  override (takes precedence over individual `DATABASE_*` values).
-- `SQLALCHEMY_POOL_PRE_PING` – enables stale-connection checks before checkout
-  (defaults to `true`).
-- `SQLALCHEMY_POOL_RECYCLE` – recycles pooled connections after this many
-  seconds (defaults to `1800`).
-- `SQLALCHEMY_POOL_TIMEOUT` – seconds to wait for a pooled connection before
-  timing out (defaults to `30`).
-- `SQLALCHEMY_POOL_SIZE` – steady-state number of pooled connections per
-  process (defaults to `5`).
-- `SQLALCHEMY_MAX_OVERFLOW` – extra burst connections allowed above
-  `SQLALCHEMY_POOL_SIZE` (defaults to `10`).
-- `SQLALCHEMY_POOL_USE_LIFO` – use LIFO checkout behavior to let older idle
-  connections expire naturally in containerized environments (defaults to
-  `true`).
-- `SMTP_HOST` – hostname of your SMTP server.
-- `SMTP_PORT` – port for the SMTP server (defaults to 25).
-- `SMTP_USERNAME` – username for SMTP authentication.
-- `SMTP_PASSWORD` – password for SMTP authentication.
-- `SMTP_SENDER` – email address used as the sender.
-- `SMTP_USE_TLS` – set to `true` to enable TLS.
-- `RATELIMIT_STORAGE_URI` – URI for the rate limiting backend. Use a
-  persistent store such as Redis in production (e.g., `redis://redis:6379/0`).
-- `MAILGUN_WEBHOOK_SIGNING_KEY` – Mailgun inbound signing key used to verify webhook authenticity.
-- `MAILGUN_ALLOWED_SENDER_DOMAINS` – comma-separated sender domains allowed to submit imports (for example `example.com`).
-- `POS_IMPORT_INGEST_MODE` – POS import ingestion strategy. Use `webhook` (default) to accept Mailgun inbound webhooks, or `poll` to ingest from a mailbox provider on a schedule.
+```env
+SECRET_KEY=replace-with-a-long-random-value
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASS=change-me
+PORT=5000
+
+DATABASE_DRIVER=postgresql+psycopg
+DATABASE_HOST=postgres
+DATABASE_PORT=5432
+DATABASE_USER=invoicemanager
+DATABASE_PASSWORD=invoicemanager
+DATABASE_NAME=invoicemanager
+DATABASE_URL=postgresql+psycopg://invoicemanager:invoicemanager@postgres:5432/invoicemanager
+SQLALCHEMY_DATABASE_URI=postgresql+psycopg://invoicemanager:invoicemanager@postgres:5432/invoicemanager
+
+SQLALCHEMY_POOL_PRE_PING=true
+SQLALCHEMY_POOL_RECYCLE=1800
+SQLALCHEMY_POOL_TIMEOUT=30
+SQLALCHEMY_POOL_SIZE=5
+SQLALCHEMY_MAX_OVERFLOW=10
+SQLALCHEMY_POOL_USE_LIFO=true
+
+SMTP_HOST=smtp.example.com
+SMTP_PORT=25
+SMTP_USERNAME=mailer-user
+SMTP_PASSWORD=mailer-pass
+SMTP_SENDER=no-reply@example.com
+SMTP_USE_TLS=true
+
+RATELIMIT_STORAGE_URI=redis://redis:6379/0
+MAILGUN_WEBHOOK_SIGNING_KEY=mailgun-signing-key
+MAILGUN_ALLOWED_SENDER_DOMAINS=example.com
+POS_IMPORT_INGEST_MODE=webhook
+```
+
+| Variable(s) | Meaning / behavior |
+| --- | --- |
+| `SECRET_KEY` | Flask secret key used for sessions. |
+| `ADMIN_EMAIL`, `ADMIN_PASS` | Initial administrator account credentials. |
+| `PORT` | Web server port (optional, defaults to `5000`). |
+| `DATABASE_DRIVER`, `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_USER`, `DATABASE_PASSWORD`, `DATABASE_NAME` | Individual PostgreSQL connection components used to build the SQLAlchemy URI (defaults: `postgresql+psycopg`, `postgres`, `5432`, `invoicemanager`, `invoicemanager`, `invoicemanager`). |
+| `DATABASE_URL`, `SQLALCHEMY_DATABASE_URI` | Optional full SQLAlchemy URI overrides. If either is set, it takes precedence over individual `DATABASE_*` values. |
+| `SQLALCHEMY_POOL_PRE_PING` | Enables stale-connection checks before checkout (defaults to `true`). |
+| `SQLALCHEMY_POOL_RECYCLE` | Recycles pooled connections after this many seconds (defaults to `1800`). |
+| `SQLALCHEMY_POOL_TIMEOUT` | Seconds to wait for a pooled connection before timing out (defaults to `30`). |
+| `SQLALCHEMY_POOL_SIZE` | Steady-state number of pooled connections per process (defaults to `5`). |
+| `SQLALCHEMY_MAX_OVERFLOW` | Extra burst connections allowed above `SQLALCHEMY_POOL_SIZE` (defaults to `10`). |
+| `SQLALCHEMY_POOL_USE_LIFO` | Uses LIFO checkout behavior to let older idle connections expire naturally in containerized environments (defaults to `true`). |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_SENDER`, `SMTP_USE_TLS` | SMTP settings for password reset emails (`SMTP_PORT` defaults to `25`; set `SMTP_USE_TLS=true` to enable TLS). |
+| `RATELIMIT_STORAGE_URI` | URI for the rate limiting backend. Use a persistent store such as Redis in production (for example `redis://redis:6379/0`). |
+| `MAILGUN_WEBHOOK_SIGNING_KEY` | Mailgun inbound signing key used to verify webhook authenticity. |
+| `MAILGUN_ALLOWED_SENDER_DOMAINS` | Comma-separated sender domains allowed to submit imports (for example `example.com`). |
+| `POS_IMPORT_INGEST_MODE` | POS import ingestion strategy: `webhook` (default) for Mailgun inbound webhooks, or `poll` for scheduled mailbox-provider ingestion. |
 
 A persistent backing store is required for rate limiting in production. Set
 `RATELIMIT_STORAGE_URI` to a supported service so that limits are shared
