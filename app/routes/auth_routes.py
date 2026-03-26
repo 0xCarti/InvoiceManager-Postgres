@@ -765,7 +765,16 @@ def restore_backup_file(filename):
         return redirect(url_for("admin.backups"))
 
     raw_mode = flask.request.values.get("restore_mode")
-    restore_mode = _resolve_restore_mode(raw_mode)
+    restore_permissive_values = {
+        value.lower()
+        for value in flask.request.values.getlist("restore_permissive")
+        if value
+    }
+    is_permissive = bool(
+        restore_permissive_values & {"1", "true", "on", "yes"}
+    )
+    selected_mode = "permissive" if is_permissive else (raw_mode or "strict")
+    restore_mode = _resolve_restore_mode(selected_mode)
 
     if compatibility.warnings:
         warning_details = "; ".join(compatibility.warnings)
