@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -20,29 +18,20 @@ services:
       retries: 5
       start_period: 10s
 
-  web:
-    image: gwcarti/invoicemanager:latest
-    container_name: invoice-manager
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "${PORT:-5000}:${PORT:-5000}"
-    volumes:
-      - ./uploads:/app/uploads
-      - ./backups:/app/backups
-      - ./import_files:/app/import_files
-    env_file:
-      - .env
-    environment:
-      - PORT=${PORT:-5000}
-      - DATABASE_DRIVER=${DATABASE_DRIVER:-postgresql+psycopg}
-      - DATABASE_HOST=${DATABASE_HOST:-postgres}
-      - DATABASE_PORT=${DATABASE_PORT:-5432}
-      - DATABASE_USER=${DATABASE_USER:-invoicemanager}
-      - DATABASE_PASSWORD=${DATABASE_PASSWORD:-invoicemanager}
-      - DATABASE_NAME=${DATABASE_NAME:-invoicemanager}
-      - DATABASE_URL=postgresql+psycopg://${DATABASE_USER:-invoicemanager}:${DATABASE_PASSWORD:-invoicemanager}@postgres:${DATABASE_PORT:-5432}/${DATABASE_NAME:-invoicemanager}
+web:
+  image: ghcr.io/0xcarti/invoice-manager-postgres:latest
+  container_name: invoice-manager
+  depends_on:
+    postgres:
+      condition: service_healthy
+  ports:
+    - "${PORT:-5000}:${PORT:-5000}"
+  volumes:
+    - ./uploads:/app/uploads
+    - ./backups:/app/backups
+    - ./import_files:/app/import_files
+  env_file:
+    - .env
 
 volumes:
   postgres_data:
