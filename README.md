@@ -24,6 +24,8 @@ You can perform the steps below manually or run one of the setup scripts provide
    ```bash
    pip install -r requirements.txt
    ```
+   This installs Flask-SQLAlchemy plus the PostgreSQL driver
+   `psycopg[binary]`, which is the default runtime database adapter.
 
 ## Required Environment Variables
 
@@ -33,6 +35,14 @@ The application requires several variables to be present in your environment:
 - `ADMIN_EMAIL` – email address for the initial administrator account.
 - `ADMIN_PASS` – password for the administrator account.
 - `PORT` – port the web server listens on (optional, defaults to 5000).
+- `DATABASE_DRIVER` – SQLAlchemy driver name (defaults to `postgresql+psycopg`).
+- `DATABASE_HOST` – PostgreSQL host (defaults to `postgres`).
+- `DATABASE_PORT` – PostgreSQL port (defaults to `5432`).
+- `DATABASE_USER` – PostgreSQL username (defaults to `invoicemanager`).
+- `DATABASE_PASSWORD` – PostgreSQL password (defaults to `invoicemanager`).
+- `DATABASE_NAME` – PostgreSQL database name (defaults to `invoicemanager`).
+- `DATABASE_URL` / `SQLALCHEMY_DATABASE_URI` – optional full SQLAlchemy URI
+  override (takes precedence over individual `DATABASE_*` values).
 - `SMTP_HOST` – hostname of your SMTP server.
 - `SMTP_PORT` – port for the SMTP server (defaults to 25).
 - `SMTP_USERNAME` – username for SMTP authentication.
@@ -125,7 +135,11 @@ python run.py
 
 Set `PORT` in your environment to change the port (default `5000`).
 
-The application uses a local SQLite database located at `inventory.db` and creates `uploads` and `backups` directories automatically on startup.
+By default, the application connects to PostgreSQL using
+`postgresql+psycopg://<user>:<password>@<host>:<port>/<database>`, assembled
+from the `DATABASE_*` environment variables. You can override this with
+`DATABASE_URL` or `SQLALCHEMY_DATABASE_URI`. The app also creates `uploads` and
+`backups` directories automatically on startup.
 
 For production deployments using Gunicorn, use the provided configuration to enable WebSocket support and prevent worker timeouts:
 
@@ -157,11 +171,11 @@ docker compose up --build
 The repository includes an `import_files` directory containing example CSV files
 that can be used as templates for data imports.
 
-The web interface will be available at `http://localhost:$PORT` (default `5000`). Uploaded files,
-import templates, backups and the SQLite database are stored on the host in the
-`uploads`, `backups`, `import_files` and `data` directories respectively. These
-folders are created automatically when the container starts so no manual setup
-is required.
+The web interface will be available at `http://localhost:$PORT` (default
+`5000`). Uploaded files, import templates, and backups are stored on the host
+in `uploads`, `backups`, and `import_files`. PostgreSQL data is persisted in the
+`postgres_data` Docker volume. These locations are created automatically when
+the container starts.
 
 ## Running Tests
 
