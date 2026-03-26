@@ -668,6 +668,7 @@ __all__ = [
     "RestoreSummary",
     "create_backup",
     "ensure_backup_schema_marker",
+    "reconcile_postgres_table_pk_sequence",
     "restore_backup",
     "start_auto_backup_thread",
     "UNIT_SECONDS",
@@ -884,6 +885,46 @@ def _is_single_integer_primary_key(table: Table):
     except (NotImplementedError, AttributeError):
         return None
     return None
+
+
+def reconcile_postgres_table_pk_sequence(
+    conn,
+    *,
+    table_name: str,
+    pk_column_name: str = "id",
+    logger: logging.Logger | None = None,
+) -> bool:
+    """Reset a PostgreSQL table PK sequence to the table's current max value."""
+
+    active_logger = logger or logging.getLogger(__name__)
+    sequence_name = conn.execute(
+        db.text("SELECT pg_get_serial_sequence(:table_name, :column_name)"),
+        {"table_name": table_name, "column_name": pk_column_name},
+    ).scalar_one_or_none()
+
+    if not sequence_name:
+        active_logger.info(
+            "Skipping sequence reset for %s.%s; no serial/identity sequence found",
+            table_name,
+            pk_column_name,
+        )
+        return False
+
+    max_pk_value = conn.execute(
+        db.text(f'SELECT COALESCE(MAX("{pk_column_name}"), 1) FROM "{table_name}"')
+    ).scalar_one()
+    conn.execute(
+        db.text("SELECT setval(CAST(:sequence_name AS regclass), :max_value, true)"),
+        {"sequence_name": sequence_name, "max_value": max_pk_value},
+    )
+    active_logger.info(
+        "Reset sequence %s for %s.%s to %s",
+        sequence_name,
+        table_name,
+        pk_column_name,
+        max_pk_value,
+    )
+    return True
 
 
 def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> RestoreSummary:
@@ -1132,39 +1173,11 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
                 pk_column = _is_single_integer_primary_key(table)
                 if pk_column is None:
                     continue
-
-                sequence_name = target_conn.execute(
-                    db.text(
-                        "SELECT pg_get_serial_sequence(:table_name, :column_name)"
-                    ),
-                    {"table_name": table.name, "column_name": pk_column.name},
-                ).scalar_one_or_none()
-
-                if not sequence_name:
-                    logger.info(
-                        "Skipping sequence reset for %s.%s; no serial/identity sequence found",
-                        table.name,
-                        pk_column.name,
-                    )
-                    continue
-
-                max_pk_value = target_conn.execute(
-                    db.text(
-                        f'SELECT COALESCE(MAX("{pk_column.name}"), 1) FROM "{table.name}"'
-                    )
-                ).scalar_one()
-                target_conn.execute(
-                    db.text(
-                        "SELECT setval(CAST(:sequence_name AS regclass), :max_value, true)"
-                    ),
-                    {"sequence_name": sequence_name, "max_value": max_pk_value},
-                )
-                logger.info(
-                    "Reset sequence %s for %s.%s to %s",
-                    sequence_name,
-                    table.name,
-                    pk_column.name,
-                    max_pk_value,
+                reconcile_postgres_table_pk_sequence(
+                    target_conn,
+                    table_name=table.name,
+                    pk_column_name=pk_column.name,
+                    logger=logger,
                 )
 
     quarantine_report = None
