@@ -6,6 +6,16 @@ from app.models import ActivityLog, User
 from app.utils.backup import RestoreCompatibilityResult
 from tests.utils import login
 from app.utils.activity import flush_activity_logs
+from app.utils.backup import create_backup
+
+
+def _create_sqlite_backup(app, filename):
+    with app.app_context():
+        generated = create_backup()
+        source = os.path.join(app.config["BACKUP_FOLDER"], generated)
+        destination = os.path.join(app.config["BACKUP_FOLDER"], filename)
+        shutil.copyfile(source, destination)
+    return destination
 
 
 def test_restore_backup_file_compatible_metadata_flashes_success(
@@ -14,10 +24,7 @@ def test_restore_backup_file_compatible_metadata_flashes_success(
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
 
-    with app.app_context():
-        db_path = app.config["SQLALCHEMY_DATABASE_URI"].replace("sqlite:///", "", 1)
-        backup_path = os.path.join(app.config["BACKUP_FOLDER"], "compatible.db")
-        shutil.copyfile(db_path, backup_path)
+    _create_sqlite_backup(app, "compatible.db")
 
     monkeypatch.setattr(
         "app.routes.auth_routes.validate_backup_file_compatibility",
@@ -42,10 +49,7 @@ def test_restore_backup_file_incompatible_metadata_shows_failure_flash(
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
 
-    with app.app_context():
-        db_path = app.config["SQLALCHEMY_DATABASE_URI"].replace("sqlite:///", "", 1)
-        backup_path = os.path.join(app.config["BACKUP_FOLDER"], "incompatible.db")
-        shutil.copyfile(db_path, backup_path)
+    _create_sqlite_backup(app, "incompatible.db")
 
     monkeypatch.setattr(
         "app.routes.auth_routes.validate_backup_file_compatibility",
@@ -68,19 +72,16 @@ def test_restore_backup_file_prunes_invalid_favorites(client, app, monkeypatch):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
 
-    with app.app_context():
-        db_path = app.config["SQLALCHEMY_DATABASE_URI"].replace("sqlite:///", "", 1)
-        backup_path = os.path.join(app.config["BACKUP_FOLDER"], "invalid_favorites.db")
-        shutil.copyfile(db_path, backup_path)
-        with sqlite3.connect(backup_path) as conn:
-            conn.execute(
-                "UPDATE user SET favorites = ? WHERE email = ?",
-                (
-                    "admin.backups,missing.endpoint,transfer.view_transfers,legacy.module",
-                    admin_email,
-                ),
-            )
-            conn.commit()
+    backup_path = _create_sqlite_backup(app, "invalid_favorites.db")
+    with sqlite3.connect(backup_path) as conn:
+        conn.execute(
+            "UPDATE user SET favorites = ? WHERE email = ?",
+            (
+                "admin.backups,missing.endpoint,transfer.view_transfers,legacy.module",
+                admin_email,
+            ),
+        )
+        conn.commit()
 
     monkeypatch.setattr(
         "app.routes.auth_routes.validate_backup_file_compatibility",
@@ -111,16 +112,13 @@ def test_restore_backup_file_ignore_favorites_clears_all(client, app, monkeypatc
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
 
-    with app.app_context():
-        db_path = app.config["SQLALCHEMY_DATABASE_URI"].replace("sqlite:///", "", 1)
-        backup_path = os.path.join(app.config["BACKUP_FOLDER"], "ignore_favorites.db")
-        shutil.copyfile(db_path, backup_path)
-        with sqlite3.connect(backup_path) as conn:
-            conn.execute(
-                "UPDATE user SET favorites = ?",
-                ("admin.backups,missing.endpoint,transfer.view_transfers",),
-            )
-            conn.commit()
+    backup_path = _create_sqlite_backup(app, "ignore_favorites.db")
+    with sqlite3.connect(backup_path) as conn:
+        conn.execute(
+            "UPDATE user SET favorites = ?",
+            ("admin.backups,missing.endpoint,transfer.view_transfers",),
+        )
+        conn.commit()
 
     monkeypatch.setattr(
         "app.routes.auth_routes.validate_backup_file_compatibility",

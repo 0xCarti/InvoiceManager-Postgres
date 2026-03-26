@@ -358,7 +358,8 @@ When running `pytest`, the fixtures in `tests/conftest.py` set up several defaul
 - `SECRET_KEY` defaults to `"testsecret"`
 - `ADMIN_EMAIL` defaults to `"admin@example.com"`
 - `ADMIN_PASS` defaults to `"adminpass"`
-- A temporary isolated test database is created for each test session
+- `TEST_DATABASE_URL` defaults to `postgresql+psycopg://invoicemanager:invoicemanager@localhost:5432/invoicemanager_test`
+- Each test runs in an isolated Postgres schema that is created and dropped automatically
 - Two GL codes (`4000` and `5000`) are populated if none exist
 
 These defaults are provided for convenience during testing, but you can override any of the environment variables by exporting your own values before running the tests.

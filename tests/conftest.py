@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import os
 import sys
+import uuid
 
 import pytest
 
 from flask_migrate import upgrade
+from sqlalchemy import text
 
 from app import create_app, create_admin_user, db
 from app.models import GLCode, Setting
@@ -31,19 +33,34 @@ def app(tmp_path):
     os.environ.setdefault("SMTP_PASSWORD", "pass")
     os.environ.setdefault("SMTP_SENDER", "test@example.com")
 
-    # Ensure a clean database for each test within the temp directory
-    db_path = tmp_path / "inventory.db"
-    if db_path.exists():
-        os.remove(db_path)
+    test_database_uri = os.getenv(
+        "TEST_DATABASE_URL",
+        "postgresql+psycopg://invoicemanager:invoicemanager@localhost:5432/invoicemanager_test",
+    )
+    test_schema = f"pytest_{uuid.uuid4().hex}"
+    os.environ["SQLALCHEMY_DATABASE_URI"] = test_database_uri
+    os.environ["DATABASE_URL"] = test_database_uri
 
     cwd = os.getcwd()
     os.chdir(tmp_path)
     app, _ = create_app(["--demo"])
     os.chdir(cwd)
 
-    app.config.update({"TESTING": True, "WTF_CSRF_ENABLED": False})
+    app.config.update(
+        {
+            "TESTING": True,
+            "WTF_CSRF_ENABLED": False,
+            "SQLALCHEMY_ENGINE_OPTIONS": {
+                "connect_args": {"options": f"-csearch_path={test_schema}"}
+            },
+        }
+    )
 
     with app.app_context():
+        db.session.remove()
+        db.engine.dispose()
+        with db.engine.begin() as conn:
+            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{test_schema}"'))
         try:
             upgrade()
         except Exception:
@@ -66,8 +83,11 @@ def app(tmp_path):
         db.session.commit()
 
         yield app
+        db.session.rollback()
         db.session.remove()
-        db.drop_all()
+        db.engine.dispose()
+        with db.engine.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA IF EXISTS "{test_schema}" CASCADE'))
 
 
 @pytest.fixture
