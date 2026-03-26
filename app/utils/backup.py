@@ -12,6 +12,7 @@ from threading import Event, Thread
 
 from flask import current_app
 from sqlalchemy import MetaData, Table, create_engine, inspect
+from sqlalchemy.sql.schema import ColumnCollectionConstraint
 from sqlalchemy.exc import DBAPIError, DataError, IntegrityError
 
 from app import db
@@ -267,6 +268,13 @@ def validate_backup_file_compatibility(
             else:
                 warnings.extend(fk_findings)
 
+        model_constraint_findings = _collect_model_constraint_findings(conn)
+        if model_constraint_findings:
+            if strict_mode:
+                issues.extend(model_constraint_findings)
+            else:
+                warnings.extend(model_constraint_findings)
+
     warnings.extend(_collect_missing_expected_endpoints())
 
     return RestoreCompatibilityResult(
@@ -364,6 +372,138 @@ def _collect_foreign_key_orphan_findings(inspector, conn) -> list[str]:
                 f"Foreign key orphan rows found for {fk_label} -> {referred_table} "
                 f"({orphan_count} row(s)). Sample key values: {sample_text}."
             )
+
+    return findings
+
+
+def _collect_model_constraint_findings(conn) -> list[str]:
+    """Return findings for backup rows that violate current model constraints."""
+
+    findings: list[str] = []
+    backup_tables = {
+        row[0]
+        for row in conn.execute(
+            db.text("SELECT name FROM sqlite_master WHERE type = 'table'")
+        ).all()
+    }
+
+    for table in db.metadata.sorted_tables:
+        if table.name not in backup_tables:
+            continue
+
+        findings.extend(_collect_not_null_findings(conn, table))
+        findings.extend(_collect_unique_findings(conn, table))
+
+    return findings
+
+
+def _collect_not_null_findings(conn, table: Table) -> list[str]:
+    findings: list[str] = []
+    table_name = _quote_identifier(table.name)
+    for column in table.columns:
+        if column.nullable:
+            continue
+
+        column_name = _quote_identifier(column.name)
+        violation_count = conn.execute(
+            db.text(
+                f"SELECT COUNT(*) FROM {table_name} "
+                f"WHERE {column_name} IS NULL"
+            )
+        ).scalar_one()
+        if not violation_count:
+            continue
+
+        sample_rows = conn.execute(
+            db.text(
+                f"SELECT rowid FROM {table_name} "
+                f"WHERE {column_name} IS NULL ORDER BY rowid LIMIT 3"
+            )
+        ).scalars().all()
+        findings.append(
+            f"Not-null violation in {table.name}.{column.name}: "
+            f"{violation_count} row(s) contain NULL values. "
+            f"Sample rowids: {sample_rows}."
+        )
+
+    return findings
+
+
+def _collect_unique_findings(conn, table: Table) -> list[str]:
+    findings: list[str] = []
+    seen_constraints: set[tuple[str, ...]] = set()
+    unique_sets: list[tuple[str, tuple[str, ...]]] = []
+
+    primary_key_columns = tuple(column.name for column in table.primary_key.columns)
+    if primary_key_columns:
+        unique_sets.append(("PRIMARY KEY", primary_key_columns))
+        seen_constraints.add(primary_key_columns)
+
+    for constraint in table.constraints:
+        if not isinstance(constraint, ColumnCollectionConstraint):
+            continue
+        if not getattr(constraint, "unique", False):
+            continue
+        columns = tuple(column.name for column in constraint.columns)
+        if not columns or columns in seen_constraints:
+            continue
+        name = constraint.name or "UNIQUE"
+        unique_sets.append((name, columns))
+        seen_constraints.add(columns)
+
+    for index in table.indexes:
+        if not index.unique:
+            continue
+        columns = tuple(column.name for column in index.columns)
+        if not columns or columns in seen_constraints:
+            continue
+        unique_sets.append((index.name or "UNIQUE INDEX", columns))
+        seen_constraints.add(columns)
+
+    if not unique_sets:
+        return findings
+
+    quoted_table = _quote_identifier(table.name)
+    for constraint_name, columns in unique_sets:
+        quoted_columns = [_quote_identifier(column) for column in columns]
+        not_null_filter = " AND ".join(f"{column} IS NOT NULL" for column in quoted_columns)
+        grouped_columns = ", ".join(quoted_columns)
+
+        duplicate_groups_count = conn.execute(
+            db.text(
+                f"SELECT COUNT(*) FROM ("
+                f"SELECT 1 FROM {quoted_table} "
+                f"WHERE {not_null_filter} "
+                f"GROUP BY {grouped_columns} "
+                f"HAVING COUNT(*) > 1"
+                f")"
+            )
+        ).scalar_one()
+        if not duplicate_groups_count:
+            continue
+
+        sample_rows = conn.execute(
+            db.text(
+                f"SELECT {grouped_columns}, COUNT(*) AS duplicate_count "
+                f"FROM {quoted_table} "
+                f"WHERE {not_null_filter} "
+                f"GROUP BY {grouped_columns} "
+                f"HAVING COUNT(*) > 1 "
+                f"ORDER BY duplicate_count DESC LIMIT 3"
+            )
+        ).mappings().all()
+        samples = [
+            {
+                "values": {column: row.get(column) for column in columns},
+                "duplicate_count": row.get("duplicate_count"),
+            }
+            for row in sample_rows
+        ]
+        findings.append(
+            f"Unique violation for {table.name} on {constraint_name} "
+            f"({', '.join(columns)}): {duplicate_groups_count} duplicate key group(s). "
+            f"Sample duplicates: {samples}."
+        )
 
     return findings
 
