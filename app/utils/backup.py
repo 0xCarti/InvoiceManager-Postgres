@@ -104,6 +104,8 @@ class RestoreSummary:
     quarantine_report: str | None = None
     repaired_count: int = 0
     repair_report: dict[str, dict[str, int]] | None = None
+    table_transform_counts: dict[str, int] | None = None
+    field_transform_counts: dict[str, dict[str, int]] | None = None
 
 
 def _collect_missing_expected_endpoints() -> list[str]:
@@ -827,6 +829,8 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
     affected_tables: set[str] = set()
     repair_report: dict[str, dict[str, int]] = {}
     repair_total = 0
+    table_transform_counts: dict[str, int] = {}
+    field_transform_counts: dict[str, dict[str, int]] = {}
     repair_orphans_enabled = bool(current_app.config.get("RESTORE_REPAIR_ORPHANS", True))
 
     with db.engine.begin() as target_conn:
@@ -860,6 +864,18 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
                     sorted(missing_cols),
                     sorted(extra_cols),
                 )
+                table_transform_counts[table_name] = (
+                    table_transform_counts.get(table_name, 0) + 1
+                )
+                table_field_counts = field_transform_counts.setdefault(
+                    table_name,
+                    {
+                        "missing_fields_filled_defaults": 0,
+                        "legacy_extra_fields_ignored": 0,
+                    },
+                )
+                table_field_counts["missing_fields_filled_defaults"] += len(missing_cols)
+                table_field_counts["legacy_extra_fields_ignored"] += len(extra_cols)
 
             select_cols = [c for c in table.columns if c.name in backup_cols]
             backup_table = backup_metadata.tables[table_name]
@@ -1017,4 +1033,6 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
         quarantine_report=quarantine_report,
         repaired_count=repair_total,
         repair_report=repair_report or None,
+        table_transform_counts=table_transform_counts or None,
+        field_transform_counts=field_transform_counts or None,
     )

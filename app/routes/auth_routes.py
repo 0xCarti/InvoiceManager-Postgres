@@ -103,6 +103,13 @@ admin = Blueprint("admin", __name__)
 
 # Only .db files are accepted for database restoration uploads
 ALLOWED_BACKUP_EXTENSIONS = {".db"}
+SQLITE_INVALID_BACKUP_MARKERS = (
+    "file is not a database",
+    "database disk image is malformed",
+    "malformed database schema",
+    "unable to open database file",
+    "not a database",
+)
 
 IMPORT_FILES = {
     "locations": "example_locations.csv",
@@ -155,6 +162,50 @@ def _resolve_restore_mode(raw_mode: str | None) -> str:
     if mode in {"permissive", "lenient"}:
         return "permissive"
     return current_app.config.get("RESTORE_MODE_DEFAULT", "strict")
+
+
+def _is_invalid_backup_sqlalchemy_error(exc: SQLAlchemyError) -> bool:
+    details = str(exc).lower()
+    return any(marker in details for marker in SQLITE_INVALID_BACKUP_MARKERS)
+
+
+def _is_schema_evolution_issue(issue: str) -> bool:
+    issue_text = (issue or "").lower()
+    return (
+        "app_schema_version" in issue_text
+        or "feature-flag settings" in issue_text
+    )
+
+
+def _split_preflight_issues(issues: list[str]) -> tuple[list[str], list[str]]:
+    schema_evolution_issues: list[str] = []
+    unresolved_blockers: list[str] = []
+    for issue in issues:
+        if _is_schema_evolution_issue(issue):
+            schema_evolution_issues.append(issue)
+        else:
+            unresolved_blockers.append(issue)
+    return schema_evolution_issues, unresolved_blockers
+
+
+def _flash_restore_report(
+    *,
+    restore_summary,
+    unresolved_blockers: list[str],
+) -> None:
+    report_payload = {
+        "mode": restore_summary.mode,
+        "inserted_count": restore_summary.inserted_count,
+        "skipped_count": restore_summary.skipped_count,
+        "table_transform_counts": restore_summary.table_transform_counts or {},
+        "field_transform_counts": restore_summary.field_transform_counts or {},
+        "repair_report": restore_summary.repair_report or {},
+        "unresolved_blockers": unresolved_blockers,
+    }
+    flash(
+        "Restore report: " + json.dumps(report_payload, sort_keys=True),
+        "info",
+    )
 
 
 def _serializer():
@@ -609,14 +660,36 @@ def restore_backup_route():
         os.makedirs(backups_dir, exist_ok=True)
         filepath = os.path.join(backups_dir, filename)
         file.save(filepath)
+        unresolved_blockers: list[str] = []
         try:
             compatibility = validate_backup_file_compatibility(filepath)
-        except SQLAlchemyError:
-            os.remove(filepath)
-            flash("Invalid backup database file.", "error")
-            return redirect(url_for("admin.backups"))
-        if not compatibility.compatible:
-            details = "; ".join(compatibility.issues)
+        except SQLAlchemyError as exc:
+            if _is_invalid_backup_sqlalchemy_error(exc):
+                os.remove(filepath)
+                flash("Invalid backup database file.", "error")
+                return redirect(url_for("admin.backups"))
+            compatibility = None
+            current_app.logger.warning(
+                "Restore preflight adapter fallback for %s due to %s: %s",
+                filename,
+                type(exc).__name__,
+                exc,
+            )
+            flash(
+                "Preflight schema inspection could not fully validate this backup. "
+                "Proceeding with legacy adapter/transform restore workflow.",
+                "warning",
+            )
+        if compatibility is not None:
+            schema_evolution_issues, unresolved_blockers = _split_preflight_issues(
+                compatibility.issues
+            )
+            if schema_evolution_issues:
+                compatibility.warnings.extend(schema_evolution_issues)
+            compatibility.issues = unresolved_blockers
+
+        if compatibility is not None and not compatibility.compatible:
+            details = "; ".join(unresolved_blockers)
             current_app.logger.warning(
                 "Restore preflight incompatibility detected for %s: %s",
                 filename,
@@ -635,7 +708,7 @@ def restore_backup_route():
 
         restore_mode = _resolve_restore_mode(form.restore_mode.data)
 
-        if compatibility.warnings:
+        if compatibility is not None and compatibility.warnings:
             warning_details = "; ".join(compatibility.warnings)
             current_app.logger.warning(
                 "Restore preflight compatibility warnings for %s: %s",
@@ -674,7 +747,7 @@ def restore_backup_route():
         mode, changed_count = _apply_restore_favorites_mode(
             bool(form.ignore_favorites.data)
         )
-        if compatibility.warnings:
+        if compatibility is not None and compatibility.warnings:
             flash("Restored with compatibility warnings.", "warning")
 
         if mode == "ignored":
@@ -707,15 +780,20 @@ def restore_backup_route():
                 f"skipped={restore_summary.skipped_count}, quarantine={restore_summary.quarantine_report}, "
                 f"tables={','.join(restore_summary.affected_tables)}"
             )
+        _flash_restore_report(
+            restore_summary=restore_summary,
+            unresolved_blockers=unresolved_blockers,
+        )
         restore_message = (
             f"Restored backup {filename} with compatibility warnings "
             f"(favorites_mode={mode})"
-            if compatibility.warnings
+            if compatibility is not None and compatibility.warnings
             else f"Restored backup {filename} (favorites_mode={mode})"
         )
         restore_message += (
             f" [restore_mode={restore_summary.mode}, inserted={restore_summary.inserted_count}, "
-            f"skipped={restore_summary.skipped_count}]"
+            f"skipped={restore_summary.skipped_count}, "
+            f"table_transforms={sum((restore_summary.table_transform_counts or {}).values())}]"
         )
         log_activity(restore_message)
     else:
@@ -740,14 +818,36 @@ def restore_backup_file(filename):
     if filepath is None or not os.path.isfile(filepath):
         abort(404)
     fname = os.path.basename(filepath)
+    unresolved_blockers: list[str] = []
     try:
         compatibility = validate_backup_file_compatibility(filepath)
-    except SQLAlchemyError:
-        flash("Invalid backup database file.", "error")
-        return redirect(url_for("admin.backups"))
+    except SQLAlchemyError as exc:
+        if _is_invalid_backup_sqlalchemy_error(exc):
+            flash("Invalid backup database file.", "error")
+            return redirect(url_for("admin.backups"))
+        compatibility = None
+        current_app.logger.warning(
+            "Restore preflight adapter fallback for %s due to %s: %s",
+            fname,
+            type(exc).__name__,
+            exc,
+        )
+        flash(
+            "Preflight schema inspection could not fully validate this backup. "
+            "Proceeding with legacy adapter/transform restore workflow.",
+            "warning",
+        )
 
-    if not compatibility.compatible:
-        details = "; ".join(compatibility.issues)
+    if compatibility is not None:
+        schema_evolution_issues, unresolved_blockers = _split_preflight_issues(
+            compatibility.issues
+        )
+        if schema_evolution_issues:
+            compatibility.warnings.extend(schema_evolution_issues)
+        compatibility.issues = unresolved_blockers
+
+    if compatibility is not None and not compatibility.compatible:
+        details = "; ".join(unresolved_blockers)
         current_app.logger.warning(
             "Restore preflight incompatibility detected for %s: %s",
             fname,
@@ -776,7 +876,7 @@ def restore_backup_file(filename):
     selected_mode = "permissive" if is_permissive else (raw_mode or "strict")
     restore_mode = _resolve_restore_mode(selected_mode)
 
-    if compatibility.warnings:
+    if compatibility is not None and compatibility.warnings:
         warning_details = "; ".join(compatibility.warnings)
         current_app.logger.warning(
             "Restore preflight compatibility warnings for %s: %s",
@@ -819,7 +919,7 @@ def restore_backup_file(filename):
     }
     ignore_favorites = bool(ignore_values & {"1", "true", "on", "yes"})
     mode, changed_count = _apply_restore_favorites_mode(ignore_favorites)
-    if compatibility.warnings:
+    if compatibility is not None and compatibility.warnings:
         flash("Restored with compatibility warnings.", "warning")
 
     if mode == "ignored":
@@ -852,15 +952,20 @@ def restore_backup_file(filename):
             f"skipped={restore_summary.skipped_count}, quarantine={restore_summary.quarantine_report}, "
             f"tables={','.join(restore_summary.affected_tables)}"
         )
+    _flash_restore_report(
+        restore_summary=restore_summary,
+        unresolved_blockers=unresolved_blockers,
+    )
     restore_message = (
         f"Restored backup {fname} with compatibility warnings "
         f"(favorites_mode={mode})"
-        if compatibility.warnings
+        if compatibility is not None and compatibility.warnings
         else f"Restored backup {fname} (favorites_mode={mode})"
     )
     restore_message += (
         f" [restore_mode={restore_summary.mode}, inserted={restore_summary.inserted_count}, "
-        f"skipped={restore_summary.skipped_count}]"
+        f"skipped={restore_summary.skipped_count}, "
+        f"table_transforms={sum((restore_summary.table_transform_counts or {}).values())}]"
     )
     log_activity(restore_message)
     return redirect(url_for("admin.backups"))
