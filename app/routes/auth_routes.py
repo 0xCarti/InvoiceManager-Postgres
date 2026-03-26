@@ -645,7 +645,7 @@ def restore_backup_route():
                 f"Restore failed for {filename}: {exc}"
             )
             flash(
-                "Restore could not proceed due to a database schema/constraint mismatch; see logs for table/column details.",
+                "Restore could not proceed due to a database constraint violation or data/driver mismatch; see logs for table details.",
                 "danger",
             )
             return redirect(url_for("admin.backups"))
@@ -747,7 +747,7 @@ def restore_backup_file(filename):
             f"Restore failed for {fname}: {exc}"
         )
         flash(
-            "Restore could not proceed due to a database schema/constraint mismatch; see logs for table/column details.",
+            "Restore could not proceed due to a database constraint violation or data/driver mismatch; see logs for table details.",
             "danger",
         )
         return redirect(url_for("admin.backups"))
