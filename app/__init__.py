@@ -632,13 +632,18 @@ def create_app(args=None):
         ]
         return Response("\n".join(lines) + "\n", mimetype="text/plain")
 
+    should_create_all = not (
+        _get_bool_env("SKIP_DB_CREATE_ALL", default=False) or "db" in args
+    )
+
     with app.app_context():
         # Ensure models are imported and the database schema is created on
         # application start.  This allows the app to run even if migrations
         # have not been executed yet, avoiding "no such table" errors.
         from . import models  # noqa: F401
 
-        db.create_all()
+        if should_create_all:
+            db.create_all()
 
         from app.routes.auth_routes import admin, auth
         from app.routes.customer_routes import customer
@@ -678,7 +683,7 @@ def create_app(args=None):
         app.register_blueprint(event)
         app.register_blueprint(glcode_bp)
         app.register_blueprint(preferences)
-        from sqlalchemy.exc import OperationalError
+        from sqlalchemy.exc import OperationalError, ProgrammingError
 
         from app.models import Setting
 
@@ -748,7 +753,7 @@ def create_app(args=None):
             )
             start_auto_backup_thread(app)
             start_pos_sales_mailbox_poller(app)
-        except OperationalError:
+        except (OperationalError, ProgrammingError):
             pass
 
         csrf_protect = CSRFProtect(app)
