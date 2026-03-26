@@ -106,3 +106,47 @@ def test_unhandled_exception_recovers_from_failed_transaction_for_user_logging(
 
     assert response.status_code == 500
     assert "Do not share this publicly" in body
+
+
+def test_unhandled_exception_handles_pending_rollback_when_rollback_fails(
+    client, app, monkeypatch
+):
+    app.config["PROPAGATE_EXCEPTIONS"] = False
+
+    with app.app_context():
+        user = User.query.filter_by(email=os.environ["ADMIN_EMAIL"]).one()
+        user_id = str(user.id)
+
+    with client.session_transaction() as session:
+        session["_user_id"] = user_id
+        session["_fresh"] = True
+
+    original_rollback = db.session.rollback
+
+    def _raise_on_rollback():
+        raise RuntimeError("forced rollback failure in test")
+
+    monkeypatch.setattr(db.session, "rollback", _raise_on_rollback)
+
+    @app.route("/__explode_pending_rollback_rollback_fails")
+    def _explode_pending_rollback_rollback_fails():
+        db.session.expire(current_user._get_current_object(), ["email"])
+        db.session.add(
+            User(
+                email=os.environ["ADMIN_EMAIL"],
+                password="duplicate-password",
+                is_admin=False,
+                active=True,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            db.session.flush()
+        raise RuntimeError("trigger unhandled exception after failed transaction")
+
+    response = client.get("/__explode_pending_rollback_rollback_fails")
+    body = response.get_data(as_text=True)
+
+    monkeypatch.setattr(db.session, "rollback", original_rollback)
+
+    assert response.status_code == 500
+    assert "Do not share this publicly" in body
