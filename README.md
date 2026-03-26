@@ -157,27 +157,20 @@ Mailgun should post inbound events to `POST /webhooks/mailgun/inbound`.
 
 ## Database Setup
 
-Run the database migrations to create the tables (host install):
+Use this sequence for **host/venv installs** (not Docker Compose):
 
-```bash
-python -m flask --app run.py db upgrade
-```
+1. **Run migrations**
+   ```bash
+   python -m flask --app run.py db upgrade
+   ```
+2. **Seed admin account + default settings**
+   ```bash
+   python seed_data.py
+   ```
 
-After the migration, seed the initial administrator account and default
-settings (GST number and timezone) using the provided script:
-
-```bash
-python seed_data.py
-```
-
-When you run the app in Docker Compose, use the container-aware helper instead
-of running Flask commands directly on your host:
-
-```bash
-./scripts/docker_migrate.sh
-```
-
-> **Note:** Both setup scripts execute these commands automatically after installing the dependencies. Run them manually only if you performed the installation steps yourself.
+> **Note:** `setup.sh` and `setup.ps1` already run these steps. Only run them manually if you performed installation yourself.
+>
+> For Docker Compose flows, use the canonical Compose startup order in [Canonical local startup order (Docker Compose)](#canonical-local-startup-order-docker-compose).
 
 ## Running the Application
 
@@ -235,78 +228,44 @@ A high-level overview of the Flask application structure, shared services, and k
 
 ## Docker Setup
 
-The project includes a `Dockerfile` and a `docker-compose.yml` to make running
-the application in a container straightforward on Linux and Windows. The image
-starts Gunicorn using the included `gunicorn.conf.py`, so no additional commands
-are required. Create a `.env` file containing the environment variables
-described above. A persistent backing service such as Redis is required for
-rate limiting in production; set `RATELIMIT_STORAGE_URI` to its connection
-string. You can also specify the port the app will use by adding a `PORT`
-variable to `.env` (or by exporting it in your shell) before starting the
-service. Database migrations run automatically when the container starts via
-`entrypoint.sh`, rather than during the image build:
+The project includes a `Dockerfile` and `docker-compose.yml` for containerized
+runs on Linux and Windows. The image starts Gunicorn using `gunicorn.conf.py`.
+Create a `.env` file with the variables listed above (including Redis-backed
+`RATELIMIT_STORAGE_URI` for production rate limiting).
 
-```bash
-docker compose up --build
-```
+For day-to-day local development, follow the canonical sequence in
+[Canonical local startup order (Docker Compose)](#canonical-local-startup-order-docker-compose).
 
-### Local startup (single command)
-
-For day-to-day local development, once your `.env` exists, use one command:
-
-```bash
-docker compose up --build
-```
-
-This starts both `postgres` and `web`, waits for PostgreSQL health checks, runs
-database migrations from the web container entrypoint, and serves the app on
-`http://localhost:${PORT:-5000}`.
+If you want a one-command boot that builds images and starts services,
+`docker compose up --build` remains supported; the web container entrypoint
+runs migrations before Gunicorn starts.
 
 ## Choose Your Setup Path
 
 - **I want the fastest Docker Compose path** → Start with [Docker Setup](#docker-setup), then follow [Canonical local startup order (Docker Compose)](#canonical-local-startup-order-docker-compose).
-- **I want a host/venv install** → Follow [Installation](#installation) and then [Database Setup](#database-setup).
+- **I want a host/venv install** → Follow [Installation](#installation) and then the host/venv canonical steps in [Database Setup](#database-setup).
 - **I need production/runtime notes** → Review [Running the Application](#running-the-application) and [Backups and Restore (Postgres runtime)](#backups-and-restore-postgres-runtime).
 - **I am troubleshooting startup or DB issues** → Jump to [Troubleshooting database connection issues](#troubleshooting-database-connection-issues).
 
 ### Migration command inventory
 
-The team currently runs migrations in three places:
+Migration execution points (single reference list):
 
-1. **Container startup**: `entrypoint.sh` runs `flask db upgrade` automatically
-   before Gunicorn starts.
-2. **Host setup scripts**: `setup.sh` and `setup.ps1` run
-   `python -m flask --app run.py db upgrade` for non-container setups.
-3. **Manual container workflow**: `docker compose run --rm web flask db upgrade`
-   (or `./scripts/docker_migrate.sh`) for explicit migration runs.
+1. **Container startup**: `entrypoint.sh` runs `flask db upgrade` before Gunicorn starts.
+2. **Host setup scripts**: `setup.sh` and `setup.ps1` run `python -m flask --app run.py db upgrade`.
+3. **Manual Compose migration**: `./scripts/docker_migrate.sh` (preferred) or `docker compose run --rm web flask db upgrade`.
 
-For Docker Compose workflows, scripts should always run with a
-Postgres-backed `DATABASE_URL` pointing to the Compose `postgres` service
-name (not `container_name`). Keep `DATABASE_HOST=postgres` for these flows.
-`./scripts/docker_migrate.sh` enforces that automatically.
-When `.env` only provides `DATABASE_*` values (without `DATABASE_URL`), verify
-the fallback URL assembly with:
+Compose reminder: keep `DATABASE_HOST=postgres` (service DNS), and use
+`./scripts/docker_migrate.sh` for explicit runs after pulling new migrations.
+If `.env` defines only `DATABASE_*` values (without `DATABASE_URL`), you can
+validate fallback URL assembly with:
 
 ```bash
 ./scripts/check_docker_migrate_env_fallback.sh
 ```
 
-### First-time database initialization and migrations
-
-On first boot, migrations run automatically. If you want to run the steps
-manually (for example while debugging), use container-aware commands. Keep
-`DATABASE_HOST=postgres` so the web service can resolve the Postgres service
-via Docker Compose DNS:
-
-```bash
-docker compose up -d postgres
-./scripts/docker_migrate.sh
-docker compose run --rm web python seed_data.py
-docker compose up -d web
-```
-
-Use `./scripts/docker_migrate.sh` after pulling new migrations so the command
-runs with a Compose-compatible `DATABASE_URL`.
+For the full Compose startup sequence (including when to seed data), use
+[Canonical local startup order (Docker Compose)](#canonical-local-startup-order-docker-compose).
 
 ### Canonical local startup order (Docker Compose)
 
@@ -321,14 +280,18 @@ Use this order for consistent local boots. For Compose startup, keep
    ```bash
    ./scripts/docker_migrate.sh
    ```
-3. **Start and verify the app**
+3. **(First boot only) seed admin account + defaults**
+   ```bash
+   docker compose run --rm web python seed_data.py
+   ```
+4. **Start and verify the app**
    ```bash
    docker compose up -d web
    docker compose ps
    curl -I http://localhost:${PORT:-5000}/
    ```
 
-You can run all three phases with:
+You can run phases 1, 2, and 4 with:
 
 ```bash
 ./scripts/docker_start_verify.sh
