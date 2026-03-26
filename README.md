@@ -18,6 +18,7 @@ PostgreSQL is the only supported runtime database backend.
 - [Code Style](#code-style)
 - [Features](#features)
 - [Documentation](#documentation)
+- [Documentation Index](#documentation-index)
 - [License](#license)
 
 ## Installation
@@ -430,6 +431,16 @@ When running `pytest`, the fixtures in `tests/conftest.py` set up several defaul
 
 These defaults are provided for convenience during testing, but you can override any of the environment variables by exporting your own values before running the tests.
 
+
+
+## Documentation Index
+
+- [Architecture overview](docs/architecture.md) – Open this for a high-level map of application layers, key services, and module responsibilities.
+- [Routes reference](docs/routes.md) – Open this when you need endpoint/blueprint coverage, URL prefixes, and request flow details.
+- [Key data models](docs/key-data-models.md) – Open this to understand core SQLAlchemy models, relationships, and business-critical fields.
+- [PostgreSQL migration guide](docs/postgres-migration.md) – Open this when migrating from SQLite-era setups or validating Postgres runtime expectations.
+- [Pizza variance guide](docs/pizza_variance.md) – Open this for the pizza variance workflow, formulas, and troubleshooting guidance.
+- [Changelog](CHANGELOG.md) – Open this to review version-by-version release notes and notable changes.
 
 ## License
 
