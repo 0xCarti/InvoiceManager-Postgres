@@ -121,6 +121,11 @@ Before any restore attempt, migrations **must** include revision
 `d2f7a1b9c8e0` (`fix_invoice_product_invoice_fk`), which corrects the
 `invoice_product.invoice_id` foreign key behavior expected during row import.
 
+Historical backups that contain invoice IDs longer than 10 characters also
+require revision `f4a1c2d3e4b5` (`expand_invoice_id_length_to_32`) before
+restore, so `invoice.id` and `invoice_product.invoice_id` can accept those
+values.
+
 ### Quick pre-restore check
 
 ```bash
