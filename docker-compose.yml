@@ -18,7 +18,7 @@ services:
       start_period: 10s
 
   web:
-    image: ghcr.io/0xcarti/invoice-manager-postgres:latest
+    image: ghcr.io/0xcarti/invoice-manager-postgres:2026.03.26-password255
     depends_on:
       postgres:
         condition: service_healthy
