@@ -110,10 +110,10 @@ Mailgun should post inbound events to `POST /webhooks/mailgun/inbound`.
 
 ## Database Setup
 
-Run the database migrations to create the tables:
+Run the database migrations to create the tables (host install):
 
 ```bash
-flask db upgrade
+python -m flask --app run.py db upgrade
 ```
 
 After the migration, seed the initial administrator account and default
@@ -121,6 +121,13 @@ settings (GST number and timezone) using the provided script:
 
 ```bash
 python seed_data.py
+```
+
+When you run the app in Docker Compose, use the container-aware helper instead
+of running Flask commands directly on your host:
+
+```bash
+./scripts/docker_migrate.sh
 ```
 
 > **Note:** Both setup scripts execute these commands automatically after installing the dependencies. Run them manually only if you performed the installation steps yourself.
@@ -180,19 +187,61 @@ This starts both `postgres` and `web`, waits for PostgreSQL health checks, runs
 database migrations from the web container entrypoint, and serves the app on
 `http://localhost:${PORT:-5000}`.
 
+
+### Migration command inventory
+
+The team currently runs migrations in three places:
+
+1. **Container startup**: `entrypoint.sh` runs `flask db upgrade` automatically
+   before Gunicorn starts.
+2. **Host setup scripts**: `setup.sh` and `setup.ps1` run
+   `python -m flask --app run.py db upgrade` for non-container setups.
+3. **Manual container workflow**: `docker compose run --rm web flask db upgrade`
+   (or `./scripts/docker_migrate.sh`) for explicit migration runs.
+
+For Docker Compose workflows, scripts should always run with a
+Postgres-backed `DATABASE_URL` pointing to the Compose `postgres` service.
+`./scripts/docker_migrate.sh` enforces that automatically.
+
 ### First-time database initialization and migrations
 
 On first boot, migrations run automatically. If you want to run the steps
-manually (for example while debugging), use:
+manually (for example while debugging), use container-aware commands:
 
 ```bash
 docker compose up -d postgres
-docker compose run --rm web flask db upgrade
+./scripts/docker_migrate.sh
 docker compose run --rm web python seed_data.py
 docker compose up -d web
 ```
 
-Use the same `flask db upgrade` command after pulling new migrations.
+Use `./scripts/docker_migrate.sh` after pulling new migrations so the command
+runs with a Compose-compatible `DATABASE_URL`.
+
+### Canonical local startup order (Docker Compose)
+
+Use this order for consistent local boots:
+
+1. **Start services needed for DB access**
+   ```bash
+   docker compose up -d postgres
+   ```
+2. **Run migrations against Postgres-backed `DATABASE_URL`**
+   ```bash
+   ./scripts/docker_migrate.sh
+   ```
+3. **Start and verify the app**
+   ```bash
+   docker compose up -d web
+   docker compose ps
+   curl -I http://localhost:${PORT:-5000}/
+   ```
+
+You can run all three phases with:
+
+```bash
+./scripts/docker_start_verify.sh
+```
 
 ### Reset workflow (fresh local database)
 
