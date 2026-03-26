@@ -34,7 +34,11 @@ from app.utils.units import (
     convert_quantity_for_reporting,
     get_unit_label,
 )
-from app.utils.text import normalize_name_for_sorting
+from app.utils.text import (
+    build_text_match_predicate,
+    normalize_name_for_sorting,
+    normalize_text_match_mode,
+)
 from app.utils.email import SMTPConfigurationError, send_email
 
 location = Blueprint("locations", __name__)
@@ -737,7 +741,7 @@ def view_locations():
     page = request.args.get("page", 1, type=int)
     per_page = get_per_page()
     name_query = request.args.get("name_query", "")
-    match_mode = request.args.get("match_mode", "contains")
+    match_mode = normalize_text_match_mode(request.args.get("match_mode"))
     archived = request.args.get("archived", "active")
     raw_menu_ids = request.args.getlist("menu_ids")
     spoilage_filter = request.args.get("spoilage", "all")
@@ -765,14 +769,9 @@ def view_locations():
         query = query.filter(Location.archived.is_(True))
 
     if name_query:
-        if match_mode == "exact":
-            query = query.filter(func.lower(Location.name) == name_query.lower())
-        elif match_mode == "startswith":
-            query = query.filter(Location.name.ilike(f"{name_query}%"))
-        elif match_mode == "not_contains":
-            query = query.filter(Location.name.notilike(f"%{name_query}%"))
-        else:
-            query = query.filter(Location.name.ilike(f"%{name_query}%"))
+        query = query.filter(
+            build_text_match_predicate(Location.name, name_query, match_mode)
+        )
 
     if include_no_menu and menu_ids:
         query = query.filter(

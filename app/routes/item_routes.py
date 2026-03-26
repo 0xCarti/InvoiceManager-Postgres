@@ -49,6 +49,7 @@ from app.utils.filter_state import (
     normalize_filters,
 )
 from app.utils.pagination import build_pagination_args, get_per_page
+from app.utils.text import build_text_match_predicate, normalize_text_match_mode
 from app.utils.units import BASE_UNITS
 
 item = Blueprint("item", __name__)
@@ -125,7 +126,7 @@ def view_items():
     page = request.args.get("page", 1, type=int)
     per_page = get_per_page()
     name_query = request.args.get("name_query", "")
-    match_mode = request.args.get("match_mode", "contains")
+    match_mode = normalize_text_match_mode(request.args.get("match_mode"))
     purchase_gl_code_params = request.args.getlist("purchase_gl_code_id")
     sales_gl_code_params = request.args.getlist("gl_code_id")
     purchase_gl_code_ids = _coerce_int_list(purchase_gl_code_params)
@@ -148,16 +149,9 @@ def view_items():
     elif archived == "archived":
         query = query.filter(Item.archived.is_(True))
     if name_query:
-        if match_mode == "exact":
-            query = query.filter(func.lower(Item.name) == name_query.lower())
-        elif match_mode == "startswith":
-            query = query.filter(Item.name.ilike(f"{name_query}%"))
-        elif match_mode == "contains":
-            query = query.filter(Item.name.ilike(f"%{name_query}%"))
-        elif match_mode == "not_contains":
-            query = query.filter(Item.name.notilike(f"%{name_query}%"))
-        else:
-            query = query.filter(Item.name.ilike(f"%{name_query}%"))
+        query = query.filter(
+            build_text_match_predicate(Item.name, name_query, match_mode)
+        )
 
     if purchase_gl_code_ids:
         query = query.filter(Item.purchase_gl_code_id.in_(purchase_gl_code_ids))

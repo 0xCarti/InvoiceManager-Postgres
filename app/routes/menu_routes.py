@@ -11,7 +11,6 @@ from flask import (
     url_for,
 )
 from flask_login import login_required
-from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 
 from app import db
@@ -24,6 +23,7 @@ from app.forms import (
 from app.models import Location, Menu, MenuAssignment, Product
 from app.utils.activity import log_activity
 from app.utils.menu_assignments import set_location_menu, sync_menu_locations
+from app.utils.text import build_text_match_predicate, normalize_text_match_mode
 
 menu = Blueprint("menu", __name__)
 
@@ -41,7 +41,7 @@ def _load_products(product_ids: list[int]) -> list[Product]:
 @login_required
 def view_menus():
     name_query = request.args.get("name_query", "").strip()
-    match_mode = request.args.get("match_mode", "contains")
+    match_mode = normalize_text_match_mode(request.args.get("match_mode"))
     assigned_status = request.args.get("assigned_status", "all")
     product_status = request.args.get("product_status", "all")
 
@@ -51,17 +51,9 @@ def view_menus():
     )
 
     if name_query:
-        if match_mode == "exact":
-            query = query.filter(func.lower(Menu.name) == name_query.lower())
-        elif match_mode == "startswith":
-            query = query.filter(Menu.name.ilike(f"{name_query}%"))
-        elif match_mode == "not_contains":
-            query = query.filter(Menu.name.notilike(f"%{name_query}%"))
-        else:  # default to contains
-            match_mode = "contains"
-            query = query.filter(Menu.name.ilike(f"%{name_query}%"))
-    else:
-        match_mode = "contains"
+        query = query.filter(
+            build_text_match_predicate(Menu.name, name_query, match_mode)
+        )
 
     if assigned_status == "assigned":
         query = query.filter(
