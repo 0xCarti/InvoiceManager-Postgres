@@ -26,6 +26,6 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ env.OWNER_LC }}/invoice-manager:latest
+          tags: ghcr.io/${{ env.OWNER_LC }}/invoice-manager-postgres:latest
           provenance: false
           sbom: false
