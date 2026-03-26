@@ -40,6 +40,15 @@ def _get_bool_env(var_name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _get_int_env(var_name: str, default: int) -> int:
+    """Return an integer environment variable value."""
+
+    value = os.getenv(var_name)
+    if value is None:
+        return default
+    return int(value)
+
+
 def _redact_error_details(details: str) -> str:
     """Redact sensitive values from exception details shown in UI."""
     if not details:
@@ -390,6 +399,14 @@ def create_app(args=None):
         os.getenv("DATABASE_URL", default_database_uri),
     )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+        "pool_pre_ping": _get_bool_env("SQLALCHEMY_POOL_PRE_PING", default=True),
+        "pool_recycle": _get_int_env("SQLALCHEMY_POOL_RECYCLE", 1800),
+        "pool_timeout": _get_int_env("SQLALCHEMY_POOL_TIMEOUT", 30),
+        "pool_size": _get_int_env("SQLALCHEMY_POOL_SIZE", 5),
+        "max_overflow": _get_int_env("SQLALCHEMY_MAX_OVERFLOW", 10),
+        "pool_use_lifo": _get_bool_env("SQLALCHEMY_POOL_USE_LIFO", default=True),
+    }
     app.config["UPLOAD_FOLDER"] = os.path.join(base_dir, "uploads")
     app.config["BACKUP_FOLDER"] = os.path.join(base_dir, "backups")
     app.config["IMPORT_FILES_FOLDER"] = os.path.join(repo_dir, "import_files")
