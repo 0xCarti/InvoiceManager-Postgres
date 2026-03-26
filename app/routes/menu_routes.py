@@ -11,6 +11,7 @@ from flask import (
     url_for,
 )
 from flask_login import login_required
+from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 
 from app import db
@@ -51,14 +52,14 @@ def view_menus():
 
     if name_query:
         if match_mode == "exact":
-            query = query.filter(Menu.name == name_query)
+            query = query.filter(func.lower(Menu.name) == name_query.lower())
         elif match_mode == "startswith":
-            query = query.filter(Menu.name.like(f"{name_query}%"))
+            query = query.filter(Menu.name.ilike(f"{name_query}%"))
         elif match_mode == "not_contains":
-            query = query.filter(Menu.name.notlike(f"%{name_query}%"))
+            query = query.filter(Menu.name.notilike(f"%{name_query}%"))
         else:  # default to contains
             match_mode = "contains"
-            query = query.filter(Menu.name.like(f"%{name_query}%"))
+            query = query.filter(Menu.name.ilike(f"%{name_query}%"))
     else:
         match_mode = "contains"
 

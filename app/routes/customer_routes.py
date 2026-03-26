@@ -34,13 +34,13 @@ def view_customers():
     if name_query:
         full_name = func.concat(Customer.first_name, " ", Customer.last_name)
         if match_mode == "exact":
-            query = query.filter(full_name == name_query)
+            query = query.filter(func.lower(full_name) == name_query.lower())
         elif match_mode == "startswith":
-            query = query.filter(full_name.like(f"{name_query}%"))
+            query = query.filter(full_name.ilike(f"{name_query}%"))
         elif match_mode == "not_contains":
-            query = query.filter(full_name.notlike(f"%{name_query}%"))
+            query = query.filter(full_name.notilike(f"%{name_query}%"))
         else:
-            query = query.filter(full_name.like(f"%{name_query}%"))
+            query = query.filter(full_name.ilike(f"%{name_query}%"))
     if gst_exempt == "yes":
         query = query.filter(Customer.gst_exempt.is_(True))
     elif gst_exempt == "no":
