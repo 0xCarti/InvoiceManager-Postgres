@@ -19,7 +19,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import psycopg
 
-conninfo = os.environ.get("DATABASE_URL")
+conninfo = os.environ.get("SQLALCHEMY_DATABASE_URI") or os.environ.get("DATABASE_URL")
 if conninfo and conninfo.startswith("postgresql+"):
     parsed = urlsplit(conninfo)
     normalized_scheme = "postgresql"
