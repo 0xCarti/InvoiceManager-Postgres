@@ -12,9 +12,9 @@ PostgreSQL is the only supported runtime database backend.
 - [Quick Gotchas](#quick-gotchas)
 - [Installation (Detailed)](#installation-detailed)
 - [Environment Variables](#environment-variables)
-- [Database Setup & Migrations](#database-setup--migrations)
+- [Database Setup & Migrations](#database-setup-migrations)
 - [Run the Application](#run-the-application)
-- [Backups & Restore (Postgres Runtime)](#backups--restore-postgres-runtime)
+- [Backups & Restore (Postgres Runtime)](#backups-restore-postgres-runtime)
 - [Project Architecture](#project-architecture)
 - [Docker Setup](#docker-setup)
 - [Command Reference](#command-reference)
@@ -285,8 +285,8 @@ your host (virtualenv) or with Docker Compose.
 ## Setup Paths
 
 - **I want the fastest Docker Compose path** → Start with [Docker Setup](#docker-setup), then follow [Canonical Startup Order (Docker Compose)](#canonical-startup-order-docker-compose).
-- **I want a host/venv install** → Follow [Installation (Detailed)](#installation-detailed) and then the host/venv canonical steps in [Database Setup & Migrations](#database-setup--migrations).
-- **I need production/runtime notes** → Review [Run the Application](#run-the-application) and [Backups & Restore (Postgres Runtime)](#backups--restore-postgres-runtime).
+- **I want a host/venv install** → Follow [Installation (Detailed)](#installation-detailed) and then the host/venv canonical steps in [Database Setup & Migrations](#database-setup-migrations).
+- **I need production/runtime notes** → Review [Run the Application](#run-the-application) and [Backups & Restore (Postgres Runtime)](#backups-restore-postgres-runtime).
 - **I am troubleshooting startup or DB issues** → Jump to [Troubleshooting Database Connection Issues](#troubleshooting-database-connection-issues).
 
 <details>
