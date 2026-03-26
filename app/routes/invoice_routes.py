@@ -25,6 +25,7 @@ from app.models import Customer, Invoice, InvoiceProduct, Product
 from app.utils.activity import log_activity
 from app.utils.numeric import coerce_float
 from app.utils.pagination import build_pagination_args, get_per_page
+from app.utils.text import normalize_request_text_filter
 
 invoice = Blueprint("invoice", __name__)
 
@@ -454,7 +455,7 @@ def get_customer_tax_status(customer_id):
 @login_required
 def filter_invoices_api():
     """Return invoices matching filters as JSON."""
-    invoice_id = request.args.get("invoice_id", "")
+    invoice_id = normalize_request_text_filter(request.args.get("invoice_id"))
     customer_id = request.args.get("customer_id", type=int)
     user_id = request.args.get("user_id", type=int)
     start_date_str = request.args.get("start_date")
@@ -548,7 +549,7 @@ def view_invoices():
         end_date = form.end_date.data
         payment_status = request.form.get("payment_status", "all").lower()
     else:
-        invoice_id = request.args.get("invoice_id", "")
+        invoice_id = normalize_request_text_filter(request.args.get("invoice_id"))
         customer_id = request.args.get("customer_id", type=int)
         start_date_str = request.args.get("start_date")
         end_date_str = request.args.get("end_date")

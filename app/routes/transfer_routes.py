@@ -36,6 +36,7 @@ from app.utils.numeric import coerce_float
 from app.utils.pagination import build_pagination_args, get_per_page
 from app.utils.sms import send_sms
 from app.utils.text import build_text_match_predicate, normalize_request_text_filter
+from app.utils.text import normalize_request_text_filter
 
 transfer = Blueprint("transfer", __name__)
 
@@ -275,7 +276,7 @@ def view_transfers():
     if transfer_id != "":
         query = query.filter(Transfer.id == transfer_id)
 
-    if from_location_name != "":
+    if from_location_name:
         query = query.join(
             Location, Transfer.from_location_id == Location.id
         ).filter(
@@ -284,7 +285,7 @@ def view_transfers():
             )
         )
 
-    if to_location_name != "":
+    if to_location_name:
         query = query.join(
             Location, Transfer.to_location_id == Location.id
         ).filter(

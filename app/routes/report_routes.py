@@ -57,6 +57,7 @@ from app.models import (
 from app.utils.forecasting import DemandForecastingHelper
 from app.utils.pos_import import parse_department_sales_forecast
 from app.utils.text import build_text_match_predicate, normalize_request_text_filter
+from app.utils.text import normalize_request_text_filter
 from app.utils.units import (
     DEFAULT_BASE_UNIT_CONVERSIONS,
     convert_cost_for_reporting,
