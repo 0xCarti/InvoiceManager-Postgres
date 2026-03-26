@@ -168,6 +168,64 @@ service. Database migrations run automatically when the container starts via
 docker compose up --build
 ```
 
+### Local startup (single command)
+
+For day-to-day local development, once your `.env` exists, use one command:
+
+```bash
+docker compose up --build
+```
+
+This starts both `postgres` and `web`, waits for PostgreSQL health checks, runs
+database migrations from the web container entrypoint, and serves the app on
+`http://localhost:${PORT:-5000}`.
+
+### First-time database initialization and migrations
+
+On first boot, migrations run automatically. If you want to run the steps
+manually (for example while debugging), use:
+
+```bash
+docker compose up -d postgres
+docker compose run --rm web flask db upgrade
+docker compose run --rm web python seed_data.py
+docker compose up -d web
+```
+
+Use the same `flask db upgrade` command after pulling new migrations.
+
+### Reset workflow (fresh local database)
+
+To reset local state and reinitialize PostgreSQL from scratch:
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+`docker compose down -v` removes the `postgres_data` volume, so all database
+data is deleted and recreated on the next startup.
+
+### Troubleshooting database connection issues
+
+- **Wrong host from your machine vs. containers:** use `DATABASE_HOST=postgres`
+  in `.env` when the app runs inside Docker Compose; use `localhost` only for
+  tools running directly on your host.
+- **Credential mismatch:** ensure `DATABASE_USER`, `DATABASE_PASSWORD`, and
+  `DATABASE_NAME` in `.env` match the Postgres container values. If you changed
+  them after initial startup, run `docker compose down -v` and start again to
+  recreate the database with the new credentials.
+- **Container startup timing:** if the app fails early with connection refused,
+  restart after Postgres becomes healthy:
+  ```bash
+  docker compose ps
+  docker compose logs postgres
+  docker compose restart web
+  ```
+- **Explicit connection string override:** if `DATABASE_URL` is set, it takes
+  precedence over individual `DATABASE_*` values. Ensure the URL points to the
+  correct host/port/user/password/database.
+
 The repository includes an `import_files` directory containing example CSV files
 that can be used as templates for data imports.
 
@@ -251,7 +309,7 @@ When running `pytest`, the fixtures in `tests/conftest.py` set up several defaul
 - `SECRET_KEY` defaults to `"testsecret"`
 - `ADMIN_EMAIL` defaults to `"admin@example.com"`
 - `ADMIN_PASS` defaults to `"adminpass"`
-- A temporary SQLite database `inventory.db` is created in a temporary directory
+- A temporary isolated test database is created for each test session
 - Two GL codes (`4000` and `5000`) are populated if none exist
 
 These defaults are provided for convenience during testing, but you can override any of the environment variables by exporting your own values before running the tests.
