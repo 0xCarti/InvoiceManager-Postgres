@@ -1,4 +1,11 @@
-from app import _build_user_error_details, _redact_error_details
+import os
+
+import pytest
+from flask_login import current_user
+from sqlalchemy.exc import IntegrityError
+
+from app import _build_user_error_details, _redact_error_details, db
+from app.models import User
 
 
 def test_redact_error_details_masks_common_secret_patterns():
@@ -64,3 +71,38 @@ def test_build_user_error_details_summary_uses_last_trace_line():
 
     assert "RuntimeError: secret=<redacted>" in output
     assert "Share token deadbeef with support for full logs." in output
+
+
+def test_unhandled_exception_recovers_from_failed_transaction_for_user_logging(
+    client, app
+):
+    app.config["PROPAGATE_EXCEPTIONS"] = False
+
+    with app.app_context():
+        user = User.query.filter_by(email=os.environ["ADMIN_EMAIL"]).one()
+        user_id = str(user.id)
+
+    with client.session_transaction() as session:
+        session["_user_id"] = user_id
+        session["_fresh"] = True
+
+    @app.route("/__explode_pending_rollback")
+    def _explode_pending_rollback():
+        db.session.expire(current_user._get_current_object(), ["email"])
+        db.session.add(
+            User(
+                email=os.environ["ADMIN_EMAIL"],
+                password="duplicate-password",
+                is_admin=False,
+                active=True,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            db.session.flush()
+        raise RuntimeError("trigger unhandled exception after failed transaction")
+
+    response = client.get("/__explode_pending_rollback")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 500
+    assert "Do not share this publicly" in body

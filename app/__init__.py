@@ -810,29 +810,46 @@ def create_app(args=None):
                     )
                 )
             user_identity = "anonymous"
-            if getattr(current_user, "is_authenticated", False):
-                user_id = getattr(current_user, "id", None)
-                user_email = getattr(current_user, "email", None)
-                if user_id is not None and user_email:
-                    user_identity = f"{user_id}:{user_email}"
-                elif user_id is not None:
-                    user_identity = str(user_id)
-                elif user_email:
-                    user_identity = user_email
-            app.logger.error(
-                "Unhandled exception",
-                extra={
-                    "error_token": error_token,
-                    "request_path": request.path,
-                    "request_method": request.method,
-                    "user_identity": user_identity,
-                    "remote_addr": request.headers.get(
-                        "X-Forwarded-For", request.remote_addr or "-"
-                    ),
-                    "user_agent": str(request.user_agent),
-                    "traceback_text": traceback_text,
-                },
-            )
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+
+            try:
+                if getattr(current_user, "is_authenticated", False):
+                    user_id = None
+                    get_id = getattr(current_user, "get_id", None)
+                    if callable(get_id):
+                        user_id = get_id()
+                    if user_id is None:
+                        user_id = getattr(current_user, "id", None)
+                    user_email = getattr(current_user, "email", None)
+                    if user_id is not None and user_email:
+                        user_identity = f"{user_id}:{user_email}"
+                    elif user_id is not None:
+                        user_identity = str(user_id)
+                    elif user_email:
+                        user_identity = user_email
+            except Exception:
+                user_identity = "anonymous"
+
+            try:
+                app.logger.error(
+                    "Unhandled exception",
+                    extra={
+                        "error_token": error_token,
+                        "request_path": request.path,
+                        "request_method": request.method,
+                        "user_identity": user_identity,
+                        "remote_addr": request.headers.get(
+                            "X-Forwarded-For", request.remote_addr or "-"
+                        ),
+                        "user_agent": str(request.user_agent),
+                        "traceback_text": traceback_text,
+                    },
+                )
+            except Exception:
+                pass
             error_details = _build_user_error_details(
                 traceback_text,
                 show_detailed_trace=app.config.get(
@@ -841,16 +858,23 @@ def create_app(args=None):
                 max_length=int(app.config.get("ERROR_DETAILS_MAX_LENGTH", 8000)),
                 error_token=error_token,
             )
-            return (
-                render_template(
-                    "errors/internal_error.html",
-                    error_token=error_token,
-                    error_details=error_details,
-                    show_error_details=app.config.get(
-                        "SHOW_ERROR_DETAILS_TO_USERS", False
+            try:
+                return (
+                    render_template(
+                        "errors/internal_error.html",
+                        error_token=error_token,
+                        error_details=error_details,
+                        show_error_details=app.config.get(
+                            "SHOW_ERROR_DETAILS_TO_USERS", False
+                        ),
                     ),
-                ),
-                500,
-            )
+                    500,
+                )
+            except Exception:
+                return (
+                    "An internal error occurred. "
+                    f"Reference token: {error_token}",
+                    500,
+                )
 
     return app, socketio
