@@ -11,6 +11,7 @@ from flask import (
     url_for,
 )
 from flask_login import login_required
+from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 
 from app import db
@@ -24,7 +25,6 @@ from app.models import Location, Menu, MenuAssignment, Product
 from app.utils.activity import log_activity
 from app.utils.menu_assignments import set_location_menu, sync_menu_locations
 from app.utils.text import (
-    build_text_match_predicate,
     normalize_request_text_filter,
     normalize_text_match_mode,
 )
@@ -55,9 +55,15 @@ def view_menus():
     )
 
     if name_query:
-        query = query.filter(
-            build_text_match_predicate(Menu.name, name_query, match_mode)
-        )
+        if match_mode == "exact":
+            name_filter = func.lower(Menu.name) == name_query.lower()
+        elif match_mode == "startswith":
+            name_filter = Menu.name.ilike(f"{name_query}%")
+        elif match_mode == "not_contains":
+            name_filter = Menu.name.notilike(f"%{name_query}%")
+        else:
+            name_filter = Menu.name.ilike(f"%{name_query}%")
+        query = query.filter(name_filter)
 
     if assigned_status == "assigned":
         query = query.filter(

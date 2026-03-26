@@ -153,9 +153,15 @@ def view_items():
     elif archived == "archived":
         query = query.filter(Item.archived.is_(True))
     if name_query:
-        query = query.filter(
-            build_text_match_predicate(Item.name, name_query, match_mode)
-        )
+        if match_mode == "exact":
+            name_filter = func.lower(Item.name) == name_query.lower()
+        elif match_mode == "startswith":
+            name_filter = Item.name.ilike(f"{name_query}%")
+        elif match_mode == "not_contains":
+            name_filter = Item.name.notilike(f"%{name_query}%")
+        else:
+            name_filter = Item.name.ilike(f"%{name_query}%")
+        query = query.filter(name_filter)
 
     if purchase_gl_code_ids:
         query = query.filter(Item.purchase_gl_code_id.in_(purchase_gl_code_ids))

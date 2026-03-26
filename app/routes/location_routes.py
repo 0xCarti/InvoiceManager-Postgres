@@ -35,7 +35,6 @@ from app.utils.units import (
     get_unit_label,
 )
 from app.utils.text import (
-    build_text_match_predicate,
     normalize_name_for_sorting,
     normalize_request_text_filter,
     normalize_text_match_mode,
@@ -770,9 +769,15 @@ def view_locations():
         query = query.filter(Location.archived.is_(True))
 
     if name_query:
-        query = query.filter(
-            build_text_match_predicate(Location.name, name_query, match_mode)
-        )
+        if match_mode == "exact":
+            name_filter = func.lower(Location.name) == name_query.lower()
+        elif match_mode == "startswith":
+            name_filter = Location.name.ilike(f"{name_query}%")
+        elif match_mode == "not_contains":
+            name_filter = Location.name.notilike(f"%{name_query}%")
+        else:
+            name_filter = Location.name.ilike(f"%{name_query}%")
+        query = query.filter(name_filter)
 
     if include_no_menu and menu_ids:
         query = query.filter(
