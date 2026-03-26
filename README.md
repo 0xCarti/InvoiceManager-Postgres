@@ -7,6 +7,19 @@ A Flask-based application for managing invoices, products and vendors. The proje
 
 PostgreSQL is the only supported runtime database backend.
 
+## Table of Contents
+
+- [Installation](#installation)
+- [Environment Variables](#required-environment-variables)
+- [Database Setup (Migrations)](#database-setup)
+- [Docker Setup](#docker-setup)
+- [Backups and Restore](#backups-and-restore-postgres-runtime)
+- [Testing](#running-tests)
+- [Code Style](#code-style)
+- [Features](#features)
+- [Documentation](#documentation)
+- [License](#license)
+
 ## Installation
 
 You can perform the steps below manually or run one of the setup scripts provided in the repository. `setup.sh` works on Linux/macOS and `setup.ps1` works on Windows. Each script optionally accepts a repository URL and target directory, clones the project, installs dependencies, prepares a `.env` file, runs the database migrations, and seeds the default admin account and settings.
