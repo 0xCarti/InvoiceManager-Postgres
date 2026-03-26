@@ -418,7 +418,7 @@ def restore_backup(file_path):
                             except ValueError:
                                 pass
 
-            insert_rows.append(record)
+                insert_rows.append(record)
 
             if insert_rows:
                 try:
