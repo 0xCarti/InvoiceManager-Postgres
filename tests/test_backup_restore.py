@@ -5,9 +5,10 @@ import time
 from datetime import date
 import json
 from io import BytesIO
+from types import SimpleNamespace
 
 from sqlalchemy.engine import Connection
-from sqlalchemy.exc import CompileError, DataError
+from sqlalchemy.exc import CompileError, DataError, IntegrityError
 from werkzeug.security import generate_password_hash
 
 from app import db
@@ -740,8 +741,7 @@ def test_restore_backup_file_route_handles_runtime_compile_error(
 
     assert response.status_code == 200
     assert (
-        b"Restore could not proceed due to a database schema/constraint mismatch; "
-        b"see logs for table/column details."
+        b"Restore failed (CompileError): Restore failed while rebuilding database schema."
         in response.data
     )
     assert b"CompileError" not in response.data
@@ -773,6 +773,117 @@ def test_restore_backup_wraps_insert_data_errors(app, monkeypatch):
             assert isinstance(exc.__cause__, DataError)
 
 
+def test_restore_backup_reports_fk_integrity_diagnostics(app, monkeypatch):
+    with app.app_context():
+        backup_path = _create_sqlite_backup_copy(app, "fk_integrity_diagnostic.db")
+        original_execute = Connection.execute
+
+        class FakePsycopgError(Exception):
+            def __init__(self):
+                self.diag = SimpleNamespace(
+                    constraint_name="invoice_user_id_fkey",
+                    table_name="invoice",
+                    column_name="user_id",
+                    message_detail="Key (user_id)=(9999) is not present in table \"user\".",
+                )
+                self.pgcode = "23503"
+
+        def fail_on_invoice_insert(self, statement, *args, **kwargs):
+            if getattr(statement, "is_insert", False) and statement.table.name == "invoice":
+                raise IntegrityError(
+                    "INSERT INTO invoice ...",
+                    kwargs.get("parameters"),
+                    FakePsycopgError(),
+                )
+            return original_execute(self, statement, *args, **kwargs)
+
+        monkeypatch.setattr(Connection, "execute", fail_on_invoice_insert)
+
+        try:
+            restore_backup(backup_path)
+            assert False, "Expected RestoreBackupError for FK failure"
+        except RestoreBackupError as exc:
+            message = str(exc)
+            assert "invoice" in message
+            assert "invoice_user_id_fkey" in message
+            assert "Key (user_id)=(9999)" in message
+            assert "keys=" in message
+
+
+def test_restore_backup_reports_unique_integrity_diagnostics(app, monkeypatch):
+    with app.app_context():
+        backup_path = _create_sqlite_backup_copy(app, "unique_integrity_diagnostic.db")
+        original_execute = Connection.execute
+
+        class FakePsycopgError(Exception):
+            def __init__(self):
+                self.diag = SimpleNamespace(
+                    constraint_name="user_email_key",
+                    table_name="user",
+                    column_name="email",
+                    message_detail='Key (email)=(admin@example.com) already exists.',
+                )
+                self.pgcode = "23505"
+
+        def fail_on_user_insert(self, statement, *args, **kwargs):
+            if getattr(statement, "is_insert", False) and statement.table.name == "user":
+                raise IntegrityError(
+                    "INSERT INTO user ...",
+                    kwargs.get("parameters"),
+                    FakePsycopgError(),
+                )
+            return original_execute(self, statement, *args, **kwargs)
+
+        monkeypatch.setattr(Connection, "execute", fail_on_user_insert)
+
+        try:
+            restore_backup(backup_path)
+            assert False, "Expected RestoreBackupError for unique failure"
+        except RestoreBackupError as exc:
+            message = str(exc)
+            assert "user" in message
+            assert "user_email_key" in message
+            assert "already exists" in message
+            assert "keys=" in message
+
+
+def test_restore_backup_reports_not_null_integrity_diagnostics(app, monkeypatch):
+    with app.app_context():
+        backup_path = _create_sqlite_backup_copy(app, "not_null_integrity_diagnostic.db")
+        original_execute = Connection.execute
+
+        class FakePsycopgError(Exception):
+            def __init__(self):
+                self.diag = SimpleNamespace(
+                    constraint_name=None,
+                    table_name="item",
+                    column_name="name",
+                    message_detail='null value in column "name" of relation "item" violates not-null constraint',
+                )
+                self.pgcode = "23502"
+
+        def fail_on_item_insert(self, statement, *args, **kwargs):
+            if getattr(statement, "is_insert", False) and statement.table.name == "item":
+                raise IntegrityError(
+                    "INSERT INTO item ...",
+                    kwargs.get("parameters"),
+                    FakePsycopgError(),
+                )
+            return original_execute(self, statement, *args, **kwargs)
+
+        monkeypatch.setattr(Connection, "execute", fail_on_item_insert)
+
+        try:
+            restore_backup(backup_path)
+            assert False, "Expected RestoreBackupError for not-null failure"
+        except RestoreBackupError as exc:
+            message = str(exc)
+            assert "item" in message
+            assert "column=name" in message
+            assert "not-null constraint" in message
+            assert "keys=" in message
+
+
 def test_restore_backup_file_route_handles_insert_data_error(client, app, monkeypatch):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
@@ -799,8 +910,7 @@ def test_restore_backup_file_route_handles_insert_data_error(client, app, monkey
 
     assert response.status_code == 200
     assert (
-        b"Restore could not proceed due to a database schema/constraint mismatch; "
-        b"see logs for table/column details."
+        b"Restore failed (DataError): Restore failed while inserting rows into table"
         in response.data
     )
     assert b"Internal Server Error" not in response.data
