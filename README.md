@@ -186,8 +186,6 @@ variable to `.env` (or by exporting it in your shell) before starting the
 service. Database migrations run automatically when the container starts via
 `entrypoint.sh`, rather than during the image build:
 
-> **Deployment tag note:** operators pulling only `docker-compose.yml` + `.env` should use `ghcr.io/0xcarti/invoice-manager-postgres:2026.03.26-password255` (not `:latest`) to ensure this password-column migration is present.
-
 ```bash
 docker compose up --build
 ```

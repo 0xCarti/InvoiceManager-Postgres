@@ -4,8 +4,6 @@
 
 Use this document during validation runs and attach command output to the PR where practical.
 
-For Compose-based deployments that only pull `docker-compose.yml` and `.env`, pin the web image to `ghcr.io/0xcarti/invoice-manager-postgres:2026.03.26-password255` so this migration is guaranteed to run from container startup.
-
 ## Checklist
 
 > For Docker Compose migration/startup workflows, keep `DATABASE_HOST=postgres` because Compose service discovery uses service names (not `container_name`).
