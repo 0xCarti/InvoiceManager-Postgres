@@ -10,6 +10,29 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: invoicemanager
+          POSTGRES_PASSWORD: invoicemanager
+          POSTGRES_DB: invoicemanager
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U invoicemanager -d invoicemanager"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      DATABASE_DRIVER: postgresql+psycopg
+      DATABASE_USER: invoicemanager
+      DATABASE_PASSWORD: invoicemanager
+      DATABASE_HOST: localhost
+      DATABASE_PORT: 5432
+      DATABASE_NAME: invoicemanager
+      DATABASE_URL: postgresql+psycopg://invoicemanager:invoicemanager@localhost:5432/invoicemanager
+      SQLALCHEMY_DATABASE_URI: postgresql+psycopg://invoicemanager:invoicemanager@localhost:5432/invoicemanager
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,6 +42,33 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      - name: Wait for PostgreSQL to be ready
+        run: |
+          python - <<'PYTHON'
+          import os
+          import time
+
+          import psycopg
+
+          dsn = os.environ["DATABASE_URL"]
+          last_error = None
+          for attempt in range(1, 31):
+              try:
+                  with psycopg.connect(dsn, connect_timeout=3) as conn:
+                      with conn.cursor() as cur:
+                          cur.execute("SELECT 1")
+                          cur.fetchone()
+                  print("PostgreSQL is ready")
+                  break
+              except Exception as exc:
+                  last_error = exc
+                  print(f"Waiting for PostgreSQL... ({attempt}/30): {exc}")
+                  time.sleep(2)
+          else:
+              raise SystemExit(f"PostgreSQL did not become ready in time: {last_error}")
+          PYTHON
+      - name: Run database migrations
+        run: flask --app run.py db upgrade
       - name: Run tests
         run: pytest --cov --cov-branch --cov-report=xml
       - name: Verify Alembic has a single head
@@ -29,6 +79,13 @@ jobs:
             flask --app run.py db heads
             exit 1
           fi
+      - name: Dump PostgreSQL diagnostics on failure
+        if: failure()
+        run: |
+          echo "=== docker ps ==="
+          docker ps -a
+          echo "=== postgres service logs ==="
+          docker logs ${{ job.services.postgres.id }} || true
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
