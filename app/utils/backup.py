@@ -2,8 +2,6 @@
 
 import logging
 import os
-import shutil
-import sqlite3
 import tempfile
 import time
 from dataclasses import dataclass
@@ -12,7 +10,7 @@ from datetime import datetime
 from threading import Event, Thread
 
 from flask import current_app
-from sqlalchemy import inspect
+from sqlalchemy import MetaData, Table, create_engine, inspect
 
 from app import db
 from app.models import Setting
@@ -125,15 +123,10 @@ def validate_backup_file_compatibility(
     issues: list[str] = []
     warnings: list[str] = []
 
-    with sqlite3.connect(f"file:{file_path}?mode=ro", uri=True) as conn:
-        conn.row_factory = sqlite3.Row
-
-        existing_tables = {
-            row["name"]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            )
-        }
+    backup_engine = create_engine(f"sqlite+pysqlite:///{file_path}")
+    with backup_engine.connect() as conn:
+        inspector = inspect(conn)
+        existing_tables = set(inspector.get_table_names())
         required_tables = set(
             current_app.config.get(
                 "RESTORE_REQUIRED_TABLES",
@@ -147,12 +140,14 @@ def validate_backup_file_compatibility(
             warnings.append("Missing setting table.")
 
         if "setting" in existing_tables:
-            cursor = conn.execute(
-                "SELECT value FROM setting WHERE name = ? LIMIT 1",
-                ("APP_SCHEMA_VERSION",),
+            marker_query = db.text(
+                "SELECT value FROM setting WHERE name = :name LIMIT 1"
             )
-            marker = cursor.fetchone()
-            marker_value = "" if marker is None else (marker["value"] or "")
+            marker = conn.execute(
+                marker_query,
+                {"name": "APP_SCHEMA_VERSION"},
+            ).mappings().first()
+            marker_value = "" if marker is None else (marker.get("value") or "")
             if not marker_value.strip():
                 warnings.append(
                     "Backup is missing APP_SCHEMA_VERSION marker in settings."
@@ -170,7 +165,8 @@ def validate_backup_file_compatibility(
         )
         if "setting" in existing_tables:
             existing_settings = {
-                row["name"] for row in conn.execute("SELECT name FROM setting")
+                row["name"]
+                for row in conn.execute(db.text("SELECT name FROM setting")).mappings()
             }
         else:
             existing_settings = set()
@@ -209,14 +205,6 @@ _backup_thread: Thread | None = None
 _stop_event = Event()
 
 
-def _get_db_path():
-    """Return the filesystem path to the database file."""
-    db_uri = current_app.config["SQLALCHEMY_DATABASE_URI"]
-    if db_uri.startswith("sqlite:///"):
-        return db_uri.replace("sqlite:///", "", 1)
-    raise RuntimeError("Only sqlite databases are supported")
-
-
 def create_backup(*, initiated_by_system: bool = False):
     """Create a timestamped copy of the database.
 
@@ -246,7 +234,6 @@ def create_backup(*, initiated_by_system: bool = False):
                 logger.info("Deleted oldest backup %s", oldest)
             except OSError:
                 logger.warning("Failed to delete backup %s", oldest, exc_info=True)
-    db_path = _get_db_path()
     filename = f"backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.db"
     backup_path = os.path.join(backups_dir, filename)
     fd, temp_path = tempfile.mkstemp(
@@ -257,7 +244,22 @@ def create_backup(*, initiated_by_system: bool = False):
     db.session.commit()
     db.engine.dispose()
     try:
-        shutil.copyfile(db_path, temp_path)
+        backup_engine = create_engine(f"sqlite+pysqlite:///{temp_path}")
+        backup_metadata = MetaData()
+
+        with backup_engine.begin() as backup_conn:
+            for table in db.metadata.sorted_tables:
+                table_copy = Table(
+                    table.name,
+                    backup_metadata,
+                    *[column.copy() for column in table.columns],
+                )
+                table_copy.create(bind=backup_conn, checkfirst=True)
+
+                rows = db.session.execute(table.select()).mappings().all()
+                if rows:
+                    backup_conn.execute(table_copy.insert(), [dict(row) for row in rows])
+
         os.replace(temp_path, backup_path)
     except Exception:
         with suppress(OSError):
@@ -331,86 +333,80 @@ def restore_backup(file_path):
     current schema and supplying defaults for any new columns.
     """
 
-    # Open the backup file in a separate SQLite connection
-    backup_conn = sqlite3.connect(file_path, detect_types=sqlite3.PARSE_DECLTYPES)
-    backup_conn.row_factory = sqlite3.Row
-    backup_cursor = backup_conn.cursor()
+    backup_engine = create_engine(f"sqlite+pysqlite:///{file_path}")
+    backup_metadata = MetaData()
+    backup_metadata.reflect(bind=backup_engine)
+    backup_inspector = inspect(backup_engine)
 
     # Reset current session and rebuild schema based on models
     db.session.remove()
-    db.drop_all()
-    db.create_all()
 
     logger = current_app.logger if current_app else logging.getLogger(__name__)
 
-    # Iterate over all tables in dependency order
-    for table in db.metadata.sorted_tables:
-        table_name = table.name
+    with db.engine.begin() as target_conn:
+        db.metadata.drop_all(bind=target_conn)
+        db.metadata.create_all(bind=target_conn)
 
-        # Ensure the table exists in the backup database
-        backup_cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-            (table_name,),
-        )
-        if not backup_cursor.fetchone():
-            logger.info("Table %s missing from backup", table_name)
-            continue
+        # Iterate over all tables in dependency order
+        for table in db.metadata.sorted_tables:
+            table_name = table.name
+            if table_name not in backup_metadata.tables:
+                logger.info("Table %s missing from backup", table_name)
+                continue
 
-        # Columns present in backup
-        quoted_table = f'"{table_name}"'
-        backup_cursor.execute(f"PRAGMA table_info({quoted_table})")
-        backup_cols = {row[1] for row in backup_cursor.fetchall()}
+            backup_cols = {
+                column["name"] for column in backup_inspector.get_columns(table_name)
+            }
 
-        current_cols = {c.name for c in table.columns}
-        missing_cols = current_cols - backup_cols
-        extra_cols = backup_cols - current_cols
-        if missing_cols or extra_cols:
-            logger.info(
-                "Schema mismatch for %s; missing=%s, extra=%s",
-                table_name,
-                sorted(missing_cols),
-                sorted(extra_cols),
-            )
+            current_cols = {c.name for c in table.columns}
+            missing_cols = current_cols - backup_cols
+            extra_cols = backup_cols - current_cols
+            if missing_cols or extra_cols:
+                logger.info(
+                    "Schema mismatch for %s; missing=%s, extra=%s",
+                    table_name,
+                    sorted(missing_cols),
+                    sorted(extra_cols),
+                )
 
-        # Only select columns that exist in both schemas
-        select_cols = [c for c in table.columns if c.name in backup_cols]
-        col_names = ", ".join(f'"{c.name}"' for c in select_cols)
-        backup_cursor.execute(f"SELECT {col_names} FROM {quoted_table}")
-        rows = backup_cursor.fetchall()
+            select_cols = [c for c in table.columns if c.name in backup_cols]
+            backup_table = backup_metadata.tables[table_name]
+            with backup_engine.connect() as backup_conn:
+                rows = backup_conn.execute(
+                    backup_table.select().with_only_columns(
+                        *(backup_table.c[c.name] for c in select_cols)
+                    )
+                ).mappings().all()
 
-        insert_rows = []
-        for row in rows:
-            record = {col.name: row[col.name] for col in select_cols}
+            insert_rows = []
+            for row in rows:
+                record = {col.name: row[col.name] for col in select_cols}
 
-            for col in table.columns:
-                if col.name not in record:
-                    default = None
-                    if col.default is not None:
-                        default = col.default.arg
-                        if callable(default):
+                for col in table.columns:
+                    if col.name not in record:
+                        default = None
+                        if col.default is not None:
+                            default = col.default.arg
+                            if callable(default):
+                                try:
+                                    default = default()
+                                except TypeError:
+                                    default = default(None)
+                        record[col.name] = default
+                    else:
+                        value = record[col.name]
+                        if isinstance(col.type, db.DateTime) and isinstance(value, str):
                             try:
-                                default = default()
-                            except TypeError:
-                                default = default(None)
-                    record[col.name] = default
-                else:
-                    value = record[col.name]
-                    if isinstance(col.type, db.DateTime) and isinstance(value, str):
-                        try:
-                            record[col.name] = datetime.fromisoformat(value)
-                        except ValueError:
-                            pass
-                    elif isinstance(col.type, db.Date) and isinstance(value, str):
-                        try:
-                            record[col.name] = datetime.fromisoformat(value).date()
-                        except ValueError:
-                            pass
+                                record[col.name] = datetime.fromisoformat(value)
+                            except ValueError:
+                                pass
+                        elif isinstance(col.type, db.Date) and isinstance(value, str):
+                            try:
+                                record[col.name] = datetime.fromisoformat(value).date()
+                            except ValueError:
+                                pass
 
-            insert_rows.append(record)
+                insert_rows.append(record)
 
-        if insert_rows:
-            db.session.execute(table.insert(), insert_rows)
-
-    db.session.commit()
-
-    backup_conn.close()
+            if insert_rows:
+                target_conn.execute(table.insert(), insert_rows)
