@@ -15,10 +15,19 @@ wait_for_database() {
 import os
 import sys
 import time
+from urllib.parse import urlsplit, urlunsplit
 
 import psycopg
 
 conninfo = os.environ.get("DATABASE_URL")
+if conninfo and conninfo.startswith("postgresql+"):
+    parsed = urlsplit(conninfo)
+    normalized_scheme = "postgresql"
+    conninfo = urlunsplit((normalized_scheme, parsed.netloc, parsed.path, parsed.query, parsed.fragment))
+    print(
+        f"[entrypoint] Normalized DATABASE_URL scheme from '{parsed.scheme}' to '{normalized_scheme}' for readiness probe.",
+        flush=True,
+    )
 if not conninfo:
     user = os.environ.get("DATABASE_USER", "invoicemanager")
     password = os.environ.get("DATABASE_PASSWORD", "invoicemanager")
