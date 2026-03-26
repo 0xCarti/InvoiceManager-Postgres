@@ -47,6 +47,7 @@ from app.routes.report_routes import (
 )
 from app.utils.forecasting import DemandForecastingHelper
 from app.utils.pagination import build_pagination_args, get_per_page
+from app.utils.text import normalize_request_text_filter
 from app.services.purchase_merge import (
     PurchaseMergeError,
     merge_purchase_orders,
@@ -1624,11 +1625,9 @@ def view_purchase_invoices():
     """List all received purchase invoices."""
     page = request.args.get("page", 1, type=int)
     per_page = get_per_page()
-    invoice_number = request.args.get("invoice_number")
-    if invoice_number is not None:
-        invoice_number = invoice_number.strip()
-    if not invoice_number:
-        invoice_number = None
+    invoice_number = (
+        normalize_request_text_filter(request.args.get("invoice_number")) or None
+    )
     po_number = request.args.get("po_number", type=int)
     vendor_id = request.args.get("vendor_id", type=int)
     location_id = request.args.get("location_id", type=int)
