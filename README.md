@@ -218,6 +218,12 @@ For Docker Compose workflows, scripts should always run with a
 Postgres-backed `DATABASE_URL` pointing to the Compose `postgres` service
 name (not `container_name`). Keep `DATABASE_HOST=postgres` for these flows.
 `./scripts/docker_migrate.sh` enforces that automatically.
+When `.env` only provides `DATABASE_*` values (without `DATABASE_URL`), verify
+the fallback URL assembly with:
+
+```bash
+./scripts/check_docker_migrate_env_fallback.sh
+```
 
 ### First-time database initialization and migrations
 
