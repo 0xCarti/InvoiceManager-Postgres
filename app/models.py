@@ -4,7 +4,7 @@ from typing import Optional
 
 from flask import current_app, has_app_context
 from flask_login import UserMixin
-from sqlalchemy import ForeignKeyConstraint, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
 
@@ -236,6 +236,7 @@ class Item(db.Model):
             "name",
             unique=True,
             sqlite_where=db.text("archived = 0"),
+            postgresql_where=db.text("archived = false"),
         ),
         db.Index("ix_item_archived", "archived"),
     )
@@ -547,13 +548,7 @@ class Invoice(db.Model):
     )
     paid_at = db.Column(db.DateTime, nullable=True)
 
-    # Define a ForeignKeyConstraint to ensure referential integrity with InvoiceProduct
     __table_args__ = (
-        ForeignKeyConstraint(
-            ["id"],
-            ["invoice_product.invoice_id"],
-            use_alter=True,
-        ),
         db.Index("ix_invoice_user_id", "user_id"),
     )
 
