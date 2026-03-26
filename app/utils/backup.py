@@ -18,6 +18,10 @@ from sqlalchemy.exc import DBAPIError, DataError, IntegrityError
 from app import db
 from app.models import Setting
 from app.utils.activity import log_activity
+from app.utils.restore_adapters import (
+    RestoreAdapterContext,
+    apply_restore_adapters,
+)
 
 BACKUP_SCHEMA_VERSION = "2026.03"
 
@@ -711,6 +715,7 @@ def _write_quarantine_report(
     backup_file_path: str,
     skipped_rows: list[dict],
     restore_mode: str,
+    table_transform_metrics: dict[str, dict[str, int]] | None = None,
 ) -> str:
     backups_dir = current_app.config["BACKUP_FOLDER"]
     os.makedirs(backups_dir, exist_ok=True)
@@ -724,6 +729,7 @@ def _write_quarantine_report(
         "restore_mode": restore_mode,
         "skipped_count": len(skipped_rows),
         "skipped_rows": skipped_rows,
+        "table_transform_metrics": table_transform_metrics or {},
     }
     with open(report_path, "w", encoding="utf-8") as fp:
         json.dump(payload, fp, indent=2, default=str)
@@ -839,12 +845,39 @@ RESTORE_ROW_NORMALIZERS: dict[str, list] = {
 }
 
 
+def _read_backup_schema_marker(backup_engine) -> str | None:
+    inspector = inspect(backup_engine)
+    if "setting" not in inspector.get_table_names():
+        return None
+    metadata = MetaData()
+    metadata.reflect(bind=backup_engine, only=["setting"])
+    setting_table = metadata.tables.get("setting")
+    if setting_table is None or "name" not in setting_table.c:
+        return None
+    value_col = setting_table.c.get("value")
+    if value_col is None:
+        return None
+
+    with backup_engine.connect() as conn:
+        marker = conn.execute(
+            setting_table.select()
+            .with_only_columns(value_col)
+            .where(setting_table.c.name == "APP_SCHEMA_VERSION")
+            .limit(1)
+        ).scalar_one_or_none()
+    if marker is None:
+        return None
+    marker_text = str(marker).strip()
+    return marker_text or None
+
+
 def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> RestoreSummary:
     restore_mode = _normalize_restore_mode(restore_mode)
     backup_engine = create_engine(f"sqlite+pysqlite:///{file_path}")
     backup_metadata = MetaData()
     backup_metadata.reflect(bind=backup_engine)
     backup_inspector = inspect(backup_engine)
+    backup_schema_marker = _read_backup_schema_marker(backup_engine)
 
     # Reset current session and rebuild schema based on models
     db.session.remove()
@@ -858,6 +891,7 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
     repair_total = 0
     table_transform_counts: dict[str, int] = {}
     field_transform_counts: dict[str, dict[str, int]] = {}
+    adapter_transform_metrics: dict[str, dict[str, int]] = {}
     repair_orphans_enabled = bool(current_app.config.get("RESTORE_REPAIR_ORPHANS", True))
 
     with db.engine.begin() as target_conn:
@@ -904,18 +938,52 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
                 table_field_counts["missing_fields_filled_defaults"] += len(missing_cols)
                 table_field_counts["legacy_extra_fields_ignored"] += len(extra_cols)
 
-            select_cols = [c for c in table.columns if c.name in backup_cols]
             backup_table = backup_metadata.tables[table_name]
             with backup_engine.connect() as backup_conn:
                 rows = backup_conn.execute(
-                    backup_table.select().with_only_columns(
-                        *(backup_table.c[c.name] for c in select_cols)
-                    )
+                    backup_table.select()
                 ).mappings().all()
+
+                adapter_result = apply_restore_adapters(
+                    table=table,
+                    backup_columns=backup_cols,
+                    rows=[dict(row) for row in rows],
+                    context=RestoreAdapterContext(
+                        backup_metadata=backup_metadata,
+                        schema_marker=backup_schema_marker,
+                    ),
+                )
+                rows = adapter_result.rows
+                if adapter_result.transformed_count > 0:
+                    table_transform_counts[table_name] = (
+                        table_transform_counts.get(table_name, 0)
+                        + adapter_result.transformed_count
+                    )
+                if adapter_result.metrics:
+                    table_adapter_metrics = adapter_transform_metrics.setdefault(
+                        table_name, {}
+                    )
+                    for key, value in adapter_result.metrics.items():
+                        table_adapter_metrics[key] = (
+                            table_adapter_metrics.get(key, 0) + value
+                        )
+                for unresolved in adapter_result.unresolved_rows or []:
+                    skipped_rows.append(
+                        {
+                            "table": table_name,
+                            "primary_key": {},
+                            "reason": "adapter_unresolved_row",
+                            "row": unresolved,
+                        }
+                    )
 
                 insert_rows = []
                 for row in rows:
-                    record = {col.name: row[col.name] for col in select_cols}
+                    record = {
+                        col.name: row[col.name]
+                        for col in table.columns
+                        if col.name in row
+                    }
 
                     for col in table.columns:
                         if col.name not in record:
@@ -1050,6 +1118,7 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
             backup_file_path=file_path,
             skipped_rows=skipped_rows,
             restore_mode=restore_mode,
+            table_transform_metrics=adapter_transform_metrics,
         )
 
     return RestoreSummary(

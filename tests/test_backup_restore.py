@@ -817,6 +817,76 @@ def test_restore_backup_strict_mode_restores_known_good_backup_with_expected_cou
         assert TerminalSale.query.count() == 1
 
 
+def test_restore_backup_adapts_legacy_purchase_gl_code_column(app):
+    with app.app_context():
+        populate_data()
+        backup_path = _create_sqlite_backup_copy(app, "legacy_purchase_gl_code.db")
+
+        with sqlite3.connect(backup_path) as conn:
+            conn.execute(
+                "UPDATE setting SET value = ? WHERE name = 'APP_SCHEMA_VERSION'",
+                ("2025.12",),
+            )
+            conn.execute(
+                """
+                CREATE TABLE purchase_invoice_item_legacy (
+                    id INTEGER PRIMARY KEY,
+                    invoice_id INTEGER NOT NULL,
+                    position INTEGER NOT NULL DEFAULT 0,
+                    item_id INTEGER,
+                    unit_id INTEGER,
+                    item_name VARCHAR(100) NOT NULL,
+                    unit_name VARCHAR(50),
+                    quantity FLOAT NOT NULL,
+                    cost FLOAT NOT NULL,
+                    container_deposit FLOAT NOT NULL DEFAULT 0.0,
+                    prev_cost FLOAT NOT NULL,
+                    location_id INTEGER,
+                    gl_code_id INTEGER
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO purchase_invoice_item_legacy (
+                    id, invoice_id, position, item_id, unit_id, item_name, unit_name,
+                    quantity, cost, container_deposit, prev_cost, location_id, gl_code_id
+                )
+                SELECT
+                    id, invoice_id, position, item_id, unit_id, item_name, unit_name,
+                    quantity, cost, container_deposit, prev_cost, location_id, purchase_gl_code_id
+                FROM purchase_invoice_item
+                """
+            )
+            conn.execute("DROP TABLE purchase_invoice_item")
+            conn.execute(
+                "ALTER TABLE purchase_invoice_item_legacy RENAME TO purchase_invoice_item"
+            )
+            conn.commit()
+        expected_table_counts = _backup_table_row_counts(
+            backup_path, [table.name for table in db.metadata.sorted_tables]
+        )
+        expected_inserted = sum(expected_table_counts.values())
+
+        PurchaseInvoiceItem.query.delete()
+        PurchaseInvoice.query.delete()
+        Product.query.delete()
+        db.session.commit()
+
+        summary = restore_backup(backup_path, restore_mode="strict")
+
+        assert summary.mode == "strict"
+        assert summary.skipped_count == 0
+        assert summary.quarantine_report is None
+        assert summary.inserted_count == expected_inserted
+        assert PurchaseInvoiceItem.query.count() == 1
+        restored_item = PurchaseInvoiceItem.query.first()
+        assert restored_item is not None
+        assert restored_item.purchase_gl_code_id is None
+        assert summary.table_transform_counts is not None
+        assert summary.table_transform_counts["purchase_invoice_item"] >= 1
+
+
 def test_restore_backup_permissive_mode_skips_invalid_rows_and_writes_quarantine(app):
     with app.app_context():
         populate_data()
