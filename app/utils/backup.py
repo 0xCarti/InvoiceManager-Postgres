@@ -127,6 +127,9 @@ def validate_backup_file_compatibility(
 
     issues: list[str] = []
     warnings: list[str] = []
+    strict_mode = bool(
+        current_app.config.get("RESTORE_PREFLIGHT_STRICT_FK_VALIDATION", False)
+    )
 
     backup_engine = create_engine(f"sqlite+pysqlite:///{file_path}")
     with backup_engine.connect() as conn:
@@ -189,6 +192,13 @@ def validate_backup_file_compatibility(
                 + "."
             )
 
+        fk_findings = _collect_foreign_key_orphan_findings(inspector, conn)
+        if fk_findings:
+            if strict_mode:
+                issues.extend(fk_findings)
+            else:
+                warnings.extend(fk_findings)
+
     warnings.extend(_collect_missing_expected_endpoints())
 
     return RestoreCompatibilityResult(
@@ -196,6 +206,98 @@ def validate_backup_file_compatibility(
         issues=issues,
         warnings=warnings,
     )
+
+
+def _quote_identifier(name: str) -> str:
+    """Return a SQLite-safe quoted identifier."""
+    return f'"{name.replace(chr(34), chr(34) * 2)}"'
+
+
+def _collect_foreign_key_orphan_findings(inspector, conn) -> list[str]:
+    """Return compatibility findings for orphaned FK rows in backup tables."""
+
+    findings: list[str] = []
+    table_names = sorted(inspector.get_table_names())
+
+    for table_name in table_names:
+        for fk in inspector.get_foreign_keys(table_name):
+            constrained_columns = list(fk.get("constrained_columns") or [])
+            referred_table = fk.get("referred_table")
+            referred_columns = list(fk.get("referred_columns") or [])
+            fk_name = fk.get("name") or "<unnamed>"
+            fk_label = f"{table_name}.{fk_name}"
+
+            if not constrained_columns or not referred_table or not referred_columns:
+                findings.append(
+                    f"Foreign key {fk_label} has incomplete metadata and could not be validated."
+                )
+                continue
+
+            if len(constrained_columns) != len(referred_columns):
+                findings.append(
+                    f"Foreign key {fk_label} column mismatch: "
+                    f"{len(constrained_columns)} child column(s) vs "
+                    f"{len(referred_columns)} parent column(s)."
+                )
+                continue
+
+            if referred_table not in table_names:
+                findings.append(
+                    f"Foreign key {fk_label} references missing parent table '{referred_table}'."
+                )
+                continue
+
+            child_alias = "child_row"
+            parent_alias = "parent_row"
+            join_conditions = " AND ".join(
+                f'{child_alias}.{_quote_identifier(child_col)} = '
+                f'{parent_alias}.{_quote_identifier(parent_col)}'
+                for child_col, parent_col in zip(
+                    constrained_columns, referred_columns, strict=True
+                )
+            )
+            child_not_null = " AND ".join(
+                f"{child_alias}.{_quote_identifier(child_col)} IS NOT NULL"
+                for child_col in constrained_columns
+            )
+            parent_missing = " AND ".join(
+                f"{parent_alias}.{_quote_identifier(parent_col)} IS NULL"
+                for parent_col in referred_columns
+            )
+            selected_values = ", ".join(
+                f"{child_alias}.{_quote_identifier(child_col)} AS {_quote_identifier(child_col)}"
+                for child_col in constrained_columns
+            )
+
+            from_join = (
+                f"FROM {_quote_identifier(table_name)} AS {child_alias} "
+                f"LEFT JOIN {_quote_identifier(referred_table)} AS {parent_alias} "
+                f"ON {join_conditions}"
+            )
+            where_clause = f"WHERE {child_not_null} AND {parent_missing}"
+
+            orphan_count = conn.execute(
+                db.text(f"SELECT COUNT(*) {from_join} {where_clause}")
+            ).scalar_one()
+            if not orphan_count:
+                continue
+
+            sample_rows = conn.execute(
+                db.text(
+                    f"SELECT {selected_values} {from_join} {where_clause} "
+                    "ORDER BY rowid LIMIT 3"
+                )
+            ).mappings().all()
+            sample_text = ", ".join(
+                str({column: row.get(column) for column in constrained_columns})
+                for row in sample_rows
+            )
+            findings.append(
+                f"Foreign key orphan rows found for {fk_label} -> {referred_table} "
+                f"({orphan_count} row(s)). Sample key values: {sample_text}."
+            )
+
+    return findings
 
 
 UNIT_SECONDS = {

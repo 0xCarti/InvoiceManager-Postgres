@@ -559,6 +559,63 @@ def test_restore_with_older_schema_marker_value_proceeds(client, app):
     assert b"Backup restored from older_marker.db" in response.data
 
 
+def test_validate_backup_file_compatibility_reports_orphan_fk_warning(app):
+    backup_path = _create_sqlite_backup_copy(app, "orphan_fk_warning.db")
+
+    with sqlite3.connect(backup_path) as conn:
+        conn.execute("DELETE FROM purchase_order")
+        conn.commit()
+
+    with app.app_context():
+        app.config["RESTORE_PREFLIGHT_STRICT_FK_VALIDATION"] = False
+        result = validate_backup_file_compatibility(backup_path)
+
+    assert result.compatible is True
+    assert not result.issues
+    assert any(
+        "purchase_invoice_draft" in warning and "Sample key values" in warning
+        for warning in result.warnings
+    )
+
+
+def test_validate_backup_file_compatibility_reports_orphan_fk_issue_in_strict_mode(app):
+    backup_path = _create_sqlite_backup_copy(app, "orphan_fk_issue.db")
+
+    with sqlite3.connect(backup_path) as conn:
+        conn.execute("DELETE FROM purchase_order")
+        conn.commit()
+
+    with app.app_context():
+        app.config["RESTORE_PREFLIGHT_STRICT_FK_VALIDATION"] = True
+        result = validate_backup_file_compatibility(backup_path)
+
+    assert result.compatible is False
+    assert any(
+        "purchase_invoice_draft" in issue and "Sample key values" in issue
+        for issue in result.issues
+    )
+
+
+def test_restore_backup_file_surfaces_orphan_fk_warning_details(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    backup_path = _create_sqlite_backup_copy(app, "orphan_fk_route_warning.db")
+
+    with sqlite3.connect(backup_path) as conn:
+        conn.execute("DELETE FROM purchase_order")
+        conn.commit()
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            "/controlpanel/backups/restore/orphan_fk_route_warning.db",
+            follow_redirects=True,
+        )
+
+    assert b"Compatibility warnings:" in response.data
+    assert b"purchase_invoice_draft" in response.data
+
+
 def test_restore_backup_with_long_activity_log_entry(app):
     with app.app_context():
         backup_path = _create_sqlite_backup_copy(app, "long_activity_log.db")

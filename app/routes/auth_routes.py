@@ -620,6 +620,7 @@ def restore_backup_route():
                 "structures and cannot be restored safely.",
                 "danger",
             )
+            flash(f"Compatibility errors: {details}", "danger")
             return redirect(url_for("admin.backups"))
 
         if compatibility.warnings:
@@ -632,6 +633,7 @@ def restore_backup_route():
             log_activity(
                 f"Restore compatibility warnings detected for {filename}: {warning_details}"
             )
+            flash(f"Compatibility warnings: {warning_details}", "warning")
 
         try:
             restore_backup(filepath)
@@ -722,6 +724,7 @@ def restore_backup_file(filename):
             "structures and cannot be restored safely.",
             "danger",
         )
+        flash(f"Compatibility errors: {details}", "danger")
         return redirect(url_for("admin.backups"))
 
     if compatibility.warnings:
@@ -734,6 +737,7 @@ def restore_backup_file(filename):
         log_activity(
             f"Restore compatibility warnings detected for {fname}: {warning_details}"
         )
+        flash(f"Compatibility warnings: {warning_details}", "warning")
 
     try:
         restore_backup(filepath)
