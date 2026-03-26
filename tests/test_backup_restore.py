@@ -662,6 +662,52 @@ def test_validate_backup_file_compatibility_warns_on_unique_violations(app):
     assert any("Sample duplicates" in warning for warning in result.warnings)
 
 
+def test_validate_backup_file_compatibility_warns_when_not_null_column_missing(app):
+    backup_path = _create_sqlite_backup_copy(app, "missing_not_null_column_warning.db")
+
+    with sqlite3.connect(backup_path) as conn:
+        conn.execute("ALTER TABLE setting RENAME TO setting_original")
+        conn.execute("CREATE TABLE setting (id INTEGER, value TEXT)")
+        conn.execute("INSERT INTO setting (id, value) SELECT id, value FROM setting_original")
+        conn.execute("DROP TABLE setting_original")
+        conn.commit()
+
+    with app.app_context():
+        app.config["RESTORE_PREFLIGHT_STRICT_FK_VALIDATION"] = False
+        result = validate_backup_file_compatibility(backup_path)
+
+    assert result.compatible is True
+    assert any(
+        "Not-null validation deferred for setting.name" in warning
+        and "column absent in backup; deferred to transform/default mapping." in warning
+        for warning in result.warnings
+    )
+
+
+def test_validate_backup_file_compatibility_warns_when_unique_column_missing(app):
+    backup_path = _create_sqlite_backup_copy(app, "missing_unique_column_warning.db")
+
+    with sqlite3.connect(backup_path) as conn:
+        conn.execute("ALTER TABLE setting RENAME TO setting_original")
+        conn.execute("CREATE TABLE setting (id INTEGER, value TEXT)")
+        conn.execute("INSERT INTO setting (id, value) SELECT id, value FROM setting_original")
+        conn.execute("DROP TABLE setting_original")
+        conn.commit()
+
+    with app.app_context():
+        app.config["RESTORE_PREFLIGHT_STRICT_FK_VALIDATION"] = False
+        result = validate_backup_file_compatibility(backup_path)
+
+    assert result.compatible is True
+    assert any(
+        "Unique validation deferred for setting" in warning
+        and "(name)" in warning
+        and "column absent in backup (name); deferred to transform/default mapping."
+        in warning
+        for warning in result.warnings
+    )
+
+
 def test_restore_backup_file_surfaces_orphan_fk_warning_details(client, app):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
