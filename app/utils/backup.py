@@ -384,28 +384,42 @@ def _collect_model_constraint_findings(conn) -> list[str]:
     """Return findings for backup rows that violate current model constraints."""
 
     findings: list[str] = []
-    backup_tables = {
-        row[0]
-        for row in conn.execute(
-            db.text("SELECT name FROM sqlite_master WHERE type = 'table'")
-        ).all()
+    inspector = inspect(conn)
+    backup_columns_by_table = {
+        table_name: {
+            column.get("name")
+            for column in inspector.get_columns(table_name)
+            if column.get("name")
+        }
+        for table_name in inspector.get_table_names()
     }
 
     for table in db.metadata.sorted_tables:
-        if table.name not in backup_tables:
+        backup_columns = backup_columns_by_table.get(table.name)
+        if backup_columns is None:
             continue
 
-        findings.extend(_collect_not_null_findings(conn, table))
-        findings.extend(_collect_unique_findings(conn, table))
+        findings.extend(_collect_not_null_findings(conn, table, backup_columns))
+        findings.extend(_collect_unique_findings(conn, table, backup_columns))
 
     return findings
 
 
-def _collect_not_null_findings(conn, table: Table) -> list[str]:
+def _collect_not_null_findings(
+    conn,
+    table: Table,
+    backup_columns: set[str],
+) -> list[str]:
     findings: list[str] = []
     table_name = _quote_identifier(table.name)
     for column in table.columns:
         if column.nullable:
+            continue
+        if column.name not in backup_columns:
+            findings.append(
+                f"Not-null validation deferred for {table.name}.{column.name}: "
+                "column absent in backup; deferred to transform/default mapping."
+            )
             continue
 
         column_name = _quote_identifier(column.name)
@@ -433,7 +447,11 @@ def _collect_not_null_findings(conn, table: Table) -> list[str]:
     return findings
 
 
-def _collect_unique_findings(conn, table: Table) -> list[str]:
+def _collect_unique_findings(
+    conn,
+    table: Table,
+    backup_columns: set[str],
+) -> list[str]:
     findings: list[str] = []
     seen_constraints: set[tuple[str, ...]] = set()
     unique_sets: list[tuple[str, tuple[str, ...]]] = []
@@ -469,6 +487,15 @@ def _collect_unique_findings(conn, table: Table) -> list[str]:
 
     quoted_table = _quote_identifier(table.name)
     for constraint_name, columns in unique_sets:
+        missing_columns = [column for column in columns if column not in backup_columns]
+        if missing_columns:
+            findings.append(
+                f"Unique validation deferred for {table.name} on {constraint_name} "
+                f"({', '.join(columns)}): column absent in backup "
+                f"({', '.join(missing_columns)}); deferred to transform/default mapping."
+            )
+            continue
+
         quoted_columns = [_quote_identifier(column) for column in columns]
         not_null_filter = " AND ".join(f"{column} IS NOT NULL" for column in quoted_columns)
         grouped_columns = ", ".join(quoted_columns)
