@@ -18,6 +18,7 @@ from flask_socketio import SocketIO
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError
+from sqlalchemy.exc import PendingRollbackError
 from werkzeug.exceptions import HTTPException
 from werkzeug.routing import BuildError
 from werkzeug.security import generate_password_hash
@@ -810,17 +811,31 @@ def create_app(args=None):
                     )
                 )
             user_identity = "anonymous"
+            cached_user_id = None
             try:
-                db.session.rollback()
+                get_id = getattr(current_user, "get_id", None)
+                if callable(get_id):
+                    cached_user_id = get_id()
             except Exception:
                 pass
 
             try:
+                if cached_user_id is not None:
+                    user_identity = str(cached_user_id)
+                session_needs_rollback = getattr(db.session, "is_active", True) is False
+            except Exception:
+                session_needs_rollback = False
+
+            if session_needs_rollback:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+
+            try:
                 if getattr(current_user, "is_authenticated", False):
-                    user_id = None
-                    get_id = getattr(current_user, "get_id", None)
-                    if callable(get_id):
-                        user_id = get_id()
+                    user_id = cached_user_id
+                    user_email = None
                     if user_id is None:
                         user_id = getattr(current_user, "id", None)
                     user_email = getattr(current_user, "email", None)
@@ -830,8 +845,18 @@ def create_app(args=None):
                         user_identity = str(user_id)
                     elif user_email:
                         user_identity = user_email
+            except PendingRollbackError:
+                user_identity = (
+                    str(cached_user_id)
+                    if cached_user_id is not None
+                    else "anonymous"
+                )
             except Exception:
-                user_identity = "anonymous"
+                user_identity = (
+                    str(cached_user_id)
+                    if cached_user_id is not None
+                    else "anonymous"
+                )
 
             try:
                 app.logger.error(
