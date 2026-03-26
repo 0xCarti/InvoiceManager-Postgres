@@ -7,6 +7,7 @@ import json
 from io import BytesIO
 from types import SimpleNamespace
 
+import pytest
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import CompileError, DataError, IntegrityError
 from werkzeug.security import generate_password_hash
@@ -58,6 +59,16 @@ def _create_sqlite_backup_copy(app, filename):
         destination = os.path.join(app.config["BACKUP_FOLDER"], filename)
         shutil.copyfile(source, destination)
     return destination
+
+
+def _backup_table_row_counts(backup_path, table_names):
+    counts = {}
+    with sqlite3.connect(backup_path) as conn:
+        for table_name in table_names:
+            counts[table_name] = conn.execute(
+                f'SELECT COUNT(*) FROM "{table_name}"'
+            ).fetchone()[0]
+    return counts
 
 
 def populate_data():
@@ -732,18 +743,29 @@ def test_restore_backup_with_long_invoice_ids(app):
         assert Product.query.filter_by(name="BackupProduct").count() == 1
 
 
-def test_restore_sqlite_backup_into_postgres_restores_key_tables(app):
+def test_restore_backup_strict_mode_restores_known_good_backup_with_expected_counts(app):
     with app.app_context():
         populate_data()
-        backup_path = _create_sqlite_backup_copy(app, "sqlite_to_postgres.db")
+        backup_path = _create_sqlite_backup_copy(app, "strict_known_good.db")
+        expected_table_counts = _backup_table_row_counts(
+            backup_path, [table.name for table in db.metadata.sorted_tables]
+        )
+        expected_inserted = sum(expected_table_counts.values())
 
         Product.query.delete()
         PurchaseInvoice.query.delete()
         TerminalSale.query.delete()
         db.session.commit()
 
-        restore_backup(backup_path)
+        summary = restore_backup(backup_path, restore_mode="strict")
 
+        assert summary.mode == "strict"
+        assert summary.skipped_count == 0
+        assert summary.quarantine_report is None
+        assert summary.inserted_count == expected_inserted
+        assert Product.__tablename__ in summary.affected_tables
+        assert PurchaseInvoice.__tablename__ in summary.affected_tables
+        assert TerminalSale.__tablename__ in summary.affected_tables
         assert Product.query.filter_by(name="BackupProduct").count() == 1
         assert PurchaseInvoice.query.filter_by(invoice_number="VN001").count() == 1
         assert TerminalSale.query.count() == 1
@@ -762,9 +784,21 @@ def test_restore_backup_permissive_mode_skips_invalid_rows_and_writes_quarantine
             assert duplicate is not None
             conn.execute(
                 "INSERT INTO user (email, password, is_admin, active) VALUES (?, ?, ?, ?)",
+                ("permissive-good-a@example.com", duplicate[1], duplicate[2], duplicate[3]),
+            )
+            conn.execute(
+                "INSERT INTO user (email, password, is_admin, active) VALUES (?, ?, ?, ?)",
+                ("permissive-good-b@example.com", duplicate[1], duplicate[2], duplicate[3]),
+            )
+            conn.execute(
+                "INSERT INTO user (email, password, is_admin, active) VALUES (?, ?, ?, ?)",
                 (duplicate[0], duplicate[1], duplicate[2], duplicate[3]),
             )
             conn.commit()
+        expected_table_counts = _backup_table_row_counts(
+            backup_path, [table.name for table in db.metadata.sorted_tables]
+        )
+        expected_inserted = sum(expected_table_counts.values()) - 1
 
         for entry in os.listdir(backups_dir):
             if entry.startswith("restore_quarantine_") and entry.endswith(".json"):
@@ -774,9 +808,12 @@ def test_restore_backup_permissive_mode_skips_invalid_rows_and_writes_quarantine
 
         assert summary.mode == "permissive"
         assert summary.skipped_count == 1
-        assert summary.inserted_count > 0
+        assert summary.inserted_count == expected_inserted
         assert "user" in summary.affected_tables
         assert summary.quarantine_report is not None
+        assert User.query.filter_by(email="permissive-good-a@example.com").count() == 1
+        assert User.query.filter_by(email="permissive-good-b@example.com").count() == 1
+        assert User.query.filter_by(email=duplicate[0]).count() == 1
 
         report_path = os.path.join(backups_dir, summary.quarantine_report)
         assert os.path.exists(report_path)
@@ -787,10 +824,18 @@ def test_restore_backup_permissive_mode_skips_invalid_rows_and_writes_quarantine
         assert "email" in report_data["skipped_rows"][0]["primary_key"]
 
 
-def test_restore_backup_strict_mode_still_fails_on_invalid_rows(app):
+def test_restore_backup_strict_mode_raises_and_rolls_back_on_invalid_row(app):
     with app.app_context():
         populate_data()
         backup_path = _create_sqlite_backup_copy(app, "strict_invalid_row.db")
+        setting_before = Setting(name="RESTORE_ROLLBACK_SENTINEL", value="before")
+        db.session.add(setting_before)
+        db.session.commit()
+        baseline_counts = {
+            "user": User.query.count(),
+            "product": Product.query.count(),
+            "setting": Setting.query.count(),
+        }
 
         with sqlite3.connect(backup_path) as conn:
             duplicate = conn.execute(
@@ -803,11 +848,13 @@ def test_restore_backup_strict_mode_still_fails_on_invalid_rows(app):
             )
             conn.commit()
 
-        try:
+        with pytest.raises(RestoreBackupError):
             restore_backup(backup_path, restore_mode="strict")
-            assert False, "Expected RestoreBackupError in strict mode"
-        except RestoreBackupError as exc:
-            assert "constraint failure" in str(exc)
+
+        assert Setting.query.filter_by(name="RESTORE_ROLLBACK_SENTINEL").count() == 1
+        assert User.query.count() == baseline_counts["user"]
+        assert Product.query.count() == baseline_counts["product"]
+        assert Setting.query.count() == baseline_counts["setting"]
 
 
 def test_restore_backup_repairs_orphan_purchase_invoice_draft_when_enabled(app):
