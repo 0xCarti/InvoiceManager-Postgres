@@ -13,6 +13,7 @@ PostgreSQL is the only supported runtime database backend.
 - [Environment Variables](#required-environment-variables)
 - [Database Setup (Migrations)](#database-setup)
 - [Docker Setup](#docker-setup)
+- [Common Commands](#common-commands)
 - [Choose Your Setup Path](#choose-your-setup-path)
 - [Backups and Restore](#backups-and-restore-postgres-runtime)
 - [Testing](#running-tests)
@@ -248,6 +249,25 @@ For day-to-day local development, follow the canonical sequence in
 If you want a one-command boot that builds images and starts services,
 `docker compose up --build` remains supported; the web container entrypoint
 runs migrations before Gunicorn starts.
+
+## Common Commands
+
+Use these as quick-reference commands depending on whether you are running on
+your host (virtualenv) or with Docker Compose.
+
+| Action | Command | Notes/context (host vs Docker) |
+| --- | --- | --- |
+| Start app | `python run.py` | Host/venv flow. |
+| Start app (Docker) | `docker compose up -d web` | Docker Compose flow after migrations. |
+| Run migrations | `python -m flask --app run.py db upgrade` | Host/venv flow. |
+| Run migrations (Docker) | `./scripts/docker_migrate.sh` | Preferred Docker wrapper; equivalent to running migration inside the web service. |
+| Seed data | `python seed_data.py` | Host/venv flow (first boot or reset). |
+| Seed data (Docker) | `docker compose run --rm web python seed_data.py` | Docker Compose first boot only. |
+| Run tests | `pytest` | Host/venv flow. |
+| Run tests (Docker) | `docker compose run --rm web pytest` | Useful when tests should run inside container environment. |
+| Run pre-commit | `pre-commit run --all-files` | Host/venv flow from repo root. |
+| Run pre-commit (Docker) | `docker compose run --rm web pre-commit run --all-files` | Requires `pre-commit` available in the container image. |
+| Docker reset workflow | `docker compose down -v && docker compose up --build` | Docker only; removes local Postgres volume and rebuilds containers. |
 
 ## Choose Your Setup Path
 
