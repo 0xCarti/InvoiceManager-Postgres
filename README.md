@@ -43,6 +43,19 @@ The application requires several variables to be present in your environment:
 - `DATABASE_NAME` – PostgreSQL database name (defaults to `invoicemanager`).
 - `DATABASE_URL` / `SQLALCHEMY_DATABASE_URI` – optional full SQLAlchemy URI
   override (takes precedence over individual `DATABASE_*` values).
+- `SQLALCHEMY_POOL_PRE_PING` – enables stale-connection checks before checkout
+  (defaults to `true`).
+- `SQLALCHEMY_POOL_RECYCLE` – recycles pooled connections after this many
+  seconds (defaults to `1800`).
+- `SQLALCHEMY_POOL_TIMEOUT` – seconds to wait for a pooled connection before
+  timing out (defaults to `30`).
+- `SQLALCHEMY_POOL_SIZE` – steady-state number of pooled connections per
+  process (defaults to `5`).
+- `SQLALCHEMY_MAX_OVERFLOW` – extra burst connections allowed above
+  `SQLALCHEMY_POOL_SIZE` (defaults to `10`).
+- `SQLALCHEMY_POOL_USE_LIFO` – use LIFO checkout behavior to let older idle
+  connections expire naturally in containerized environments (defaults to
+  `true`).
 - `SMTP_HOST` – hostname of your SMTP server.
 - `SMTP_PORT` – port for the SMTP server (defaults to 25).
 - `SMTP_USERNAME` – username for SMTP authentication.
