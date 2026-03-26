@@ -871,6 +871,21 @@ def _read_backup_schema_marker(backup_engine) -> str | None:
     return marker_text or None
 
 
+def _is_single_integer_primary_key(table: Table):
+    """Return the table's single integer PK column when available."""
+
+    primary_key_columns = list(table.primary_key.columns)
+    if len(primary_key_columns) != 1:
+        return None
+    pk_column = primary_key_columns[0]
+    try:
+        if pk_column.type.python_type is int:
+            return pk_column
+    except (NotImplementedError, AttributeError):
+        return None
+    return None
+
+
 def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> RestoreSummary:
     restore_mode = _normalize_restore_mode(restore_mode)
     backup_engine = create_engine(f"sqlite+pysqlite:///{file_path}")
@@ -1110,6 +1125,47 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
                 if inserted:
                     inserted_total += inserted
                     affected_tables.add(table_name)
+
+        if target_conn.dialect.name == "postgresql":
+            logger.info("Running post-restore sequence reconciliation for PostgreSQL")
+            for table in db.metadata.sorted_tables:
+                pk_column = _is_single_integer_primary_key(table)
+                if pk_column is None:
+                    continue
+
+                sequence_name = target_conn.execute(
+                    db.text(
+                        "SELECT pg_get_serial_sequence(:table_name, :column_name)"
+                    ),
+                    {"table_name": table.name, "column_name": pk_column.name},
+                ).scalar_one_or_none()
+
+                if not sequence_name:
+                    logger.info(
+                        "Skipping sequence reset for %s.%s; no serial/identity sequence found",
+                        table.name,
+                        pk_column.name,
+                    )
+                    continue
+
+                max_pk_value = target_conn.execute(
+                    db.text(
+                        f'SELECT COALESCE(MAX("{pk_column.name}"), 1) FROM "{table.name}"'
+                    )
+                ).scalar_one()
+                target_conn.execute(
+                    db.text(
+                        "SELECT setval(CAST(:sequence_name AS regclass), :max_value, true)"
+                    ),
+                    {"sequence_name": sequence_name, "max_value": max_pk_value},
+                )
+                logger.info(
+                    "Reset sequence %s for %s.%s to %s",
+                    sequence_name,
+                    table.name,
+                    pk_column.name,
+                    max_pk_value,
+                )
 
     quarantine_report = None
     if skipped_rows:

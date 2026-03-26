@@ -236,6 +236,23 @@ def test_backup_and_restore(app):
             assert m.query.count() == count
 
 
+def test_restore_backup_allows_creating_product_without_pk_collision(app):
+    with app.app_context():
+        populate_data()
+        backup_path = _create_sqlite_backup_copy(app, "product_pk_restore.db")
+
+        Product.query.delete()
+        db.session.commit()
+        restore_backup(backup_path)
+
+        existing_ids = {product.id for product in Product.query.all()}
+        created = Product(name="PostRestoreProduct", price=2.0, cost=1.0, gl_code="6000")
+        db.session.add(created)
+        db.session.commit()
+
+        assert created.id not in existing_ids
+
+
 def test_restore_backup_file_rejects_path_traversal(client, app):
     with app.app_context():
         admin = User.query.filter_by(is_admin=True).first()
