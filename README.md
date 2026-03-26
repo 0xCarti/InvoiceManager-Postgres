@@ -10,6 +10,7 @@ PostgreSQL is the only supported runtime database backend.
 ## Table of Contents
 
 - [Installation](#installation)
+- [Gotchas](#gotchas)
 - [Environment Variables](#required-environment-variables)
 - [Database Setup (Migrations)](#database-setup)
 - [Docker Setup](#docker-setup)
@@ -22,6 +23,14 @@ PostgreSQL is the only supported runtime database backend.
 - [Documentation](#documentation)
 - [Documentation Index](#documentation-index)
 - [License](#license)
+
+
+## Gotchas
+
+- ⚠️ **Docker Compose DB host:** when app/tools run **inside Compose services**, set `DATABASE_HOST=postgres` (service DNS name), not `localhost`.
+- ⚠️ **Host-run tools:** when running commands from your host shell/venv (for example `flask db upgrade`), use `localhost` for DB host/URL unless you are targeting another host.
+- ⚠️ **Connection var precedence:** `DATABASE_URL` (and `SQLALCHEMY_DATABASE_URI`) override individual `DATABASE_*` parts when set.
+- ⚠️ **Restore prerequisite:** run migrations to latest **before** restoring a backup (`python -m flask --app run.py db upgrade` or `./scripts/docker_migrate.sh`).
 
 ## Installation
 
