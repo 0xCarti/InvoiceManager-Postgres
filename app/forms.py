@@ -859,7 +859,7 @@ class SpoilageFilterForm(FlaskForm):
     def __init__(self, *args, **kwargs):
         super(SpoilageFilterForm, self).__init__(*args, **kwargs)
         gl_codes = ItemForm._fetch_purchase_gl_codes()
-        self.purchase_gl_code.choices = [
+        self.purchase_gl_code.choices = [(0, "All Purchase GL Codes")] + [
             (g.id, f"{g.code} - {g.description}" if g.description else g.code)
             for g in gl_codes
         ]

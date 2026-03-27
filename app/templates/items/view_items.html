@@ -125,7 +125,8 @@
         method='get',
         reset_url=url_for('item.view_items', reset=1),
         dialog_class='modal-lg',
-        scope=request.endpoint
+        scope=request.endpoint,
+        save_defaults=True
     ) %}
         <div class="row g-3 mb-3">
             <div class="col-md-6">

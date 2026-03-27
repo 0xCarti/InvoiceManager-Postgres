@@ -9,7 +9,8 @@
     dialog_class='',
     form_class='',
     scope=None,
-    save_url=None
+    save_url=None,
+    save_defaults=False
 ) -%}
 <div
   class="modal fade"
@@ -45,7 +46,9 @@
           {% else %}
           <button type="reset" class="btn btn-outline-secondary" data-filter-reset>Reset</button>
           {% endif %}
+          {% if save_defaults %}
           <button type="button" class="btn btn-outline-primary" data-filter-save>Save as Default</button>
+          {% endif %}
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="submit" class="btn btn-primary">Apply</button>
         </div>

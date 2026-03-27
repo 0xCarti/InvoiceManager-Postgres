@@ -19,6 +19,7 @@ from flask import (
 )
 from flask_login import current_user, login_required
 from sqlalchemy import func, tuple_
+from sqlalchemy.orm import aliased
 
 from app import db, socketio
 from app.forms import ConfirmForm, DateRangeForm, TransferForm
@@ -271,6 +272,8 @@ def view_transfers():
     page = request.args.get("page", 1, type=int)
 
     query = Transfer.query
+    from_location_alias = aliased(Location)
+    to_location_alias = aliased(Location)
     if user_id:
         query = query.filter(Transfer.user_id == user_id)
     if transfer_id != "":
@@ -278,18 +281,22 @@ def view_transfers():
 
     if from_location_name:
         query = query.join(
-            Location, Transfer.from_location_id == Location.id
+            from_location_alias,
+            Transfer.from_location_id == from_location_alias.id,
         ).filter(
             build_text_match_predicate(
-                Location.name, from_location_name, "contains"
+                from_location_alias.name, from_location_name, "contains"
             )
         )
 
     if to_location_name:
         query = query.join(
-            Location, Transfer.to_location_id == Location.id
+            to_location_alias,
+            Transfer.to_location_id == to_location_alias.id,
         ).filter(
-            build_text_match_predicate(Location.name, to_location_name, "contains")
+            build_text_match_predicate(
+                to_location_alias.name, to_location_name, "contains"
+            )
         )
 
     if filter_option == "completed":

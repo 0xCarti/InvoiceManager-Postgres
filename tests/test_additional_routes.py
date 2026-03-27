@@ -58,3 +58,42 @@ def test_view_transfers(client, app):
         response = client.get("/transfers", follow_redirects=True)
         assert response.status_code == 200
         assert str(tid).encode() in response.data
+
+
+def test_view_transfers_filters_from_and_to_location_together(client, app):
+    with app.app_context():
+        user = User(
+            email="transferfilters@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        from_loc = Location(name="Warehouse A")
+        to_loc = Location(name="Front Stand")
+        other_to_loc = Location(name="Overflow")
+        db.session.add_all([user, from_loc, to_loc, other_to_loc])
+        db.session.commit()
+
+        matching_transfer = Transfer(
+            from_location_id=from_loc.id,
+            to_location_id=to_loc.id,
+            user_id=user.id,
+        )
+        other_transfer = Transfer(
+            from_location_id=from_loc.id,
+            to_location_id=other_to_loc.id,
+            user_id=user.id,
+        )
+        db.session.add_all([matching_transfer, other_transfer])
+        db.session.commit()
+        matching_transfer_id = matching_transfer.id
+        other_transfer_id = other_transfer.id
+
+    with client:
+        login(client, "transferfilters@example.com", "pass")
+        response = client.get(
+            "/transfers?filter=all&from_location=Warehouse&to_location=Front",
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert str(matching_transfer_id).encode() in response.data
+        assert str(other_transfer_id).encode() not in response.data

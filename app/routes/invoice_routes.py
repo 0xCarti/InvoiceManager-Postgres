@@ -455,6 +455,8 @@ def get_customer_tax_status(customer_id):
 @login_required
 def filter_invoices_api():
     """Return invoices matching filters as JSON."""
+    page = request.args.get("page", 1, type=int)
+    per_page = get_per_page()
     invoice_id = normalize_request_text_filter(request.args.get("invoice_id"))
     customer_id = request.args.get("customer_id", type=int)
     user_id = request.args.get("user_id", type=int)
@@ -491,7 +493,9 @@ def filter_invoices_api():
     elif payment_status == "unpaid":
         query = query.filter(Invoice.is_paid.is_(False))
 
-    invoices = query.order_by(Invoice.date_created.desc()).all()
+    invoices = query.order_by(Invoice.date_created.desc()).paginate(
+        page=page, per_page=per_page
+    )
     data = [
         {
             "id": inv.id,
@@ -499,9 +503,21 @@ def filter_invoices_api():
             "customer": f"{inv.customer.first_name} {inv.customer.last_name}",
             "payment_status": "Paid" if inv.is_paid else "Unpaid",
         }
-        for inv in invoices
+        for inv in invoices.items
     ]
-    return {"invoices": data}
+    return {
+        "invoices": data,
+        "pagination": {
+            "page": invoices.page,
+            "pages": invoices.pages,
+            "has_prev": invoices.has_prev,
+            "has_next": invoices.has_next,
+            "prev_num": invoices.prev_num,
+            "next_num": invoices.next_num,
+            "per_page": per_page,
+            "total": invoices.total,
+        },
+    }
 
 
 @invoice.route("/api/create_invoice", methods=["POST"])
@@ -534,9 +550,7 @@ def view_invoices():
     per_page = get_per_page()
     form.customer_id.choices = [(-1, "All")] + [
         (c.id, f"{c.first_name} {c.last_name}")
-        for c in Customer.query.paginate(
-            page=page, per_page=per_page
-        ).items
+        for c in Customer.query.order_by(Customer.last_name, Customer.first_name).all()
     ]
 
     user_id = request.args.get("user_id", type=int)

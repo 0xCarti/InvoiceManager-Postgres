@@ -218,13 +218,11 @@
     'filterModal',
     'Filter Invoices',
     form_id='filterForm',
-    form_action=url_for('invoice.filter_invoices_api'),
+    form_action=url_for('invoice.view_invoices'),
     method='get',
     reset_url=(url_for('invoice.view_invoices', user_id=request.args.get('user_id')) if request.args.get('user_id') else url_for('invoice.view_invoices')),
-    ajax=True,
     scope=request.endpoint
 ) %}
-    {{ form.hidden_tag() }}
     {% if request.args.get('user_id') %}
     <input type="hidden" name="user_id" value="{{ request.args.get('user_id') }}">
     {% endif %}
@@ -394,44 +392,6 @@ $(document).ready(function(){
         $selectAllInvoices.prop('indeterminate', hasSelection && selectedCount < totalCheckboxes);
     }
 
-    let currentFilters = '';
-    const searchFormEl = document.getElementById('invoice-search-form');
-    const searchInputEl = document.getElementById('invoice-search');
-    let searchDebounceTimer = null;
-
-    const filterModalEl = document.querySelector('[data-filter-modal]');
-    const filterFormEl = filterModalEl ? filterModalEl.querySelector('[data-filter-form]') : null;
-    const filterFormAction = filterFormEl ? (filterFormEl.getAttribute('action') || '{{ url_for('invoice.filter_invoices_api') }}') : '{{ url_for('invoice.filter_invoices_api') }}';
-
-    function buildInvoiceQueryParams() {
-        const params = new URLSearchParams(currentFilters);
-
-        if (searchFormEl) {
-            const formData = new FormData(searchFormEl);
-            for (const [key, value] of formData.entries()) {
-                if (!value || key === 'page' || key === 'invoice_id') {
-                    continue;
-                }
-                params.append(key, value);
-            }
-        }
-
-        const query = searchInputEl ? searchInputEl.value.trim() : '';
-        if (query) {
-            params.set('invoice_id', query);
-        } else {
-            params.delete('invoice_id');
-        }
-
-        return params.toString();
-    }
-
-    function loadInvoices(){
-        return $.getJSON(filterFormAction, buildInvoiceQueryParams(), function(data){
-            renderInvoices(data.invoices);
-        });
-    }
-
     async function runBulkInvoiceAction(action) {
         const selectedInvoiceIds = getSelectedInvoiceIds();
         if (!selectedInvoiceIds.length) {
@@ -466,28 +426,12 @@ $(document).ready(function(){
 
         try {
             await Promise.all(requests);
-            await loadInvoices();
+            window.location.reload();
         } catch (error) {
             window.alert('Unable to update one or more selected invoices. Please try again.');
         } finally {
             updateBulkInvoiceSelectionState();
         }
-    }
-
-    if (searchFormEl) {
-        $(searchFormEl).on('submit', function (e) {
-            e.preventDefault();
-            loadInvoices();
-        });
-    }
-
-    if (searchInputEl) {
-        $(searchInputEl).on('input', function () {
-            window.clearTimeout(searchDebounceTimer);
-            searchDebounceTimer = window.setTimeout(function () {
-                loadInvoices();
-            }, 250);
-        });
     }
 
     $selectAllInvoices.on('change', function () {
@@ -515,19 +459,6 @@ $(document).ready(function(){
             e.preventDefault();
         }
     });
-
-    if (filterFormEl) {
-        const $filterForm = $(filterFormEl);
-        $filterForm.on('submit', function(e){
-            e.preventDefault();
-            currentFilters = $filterForm.serialize();
-            loadInvoices();
-            if (filterModalEl) {
-                const modal = bootstrap.Modal.getInstance(filterModalEl);
-                if (modal) { modal.hide(); }
-            }
-        });
-    }
     updateBulkInvoiceSelectionState();
 
     // Create invoice form logic
@@ -636,10 +567,7 @@ $(document).ready(function(){
         });
         $('#products').val(products);
         $.post("{{ url_for('invoice.create_invoice_api') }}", $(this).serialize(), function () {
-            $('#createInvoiceModal').modal('hide');
-            $('#invoiceForm')[0].reset();
-            $('#productTable tbody').empty();
-            loadInvoices();
+            window.location.reload();
         });
     });
 });

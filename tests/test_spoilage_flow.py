@@ -51,3 +51,18 @@ def test_spoilage_page_filters(client, app):
     resp = client.get(f"/spoilage?purchase_gl_code={gl_id}")
     assert b"Milk" in resp.data
 
+
+def test_spoilage_filter_includes_explicit_all_gl_option(client, app):
+    with app.app_context():
+        if GLCode.query.filter_by(code="5000").first() is None:
+            db.session.add(GLCode(code="5000", description="Food Purchases"))
+            db.session.commit()
+
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    login(client, admin_email, admin_pass)
+
+    resp = client.get("/spoilage")
+    assert resp.status_code == 200
+    assert b"All Purchase GL Codes" in resp.data
+

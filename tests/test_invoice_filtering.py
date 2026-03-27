@@ -156,3 +156,56 @@ def test_view_invoices_actions_column_uses_overflow_menu_with_delete(client, app
     assert 'class="js-confirm-delete-invoice"' in html
     assert 'method="post"' in html
     assert 'class="dropdown-item text-danger">Delete</button>' in html
+
+
+def test_view_invoices_filter_form_submits_to_server_route(client, app):
+    user_email, _, _ = setup_invoices(app)
+
+    with client:
+        login(client, user_email, "pass")
+        response = client.get("/view_invoices", follow_redirects=True)
+
+    html = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert 'action="/view_invoices"' in html
+    assert "/api/filter_invoices" not in html
+
+
+def test_invoice_customer_filter_lists_all_customers_on_later_pages(client, app):
+    with app.app_context():
+        user = User(
+            email="invoicefilterchoices@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add(user)
+        db.session.commit()
+
+        first_customer_id = None
+        last_customer_id = None
+        for index in range(30):
+            customer = Customer(first_name=f"Customer{index:02d}", last_name="Filter")
+            db.session.add(customer)
+            db.session.flush()
+            if first_customer_id is None:
+                first_customer_id = customer.id
+            last_customer_id = customer.id
+            db.session.add(
+                Invoice(
+                    id=f"INVF{index:02d}",
+                    user_id=user.id,
+                    customer_id=customer.id,
+                    date_created=datetime(2023, 1, 1),
+                )
+            )
+        db.session.commit()
+
+    with client:
+        login(client, "invoicefilterchoices@example.com", "pass")
+        response = client.get("/view_invoices?page=2", follow_redirects=True)
+
+    html = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert f'value="{first_customer_id}"'.encode() in response.data
+    assert f'value="{last_customer_id}"'.encode() in response.data
+    assert "Page 2 of 2" in html

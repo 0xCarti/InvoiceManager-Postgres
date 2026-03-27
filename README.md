@@ -9,6 +9,8 @@ PostgreSQL is the only supported runtime database backend.
 
 ## Table of Contents
 
+<<<<<<< ours
+<<<<<<< ours
 - [Quick Gotchas](#quick-gotchas)
 - [Installation (Detailed)](#installation-detailed)
 - [Environment Variables](#environment-variables)
@@ -37,6 +39,22 @@ PostgreSQL is the only supported runtime database backend.
 - ⚠️ **Restore prerequisite:** run migrations to latest **before** restoring a backup (`python -m flask --app run.py db upgrade` or `./scripts/docker_migrate.sh`).
 
 ## Installation (Detailed)
+=======
+=======
+>>>>>>> theirs
+- [Installation](#installation)
+- [Environment Variables](#required-environment-variables)
+- [Database Setup (Migrations)](#database-setup)
+- [Docker Setup](#docker-setup)
+- [Backups and Restore](#backups-and-restore-postgres-runtime)
+- [Testing](#running-tests)
+- [Code Style](#code-style)
+- [Features](#features)
+- [Documentation](#documentation)
+- [License](#license)
+
+## Installation
+>>>>>>> theirs
 
 You can perform the steps below manually or run one of the setup scripts provided in the repository. `setup.sh` works on Linux/macOS and `setup.ps1` works on Windows. Each script optionally accepts a repository URL and target directory, clones the project, installs dependencies, prepares a `.env` file, runs the database migrations, and seeds the default admin account and settings.
 

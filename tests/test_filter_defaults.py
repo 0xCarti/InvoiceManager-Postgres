@@ -60,3 +60,25 @@ def test_reset_reverts_to_saved_defaults(client, app, save_filter_defaults):
         assert final_response.status_code == 200
         assert b"ArchivedItem" in final_response.data
         assert b"ActiveItem" not in final_response.data
+
+
+def test_save_defaults_button_only_shown_on_supported_filter_views(client, app):
+    email = setup_filter_data(app)
+    with client:
+        login(client, email, "pass")
+
+        items_response = client.get("/items")
+        assert items_response.status_code == 200
+        assert b"Save as Default" in items_response.data
+
+        products_response = client.get("/products")
+        assert products_response.status_code == 200
+        assert b"Save as Default" in products_response.data
+
+        customers_response = client.get("/customers")
+        assert customers_response.status_code == 200
+        assert b"Save as Default" not in customers_response.data
+
+        invoices_response = client.get("/view_invoices")
+        assert invoices_response.status_code == 200
+        assert b"Save as Default" not in invoices_response.data
