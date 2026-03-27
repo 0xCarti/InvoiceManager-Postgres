@@ -195,7 +195,7 @@
 
     const unitQtyInput = document.createElement('input');
     unitQtyInput.type = 'text';
-    unitQtyInput.setAttribute('inputmode', 'decimal');
+    unitQtyInput.setAttribute('inputmode', 'text');
     unitQtyInput.setAttribute('data-numeric-input', '1');
     unitQtyInput.className = 'form-control unit-quantity';
     unitQtyInput.name = `${prefix}-${index}-quantity`;
@@ -219,7 +219,7 @@
 
     const baseQtyInput = document.createElement('input');
     baseQtyInput.type = 'text';
-    baseQtyInput.setAttribute('inputmode', 'decimal');
+    baseQtyInput.setAttribute('inputmode', 'text');
     baseQtyInput.setAttribute('data-numeric-input', '1');
     baseQtyInput.className = 'form-control base-quantity';
     baseQtyInput.name = `${prefix}-${index}-base_quantity`;

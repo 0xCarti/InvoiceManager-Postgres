@@ -92,26 +92,26 @@
                     {% endif %}
                 </td>
                 <td>
-                    <input type="text" inputmode="decimal" data-numeric-input="1" class="form-control" name="open_{{ entry.item.id }}" value="{% if entry.sheet_values.opening_count is not none %}{{ '%.4f'|format(entry.sheet_values.opening_count) }}{% endif %}">
+                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="open_{{ entry.item.id }}" value="{% if entry.sheet_values.opening_count is not none %}{{ '%.4f'|format(entry.sheet_values.opening_count) }}{% endif %}">
                 </td>
                 <td>
-                    <input type="text" inputmode="decimal" data-numeric-input="1" class="form-control" name="in_{{ entry.item.id }}" value="{% if entry.sheet_values.transferred_in is not none %}{{ '%.4f'|format(entry.sheet_values.transferred_in) }}{% endif %}">
+                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="in_{{ entry.item.id }}" value="{% if entry.sheet_values.transferred_in is not none %}{{ '%.4f'|format(entry.sheet_values.transferred_in) }}{% endif %}">
                 </td>
                 <td>
-                    <input type="text" inputmode="decimal" data-numeric-input="1" class="form-control" name="out_{{ entry.item.id }}" value="{% if entry.sheet_values.transferred_out is not none %}{{ '%.4f'|format(entry.sheet_values.transferred_out) }}{% endif %}">
+                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="out_{{ entry.item.id }}" value="{% if entry.sheet_values.transferred_out is not none %}{{ '%.4f'|format(entry.sheet_values.transferred_out) }}{% endif %}">
                 </td>
                 <td>
-                    <input type="text" inputmode="decimal" data-numeric-input="1" class="form-control adjustments" name="adjust_{{ entry.item.id }}" value="{% if entry.sheet_values.adjustments is not none %}{{ '%.4f'|format(entry.sheet_values.adjustments) }}{% endif %}">
+                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control adjustments" name="adjust_{{ entry.item.id }}" value="{% if entry.sheet_values.adjustments is not none %}{{ '%.4f'|format(entry.sheet_values.adjustments) }}{% endif %}">
                 </td>
                 <td class="sales" data-sales="{{ '%.4f'|format(entry.sales) }}">{{ '%.2f'|format(entry.sales) }}</td>
                 <td>
-                    <input type="text" inputmode="decimal" data-numeric-input="1" class="form-control" name="eaten_{{ entry.item.id }}" value="{% if entry.sheet_values.eaten is not none %}{{ '%.4f'|format(entry.sheet_values.eaten) }}{% endif %}">
+                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="eaten_{{ entry.item.id }}" value="{% if entry.sheet_values.eaten is not none %}{{ '%.4f'|format(entry.sheet_values.eaten) }}{% endif %}">
                 </td>
                 <td>
-                    <input type="text" inputmode="decimal" data-numeric-input="1" class="form-control" name="spoiled_{{ entry.item.id }}" value="{% if entry.sheet_values.spoiled is not none %}{{ '%.4f'|format(entry.sheet_values.spoiled) }}{% endif %}">
+                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="spoiled_{{ entry.item.id }}" value="{% if entry.sheet_values.spoiled is not none %}{{ '%.4f'|format(entry.sheet_values.spoiled) }}{% endif %}">
                 </td>
                 <td>
-                    <input type="text" inputmode="decimal" data-numeric-input="1" class="form-control" name="close_{{ entry.item.id }}" value="{% if entry.sheet_values.closing_count is not none %}{{ '%.4f'|format(entry.sheet_values.closing_count) }}{% endif %}">
+                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="close_{{ entry.item.id }}" value="{% if entry.sheet_values.closing_count is not none %}{{ '%.4f'|format(entry.sheet_values.closing_count) }}{% endif %}">
                 </td>
                 <td class="variance">{% if entry.sheet %}{{ '%.2f'|format(variance) }}{% else %}0.00{% endif %}</td>
             </tr>

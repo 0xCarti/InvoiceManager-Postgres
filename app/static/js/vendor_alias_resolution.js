@@ -254,11 +254,13 @@ function initVendorAliasResolution(config) {
         factorLabel.setAttribute('for', factorId);
         factorLabel.textContent = 'Ratio to Base Unit';
         const factorInput = document.createElement('input');
-        factorInput.type = 'number';
+        factorInput.type = 'text';
         factorInput.classList.add('form-control', 'new-item-unit-factor');
         factorInput.id = factorId;
         factorInput.step = 'any';
         factorInput.min = '0';
+        factorInput.setAttribute('data-numeric-input', '1');
+        factorInput.setAttribute('inputmode', 'text');
         factorInput.value =
             options.factor !== undefined && options.factor !== null
                 ? options.factor

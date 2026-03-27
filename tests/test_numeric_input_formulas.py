@@ -2,6 +2,7 @@ import json
 import math
 from pathlib import Path
 
+import pytest
 from py_mini_racer import py_mini_racer
 
 from app.utils.numeric import coerce_float
@@ -10,11 +11,20 @@ from app.utils.numeric import coerce_float
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture(autouse=True)
+def gl_codes():
+    yield
+
+
 def _load_numeric_input_context():
     ctx = py_mini_racer.MiniRacer()
     ctx.eval(
         """
         var window = {};
+        window.Event = function (type, options) {
+            this.type = type;
+            this.bubbles = options && options.bubbles;
+        };
         var document = {
             readyState: 'complete',
             addEventListener: function () {},
@@ -22,13 +32,40 @@ def _load_numeric_input_context():
             documentElement: {}
         };
         window.document = document;
-        window.HTMLInputElement = function () {};
+        function HTMLInputElement() {
+            this.__attrs = {};
+            this.dataset = {};
+            this.value = '';
+        }
+        HTMLInputElement.prototype.getAttribute = function (name) {
+            return Object.prototype.hasOwnProperty.call(this.__attrs, name)
+                ? this.__attrs[name]
+                : null;
+        };
+        HTMLInputElement.prototype.setAttribute = function (name, value) {
+            this.__attrs[name] = String(value);
+        };
+        HTMLInputElement.prototype.hasAttribute = function (name) {
+            return Object.prototype.hasOwnProperty.call(this.__attrs, name);
+        };
+        HTMLInputElement.prototype.addEventListener = function () {};
+        HTMLInputElement.prototype.dispatchEvent = function () { return true; };
+        Object.defineProperty(HTMLInputElement.prototype, 'type', {
+            get: function () {
+                return this.getAttribute('type') || 'text';
+            },
+            set: function (value) {
+                this.__attrs.type = String(value);
+            }
+        });
+        window.HTMLInputElement = HTMLInputElement;
         window.Element = function () {};
         function MutationObserver(callback) {
             this.observe = function () {};
         }
         window.MutationObserver = MutationObserver;
         var MutationObserver = window.MutationObserver;
+        var Event = window.Event;
         var global = window;
         var globalThis = window;
         """
@@ -101,6 +138,29 @@ def test_parse_value_does_not_mutate_inputs_for_date_like_strings():
         )
         assert ctx.eval('isNaN(window.__dateParseResult)')
         assert ctx.eval('window.__dateValueAfterParse') == date_value
+
+
+def test_enable_within_uses_text_keyboard_for_formula_capable_inputs():
+    ctx = _load_numeric_input_context()
+    ctx.eval(
+        """
+        (function () {
+          var input = new window.HTMLInputElement();
+          input.type = 'number';
+          input.value = '=1+4';
+          input.setAttribute('inputmode', 'decimal');
+          window.NumericInput.enableWithin(input);
+          window.__enabledType = input.type;
+          window.__enabledInputMode = input.getAttribute('inputmode');
+          window.__enabledDataNumeric = input.getAttribute('data-numeric-input');
+          window.__enabledValue = input.value;
+        })();
+        """
+    )
+    assert ctx.eval("window.__enabledType") == "text"
+    assert ctx.eval("window.__enabledInputMode") == "text"
+    assert ctx.eval("window.__enabledDataNumeric") == "1"
+    assert ctx.eval("window.__enabledValue") == "5"
 
 
 def test_coerce_float_supports_comma_decimal_separator():

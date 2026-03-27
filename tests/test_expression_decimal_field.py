@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+import pytest
+from flask import Flask
 from flask_wtf import FlaskForm
 from werkzeug.datastructures import MultiDict
 
@@ -8,6 +10,18 @@ from app.forms import DecimalField
 
 class DummyExpressionForm(FlaskForm):
     value = DecimalField("Value", places=None)
+
+
+@pytest.fixture
+def app():
+    app = Flask(__name__)
+    app.config.update(SECRET_KEY="test-secret", WTF_CSRF_ENABLED=False)
+    return app
+
+
+@pytest.fixture(autouse=True)
+def gl_codes():
+    yield
 
 
 def test_expression_evaluates_when_prefixed(app):
@@ -36,7 +50,8 @@ def test_expression_field_marks_input_for_numeric_js(app):
         form = DummyExpressionForm()
         html = form.value()
         assert 'data-numeric-input="1"' in html
-        assert 'inputmode="decimal"' in html
+        assert 'type="text"' in html
+        assert 'inputmode="text"' in html
 
 
 def test_decimal_field_accepts_formatted_numbers(app):

@@ -150,11 +150,13 @@
             factorLabel.setAttribute("for", factorId);
             factorLabel.textContent = "Ratio to Base Unit";
             const factorField = document.createElement("input");
-            factorField.type = "number";
+            factorField.type = "text";
             factorField.classList.add("form-control", "new-item-unit-factor");
             factorField.id = factorId;
             factorField.step = "any";
             factorField.min = "0";
+            factorField.setAttribute("data-numeric-input", "1");
+            factorField.setAttribute("inputmode", "text");
             const factorValue =
                 options.factor !== undefined && options.factor !== null
                     ? options.factor

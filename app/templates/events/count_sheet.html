@@ -20,15 +20,15 @@
                 <tr>
                     <td>{{ entry.item.name }}</td>
                     <td>
-                        <input type="text" class="form-control" inputmode="decimal" data-numeric-input="1" name="recv_{{ entry.item.id }}" value="{{ entry.sheet.opening_count if entry.sheet else '' }}">
+                        <input type="text" class="form-control" inputmode="text" data-numeric-input="1" name="recv_{{ entry.item.id }}" value="{{ entry.sheet.opening_count if entry.sheet else '' }}">
                         {% if entry.recv_unit %} {{ entry.recv_unit.name }} of {{ entry.recv_unit.factor }} {{ entry.item.base_unit }}{% endif %}
                     </td>
                     <td>
-                        <input type="text" class="form-control" inputmode="decimal" data-numeric-input="1" name="trans_{{ entry.item.id }}" value="{{ entry.sheet.transferred_in if entry.sheet else '' }}">
+                        <input type="text" class="form-control" inputmode="text" data-numeric-input="1" name="trans_{{ entry.item.id }}" value="{{ entry.sheet.transferred_in if entry.sheet else '' }}">
                         {% if entry.trans_unit %} {{ entry.trans_unit.name }} of {{ entry.trans_unit.factor }} {{ entry.item.base_unit }}{% endif %}
                     </td>
                     <td>
-                        <input type="text" class="form-control" inputmode="decimal" data-numeric-input="1" name="base_{{ entry.item.id }}" value="{{ entry.sheet.transferred_out if entry.sheet else '' }}">
+                        <input type="text" class="form-control" inputmode="text" data-numeric-input="1" name="base_{{ entry.item.id }}" value="{{ entry.sheet.transferred_out if entry.sheet else '' }}">
                         {{ entry.item.base_unit }}
                     </td>
                 </tr>

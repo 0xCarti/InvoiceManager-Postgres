@@ -294,7 +294,7 @@
                 '-unit" class="form-select form-select-sm unit-select"></select>' +
                 "</div>" +
                 '<div class="col">' +
-                '<input type="number" step="any" name="items-' +
+                '<input type="text" step="any" inputmode="text" data-numeric-input="1" name="items-' +
                 index +
                 '-quantity" class="form-control form-control-sm" placeholder="Qty">' +
                 "</div>" +

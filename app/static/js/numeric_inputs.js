@@ -438,6 +438,30 @@
     resolveExpressionForInput(event.target);
   }
 
+  function isNumericInputMode(value) {
+    if (typeof value !== 'string') {
+      return false;
+    }
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'decimal' || normalized === 'numeric';
+  }
+
+  function configureFormulaKeyboard(input) {
+    const currentInputMode = input.getAttribute('inputmode');
+    if (!currentInputMode || isNumericInputMode(currentInputMode)) {
+      input.setAttribute('inputmode', 'text');
+    }
+    if (!input.hasAttribute('autocapitalize')) {
+      input.setAttribute('autocapitalize', 'off');
+    }
+    if (!input.hasAttribute('autocorrect')) {
+      input.setAttribute('autocorrect', 'off');
+    }
+    if (!input.hasAttribute('spellcheck')) {
+      input.setAttribute('spellcheck', 'false');
+    }
+  }
+
   function enableInput(input) {
     if (!input || input.dataset.numericExpressionEnabled === '1') {
       return;
@@ -452,10 +476,7 @@
       }
     }
     input.setAttribute('data-numeric-input', '1');
-
-    if (!input.hasAttribute('inputmode')) {
-      input.setAttribute('inputmode', 'decimal');
-    }
+    configureFormulaKeyboard(input);
     input.addEventListener('blur', handleInputBlur);
     input.addEventListener('change', handleInputChange);
     input.dataset.numericExpressionEnabled = '1';

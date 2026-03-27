@@ -36,7 +36,7 @@ from wtforms.validators import (
     Optional,
     ValidationError,
 )
-from wtforms.widgets import CheckboxInput, ListWidget
+from wtforms.widgets import CheckboxInput, ListWidget, TextInput
 
 from app.models import (
     Event,
@@ -83,13 +83,18 @@ class ExpressionDecimalField(WTFormsDecimalField):
     """Decimal field that supports simple math expressions prefixed with '='."""
 
     expression_prefix = "="
+    widget = TextInput()
 
     _CURRENCY_SYMBOLS = "$€£¥₽₩₹₺"
 
     def __init__(self, *args, render_kw=None, **kwargs):
         render_kw = dict(render_kw or {})
+        render_kw.setdefault("type", "text")
         render_kw.setdefault("data-numeric-input", "1")
-        render_kw.setdefault("inputmode", "decimal")
+        render_kw.setdefault("inputmode", "text")
+        render_kw.setdefault("autocapitalize", "off")
+        render_kw.setdefault("autocorrect", "off")
+        render_kw.setdefault("spellcheck", "false")
         super().__init__(*args, render_kw=render_kw, **kwargs)
 
     @classmethod

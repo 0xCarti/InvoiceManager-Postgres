@@ -205,8 +205,8 @@
                 <input type="hidden" name="items-${index}-position" class="item-position" value="">
             </div>
             <div class="col-auto unit-col"><select name="items-${index}-unit" id="items-${index}-unit" class="form-control unit-select" data-selected=""></select></div>
-            <div class="col quantity-col"><input type="text" name="items-${index}-quantity" id="items-${index}-quantity" class="form-control quantity" inputmode="decimal" data-numeric-input="1"></div>
-            <div class="col cost-col"><input type="text" name="items-${index}-cost" id="items-${index}-cost" class="form-control cost" inputmode="decimal" data-numeric-input="1"></div>
+            <div class="col quantity-col"><input type="text" name="items-${index}-quantity" id="items-${index}-quantity" class="form-control quantity" inputmode="text" data-numeric-input="1"></div>
+            <div class="col cost-col"><input type="text" name="items-${index}-cost" id="items-${index}-cost" class="form-control cost" inputmode="text" data-numeric-input="1"></div>
             <div class="col line-total-col"><span class="line-total">0.00</span></div>
             <div class="col-auto">
                 <div class="d-flex flex-column gap-1 move-button-stack">
@@ -221,7 +221,7 @@
                     <div class="col-md-4 col-sm-6">
                         <div class="d-flex gap-2 align-items-center">
                             <button type="button" class="btn btn-outline-secondary btn-sm toggle-deposit" data-active="0">Add container deposit</button>
-                            <div class="flex-grow-1 deposit-col d-none"><input type="text" name="items-${index}-container_deposit" id="items-${index}-container_deposit" class="form-control deposit" inputmode="decimal" data-numeric-input="1" data-initial-enabled="0" disabled></div>
+                            <div class="flex-grow-1 deposit-col d-none"><input type="text" name="items-${index}-container_deposit" id="items-${index}-container_deposit" class="form-control deposit" inputmode="text" data-numeric-input="1" data-initial-enabled="0" disabled></div>
                         </div>
                     </div>
                     <div class="col-md-4 col-sm-6">

@@ -30,7 +30,7 @@
         <div class="row mt-2">
             <div class="col">
                 {{ form.auto_backup_interval_value.label }}
-                {{ form.auto_backup_interval_value(class='form-control') }}
+                {{ form.auto_backup_interval_value(class='form-control', type='text', inputmode='text', **{'data-numeric-input': '1', 'autocapitalize': 'off', 'autocorrect': 'off', 'spellcheck': 'false'}) }}
             </div>
             <div class="col">
                 {{ form.auto_backup_interval_unit.label }}
@@ -39,7 +39,7 @@
         </div>
         <div class="form-group mt-2">
             {{ form.max_backups.label }}
-            {{ form.max_backups(class='form-control') }}
+            {{ form.max_backups(class='form-control', type='text', inputmode='text', **{'data-numeric-input': '1', 'autocapitalize': 'off', 'autocorrect': 'off', 'spellcheck': 'false'}) }}
         </div>
         <div class="mt-4">
             <h3>Purchase Receiving Defaults</h3>

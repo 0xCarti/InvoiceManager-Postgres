@@ -263,7 +263,7 @@
             <div class="col">
                 <select name="items-${idx}-unit" class="form-control unit-select"></select>
             </div>
-            <div class="col"><input type="number" name="items-${idx}-quantity" class="form-control" step="any"></div>
+            <div class="col"><input type="text" name="items-${idx}-quantity" class="form-control" step="any" inputmode="text" data-numeric-input="1"></div>
             <div class="col-auto form-check d-flex align-items-center">
                 <input type="checkbox" name="items-${idx}-countable" class="form-check-input" id="items-${idx}-countable">
                 <label class="form-check-label ms-1" for="items-${idx}-countable">${countableLabel}</label>

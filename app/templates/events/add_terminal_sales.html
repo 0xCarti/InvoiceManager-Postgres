@@ -15,7 +15,7 @@
             <td>{{ product.name }}</td>
             <td class="text-end">${{ '{:,.2f}'.format(product.price) }}</td>
             <td>
-                <input type="number" step="any" name="qty_{{ product.id }}" class="form-control terminal-sale-input"
+                <input type="text" step="any" inputmode="text" data-numeric-input="1" name="qty_{{ product.id }}" class="form-control terminal-sale-input"
                        value="{{ existing_sales.get(product.id, '') }}">
             </td>
         </tr>

@@ -54,7 +54,7 @@ $(document).ready(function () {
         var newRow = `
 <tr class="product-row">
     <td>${productName}</td>
-    <td><input type="text" class="form-control quantity" value="1" inputmode="decimal" data-numeric-input="1"></td>
+    <td><input type="text" class="form-control quantity" value="1" inputmode="text" data-numeric-input="1"></td>
     <td class="price">$${productPrice}</td>
     <td class="total">$${(parseFloat(productPrice)).toFixed(2)}</td>
     <td>
