@@ -6,7 +6,6 @@ import hashlib
 import hmac
 import os
 import time
-from email.utils import parseaddr
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request
@@ -14,24 +13,14 @@ from werkzeug.utils import secure_filename
 
 from app.services.pos_sales_ingest import ingest_pos_sales_attachment
 from app.utils.activity import log_activity
+from app.utils.pos_import_security import (
+    DEFAULT_MAX_ATTACHMENT_BYTES,
+    csv_config_set,
+    normalized_extension_allowlist,
+    sender_policy_error,
+)
 
 mailgun = Blueprint("mailgun", __name__, url_prefix="/webhooks/mailgun")
-
-
-def _csv_config_set(value: str | None) -> set[str]:
-    if not value:
-        return set()
-    return {entry.strip().lower() for entry in value.split(",") if entry.strip()}
-
-
-def _extract_domain(email_value: str | None) -> str:
-    if not email_value:
-        return ""
-    _, parsed = parseaddr(email_value)
-    candidate = parsed or email_value
-    if "@" not in candidate:
-        return ""
-    return candidate.split("@", 1)[1].strip().lower()
 
 
 def _mailgun_signature_valid() -> bool:
@@ -87,25 +76,31 @@ def inbound_mailgun():
 
     sender = request.form.get("sender") or request.form.get("from") or ""
     sender_value = sender.strip().lower()
-    sender_domain = _extract_domain(sender_value)
 
-    allowed_senders = _csv_config_set(current_app.config.get("MAILGUN_ALLOWED_SENDERS"))
-    allowed_domains = _csv_config_set(
+    allowed_senders = csv_config_set(current_app.config.get("MAILGUN_ALLOWED_SENDERS"))
+    allowed_domains = csv_config_set(
         current_app.config.get("MAILGUN_ALLOWED_SENDER_DOMAINS")
     )
-
-    if allowed_senders and sender_value not in allowed_senders:
-        return jsonify({"ok": False, "error": "sender_not_allowed"}), 403
-
-    if allowed_domains and sender_domain not in allowed_domains:
-        return jsonify({"ok": False, "error": "sender_domain_not_allowed"}), 403
-
-    allowed_extensions = _csv_config_set(
-        current_app.config.get("MAILGUN_ALLOWED_ATTACHMENT_EXTENSIONS", "xls,xlsx")
+    sender_error = sender_policy_error(
+        sender_value,
+        allowed_senders=allowed_senders,
+        allowed_domains=allowed_domains,
     )
-    normalized_extensions = {
-        ext if ext.startswith(".") else f".{ext}" for ext in allowed_extensions
-    }
+    if sender_error:
+        status_code = 503 if sender_error == "sender_allowlist_not_configured" else 403
+        return jsonify({"ok": False, "error": sender_error}), status_code
+
+    normalized_extensions = normalized_extension_allowlist(
+        current_app.config.get("MAILGUN_ALLOWED_ATTACHMENT_EXTENSIONS")
+    )
+    max_attachment_bytes = int(
+        current_app.config.get(
+            "POS_IMPORT_MAX_ATTACHMENT_BYTES",
+            current_app.config.get(
+                "MAX_UPLOAD_FILE_SIZE_BYTES", DEFAULT_MAX_ATTACHMENT_BYTES
+            ),
+        )
+    )
 
     if not request.files:
         return jsonify({"ok": False, "error": "missing_attachment"}), 400
@@ -138,6 +133,8 @@ def inbound_mailgun():
         content = upload.read()
         if not content:
             continue
+        if len(content) > max_attachment_bytes:
+            return jsonify({"ok": False, "error": "attachment_too_large"}), 413
 
         message_id = _message_id()
         try:

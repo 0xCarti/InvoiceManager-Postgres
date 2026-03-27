@@ -40,20 +40,27 @@
                     {% endif %}
                 </td>
                 <td>
-                    <div class="form-check form-switch">
-                        <input
-                            class="form-check-input js-transfer-item-toggle"
-                            type="checkbox"
-                            role="switch"
-                            id="transfer-item-{{ item.id }}"
-                            data-complete-url="{{ url_for('transfer.complete_transfer_item', transfer_item_id=item.id) }}"
-                            data-uncomplete-url="{{ url_for('transfer.uncomplete_transfer_item', transfer_item_id=item.id) }}"
-                            {% if is_completed %}checked{% endif %}
-                        >
-                        <label class="form-check-label" for="transfer-item-{{ item.id }}">
-                            {% if is_completed %}Complete{% else %}Incomplete{% endif %}
-                        </label>
-                    </div>
+                    <form
+                        method="post"
+                        action="{{ url_for('transfer.complete_transfer_item', transfer_item_id=item.id) }}"
+                        class="d-inline js-transfer-item-status-form"
+                        data-complete-url="{{ url_for('transfer.complete_transfer_item', transfer_item_id=item.id) }}"
+                        data-uncomplete-url="{{ url_for('transfer.uncomplete_transfer_item', transfer_item_id=item.id) }}"
+                    >
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <div class="form-check form-switch">
+                            <input
+                                class="form-check-input js-transfer-item-toggle"
+                                type="checkbox"
+                                role="switch"
+                                id="transfer-item-{{ item.id }}"
+                                {% if is_completed %}checked{% endif %}
+                            >
+                            <label class="form-check-label" for="transfer-item-{{ item.id }}">
+                                {% if is_completed %}Complete{% else %}Incomplete{% endif %}
+                            </label>
+                        </div>
+                    </form>
                 </td>
             </tr>
             {% endfor %}
@@ -64,12 +71,14 @@
 <script nonce="{{ csp_nonce }}">
     document.querySelectorAll('.js-transfer-item-toggle').forEach(function(toggle) {
         toggle.addEventListener('change', function(event) {
-            const completeUrl = event.target.dataset.completeUrl;
-            const uncompleteUrl = event.target.dataset.uncompleteUrl;
-            if (!completeUrl || !uncompleteUrl) {
+            const form = event.target.form;
+            if (!form) {
                 return;
             }
-            window.location.href = event.target.checked ? completeUrl : uncompleteUrl;
+            form.action = event.target.checked
+                ? form.dataset.completeUrl
+                : form.dataset.uncompleteUrl;
+            form.submit();
         });
     });
 </script>

@@ -300,7 +300,10 @@
                     <a href="{{ url_for('purchase.view_purchase_invoice', invoice_id=inv.id) }}" class="btn btn-sm btn-primary">View</a>
                     <a href="{{ url_for('report.invoice_gl_code_report', invoice_id=inv.id) }}" class="btn btn-sm btn-outline-primary">Invoice GL Code Report</a>
                     <a href="{{ url_for('notes.entity_notes', entity_type='purchase_invoice', entity_id=inv.id) }}" class="btn btn-sm btn-outline-secondary">Notes</a>
-                    <a href="{{ url_for('purchase.reverse_purchase_invoice', invoice_id=inv.id) }}" class="btn btn-sm btn-danger">Reverse</a>
+                    <form method="post" action="{{ url_for('purchase.reverse_purchase_invoice', invoice_id=inv.id) }}" class="d-inline">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm btn-danger">Reverse</button>
+                    </form>
                 </td>
             </tr>
         {% endfor %}

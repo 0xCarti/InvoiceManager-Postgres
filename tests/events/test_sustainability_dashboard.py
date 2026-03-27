@@ -157,3 +157,25 @@ def test_sustainability_dashboard_handles_events_without_data(
     assert report["item_leaderboard"] == []
     assert report["goal"]["target"] is None
     assert report["goal"]["progress_pct"] is None
+
+
+def test_sustainability_dashboard_escapes_chart_payload(
+    client, app, sustainability_event
+):
+    payload = sustainability_event
+
+    with app.app_context():
+        malicious_location = db.session.get(
+            Location, payload["location_ids"]["A"]
+        )
+        malicious_location.name = 'North </script><script>alert("xss")</script>'
+        db.session.commit()
+
+    with client:
+        login(client, payload["user_email"], "pass")
+        resp = client.get(f"/events/{payload['event_id']}/sustainability")
+
+    assert resp.status_code == 200
+    page = resp.get_data(as_text=True)
+    assert '</script><script>alert("xss")</script>' not in page
+    assert "\\u003c/script\\u003e\\u003cscript\\u003ealert" in page

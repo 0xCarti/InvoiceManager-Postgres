@@ -37,6 +37,7 @@ def test_poll_once_ingests_and_deduplicates(app, monkeypatch, tmp_path):
         {
             "POS_IMPORT_INGEST_MODE": "poll",
             "MAILGUN_INBOUND_STORAGE_DIR": str(tmp_path / "mailgun_staging"),
+            "MAILGUN_ALLOWED_SENDER_DOMAINS": "example.com",
         }
     )
 
@@ -65,3 +66,21 @@ def test_poll_once_noop_when_mode_not_poll(app):
     result = pos_sales_polling.run_pos_sales_mailbox_poll_once(app)
 
     assert result == {"messages": 0, "imports": 0, "duplicates": 0, "errors": 0}
+
+
+def test_poll_once_rejects_messages_when_sender_allowlist_missing(app, monkeypatch):
+    message = PollMessage(
+        message_id="<poll-test-missing-allowlist>",
+        sender="reports@example.com",
+        ack_token="uid-2",
+        attachments=[PollAttachment(filename="game_sales.xls", content=b"1234")],
+    )
+    provider = _StubProvider([message])
+
+    app.config.update({"POS_IMPORT_INGEST_MODE": "poll"})
+    monkeypatch.setattr(pos_sales_polling, "_build_provider", lambda _app: provider)
+
+    result = pos_sales_polling.run_pos_sales_mailbox_poll_once(app)
+
+    assert result == {"messages": 1, "imports": 0, "duplicates": 0, "errors": 1}
+    assert provider.ack_tokens == []

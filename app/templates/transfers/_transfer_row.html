@@ -17,11 +17,17 @@
         <a href="{{ url_for('transfer.view_transfer', transfer_id=transfer.id) }}" class="btn btn-primary" target="_blank">View</a>
         <button type="button" class="btn btn-secondary edit-transfer-btn" data-id="{{ transfer.id }}">Edit</button>
         {% if transfer.completed %}
-        <a href="{{ url_for('transfer.uncomplete_transfer', transfer_id=transfer.id) }}" class="btn btn-success">Incomplete</a>
+        <form method="post" action="{{ url_for('transfer.uncomplete_transfer', transfer_id=transfer.id) }}" class="d-inline">
+            {{ form.hidden_tag() }}
+            <button type="submit" class="btn btn-success">Incomplete</button>
+        </form>
         {% else %}
-        <a href="{{ url_for('transfer.complete_transfer', transfer_id=transfer.id) }}" class="btn btn-success">
-            {% if ns.completed_items > 0 %}Finish{% else %}Complete{% endif %}
-        </a>
+        <form method="post" action="{{ url_for('transfer.complete_transfer', transfer_id=transfer.id) }}" class="d-inline">
+            {{ form.hidden_tag() }}
+            <button type="submit" class="btn btn-success">
+                {% if ns.completed_items > 0 %}Finish{% else %}Complete{% endif %}
+            </button>
+        </form>
         {% endif %}
         <form action="{{ url_for('transfer.delete_transfer', transfer_id=transfer.id) }}" method="post" class="d-inline">
             {{ form.hidden_tag() }}

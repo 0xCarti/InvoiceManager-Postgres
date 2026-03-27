@@ -144,3 +144,27 @@ def test_product_create_and_list_surfaces_show_both_price_labels(client, app):
     create_page = create_response.get_data(as_text=True)
     assert 'Terminal/Event Sell Price' in create_page
     assert 'Sales Invoice Price (3rd-party customer)' in create_page
+
+
+def test_search_products_requires_login_and_ignores_blank_query(client, app):
+    with app.app_context():
+        db.session.add(
+            Product(name="Searchable Product", price=12.0, invoice_sale_price=15.0)
+        )
+        db.session.commit()
+
+    anonymous = client.get("/search_products?query=Searchable")
+    assert anonymous.status_code == 302
+    assert "/auth/login" in anonymous.headers["Location"]
+
+    login_admin(client, app)
+
+    blank = client.get("/search_products?query=")
+    assert blank.status_code == 200
+    assert blank.get_json() == []
+
+    filled = client.get("/search_products?query=Searchable")
+    assert filled.status_code == 200
+    payload = filled.get_json()
+    assert len(payload) == 1
+    assert payload[0]["name"] == "Searchable Product"

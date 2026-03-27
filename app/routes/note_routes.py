@@ -324,6 +324,8 @@ def delete_note(entity_type: str, entity_id: str, note_id: int):
     config, entity, identifier, note = _load_note_or_404(
         entity_type, entity_id, note_id
     )
+    if not (current_user.is_admin or note.user_id == current_user.id):
+        abort(403)
     db.session.delete(note)
     db.session.commit()
     log_activity(

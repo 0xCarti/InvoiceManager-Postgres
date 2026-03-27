@@ -226,9 +226,23 @@
             justify-content: center;
             padding: 0.2rem;
             line-height: 1;
+            border: 0;
+            background: transparent;
             border-radius: 0.375rem;
             color: rgba(var(--bs-emphasis-color-rgb), 0.46);
             transition: color 0.15s ease, background-color 0.15s ease;
+        }
+
+        #navbarNav .offcanvas-body .nav-inline-form {
+            margin: 0;
+        }
+
+        #navbarNav .offcanvas-body .nav-link-button {
+            width: 100%;
+            border: 0;
+            background: transparent;
+            text-align: left;
+            font: inherit;
         }
 
         #navbarNav .offcanvas-body .nav-favorite-toggle:hover,
@@ -560,9 +574,13 @@
                                     {% else %}
                                     <span class="nav-link disabled" title="Unavailable in this build">{{ label }}</span>
                                     {% endif %}
-                                    <a href="{{ url_for('auth.toggle_favorite', link=endpoint) }}" class="ms-1 nav-favorite-toggle" aria-label="Toggle favorite for {{ label }}" title="Toggle favorite">
-                                        {% if endpoint in current_user.get_favorites() %}&#9733;{% else %}&#9734;{% endif %}
-                                    </a>
+                                    <form method="post" action="{{ url_for('auth.toggle_favorite', link=endpoint) }}" class="nav-inline-form">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="next" value="{{ request.full_path }}">
+                                        <button type="submit" class="ms-1 nav-favorite-toggle" aria-label="Toggle favorite for {{ label }}" title="Toggle favorite">
+                                            {% if endpoint in current_user.get_favorites() %}&#9733;{% else %}&#9734;{% endif %}
+                                        </button>
+                                    </form>
                                 </li>
                                 {% endfor %}
                             </ul>
@@ -589,12 +607,19 @@
                             {% else %}
                             <span class="nav-link disabled" title="Unavailable in this build">Profile</span>
                             {% endif %}
-                            <a href="{{ url_for('auth.toggle_favorite', link='auth.profile') }}" class="ms-1 nav-favorite-toggle" aria-label="Toggle favorite for Profile" title="Toggle favorite">
-                                {% if 'auth.profile' in current_user.get_favorites() %}&#9733;{% else %}&#9734;{% endif %}
-                            </a>
+                            <form method="post" action="{{ url_for('auth.toggle_favorite', link='auth.profile') }}" class="nav-inline-form">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="next" value="{{ request.full_path }}">
+                                <button type="submit" class="ms-1 nav-favorite-toggle" aria-label="Toggle favorite for Profile" title="Toggle favorite">
+                                    {% if 'auth.profile' in current_user.get_favorites() %}&#9733;{% else %}&#9734;{% endif %}
+                                </button>
+                            </form>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="{{ url_for('auth.logout') }}">Logout</a>
+                            <form method="post" action="{{ url_for('auth.logout') }}" class="nav-inline-form">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="nav-link nav-link-button">Logout</button>
+                            </form>
                         </li>
                         {% endif %}
                     </ul>

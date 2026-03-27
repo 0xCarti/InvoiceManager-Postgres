@@ -62,7 +62,10 @@
         {% if not event.closed %}
         <a class="btn btn-outline-secondary" href="{{ url_for('event.upload_terminal_sales', event_id=event.id) }}">Upload Sales</a>
         {% if unconfirmed_count == 0 %}
-        <a class="btn btn-danger" id="close-event-btn" href="{{ url_for('event.close_event', event_id=event.id) }}">Close Event</a>
+        <form method="post" action="{{ url_for('event.close_event', event_id=event.id) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger">Close Event</button>
+        </form>
         {% else %}
         <button type="button" class="btn btn-danger" disabled title="All locations must be confirmed before closing this event.">Close Event</button>
         {% endif %}
@@ -178,23 +181,6 @@
         </div>
     {% endif %}
 </div>
-{% if not event.closed and unconfirmed_count %}
-<script nonce="{{ csp_nonce }}">
-    document.addEventListener('DOMContentLoaded', function () {
-        const closeEventButton = document.getElementById('close-event-btn');
-        if (!closeEventButton) {
-            return;
-        }
-
-        const warningMessage = 'There are locations for this event that are still unconfirmed. Closing the event will prevent further updates. Do you want to continue?';
-        closeEventButton.addEventListener('click', function (event) {
-            if (!confirm(warningMessage)) {
-                event.preventDefault();
-            }
-        });
-    });
-</script>
-{% endif %}
 {% include 'shared/email_stand_sheet_modal.html' %}
 {% endblock %}
 {% block scripts %}

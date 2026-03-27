@@ -55,6 +55,13 @@ def test_password_reset_flow(client, app, monkeypatch):
         follow_redirects=True,
     )
 
+    reused = client.post(
+        f"/auth/reset/{token}",
+        data={"new_password": "anotherpass", "confirm_password": "anotherpass"},
+        follow_redirects=True,
+    )
+    assert b"Invalid or expired token." in reused.data
+
     with app.app_context():
         user = User.query.filter_by(email="reset@example.com").first()
         assert check_password_hash(user.password, "newpass")
@@ -71,4 +78,7 @@ def test_password_reset_unknown_email(client):
         data={"email": "missing@example.com"},
         follow_redirects=True,
     )
-    assert b"No account found with that email." in response.data
+    assert (
+        b"If an account exists for that email, a reset link has been sent."
+        in response.data
+    )

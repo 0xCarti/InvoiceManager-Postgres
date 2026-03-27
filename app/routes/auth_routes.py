@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import platform
@@ -32,6 +33,7 @@ from app import limiter
 from app.forms import (
     ActivityLogFilterForm,
     ChangePasswordForm,
+    CSRFOnlyForm,
     ConfirmForm,
     CreateBackupForm,
     DeleteForm,
@@ -268,8 +270,17 @@ def _serializer():
     return URLSafeTimedSerializer(current_app.config["SECRET_KEY"])
 
 
-def generate_reset_token(user_id: int) -> str:
-    return _serializer().dumps({"user_id": user_id})
+def _reset_token_password_fingerprint(user: User) -> str:
+    return hashlib.sha256((user.password or "").encode("utf-8")).hexdigest()
+
+
+def generate_reset_token(user: User) -> str:
+    return _serializer().dumps(
+        {
+            "user_id": user.id,
+            "password_fingerprint": _reset_token_password_fingerprint(user),
+        }
+    )
 
 
 def verify_reset_token(token: str, max_age: int = 3600):
@@ -277,7 +288,14 @@ def verify_reset_token(token: str, max_age: int = 3600):
         data = _serializer().loads(token, max_age=max_age)
     except (BadSignature, SignatureExpired):
         return None
-    return db.session.get(User, data.get("user_id"))
+    user = db.session.get(User, data.get("user_id"))
+    if user is None:
+        return None
+    if data.get("password_fingerprint") != _reset_token_password_fingerprint(
+        user
+    ):
+        return None
+    return user
 
 
 @auth.route("/login", methods=["GET", "POST"])
@@ -314,10 +332,13 @@ def login():
     )
 
 
-@auth.route("/logout")
+@auth.route("/logout", methods=["POST"])
 @login_required
 def logout():
     """Log the current user out."""
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        abort(400)
     user_id = current_user.id
     logout_user()
     log_activity("Logged out", user_id)
@@ -336,18 +357,18 @@ def reset_request():
     form = PasswordResetRequestForm()
     if form.validate_on_submit():
         user = User.query.filter_by(email=form.email.data).first()
-        if not user:
-            flash("No account found with that email.", "danger")
-            return render_template("auth/reset_request.html", form=form)
-
-        token = generate_reset_token(user.id)
-        reset_url = url_for("auth.reset_token", token=token, _external=True)
-        send_email(
-            user.email,
-            "Password Reset",
-            f"Click the link to reset your password: {reset_url}",
+        if user:
+            token = generate_reset_token(user)
+            reset_url = url_for("auth.reset_token", token=token, _external=True)
+            send_email(
+                user.email,
+                "Password Reset",
+                f"Click the link to reset your password: {reset_url}",
+            )
+        flash(
+            "If an account exists for that email, a reset link has been sent.",
+            "success",
         )
-        flash("A reset link has been sent to your email.", "success")
         return redirect(url_for("auth.login"))
     return render_template("auth/reset_request.html", form=form)
 
@@ -446,13 +467,16 @@ def profile():
     )
 
 
-@auth.route("/favorite/<path:link>")
+@auth.route("/favorite/<path:link>", methods=["POST"])
 @login_required
 def toggle_favorite(link):
     """Toggle a navigation link as favourite for the current user."""
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        abort(400)
     current_user.toggle_favorite(link)
     db.session.commit()
-    referrer = request.referrer
+    referrer = request.form.get("next") or request.referrer
     if referrer:
         safe_referrer = referrer.replace("\\", "")
         parsed = urlparse(safe_referrer)
@@ -548,10 +572,13 @@ def user_profile(user_id):
     )
 
 
-@admin.route("/activate_user/<int:user_id>", methods=["GET"])
+@admin.route("/activate_user/<int:user_id>", methods=["POST"])
 @login_required
 def activate_user(user_id):
     """Activate a user account."""
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        abort(400)
     if not current_user.is_admin:
         abort(403)  # Abort if the current user is not an admin
 
@@ -594,7 +621,7 @@ def users():
             )
             db.session.add(new_user)
             db.session.commit()
-            token = generate_reset_token(new_user.id)
+            token = generate_reset_token(new_user)
             invite_url = url_for(
                 "auth.reset_token", token=token, _external=True
             )

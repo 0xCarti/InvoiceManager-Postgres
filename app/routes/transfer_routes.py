@@ -125,6 +125,29 @@ def _build_transfer_item_quantities(transfer_items, multiplier):
     return quantities
 
 
+def _transfer_confirmation_submitted() -> bool:
+    return request.method == "POST" and "submit" in request.form
+
+
+def _render_transfer_confirmation(
+    *,
+    form: ConfirmForm,
+    warnings: list[str],
+    action_url: str,
+    cancel_url: str,
+    title: str,
+    default_message: str,
+):
+    return render_template(
+        "confirm_action.html",
+        form=form,
+        warnings=warnings or [default_message],
+        action_url=action_url,
+        cancel_url=cancel_url,
+        title=title,
+    )
+
+
 def _sync_transfer_completed(transfer_obj):
     transfer_obj.completed = all(
         transfer_item.completed_quantity >= transfer_item.quantity
@@ -641,9 +664,8 @@ def complete_transfer(transfer_id):
         quantities=quantities,
     )
     form = ConfirmForm()
-    if warnings and request.method == "GET":
-        return render_template(
-            "confirm_action.html",
+    if request.method == "GET":
+        return _render_transfer_confirmation(
             form=form,
             warnings=warnings,
             action_url=url_for(
@@ -651,10 +673,10 @@ def complete_transfer(transfer_id):
             ),
             cancel_url=url_for("transfer.view_transfers"),
             title="Confirm Transfer Completion",
+            default_message="Are you sure you want to complete this transfer?",
         )
-    if warnings and not form.validate_on_submit():
-        return render_template(
-            "confirm_action.html",
+    if warnings and not _transfer_confirmation_submitted():
+        return _render_transfer_confirmation(
             form=form,
             warnings=warnings,
             action_url=url_for(
@@ -662,6 +684,7 @@ def complete_transfer(transfer_id):
             ),
             cancel_url=url_for("transfer.view_transfers"),
             title="Confirm Transfer Completion",
+            default_message="Are you sure you want to complete this transfer?",
         )
     completed_at = datetime.utcnow()
     for transfer_item in transfer_items:
@@ -706,9 +729,8 @@ def complete_transfer_item(transfer_item_id):
         quantities=quantities,
     )
     form = ConfirmForm()
-    if warnings and request.method == "GET":
-        return render_template(
-            "confirm_action.html",
+    if request.method == "GET":
+        return _render_transfer_confirmation(
             form=form,
             warnings=warnings,
             action_url=url_for(
@@ -719,10 +741,10 @@ def complete_transfer_item(transfer_item_id):
                 "transfer.view_transfer", transfer_id=transfer.id
             ),
             title="Confirm Transfer Item Completion",
+            default_message="Are you sure you want to complete this transfer item?",
         )
-    if warnings and not form.validate_on_submit():
-        return render_template(
-            "confirm_action.html",
+    if warnings and not _transfer_confirmation_submitted():
+        return _render_transfer_confirmation(
             form=form,
             warnings=warnings,
             action_url=url_for(
@@ -733,6 +755,7 @@ def complete_transfer_item(transfer_item_id):
                 "transfer.view_transfer", transfer_id=transfer.id
             ),
             title="Confirm Transfer Item Completion",
+            default_message="Are you sure you want to complete this transfer item?",
         )
     completed_at = datetime.utcnow()
     transfer_item.completed_quantity = transfer_item.quantity
@@ -775,9 +798,8 @@ def uncomplete_transfer(transfer_id):
         quantities=quantities,
     )
     form = ConfirmForm()
-    if warnings and request.method == "GET":
-        return render_template(
-            "confirm_action.html",
+    if request.method == "GET":
+        return _render_transfer_confirmation(
             form=form,
             warnings=warnings,
             action_url=url_for(
@@ -785,10 +807,10 @@ def uncomplete_transfer(transfer_id):
             ),
             cancel_url=url_for("transfer.view_transfers"),
             title="Confirm Transfer Incomplete",
+            default_message="Are you sure you want to mark this transfer incomplete?",
         )
-    if warnings and not form.validate_on_submit():
-        return render_template(
-            "confirm_action.html",
+    if warnings and not _transfer_confirmation_submitted():
+        return _render_transfer_confirmation(
             form=form,
             warnings=warnings,
             action_url=url_for(
@@ -796,6 +818,7 @@ def uncomplete_transfer(transfer_id):
             ),
             cancel_url=url_for("transfer.view_transfers"),
             title="Confirm Transfer Incomplete",
+            default_message="Are you sure you want to mark this transfer incomplete?",
         )
     transfer.completed = False
     for transfer_item in transfer_items:
@@ -839,9 +862,8 @@ def uncomplete_transfer_item(transfer_item_id):
         quantities=quantities,
     )
     form = ConfirmForm()
-    if warnings and request.method == "GET":
-        return render_template(
-            "confirm_action.html",
+    if request.method == "GET":
+        return _render_transfer_confirmation(
             form=form,
             warnings=warnings,
             action_url=url_for(
@@ -852,10 +874,10 @@ def uncomplete_transfer_item(transfer_item_id):
                 "transfer.view_transfer", transfer_id=transfer.id
             ),
             title="Confirm Transfer Item Incomplete",
+            default_message="Are you sure you want to mark this transfer item incomplete?",
         )
-    if warnings and not form.validate_on_submit():
-        return render_template(
-            "confirm_action.html",
+    if warnings and not _transfer_confirmation_submitted():
+        return _render_transfer_confirmation(
             form=form,
             warnings=warnings,
             action_url=url_for(
@@ -866,6 +888,7 @@ def uncomplete_transfer_item(transfer_item_id):
                 "transfer.view_transfer", transfer_id=transfer.id
             ),
             title="Confirm Transfer Item Incomplete",
+            default_message="Are you sure you want to mark this transfer item incomplete?",
         )
     transfer_item.completed_quantity = 0.0
     transfer_item.completed_at = None

@@ -1066,15 +1066,20 @@ def delete_product(product_id):
 
 
 @product.route("/search_products")
+@login_required
 def search_products():
     """Return products matching a search query."""
-    # Retrieve query parameter from the URL
     query = normalize_request_text_filter(request.args.get("query"))
-    # Query the database for products that match the search query
-    matched_products = Product.query.filter(
-        build_text_match_predicate(Product.name, query, "contains")
-    ).all()
-    # Include id so that search results can be referenced elsewhere
+    if not query:
+        return jsonify([])
+    matched_products = (
+        Product.query.filter(
+            build_text_match_predicate(Product.name, query, "contains")
+        )
+        .order_by(Product.name)
+        .limit(25)
+        .all()
+    )
     product_data = [
         {
             "id": product.id,
@@ -1086,5 +1091,4 @@ def search_products():
         }
         for product in matched_products
     ]
-    # Return matched product names and prices as JSON
     return jsonify(product_data)

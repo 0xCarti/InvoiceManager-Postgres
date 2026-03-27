@@ -9,14 +9,12 @@ PostgreSQL is the only supported runtime database backend.
 
 ## Table of Contents
 
-<<<<<<< ours
-<<<<<<< ours
 - [Quick Gotchas](#quick-gotchas)
-- [Installation (Detailed)](#installation-detailed)
+- [Installation](#installation)
 - [Environment Variables](#environment-variables)
-- [Database Setup & Migrations](#database-setup-migrations)
+- [Database Setup & Migrations](#database-setup--migrations)
 - [Run the Application](#run-the-application)
-- [Backups & Restore (Postgres Runtime)](#backups-restore-postgres-runtime)
+- [Backups & Restore (Postgres Runtime)](#backups--restore-postgres-runtime)
 - [Project Architecture](#project-architecture)
 - [Docker Setup](#docker-setup)
 - [Command Reference](#command-reference)
@@ -33,28 +31,14 @@ PostgreSQL is the only supported runtime database backend.
 
 ## Quick Gotchas
 
+- **POS email imports are deny-by-default:** configure `MAILGUN_ALLOWED_SENDERS` or `MAILGUN_ALLOWED_SENDER_DOMAINS` before enabling webhook or poll-mode ingestion.
+- **Uploads are capped:** oversized uploads are rejected using `MAX_UPLOAD_FILE_SIZE_BYTES` and `POS_IMPORT_MAX_ATTACHMENT_BYTES`.
 - ⚠️ **Docker Compose DB host:** when app/tools run **inside Compose services**, set `DATABASE_HOST=postgres` (service DNS name), not `localhost`.
 - ⚠️ **Host-run tools:** when running commands from your host shell/venv (for example `flask db upgrade`), use `localhost` for DB host/URL unless you are targeting another host.
 - ⚠️ **Connection var precedence:** `DATABASE_URL` (and `SQLALCHEMY_DATABASE_URI`) override individual `DATABASE_*` parts when set.
 - ⚠️ **Restore prerequisite:** run migrations to latest **before** restoring a backup (`python -m flask --app run.py db upgrade` or `./scripts/docker_migrate.sh`).
 
-## Installation (Detailed)
-=======
-=======
->>>>>>> theirs
-- [Installation](#installation)
-- [Environment Variables](#required-environment-variables)
-- [Database Setup (Migrations)](#database-setup)
-- [Docker Setup](#docker-setup)
-- [Backups and Restore](#backups-and-restore-postgres-runtime)
-- [Testing](#running-tests)
-- [Code Style](#code-style)
-- [Features](#features)
-- [Documentation](#documentation)
-- [License](#license)
-
 ## Installation
->>>>>>> theirs
 
 You can perform the steps below manually or run one of the setup scripts provided in the repository. `setup.sh` works on Linux/macOS and `setup.ps1` works on Windows. Each script optionally accepts a repository URL and target directory, clones the project, installs dependencies, prepares a `.env` file, runs the database migrations, and seeds the default admin account and settings.
 
@@ -83,17 +67,17 @@ The application requires several variables to be present in your environment:
 ```env
 SECRET_KEY=replace-with-a-long-random-value
 ADMIN_EMAIL=admin@example.com
-ADMIN_PASS=change-me
+ADMIN_PASS=replace-with-a-long-random-admin-password
 PORT=5000
 
 DATABASE_DRIVER=postgresql+psycopg
 DATABASE_HOST=postgres
 DATABASE_PORT=5432
-DATABASE_USER=invoicemanager
-DATABASE_PASSWORD=invoicemanager
+DATABASE_USER=invoice_manager
+DATABASE_PASSWORD=replace-with-a-strong-db-password
 DATABASE_NAME=invoicemanager
-DATABASE_URL=postgresql+psycopg://invoicemanager:invoicemanager@postgres:5432/invoicemanager
-SQLALCHEMY_DATABASE_URI=postgresql+psycopg://invoicemanager:invoicemanager@postgres:5432/invoicemanager
+DATABASE_URL=postgresql+psycopg://invoice_manager:replace-with-a-strong-db-password@postgres:5432/invoicemanager
+SQLALCHEMY_DATABASE_URI=postgresql+psycopg://invoice_manager:replace-with-a-strong-db-password@postgres:5432/invoicemanager
 
 SQLALCHEMY_POOL_PRE_PING=true
 SQLALCHEMY_POOL_RECYCLE=1800
@@ -101,6 +85,8 @@ SQLALCHEMY_POOL_TIMEOUT=30
 SQLALCHEMY_POOL_SIZE=5
 SQLALCHEMY_MAX_OVERFLOW=10
 SQLALCHEMY_POOL_USE_LIFO=true
+MAX_UPLOAD_FILE_SIZE_BYTES=10485760
+POS_IMPORT_MAX_ATTACHMENT_BYTES=10485760
 
 SMTP_HOST=smtp.example.com
 SMTP_PORT=25
@@ -111,6 +97,7 @@ SMTP_USE_TLS=true
 
 RATELIMIT_STORAGE_URI=redis://redis:6379/0
 MAILGUN_WEBHOOK_SIGNING_KEY=mailgun-signing-key
+MAILGUN_ALLOWED_SENDERS=
 MAILGUN_ALLOWED_SENDER_DOMAINS=example.com
 POS_IMPORT_INGEST_MODE=webhook
 ```
@@ -120,7 +107,7 @@ POS_IMPORT_INGEST_MODE=webhook
 | `SECRET_KEY` | Flask secret key used for sessions. |
 | `ADMIN_EMAIL`, `ADMIN_PASS` | Initial administrator account credentials. |
 | `PORT` | Web server port (optional, defaults to `5000`). |
-| `DATABASE_DRIVER`, `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_USER`, `DATABASE_PASSWORD`, `DATABASE_NAME` | Individual PostgreSQL connection components used to build the SQLAlchemy URI (defaults: `postgresql+psycopg`, `postgres`, `5432`, `invoicemanager`, `invoicemanager`, `invoicemanager`). |
+| `DATABASE_DRIVER`, `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_USER`, `DATABASE_PASSWORD`, `DATABASE_NAME` | Individual PostgreSQL connection components used to build the SQLAlchemy URI. `DATABASE_USER`, `DATABASE_PASSWORD`, and `DATABASE_NAME` are required unless you set `DATABASE_URL` or `SQLALCHEMY_DATABASE_URI` directly. |
 | `DATABASE_URL`, `SQLALCHEMY_DATABASE_URI` | Optional full SQLAlchemy URI overrides. If either is set, it takes precedence over individual `DATABASE_*` values. |
 | `SQLALCHEMY_POOL_PRE_PING` | Enables stale-connection checks before checkout (defaults to `true`). |
 | `SQLALCHEMY_POOL_RECYCLE` | Recycles pooled connections after this many seconds (defaults to `1800`). |
@@ -128,10 +115,12 @@ POS_IMPORT_INGEST_MODE=webhook
 | `SQLALCHEMY_POOL_SIZE` | Steady-state number of pooled connections per process (defaults to `5`). |
 | `SQLALCHEMY_MAX_OVERFLOW` | Extra burst connections allowed above `SQLALCHEMY_POOL_SIZE` (defaults to `10`). |
 | `SQLALCHEMY_POOL_USE_LIFO` | Uses LIFO checkout behavior to let older idle connections expire naturally in containerized environments (defaults to `true`). |
+| `MAX_UPLOAD_FILE_SIZE_BYTES` | Global request-body upload cap. Oversized browser and webhook uploads are rejected before parsing (defaults to `10485760`, or 10 MB). |
+| `POS_IMPORT_MAX_ATTACHMENT_BYTES` | Per-attachment cap for POS email imports in webhook and poll mode (defaults to `MAX_UPLOAD_FILE_SIZE_BYTES`). |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_SENDER`, `SMTP_USE_TLS` | SMTP settings for password reset emails (`SMTP_PORT` defaults to `25`; set `SMTP_USE_TLS=true` to enable TLS). |
 | `RATELIMIT_STORAGE_URI` | URI for the rate limiting backend. Use a persistent store such as Redis in production (for example `redis://redis:6379/0`). |
 | `MAILGUN_WEBHOOK_SIGNING_KEY` | Mailgun inbound signing key used to verify webhook authenticity. |
-| `MAILGUN_ALLOWED_SENDER_DOMAINS` | Comma-separated sender domains allowed to submit imports (for example `example.com`). |
+| `MAILGUN_ALLOWED_SENDERS`, `MAILGUN_ALLOWED_SENDER_DOMAINS` | Sender allowlists for POS imports. Configure at least one of these before enabling webhook or poll-mode ingestion. |
 | `POS_IMPORT_INGEST_MODE` | POS import ingestion strategy: `webhook` (default) for Mailgun inbound webhooks, or `poll` for scheduled mailbox-provider ingestion. |
 
 A persistent backing store is required for rate limiting in production. Set
@@ -146,6 +135,7 @@ These can be placed in a `.env` file or exported in your shell before starting t
 
 ### Optional Environment Variables
 
+- At least one of `MAILGUN_ALLOWED_SENDERS` or `MAILGUN_ALLOWED_SENDER_DOMAINS` must be configured before POS email ingestion is enabled.
 - `SESSION_COOKIE_SECURE` – set to `false` when running over plain HTTP (for
   example in local development). Defaults to `true` so cookies are only sent
   over HTTPS in production.
@@ -179,8 +169,9 @@ Mailgun should post inbound events to `POST /webhooks/mailgun/inbound`.
 2. Configure provider settings:
    - IMAP: set `POS_IMPORT_POLL_PROVIDER=imap` and IMAP credentials/host variables.
    - API: set `POS_IMPORT_POLL_PROVIDER=api` and API URL/token variables.
-3. Keep `MAILGUN_ALLOWED_ATTACHMENT_EXTENSIONS` configured as needed; the same extension allowlist is applied in poll mode.
-4. Ensure the process remains running continuously so the background poller thread can execute hourly checks.
+3. Set `MAILGUN_ALLOWED_SENDERS` or `MAILGUN_ALLOWED_SENDER_DOMAINS`; poll mode rejects all senders until one of these allowlists is configured.
+4. Keep `MAILGUN_ALLOWED_ATTACHMENT_EXTENSIONS` configured as needed; the same extension allowlist is applied in poll mode.
+5. Ensure the process remains running continuously so the background poller thread can execute hourly checks.
 
 </details>
 
@@ -220,9 +211,9 @@ python run.py
 
 Set `PORT` in your environment to change the port (default `5000`).
 
-By default, the application connects to PostgreSQL using
+The application connects to PostgreSQL using
 `postgresql+psycopg://<user>:<password>@<host>:<port>/<database>`, assembled
-from the `DATABASE_*` environment variables. You can override this with
+from the `DATABASE_*` environment variables when you do not provide
 `DATABASE_URL` or `SQLALCHEMY_DATABASE_URI`. The app also creates `uploads` and
 `backups` directories automatically on startup.
 
@@ -467,7 +458,7 @@ starting point:
   transfer default. The `gl_code` column should reference an existing GL code.
 - `example_customers.csv`
 - `example_vendors.csv`
-- `example_users.csv`
+- `example_users.csv` – uses placeholder passwords; replace them before importing.
 
 Visit **Control Panel → Data Imports** in the web interface, choose the
 appropriate CSV file, and click the corresponding button to import each

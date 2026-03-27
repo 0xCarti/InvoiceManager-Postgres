@@ -27,6 +27,7 @@ from werkzeug.utils import secure_filename
 
 from app import db
 from app.forms import (
+    CSRFOnlyForm,
     EVENT_TYPES,
     EventForm,
     EventLocationConfirmForm,
@@ -1052,9 +1053,12 @@ def edit_event(event_id):
     return render_template("events/edit_event.html", form=form, event=ev)
 
 
-@event.route("/events/<int:event_id>/delete")
+@event.route("/events/<int:event_id>/delete", methods=["POST"])
 @login_required
 def delete_event(event_id):
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        abort(400)
     ev = db.session.get(Event, event_id)
     if ev is None:
         abort(404)
@@ -4947,13 +4951,11 @@ def sustainability_dashboard(event_id):
         abort(404)
 
     report = build_sustainability_report(event_id)
-    chart_json = json.dumps(report["chart_data"])
-
     return render_template(
         "events/sustainability_dashboard.html",
         event=ev,
         report=report,
-        chart_json=chart_json,
+        chart_data=report["chart_data"],
         print_view=False,
     )
 
@@ -4966,13 +4968,11 @@ def sustainability_dashboard_print(event_id):
         abort(404)
 
     report = build_sustainability_report(event_id)
-    chart_json = json.dumps(report["chart_data"])
-
     return render_template(
         "events/sustainability_dashboard.html",
         event=ev,
         report=report,
-        chart_json=chart_json,
+        chart_data=report["chart_data"],
         print_view=True,
     )
 
@@ -5234,9 +5234,12 @@ def bulk_count_sheets(event_id):
     )
 
 
-@event.route("/events/<int:event_id>/close")
+@event.route("/events/<int:event_id>/close", methods=["POST"])
 @login_required
 def close_event(event_id):
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        abort(400)
     ev = db.session.get(Event, event_id)
     if ev is None:
         abort(404)

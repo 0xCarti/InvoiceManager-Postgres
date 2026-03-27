@@ -1,3 +1,3 @@
 email,password,is_admin,active
-admin2@example.com,adminpass,1,1
-user@example.com,userpass,0,1
+admin2@example.com,replace-before-import-admin-password,1,1
+user@example.com,replace-before-import-user-password,0,1

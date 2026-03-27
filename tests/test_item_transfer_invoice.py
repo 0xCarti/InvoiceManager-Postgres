@@ -138,6 +138,11 @@ def test_transfer_flow(client, app):
     with client:
         login(client, "transfer@example.com", "pass")
         resp = client.get(
+            f"/transfers/uncomplete/{tid}", follow_redirects=False
+        )
+        assert resp.status_code == 200
+        assert b"Confirm Transfer Incomplete" in resp.data
+        resp = client.post(
             f"/transfers/uncomplete/{tid}", follow_redirects=True
         )
         assert resp.status_code == 200

@@ -1868,18 +1868,18 @@ def reverse_purchase_invoice(invoice_id):
         abort(404)
     warnings = check_negative_invoice_reverse(invoice)
     form = ConfirmForm()
-    if warnings and request.method == "GET":
+    if request.method == "GET":
         return render_template(
             "confirm_action.html",
             form=form,
-            warnings=warnings,
+            warnings=warnings or ["Are you sure you want to reverse this invoice?"],
             action_url=url_for(
                 "purchase.reverse_purchase_invoice", invoice_id=invoice_id
             ),
             cancel_url=url_for("purchase.view_purchase_invoices"),
             title="Confirm Invoice Reversal",
         )
-    if warnings and not form.validate_on_submit():
+    if warnings and "submit" not in request.form:
         return render_template(
             "confirm_action.html",
             form=form,

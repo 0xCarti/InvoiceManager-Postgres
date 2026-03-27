@@ -137,3 +137,32 @@ def test_mailgun_webhook_rejects_missing_attachment_payload(client, app):
     payload = response.get_json()
     assert payload["ok"] is False
     assert payload["error"] == "missing_attachment"
+
+
+def test_mailgun_webhook_requires_sender_allowlist(client, app):
+    app.config.update({"MAILGUN_WEBHOOK_SIGNING_KEY": "secret-key"})
+
+    response = client.post("/webhooks/mailgun/inbound", data=_payload("secret-key"))
+
+    assert response.status_code == 503
+    assert response.get_json()["error"] == "sender_allowlist_not_configured"
+
+
+def test_mailgun_webhook_rejects_oversized_attachment(client, app):
+    app.config.update(
+        {
+            "MAILGUN_WEBHOOK_SIGNING_KEY": "secret-key",
+            "MAILGUN_ALLOWED_SENDER_DOMAINS": "example.com",
+            "MAILGUN_ALLOWED_ATTACHMENT_EXTENSIONS": "xls,xlsx",
+            "POS_IMPORT_MAX_ATTACHMENT_BYTES": 4,
+        }
+    )
+    data = _payload("secret-key")
+    data["attachment-1"] = (io.BytesIO(b"12345"), "game_sales.xls")
+
+    response = client.post(
+        "/webhooks/mailgun/inbound", data=data, content_type="multipart/form-data"
+    )
+
+    assert response.status_code == 413
+    assert response.get_json()["error"] == "attachment_too_large"

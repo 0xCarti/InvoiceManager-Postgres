@@ -1,7 +1,7 @@
 import os
 
 from app.models import User
-from tests.utils import login
+from tests.utils import extract_csrf_token, login
 
 
 def test_navbar_renders_single_favorites_row_without_special_admin_block(
@@ -104,3 +104,26 @@ def test_sidebar_menu_search_includes_admin_destinations_for_admins(
     assert 'data-nav-endpoint="admin.users"' in html
     assert "/favorite/admin.users" in html
     assert 'aria-label="Toggle favorite for Control Panel"' in html
+
+
+def test_favorite_toggle_requires_post_and_updates_state(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with client:
+        login(client, admin_email, admin_pass)
+        get_response = client.get("/favorite/transfer.view_transfers")
+        assert get_response.status_code == 405
+
+        home = client.get("/")
+        token = extract_csrf_token(home)
+        post_response = client.post(
+            "/favorite/transfer.view_transfers",
+            data={"csrf_token": token, "next": "/"},
+            follow_redirects=False,
+        )
+        assert post_response.status_code == 302
+
+        with app.app_context():
+            admin = User.query.filter_by(email=admin_email).one()
+            assert "transfer.view_transfers" in admin.get_favorites()

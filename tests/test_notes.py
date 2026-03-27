@@ -73,6 +73,18 @@ def test_admin_can_manage_notes(client, app):
         delete_resp = client.post(
             f"/notes/location/{location_id}/delete/{note_id}",
             data={},
+            follow_redirects=False,
+        )
+        assert delete_resp.status_code == 403
+
+        with client.session_transaction() as session:
+            session.clear()
+            session["_user_id"] = str(admin.id)
+            session["_fresh"] = True
+
+        delete_resp = client.post(
+            f"/notes/location/{location_id}/delete/{note_id}",
+            data={},
             follow_redirects=True,
         )
         assert delete_resp.status_code == 200

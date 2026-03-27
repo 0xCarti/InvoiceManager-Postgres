@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}Upload Too Large{% endblock %}
+{% block content %}
+<div class="container mt-4">
+    <div class="alert alert-danger" role="alert">
+        Uploads are limited to {{ max_upload_size_mb }} MB.
+    </div>
+    <p class="text-muted mb-0">
+        Reduce the file size and try again, or increase <code>MAX_UPLOAD_FILE_SIZE_BYTES</code> for this deployment if larger uploads are expected.
+    </p>
+</div>
+{% endblock %}

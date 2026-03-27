@@ -20,6 +20,13 @@ from flask import current_app
 
 from app.services.pos_sales_ingest import ingest_pos_sales_attachment
 from app.utils.activity import log_activity
+from app.utils.pos_import_security import (
+    DEFAULT_MAX_ATTACHMENT_BYTES,
+    attachment_allowed,
+    csv_config_set,
+    normalized_extension_allowlist,
+    sender_policy_error,
+)
 
 _poller_thread: Thread | None = None
 _stop_event = Event()
@@ -213,12 +220,6 @@ class ApiMailboxProvider(MailboxProvider):
             )
 
 
-def _csv_config_set(value: str | None) -> set[str]:
-    if not value:
-        return set()
-    return {entry.strip().lower() for entry in value.split(",") if entry.strip()}
-
-
 def _ingest_mode_enabled(app) -> bool:
     mode = (app.config.get("POS_IMPORT_INGEST_MODE") or "webhook").strip().lower()
     return mode == "poll"
@@ -233,11 +234,6 @@ def _build_provider(app) -> MailboxProvider:
     raise RuntimeError(f"Unsupported POS_IMPORT_POLL_PROVIDER: {provider}")
 
 
-def _attachment_allowed(filename: str, allowed_extensions: set[str]) -> bool:
-    extension = Path(filename).suffix.lower()
-    return bool(extension and extension in allowed_extensions)
-
-
 def run_pos_sales_mailbox_poll_once(app) -> dict[str, int]:
     """Run a single polling pass and ingest supported attachments."""
 
@@ -249,12 +245,21 @@ def run_pos_sales_mailbox_poll_once(app) -> dict[str, int]:
             return {"messages": 0, "imports": 0, "duplicates": 0, "errors": 0}
 
         provider = _build_provider(app)
-        allowed = _csv_config_set(
-            app.config.get("MAILGUN_ALLOWED_ATTACHMENT_EXTENSIONS", "xls,xlsx")
+        allowed_extensions = normalized_extension_allowlist(
+            app.config.get("MAILGUN_ALLOWED_ATTACHMENT_EXTENSIONS")
         )
-        allowed_extensions = {
-            ext if ext.startswith(".") else f".{ext}" for ext in allowed
-        }
+        allowed_senders = csv_config_set(app.config.get("MAILGUN_ALLOWED_SENDERS"))
+        allowed_domains = csv_config_set(
+            app.config.get("MAILGUN_ALLOWED_SENDER_DOMAINS")
+        )
+        max_attachment_bytes = int(
+            app.config.get(
+                "POS_IMPORT_MAX_ATTACHMENT_BYTES",
+                app.config.get(
+                    "MAX_UPLOAD_FILE_SIZE_BYTES", DEFAULT_MAX_ATTACHMENT_BYTES
+                ),
+            )
+        )
         storage_root = Path(
             app.config.get("MAILGUN_INBOUND_STORAGE_DIR")
             or os.path.join(app.config["UPLOAD_FOLDER"], "mailgun_inbound")
@@ -264,8 +269,31 @@ def run_pos_sales_mailbox_poll_once(app) -> dict[str, int]:
         for message in provider.fetch_unseen_messages():
             result["messages"] += 1
             message_failed = False
+            sender_error = sender_policy_error(
+                message.sender,
+                allowed_senders=allowed_senders,
+                allowed_domains=allowed_domains,
+            )
+            if sender_error:
+                result["errors"] += 1
+                current_app.logger.warning(
+                    "Rejected polled POS import message %s: %s",
+                    message.message_id,
+                    sender_error,
+                )
+                if sender_error != "sender_allowlist_not_configured":
+                    provider.acknowledge(message.ack_token)
+                continue
             for attachment in message.attachments:
-                if not _attachment_allowed(attachment.filename, allowed_extensions):
+                if not attachment_allowed(attachment.filename, allowed_extensions):
+                    continue
+                if len(attachment.content) > max_attachment_bytes:
+                    result["errors"] += 1
+                    current_app.logger.warning(
+                        "Rejected oversized POS import attachment %s from message %s",
+                        attachment.filename,
+                        message.message_id,
+                    )
                     continue
                 try:
                     _, duplicate = ingest_pos_sales_attachment(

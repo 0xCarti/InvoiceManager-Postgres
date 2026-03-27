@@ -9,7 +9,7 @@ from logging.handlers import RotatingFileHandler
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from flask import Flask, Response, flash, g, redirect, render_template, request, url_for
+from flask import Flask, Response, flash, g, jsonify, redirect, render_template, request, url_for
 from flask_bootstrap import Bootstrap
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -19,7 +19,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError
 from sqlalchemy.exc import PendingRollbackError
-from werkzeug.exceptions import HTTPException
+from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 from werkzeug.routing import BuildError
 from werkzeug.security import generate_password_hash
 
@@ -30,6 +30,7 @@ login_manager.login_view = "auth.login"
 storage_uri = os.getenv("RATELIMIT_STORAGE_URI", "memory://")
 limiter = Limiter(key_func=get_remote_address, storage_uri=storage_uri)
 socketio = None
+DEFAULT_MAX_UPLOAD_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 
 def _get_bool_env(var_name: str, default: bool = False) -> bool:
@@ -384,21 +385,37 @@ def create_app(args=None):
 
     base_dir = os.getcwd()
     repo_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-    # Default to PostgreSQL for local and containerized development.
-    # The default host intentionally uses the Docker Compose service name.
-    db_driver = os.getenv("DATABASE_DRIVER", "postgresql+psycopg")
-    db_user = os.getenv("DATABASE_USER", "invoicemanager")
-    db_password = os.getenv("DATABASE_PASSWORD", "invoicemanager")
-    db_host = os.getenv("DATABASE_HOST", "postgres")
-    db_port = os.getenv("DATABASE_PORT", "5432")
-    db_name = os.getenv("DATABASE_NAME", "invoicemanager")
-    default_database_uri = (
-        f"{db_driver}://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+    explicit_database_uri = os.getenv("SQLALCHEMY_DATABASE_URI") or os.getenv(
+        "DATABASE_URL"
     )
-    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
-        "SQLALCHEMY_DATABASE_URI",
-        os.getenv("DATABASE_URL", default_database_uri),
-    )
+    if explicit_database_uri:
+        app.config["SQLALCHEMY_DATABASE_URI"] = explicit_database_uri
+    else:
+        db_driver = os.getenv("DATABASE_DRIVER", "postgresql+psycopg")
+        db_host = os.getenv("DATABASE_HOST", "postgres")
+        db_port = os.getenv("DATABASE_PORT", "5432")
+        db_user = os.getenv("DATABASE_USER")
+        db_password = os.getenv("DATABASE_PASSWORD")
+        db_name = os.getenv("DATABASE_NAME")
+        missing_db_settings = [
+            name
+            for name, value in {
+                "DATABASE_USER": db_user,
+                "DATABASE_PASSWORD": db_password,
+                "DATABASE_NAME": db_name,
+            }.items()
+            if not value
+        ]
+        if missing_db_settings:
+            missing_display = ", ".join(missing_db_settings)
+            raise RuntimeError(
+                "Database configuration is incomplete. Set SQLALCHEMY_DATABASE_URI "
+                "or DATABASE_URL, or define DATABASE_USER, DATABASE_PASSWORD, and "
+                f"DATABASE_NAME. Missing: {missing_display}."
+            )
+        app.config["SQLALCHEMY_DATABASE_URI"] = (
+            f"{db_driver}://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+        )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
         "pool_pre_ping": _get_bool_env("SQLALCHEMY_POOL_PRE_PING", default=True),
@@ -411,6 +428,11 @@ def create_app(args=None):
     app.config["UPLOAD_FOLDER"] = os.path.join(base_dir, "uploads")
     app.config["BACKUP_FOLDER"] = os.path.join(base_dir, "backups")
     app.config["IMPORT_FILES_FOLDER"] = os.path.join(repo_dir, "import_files")
+    max_upload_file_size = _get_int_env(
+        "MAX_UPLOAD_FILE_SIZE_BYTES", DEFAULT_MAX_UPLOAD_FILE_SIZE_BYTES
+    )
+    app.config["MAX_UPLOAD_FILE_SIZE_BYTES"] = max_upload_file_size
+    app.config["MAX_CONTENT_LENGTH"] = max_upload_file_size
     app.config["MAILGUN_WEBHOOK_SIGNING_KEY"] = os.getenv(
         "MAILGUN_WEBHOOK_SIGNING_KEY", ""
     )
@@ -426,6 +448,9 @@ def create_app(args=None):
     )
     app.config["MAILGUN_INBOUND_STORAGE_DIR"] = os.getenv(
         "MAILGUN_INBOUND_STORAGE_DIR", ""
+    )
+    app.config["POS_IMPORT_MAX_ATTACHMENT_BYTES"] = _get_int_env(
+        "POS_IMPORT_MAX_ATTACHMENT_BYTES", max_upload_file_size
     )
     app.config["POS_IMPORT_INGEST_MODE"] = os.getenv(
         "POS_IMPORT_INGEST_MODE", "webhook"
@@ -792,6 +817,31 @@ def create_app(args=None):
                     reason=error.description,
                 ),
                 400,
+            )
+
+        @app.errorhandler(RequestEntityTooLarge)
+        def handle_request_entity_too_large(error):
+            """Render a clear error for oversized uploads."""
+            if request.path.startswith("/webhooks/mailgun"):
+                return (
+                    jsonify({"ok": False, "error": "payload_too_large"}),
+                    413,
+                )
+            return (
+                render_template(
+                    "errors/upload_too_large.html",
+                    max_upload_size_mb=max(
+                        1,
+                        int(
+                            app.config.get(
+                                "MAX_UPLOAD_FILE_SIZE_BYTES",
+                                DEFAULT_MAX_UPLOAD_FILE_SIZE_BYTES,
+                            )
+                        )
+                        // (1024 * 1024),
+                    ),
+                ),
+                413,
             )
 
         @app.errorhandler(Exception)
