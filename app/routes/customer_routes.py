@@ -144,16 +144,9 @@ def create_customer_modal():
         db.session.add(customer)
         db.session.commit()
         log_activity(f"Created customer {customer.id}")
-        delete_form = DeleteForm()
-        row_html = render_template(
-            "customers/_customer_row.html",
-            customer=customer,
-            delete_form=delete_form,
-        )
         return jsonify(
             {
                 "success": True,
-                "row_html": row_html,
                 "customer": {
                     "id": customer.id,
                     "first_name": customer.first_name,

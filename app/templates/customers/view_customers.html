@@ -108,7 +108,19 @@
         </thead>
         <tbody>
             {% for customer in customers.items %}
-            {% include 'customers/_customer_row.html' with context %}
+            <tr>
+                <td class="col-customer-name">{{ customer.first_name }} {{ customer.last_name }}</td>
+                <td class="col-customer-gst">{{ 'Yes' if customer.gst_exempt else 'No' }}</td>
+                <td class="col-customer-pst">{{ 'Yes' if customer.pst_exempt else 'No' }}</td>
+                <td class="col-customer-actions">
+                    <a href="{{ url_for('customer.edit_customer', customer_id=customer.id) }}" class="btn btn-primary mr-2">Edit</a>
+                    <a href="{{ url_for('notes.entity_notes', entity_type='customer', entity_id=customer.id) }}" class="btn btn-outline-secondary mr-2">Notes</a>
+                    <form action="{{ url_for('customer.delete_customer', customer_id=customer.id) }}" method="post" class="d-inline">
+                        {{ delete_form.hidden_tag() }}
+                        <button type="submit" class="btn btn-danger mr-2" data-confirm-message="Are you sure you want to delete this customer?">Delete</button>
+                    </form>
+                </td>
+            </tr>
             {% endfor %}
         </tbody>
     </table>
@@ -166,29 +178,28 @@
         if (!form) return;
         form.addEventListener('submit', async function(e) {
             e.preventDefault();
-            const response = await fetch('{{ url_for('customer.create_customer_modal') }}', {
-                method: 'POST',
-                body: new FormData(form)
-            });
-            if (response.ok) {
-                const data = await response.json();
-                if (data.success) {
-                    const tbody = document.querySelector('table tbody');
-                    if (data.row_html) {
-                        tbody.insertAdjacentHTML('beforeend', data.row_html);
+            try {
+                const response = await fetch('{{ url_for('customer.create_customer_modal') }}', {
+                    method: 'POST',
+                    body: new FormData(form)
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success) {
+                        form.reset();
+                        const modalEl = document.getElementById('createCustomerModal');
+                        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+                        modal.hide();
+                        window.location.reload();
                     }
-                    if (window.TableSort && typeof window.TableSort.bind === 'function') {
-                        window.TableSort.bind(document.getElementById('customerTable'));
-                    }
-                    form.reset();
-                    const modalEl = document.getElementById('createCustomerModal');
-                    bootstrap.Modal.getInstance(modalEl).hide();
+                } else {
+                    const data = await response.json().catch(() => ({}));
+                    const errors = data.errors || {};
+                    const firstError = Object.values(errors).flat()[0];
+                    window.alert(firstError || 'Unable to create customer. Please check the form and try again.');
                 }
-            } else {
-                const data = await response.json().catch(() => ({}));
-                const errors = data.errors || {};
-                const firstError = Object.values(errors).flat()[0];
-                window.alert(firstError || 'Unable to create customer. Please check the form and try again.');
+            } catch (error) {
+                window.alert('Unable to create customer. Please check the form and try again.');
             }
         });
     });

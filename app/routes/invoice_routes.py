@@ -17,6 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from app import GST, db
 from app.forms import (
     BulkInvoicePaymentForm,
+    CustomerForm,
     DeleteForm,
     InvoiceFilterForm,
     InvoiceForm,
@@ -218,6 +219,7 @@ def _create_invoice_from_form(form):
 def create_invoice():
     """Create a sales invoice."""
     form = InvoiceForm()
+    customer_form = CustomerForm()
     form.customer.choices = [
         (c.id, f"{c.first_name} {c.last_name}") for c in Customer.query.all()
     ]
@@ -231,7 +233,11 @@ def create_invoice():
             flash("Invoice created successfully!", "success")
             return redirect(url_for("invoice.view_invoices"))
 
-    return render_template("invoices/create_invoice.html", form=form)
+    return render_template(
+        "invoices/create_invoice.html",
+        form=form,
+        customer_form=customer_form,
+    )
 
 
 @invoice.route("/delete_invoice/<invoice_id>", methods=["POST"])
@@ -668,6 +674,7 @@ def view_invoices():
     )
     delete_form = DeleteForm()
     create_form = InvoiceForm()
+    customer_form = CustomerForm()
     create_form.customer.choices = [
         (c.id, f"{c.first_name} {c.last_name}") for c in Customer.query.all()
     ]
@@ -677,6 +684,7 @@ def view_invoices():
         form=form,
         delete_form=delete_form,
         create_form=create_form,
+        customer_form=customer_form,
         per_page=per_page,
         pagination_args=build_pagination_args(
             per_page,

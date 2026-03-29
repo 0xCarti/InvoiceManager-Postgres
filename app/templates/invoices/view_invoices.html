@@ -265,6 +265,22 @@
   </div>
 </div>
 
+<div class="modal fade" id="createInvoiceCustomerModal" tabindex="-1" aria-labelledby="createInvoiceCustomerModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="createInvoiceCustomerModalLabel">Create Customer</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        {% with form=customer_form %}
+          {% include 'customers/customer_form.html' %}
+        {% endwith %}
+      </div>
+    </div>
+  </div>
+</div>
+
 <script nonce="{{ csp_nonce }}">
 $(document).ready(function(){
     const deleteFormHTML = {{ delete_form.hidden_tag()|tojson }};
@@ -463,6 +479,54 @@ $(document).ready(function(){
 
     // Create invoice form logic
     let currentTaxStatus = { gst_exempt: false, pst_exempt: false };
+    let reopenInvoiceModalAfterCustomer = false;
+
+    function syncCustomerSelection(customer) {
+        const fullName = `${customer.first_name} ${customer.last_name}`.trim();
+        let option = $(`#customerSelect option[value="${customer.id}"]`);
+        if (!option.length) {
+            option = $('<option>').val(String(customer.id)).text(fullName);
+            $('#customerSelect').append(option);
+        } else {
+            option.text(fullName);
+        }
+        $('#customerSelect').val(String(customer.id)).trigger('change');
+    }
+
+    $('#createInvoiceCustomerModal #customerForm').on('submit', async function (e) {
+        e.preventDefault();
+        const formEl = this;
+        try {
+            const response = await fetch('{{ url_for('customer.create_customer_modal') }}', {
+                method: 'POST',
+                body: new FormData(formEl)
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || !payload.success) {
+                const errors = payload.errors || {};
+                const firstError = Object.values(errors).flat()[0];
+                window.alert(firstError || 'Unable to create customer. Please check the form and try again.');
+                return;
+            }
+            syncCustomerSelection(payload.customer);
+            formEl.reset();
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('createInvoiceCustomerModal')).hide();
+        } catch (error) {
+            window.alert('Unable to create customer. Please check the form and try again.');
+        }
+    });
+
+    $('#createInvoiceModal').on('click', '[data-bs-target="#createInvoiceCustomerModal"]', function () {
+        reopenInvoiceModalAfterCustomer = true;
+    });
+
+    $('#createInvoiceCustomerModal').on('hidden.bs.modal', function () {
+        if (reopenInvoiceModalAfterCustomer) {
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('createInvoiceModal')).show();
+            reopenInvoiceModalAfterCustomer = false;
+        }
+    });
+
     const initialCustomerId = $('#customerSelect').val();
     if (initialCustomerId) {
         $.get(`/get_customer_tax_status/${initialCustomerId}`, function (data) {

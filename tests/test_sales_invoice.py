@@ -25,6 +25,19 @@ def setup_sales(app):
         return user.email, customer.id, product.name, product.id
 
 
+def setup_sales_without_customer(app):
+    with app.app_context():
+        user = User(
+            email="salesnocustomer@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        product = Product(name="Widget", price=10.0, cost=5.0, quantity=5)
+        db.session.add_all([user, product])
+        db.session.commit()
+        return user.email, product.name, product.id
+
+
 def create_sales_invoices(client, email, customer_id, product_name, count):
     with client:
         login(client, email, "pass")
@@ -227,6 +240,61 @@ def test_sales_invoice_api_rejects_empty_invoice_submission(client, app):
 
     with app.app_context():
         assert Invoice.query.filter_by(customer_id=cust_id).count() == 0
+
+
+def test_invoice_pages_include_customer_create_modal(client, app):
+    email, _, _, _ = setup_sales(app)
+
+    with client:
+        login(client, email, "pass")
+        create_page = client.get("/create_invoice")
+        assert create_page.status_code == 200
+        create_html = create_page.get_data(as_text=True)
+        assert 'data-bs-target="#createInvoiceCustomerModal"' in create_html
+        assert 'id="createInvoiceCustomerModal"' in create_html
+
+        list_page = client.get("/view_invoices")
+        assert list_page.status_code == 200
+        list_html = list_page.get_data(as_text=True)
+        assert 'data-bs-target="#createInvoiceCustomerModal"' in list_html
+        assert 'id="createInvoiceCustomerModal"' in list_html
+
+
+def test_customer_create_modal_can_feed_invoice_creation_flow(client, app):
+    email, product_name, _ = setup_sales_without_customer(app)
+
+    with client:
+        login(client, email, "pass")
+        customer_resp = client.post(
+            "/customers/create-modal",
+            data={
+                "first_name": "Invoice",
+                "last_name": "Customer",
+                "gst_exempt": "y",
+                "pst_exempt": "",
+            },
+        )
+        assert customer_resp.status_code == 200
+        payload = customer_resp.get_json()
+        customer_id = payload["customer"]["id"]
+
+        create_resp = client.post(
+            "/create_invoice",
+            data={
+                "customer": float(customer_id),
+                "products": f"{product_name}?1??",
+            },
+            follow_redirects=True,
+        )
+        assert create_resp.status_code == 200
+        assert b"Invoice created successfully" in create_resp.data
+
+    with app.app_context():
+        customer = Customer.query.get(customer_id)
+        assert customer is not None
+        invoice = Invoice.query.filter_by(customer_id=customer_id).first()
+        assert invoice is not None
+        assert invoice.products[0].product_name == product_name
 
 
 def test_delete_invoice_route_still_accepts_post_from_list_form(client, app):

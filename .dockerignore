@@ -3,6 +3,16 @@ __pycache__/
 *.pyo
 *.pyd
 *.db
+.codex-tmp/
+.codex-pydeps/
+.pydeps-test/
+.pytest_cache/
+.tmp-pip/
+.tmp-py/
+.venv-codex/
+.venv-codex-test/
+instance/
+logs/
 uploads/
 backups/
 .env

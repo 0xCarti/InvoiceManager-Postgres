@@ -73,6 +73,7 @@ PORT=5000
 DATABASE_DRIVER=postgresql+psycopg
 DATABASE_HOST=postgres
 DATABASE_PORT=5432
+HOST_DATABASE_PORT=5432
 DATABASE_USER=invoice_manager
 DATABASE_PASSWORD=replace-with-a-strong-db-password
 DATABASE_NAME=invoicemanager
@@ -108,6 +109,7 @@ POS_IMPORT_INGEST_MODE=webhook
 | `ADMIN_EMAIL`, `ADMIN_PASS` | Initial administrator account credentials. |
 | `PORT` | Web server port (optional, defaults to `5000`). |
 | `DATABASE_DRIVER`, `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_USER`, `DATABASE_PASSWORD`, `DATABASE_NAME` | Individual PostgreSQL connection components used to build the SQLAlchemy URI. `DATABASE_USER`, `DATABASE_PASSWORD`, and `DATABASE_NAME` are required unless you set `DATABASE_URL` or `SQLALCHEMY_DATABASE_URI` directly. |
+| `HOST_DATABASE_PORT` | Host-side port published for the Postgres container in Docker Compose. Leave this at `5432` unless that port is already in use on your machine. |
 | `DATABASE_URL`, `SQLALCHEMY_DATABASE_URI` | Optional full SQLAlchemy URI overrides. If either is set, it takes precedence over individual `DATABASE_*` values. |
 | `SQLALCHEMY_POOL_PRE_PING` | Enables stale-connection checks before checkout (defaults to `true`). |
 | `SQLALCHEMY_POOL_RECYCLE` | Recycles pooled connections after this many seconds (defaults to `1800`). |
@@ -263,7 +265,10 @@ A high-level overview of the Flask application structure, shared services, and k
 The project includes a `Dockerfile` and `docker-compose.yml` for containerized
 runs on Linux and Windows. The image starts Gunicorn using `gunicorn.conf.py`.
 Create a `.env` file with the variables listed above (including Redis-backed
-`RATELIMIT_STORAGE_URI` for production rate limiting).
+`RATELIMIT_STORAGE_URI` for production rate limiting). The Compose stack now
+starts `postgres`, `redis`, and `web` together, and `HOST_DATABASE_PORT`
+controls only the host-exposed Postgres port so it can avoid local port
+conflicts without changing the app's internal `DATABASE_PORT=5432`.
 
 For day-to-day local development, follow the canonical sequence in
 [Canonical Startup Order (Docker Compose)](#canonical-startup-order-docker-compose).
@@ -271,6 +276,10 @@ For day-to-day local development, follow the canonical sequence in
 If you want a one-command boot that builds images and starts services,
 `docker compose up --build` remains supported; the web container entrypoint
 runs migrations before Gunicorn starts.
+
+When you are testing local code changes from this checkout, use
+`docker compose up --build` so the `web` service rebuilds from the local
+`Dockerfile` instead of continuing to run an older cached/pulled image.
 
 ## Command Reference
 
@@ -280,7 +289,7 @@ your host (virtualenv) or with Docker Compose.
 | Action | Command | Notes/context (host vs Docker) |
 | --- | --- | --- |
 | Start app | `python run.py` | Host/venv flow. |
-| Start app (Docker) | `docker compose up -d web` | Docker Compose flow after migrations. |
+| Start app (Docker) | `docker compose up -d web` | Docker Compose flow after migrations; `postgres` and `redis` must already be up or be started with `docker compose up -d`. |
 | Run migrations | `python -m flask --app run.py db upgrade` | Host/venv flow. |
 | Run migrations (Docker) | `./scripts/docker_migrate.sh` | Preferred Docker wrapper; equivalent to running migration inside the web service. |
 | Seed data | `python seed_data.py` | Host/venv flow (first boot or reset). |
@@ -328,7 +337,7 @@ Use this order for consistent local boots. For Compose startup, keep
 
 1. **Start services needed for DB access**
    ```bash
-   docker compose up -d postgres
+   docker compose up -d postgres redis
    ```
 2. **Run migrations against Postgres-backed `DATABASE_URL`**
    ```bash
@@ -382,6 +391,8 @@ data is deleted and recreated on the next startup.
   docker compose logs postgres
   docker compose restart web
   ```
+- **Host Postgres port already in use:** if Compose cannot bind `127.0.0.1:5432`,
+  set `HOST_DATABASE_PORT` in `.env` to another free host port such as `55432`.
 - **Explicit connection string override:** if `DATABASE_URL` is set, it takes
   precedence over individual `DATABASE_*` values. Ensure the URL points to the
   correct host/port/user/password/database.

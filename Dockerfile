@@ -2,7 +2,8 @@ FROM python:3.11-slim
 
 # Ensure predictable Python behavior
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    XDG_CACHE_HOME=/tmp/.cache
 
 # Set working directory
 WORKDIR /app
@@ -29,8 +30,11 @@ RUN groupadd -r app && useradd -r -g app app
 # Copy application code
 COPY . .
 
-RUN mkdir -p /app/data /app/uploads /app/backups \
+RUN sed -i 's/\r$//' /app/entrypoint.sh \
+    && mkdir -p /app/data /app/uploads /app/backups \
+    && mkdir -p /tmp/.cache/fontconfig \
     && chown -R app:app /app \
+    && chown -R app:app /tmp/.cache \
     && chmod +x /app/entrypoint.sh
 
 ARG PORT=5000

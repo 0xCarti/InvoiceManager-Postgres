@@ -87,9 +87,9 @@ def test_create_customer_modal_returns_json_payload(client, app):
     assert resp.status_code == 200
     payload = resp.get_json()
     assert payload["success"] is True
+    assert payload["customer"]["id"] > 0
     assert payload["customer"]["first_name"] == "Modal"
     assert payload["customer"]["last_name"] == "Customer"
-    assert "delete_csrf_token" in payload
 
     with app.app_context():
         cust = Customer.query.filter_by(
