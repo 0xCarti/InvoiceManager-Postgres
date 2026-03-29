@@ -818,8 +818,10 @@ def test_invoice_moves_and_reverse(client, app):
 
     with client:
         login(client, email, "pass")
-        client.get(
-            f"/purchase_invoices/{inv_id}/reverse", follow_redirects=True
+        client.post(
+            f"/purchase_invoices/{inv_id}/reverse",
+            data={"submit": "y"},
+            follow_redirects=True,
         )
 
     with app.app_context():
@@ -890,8 +892,10 @@ def test_reverse_invoice_prefills_form(client, app):
 
     with client:
         login(client, email, "pass")
-        client.get(
-            f"/purchase_invoices/{inv_id}/reverse", follow_redirects=True
+        client.post(
+            f"/purchase_invoices/{inv_id}/reverse",
+            data={"submit": "y"},
+            follow_redirects=True,
         )
 
     with app.app_context():
@@ -1472,8 +1476,10 @@ def test_reverse_invoice_restores_previous_cost(client, app):
 
     with client:
         login(client, email, "pass")
-        client.get(
-            f"/purchase_invoices/{inv_id}/reverse", follow_redirects=True
+        client.post(
+            f"/purchase_invoices/{inv_id}/reverse",
+            data={"submit": "y"},
+            follow_redirects=True,
         )
 
     with app.app_context():
@@ -1847,4 +1853,381 @@ def test_view_purchase_invoices_amount_filters(client, app):
         for number in totals:
             assert number in page_bad_value
         assert "Filtering by Amount" not in page_bad_value
+
+
+def test_create_purchase_order_rejects_unselected_item_rows(client, app):
+    email, vendor_id, _, _, unit_id = setup_purchase(app)
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            "/purchase_orders/create",
+            data={
+                "vendor": vendor_id,
+                "order_date": "2024-03-01",
+                "expected_date": "2024-03-02",
+                "items-0-unit": unit_id,
+                "items-0-quantity": 2,
+            },
+            follow_redirects=True,
+        )
+
+    assert resp.status_code == 200
+    assert (
+        b"Each populated purchase-order row must include a selected item and quantity."
+        in resp.data
+    )
+
+    with app.app_context():
+        assert PurchaseOrder.query.count() == 0
+
+
+def test_edit_purchase_order_rejects_invalid_rows_without_destroying_items(
+    client, app
+):
+    email, vendor_id, item_id, _, unit_id = setup_purchase(app)
+
+    with client:
+        login(client, email, "pass")
+        client.post(
+            "/purchase_orders/create",
+            data={
+                "vendor": vendor_id,
+                "order_date": "2024-03-01",
+                "expected_date": "2024-03-02",
+                "items-0-item": item_id,
+                "items-0-unit": unit_id,
+                "items-0-quantity": 2,
+            },
+            follow_redirects=True,
+        )
+
+    with app.app_context():
+        po = PurchaseOrder.query.first()
+        assert po is not None
+        po_id = po.id
+        original_items = [
+            (line.item_id, line.unit_id, float(line.quantity)) for line in po.items
+        ]
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            f"/purchase_orders/edit/{po_id}",
+            data={
+                "vendor": vendor_id,
+                "order_date": "2024-03-05",
+                "expected_date": "2024-03-06",
+                "items-0-unit": unit_id,
+                "items-0-quantity": 5,
+            },
+            follow_redirects=True,
+        )
+
+    assert resp.status_code == 200
+    assert (
+        b"Each populated purchase-order row must include a selected item and quantity."
+        in resp.data
+    )
+
+    with app.app_context():
+        po = db.session.get(PurchaseOrder, po_id)
+        assert po is not None
+        persisted_items = [
+            (line.item_id, line.unit_id, float(line.quantity)) for line in po.items
+        ]
+        assert persisted_items == original_items
+
+
+def test_received_purchase_orders_cannot_be_edited(client, app):
+    email, vendor_id, item_id, location_id, unit_id = setup_purchase(app)
+
+    with client:
+        login(client, email, "pass")
+        client.post(
+            "/purchase_orders/create",
+            data={
+                "vendor": vendor_id,
+                "order_date": "2024-03-01",
+                "expected_date": "2024-03-02",
+                "items-0-item": item_id,
+                "items-0-unit": unit_id,
+                "items-0-quantity": 2,
+            },
+            follow_redirects=True,
+        )
+
+    with app.app_context():
+        po = PurchaseOrder.query.first()
+        assert po is not None
+        po_id = po.id
+
+    with client:
+        login(client, email, "pass")
+        client.post(
+            f"/purchase_orders/{po_id}/receive",
+            data={
+                "received_date": "2024-03-03",
+                "location_id": location_id,
+                "gst": 0,
+                "pst": 0,
+                "delivery_charge": 0,
+                "items-0-item": item_id,
+                "items-0-unit": unit_id,
+                "items-0-quantity": 2,
+                "items-0-cost": 3,
+            },
+            follow_redirects=True,
+        )
+        resp = client.get(
+            f"/purchase_orders/edit/{po_id}", follow_redirects=True
+        )
+
+    assert resp.status_code == 200
+    assert b"Received purchase orders cannot be edited." in resp.data
+
+
+def test_receive_invoice_rejects_duplicate_receive(client, app):
+    email, vendor_id, item_id, location_id, unit_id = setup_purchase(app)
+
+    with client:
+        login(client, email, "pass")
+        client.post(
+            "/purchase_orders/create",
+            data={
+                "vendor": vendor_id,
+                "order_date": "2024-03-01",
+                "expected_date": "2024-03-02",
+                "items-0-item": item_id,
+                "items-0-unit": unit_id,
+                "items-0-quantity": 2,
+            },
+            follow_redirects=True,
+        )
+
+    with app.app_context():
+        po = PurchaseOrder.query.first()
+        assert po is not None
+        po_id = po.id
+
+    receive_payload = {
+        "received_date": "2024-03-03",
+        "location_id": location_id,
+        "gst": 0,
+        "pst": 0,
+        "delivery_charge": 0,
+        "items-0-item": item_id,
+        "items-0-unit": unit_id,
+        "items-0-quantity": 2,
+        "items-0-cost": 3,
+    }
+
+    with client:
+        login(client, email, "pass")
+        client.post(
+            f"/purchase_orders/{po_id}/receive",
+            data=receive_payload,
+            follow_redirects=True,
+        )
+        resp = client.get(
+            f"/purchase_orders/{po_id}/receive", follow_redirects=True
+        )
+
+    assert resp.status_code == 200
+    assert b"This purchase order has already been received." in resp.data
+
+    with app.app_context():
+        assert PurchaseInvoice.query.filter_by(purchase_order_id=po_id).count() == 1
+
+
+def test_view_purchase_orders_rejects_invalid_date_filters(client, app):
+    email, _, _, _, _ = setup_purchase(app)
+
+    with client:
+        login(client, email, "pass")
+        resp = client.get(
+            "/purchase_orders",
+            query_string={"start_date": "not-a-date"},
+            follow_redirects=True,
+        )
+
+    assert resp.status_code == 200
+    assert b"Invalid start date." in resp.data
+
+
+def test_edit_purchase_order_allows_archived_vendor_choice(client, app):
+    email, vendor_id, item_id, _, unit_id = setup_purchase(app)
+
+    with client:
+        login(client, email, "pass")
+        client.post(
+            "/purchase_orders/create",
+            data={
+                "vendor": vendor_id,
+                "order_date": "2024-03-01",
+                "expected_date": "2024-03-02",
+                "items-0-item": item_id,
+                "items-0-unit": unit_id,
+                "items-0-quantity": 2,
+            },
+            follow_redirects=True,
+        )
+
+    with app.app_context():
+        po = PurchaseOrder.query.first()
+        assert po is not None
+        po_id = po.id
+        vendor = db.session.get(Vendor, vendor_id)
+        vendor.archived = True
+        db.session.commit()
+
+    with client:
+        login(client, email, "pass")
+        resp = client.get(f"/purchase_orders/edit/{po_id}")
+
+    assert resp.status_code == 200
+    page = resp.get_data(as_text=True)
+    assert f'value="{vendor_id}"' in page
+    assert "Vend Or" in page
+
+
+def test_view_purchase_invoices_filters_by_line_location(client, app):
+    email, vendor_id, item_id, location_id, unit_id = setup_purchase(app)
+
+    with app.app_context():
+        secondary = Location(name="Secondary")
+        db.session.add(secondary)
+        db.session.commit()
+        secondary_id = secondary.id
+
+    with client:
+        login(client, email, "pass")
+        client.post(
+            "/purchase_orders/create",
+            data={
+                "vendor": vendor_id,
+                "order_date": "2024-03-01",
+                "expected_date": "2024-03-02",
+                "items-0-item": item_id,
+                "items-0-unit": unit_id,
+                "items-0-quantity": 2,
+            },
+            follow_redirects=True,
+        )
+
+    with app.app_context():
+        po = PurchaseOrder.query.first()
+        assert po is not None
+        po_id = po.id
+
+    with client:
+        login(client, email, "pass")
+        client.post(
+            f"/purchase_orders/{po_id}/receive",
+            data={
+                "received_date": "2024-03-03",
+                "location_id": location_id,
+                "invoice_number": "LINE-LOC-1",
+                "gst": 0,
+                "pst": 0,
+                "delivery_charge": 0,
+                "items-0-item": item_id,
+                "items-0-unit": unit_id,
+                "items-0-quantity": 2,
+                "items-0-cost": 3,
+                "items-0-location_id": secondary_id,
+            },
+            follow_redirects=True,
+        )
+        resp = client.get(
+            "/purchase_invoices",
+            query_string={"location_id": secondary_id},
+        )
+
+    assert resp.status_code == 200
+    assert "LINE-LOC-1" in resp.get_data(as_text=True)
+
+
+def test_reverse_invoice_same_item_lines_restore_original_cost(client, app):
+    email, vendor_id, item_id, location_id, unit_id = setup_purchase(app)
+
+    with app.app_context():
+        item = db.session.get(Item, item_id)
+        item.quantity = 5
+        item.cost = 2
+        location_item = LocationStandItem.query.filter_by(
+            location_id=location_id, item_id=item_id
+        ).first()
+        location_item.expected_count = 5
+        db.session.commit()
+
+    with client:
+        login(client, email, "pass")
+        client.post(
+            "/purchase_orders/create",
+            data={
+                "vendor": vendor_id,
+                "order_date": "2024-03-01",
+                "expected_date": "2024-03-02",
+                "items-0-item": item_id,
+                "items-0-unit": unit_id,
+                "items-0-quantity": 1,
+                "items-1-item": item_id,
+                "items-1-unit": unit_id,
+                "items-1-quantity": 1,
+            },
+            follow_redirects=True,
+        )
+
+    with app.app_context():
+        po = PurchaseOrder.query.first()
+        assert po is not None
+        po_id = po.id
+
+    with client:
+        login(client, email, "pass")
+        client.post(
+            f"/purchase_orders/{po_id}/receive",
+            data={
+                "received_date": "2024-03-03",
+                "location_id": location_id,
+                "invoice_number": "MULTI-LINE",
+                "gst": 0,
+                "pst": 0,
+                "delivery_charge": 0,
+                "items-0-item": item_id,
+                "items-0-unit": unit_id,
+                "items-0-quantity": 1,
+                "items-0-cost": 10,
+                "items-1-item": item_id,
+                "items-1-unit": unit_id,
+                "items-1-quantity": 1,
+                "items-1-cost": 12,
+            },
+            follow_redirects=True,
+        )
+
+    with app.app_context():
+        invoice = PurchaseInvoice.query.filter_by(invoice_number="MULTI-LINE").first()
+        assert invoice is not None
+        invoice_id = invoice.id
+        item = db.session.get(Item, item_id)
+        assert item.cost == pytest.approx((5 * 2 + 10 + 12) / 7)
+
+    with client:
+        login(client, email, "pass")
+        client.post(
+            f"/purchase_invoices/{invoice_id}/reverse",
+            data={"submit": "y"},
+            follow_redirects=True,
+        )
+
+    with app.app_context():
+        item = db.session.get(Item, item_id)
+        location_item = LocationStandItem.query.filter_by(
+            location_id=location_id, item_id=item_id
+        ).first()
+        assert item.quantity == 5
+        assert item.cost == 2
+        assert location_item.expected_count == 5
 

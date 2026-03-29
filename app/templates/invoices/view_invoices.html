@@ -568,6 +568,11 @@ $(document).ready(function(){
         $('#products').val(products);
         $.post("{{ url_for('invoice.create_invoice_api') }}", $(this).serialize(), function () {
             window.location.reload();
+        }).fail(function (xhr) {
+            const payload = xhr.responseJSON || {};
+            const errors = payload.errors || {};
+            const firstError = Object.values(errors).flat()[0];
+            window.alert(firstError || 'Unable to create invoice. Please check the form and try again.');
         });
     });
 });

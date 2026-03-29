@@ -36,7 +36,7 @@ def view_customers():
 
     query = Customer.query.filter_by(archived=False)
     if name_query:
-        full_name = func.concat(Customer.first_name, " ", Customer.last_name)
+        full_name = Customer.first_name + " " + Customer.last_name
         if match_mode == "exact":
             name_filter = func.lower(full_name) == name_query.lower()
         elif match_mode == "startswith":
@@ -145,9 +145,15 @@ def create_customer_modal():
         db.session.commit()
         log_activity(f"Created customer {customer.id}")
         delete_form = DeleteForm()
+        row_html = render_template(
+            "customers/_customer_row.html",
+            customer=customer,
+            delete_form=delete_form,
+        )
         return jsonify(
             {
                 "success": True,
+                "row_html": row_html,
                 "customer": {
                     "id": customer.id,
                     "first_name": customer.first_name,
@@ -155,7 +161,6 @@ def create_customer_modal():
                     "gst_exempt": customer.gst_exempt,
                     "pst_exempt": customer.pst_exempt,
                 },
-                "delete_csrf_token": delete_form.csrf_token.current_token,
             }
         )
     return jsonify({"success": False, "errors": form.errors}), 400

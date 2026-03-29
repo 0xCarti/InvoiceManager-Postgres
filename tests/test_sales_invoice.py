@@ -191,6 +191,44 @@ def test_sales_invoice_returns(client, app):
         assert product.quantity == 7
 
 
+def test_sales_invoice_rejects_empty_invoice_submission(client, app):
+    email, cust_id, _, _ = setup_sales(app)
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            "/create_invoice",
+            data={"customer": float(cust_id), "products": ""},
+            follow_redirects=True,
+        )
+
+    assert resp.status_code == 200
+    assert b"Add at least one valid product before creating an invoice." in resp.data
+
+    with app.app_context():
+        assert Invoice.query.filter_by(customer_id=cust_id).count() == 0
+
+
+def test_sales_invoice_api_rejects_empty_invoice_submission(client, app):
+    email, cust_id, _, _ = setup_sales(app)
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            "/api/create_invoice",
+            data={"customer": float(cust_id), "products": ""},
+        )
+
+    assert resp.status_code == 400
+    payload = resp.get_json()
+    assert payload["errors"]["products"] == [
+        "Add at least one valid product before creating an invoice."
+    ]
+
+    with app.app_context():
+        assert Invoice.query.filter_by(customer_id=cust_id).count() == 0
+
+
 def test_delete_invoice_route_still_accepts_post_from_list_form(client, app):
     email, cust_id, prod_name, _ = setup_sales(app)
 
@@ -504,3 +542,33 @@ def test_bulk_invoice_payment_status_rejects_missing_invoice_ids(client, app):
             "Some invoices were not found: UNKNOWN-INVOICE-ID"
         )
         assert payload["missing_invoice_ids"] == ["UNKNOWN-INVOICE-ID"]
+
+
+def test_view_invoices_rejects_invalid_date_filters(client, app):
+    email, _, _, _ = setup_sales(app)
+
+    with client:
+        login(client, email, "pass")
+        resp = client.get(
+            "/view_invoices",
+            query_string={"start_date": "not-a-date"},
+            follow_redirects=True,
+        )
+
+    assert resp.status_code == 200
+    assert b"Invalid start date." in resp.data
+
+
+def test_filter_invoices_api_rejects_invalid_date_filters(client, app):
+    email, _, _, _ = setup_sales(app)
+
+    with client:
+        login(client, email, "pass")
+        resp = client.get(
+            "/api/filter_invoices",
+            query_string={"start_date": "not-a-date"},
+        )
+
+    assert resp.status_code == 400
+    payload = resp.get_json()
+    assert payload == {"errors": {"start_date": ["Invalid start date."]}}

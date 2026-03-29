@@ -67,3 +67,32 @@ def test_customer_crud_flow(client, app):
     with app.app_context():
         cust = db.session.get(Customer, cid)
         assert cust.archived
+
+
+def test_create_customer_modal_returns_json_payload(client, app):
+    email = setup_user(app)
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            "/customers/create-modal",
+            data={
+                "first_name": "Modal",
+                "last_name": "Customer",
+                "gst_exempt": "y",
+                "pst_exempt": "",
+            },
+        )
+
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["success"] is True
+    assert payload["customer"]["first_name"] == "Modal"
+    assert payload["customer"]["last_name"] == "Customer"
+    assert "delete_csrf_token" in payload
+
+    with app.app_context():
+        cust = Customer.query.filter_by(
+            first_name="Modal", last_name="Customer"
+        ).first()
+        assert cust is not None

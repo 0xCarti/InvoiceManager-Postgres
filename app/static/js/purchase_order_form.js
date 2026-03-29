@@ -704,6 +704,15 @@
             }
             itemCol.appendChild(hiddenInput);
 
+            const costInput = document.createElement("input");
+            costInput.type = "hidden";
+            costInput.name = `items-${index}-cost`;
+            costInput.classList.add("item-cost-field");
+            if (options.cost !== undefined && options.cost !== null && options.cost !== "") {
+                costInput.value = options.cost;
+            }
+            itemCol.appendChild(costInput);
+
             const positionInput = document.createElement("input");
             positionInput.type = "hidden";
             positionInput.name = `items-${index}-position`;
@@ -993,11 +1002,15 @@
                 return;
             }
             const hiddenField = row.querySelector(".item-id-field");
+            const costField = row.querySelector(".item-cost-field");
             const unitSelect = row.querySelector(".unit-select");
             const suggestionList = row.querySelector(".suggestion-list");
 
             if (hiddenField) {
                 hiddenField.value = "";
+            }
+            if (costField) {
+                costField.value = "";
             }
             setManageButtonState(row, false);
             updateRowGlCode(row, "");

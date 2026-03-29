@@ -1396,6 +1396,7 @@ class ImportForm(FlaskForm):
 
 class POItemForm(FlaskForm):
     item = HiddenField("Item")
+    cost = HiddenField("Cost")
     product = SelectField(
         "Product", coerce=int, validators=[Optional()], validate_choice=False
     )

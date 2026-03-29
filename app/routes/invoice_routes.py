@@ -34,10 +34,72 @@ class InvoiceCreationError(Exception):
     """Raised when invoice creation cannot be completed safely."""
 
 
+class InvoiceFilterError(Exception):
+    """Raised when invoice filter query parameters are invalid."""
+
+    def __init__(self, message, *, field="date"):
+        super().__init__(message)
+        self.field = field
+
+
+def _parse_invoice_product_entries(raw_product_data):
+    """Return valid invoice line payloads extracted from the hidden form field."""
+
+    entries = []
+    for raw_entry in (raw_product_data or "").removesuffix(":").split(":"):
+        entry = str(raw_entry or "").strip()
+        if not entry:
+            continue
+        parts = entry.split("?")
+        if len(parts) != 4:
+            continue
+        product_name, quantity, override_gst, override_pst = parts
+        product_name = product_name.strip()
+        quantity_value = coerce_float(quantity, default=None)
+        if not product_name or quantity_value is None:
+            continue
+        entries.append(
+            {
+                "product_name": product_name,
+                "quantity": quantity_value,
+                "override_gst": override_gst,
+                "override_pst": override_pst,
+            }
+        )
+    return entries
+
+
+def _parse_invoice_filter_dates(start_date_str, end_date_str):
+    start_date = None
+    end_date = None
+
+    if start_date_str:
+        try:
+            start_date = datetime.fromisoformat(start_date_str).date()
+        except ValueError as exc:
+            raise InvoiceFilterError("Invalid start date.", field="start_date") from exc
+    if end_date_str:
+        try:
+            end_date = datetime.fromisoformat(end_date_str).date()
+        except ValueError as exc:
+            raise InvoiceFilterError("Invalid end date.", field="end_date") from exc
+    if start_date and end_date and start_date > end_date:
+        raise InvoiceFilterError(
+            "Invalid date range: start cannot be after end.",
+            field="end_date",
+        )
+
+    return start_date, end_date
+
+
 def _create_invoice_from_form(form):
     customer = db.session.get(Customer, form.customer.data)
     if customer is None:
         abort(404)
+    parsed_entries = _parse_invoice_product_entries(form.products.data)
+    if not parsed_entries:
+        raise InvoiceCreationError("Add at least one valid product before creating an invoice.")
+
     today = datetime.now().strftime("%d%m%y")
     count = (
         Invoice.query.filter(
@@ -53,22 +115,7 @@ def _create_invoice_from_form(form):
     )
     db.session.add(invoice)
 
-    product_data = form.products.data.removesuffix(":").split(":")
-
-    parsed_entries = []
-    product_names = set()
-    for entry in product_data:
-        try:
-            product_name, quantity, override_gst, override_pst = entry.split(
-                "?"
-            )
-        except ValueError:
-            flash(f"Invalid product data format: '{entry}'", "danger")
-            continue
-        parsed_entries.append(
-            (product_name, quantity, override_gst, override_pst)
-        )
-        product_names.add(product_name)
+    product_names = {entry["product_name"] for entry in parsed_entries}
 
     products = (
         Product.query.filter(Product.name.in_(product_names)).all()
@@ -76,15 +123,16 @@ def _create_invoice_from_form(form):
         else []
     )
     product_lookup = {p.name: p for p in products}
+    created_line_count = 0
 
-    for product_name, quantity, override_gst, override_pst in parsed_entries:
+    for entry in parsed_entries:
+        product_name = entry["product_name"]
+        quantity = entry["quantity"]
+        override_gst = entry["override_gst"]
+        override_pst = entry["override_pst"]
         product = product_lookup.get(product_name)
 
         if product:
-            quantity_value = coerce_float(quantity)
-            if quantity_value is None:
-                continue
-            quantity = quantity_value
             invoice_price = product.invoice_sale_price
             unit_price = (
                 float(invoice_price)
@@ -127,6 +175,7 @@ def _create_invoice_from_form(form):
                 line_pst=line_pst,
             )
             db.session.add(invoice_product)
+            created_line_count += 1
 
             product.quantity = (product.quantity or 0) - quantity
 
@@ -136,6 +185,10 @@ def _create_invoice_from_form(form):
                 item.quantity = (item.quantity or 0) - (
                     recipe_item.quantity * factor * quantity
                 )
+
+    if created_line_count == 0:
+        db.session.rollback()
+        raise InvoiceCreationError("Add at least one valid product before creating an invoice.")
 
     try:
         db.session.commit()
@@ -152,7 +205,9 @@ def _create_invoice_from_form(form):
                 ],
             },
         )
-        raise InvoiceCreationError("Invoice could not be created.") from exc
+        raise InvoiceCreationError(
+            "Unable to create invoice right now. Please try again."
+        ) from exc
 
     log_activity(f"Created invoice {invoice.id}")
     return invoice
@@ -170,11 +225,8 @@ def create_invoice():
     if form.validate_on_submit():
         try:
             _create_invoice_from_form(form)
-        except InvoiceCreationError:
-            flash(
-                "Unable to create invoice right now. Please try again.",
-                "danger",
-            )
+        except InvoiceCreationError as exc:
+            flash(str(exc), "danger")
         else:
             flash("Invoice created successfully!", "success")
             return redirect(url_for("invoice.view_invoices"))
@@ -466,10 +518,12 @@ def filter_invoices_api():
     if payment_status not in {"all", "paid", "unpaid"}:
         payment_status = "all"
 
-    start_date = (
-        datetime.fromisoformat(start_date_str) if start_date_str else None
-    )
-    end_date = datetime.fromisoformat(end_date_str) if end_date_str else None
+    try:
+        start_date, end_date = _parse_invoice_filter_dates(
+            start_date_str, end_date_str
+        )
+    except InvoiceFilterError as exc:
+        return {"errors": {exc.field: [str(exc)]}}, 400
 
     query = Invoice.query
     if user_id:
@@ -529,7 +583,10 @@ def create_invoice_api():
         (c.id, f"{c.first_name} {c.last_name}") for c in Customer.query.all()
     ]
     if form.validate_on_submit():
-        invoice = _create_invoice_from_form(form)
+        try:
+            invoice = _create_invoice_from_form(form)
+        except InvoiceCreationError as exc:
+            return {"errors": {"products": [str(exc)]}}, 400
         customer = invoice.customer
         return {
             "invoice": {
@@ -568,12 +625,13 @@ def view_invoices():
         start_date_str = request.args.get("start_date")
         end_date_str = request.args.get("end_date")
         payment_status = request.args.get("payment_status", "all").lower()
-        start_date = (
-            datetime.fromisoformat(start_date_str) if start_date_str else None
-        )
-        end_date = (
-            datetime.fromisoformat(end_date_str) if end_date_str else None
-        )
+        try:
+            start_date, end_date = _parse_invoice_filter_dates(
+                start_date_str, end_date_str
+            )
+        except InvoiceFilterError as exc:
+            flash(str(exc), "danger")
+            return redirect(url_for("invoice.view_invoices"))
         form.invoice_id.data = invoice_id
         if customer_id is not None:
             form.customer_id.data = customer_id

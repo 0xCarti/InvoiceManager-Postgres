@@ -108,19 +108,7 @@
         </thead>
         <tbody>
             {% for customer in customers.items %}
-            <tr>
-                <td class="col-customer-name">{{ customer.first_name }} {{ customer.last_name }}</td>
-                <td class="col-customer-gst">{{ 'Yes' if customer.gst_exempt else 'No' }}</td>
-                <td class="col-customer-pst">{{ 'Yes' if customer.pst_exempt else 'No' }}</td>
-                <td class="col-customer-actions">
-                    <a href="{{ url_for('customer.edit_customer', customer_id=customer.id) }}" class="btn btn-primary mr-2">Edit</a>
-                    <a href="{{ url_for('notes.entity_notes', entity_type='customer', entity_id=customer.id) }}" class="btn btn-outline-secondary mr-2">Notes</a>
-                    <form action="{{ url_for('customer.delete_customer', customer_id=customer.id) }}" method="post" class="d-inline">
-                        {{ delete_form.hidden_tag() }}
-                        <button type="submit" class="btn btn-danger mr-2" data-confirm-message="Are you sure you want to delete this customer?">Delete</button>
-                    </form>
-                </td>
-            </tr>
+            {% include 'customers/_customer_row.html' with context %}
             {% endfor %}
         </tbody>
     </table>
@@ -186,20 +174,9 @@
                 const data = await response.json();
                 if (data.success) {
                     const tbody = document.querySelector('table tbody');
-                    const row = document.createElement('tr');
-                    row.innerHTML = `
-                        <td class="col-customer-name">${data.customer.first_name} ${data.customer.last_name}</td>
-                        <td class="col-customer-gst">${data.customer.gst_exempt ? 'Yes' : 'No'}</td>
-                        <td class="col-customer-pst">${data.customer.pst_exempt ? 'Yes' : 'No'}</td>
-                        <td class="col-customer-actions">
-                            <a href="/customers/${data.customer.id}/edit" class="btn btn-primary mr-2">Edit</a>
-                            <a href="/notes/customer/${data.customer.id}" class="btn btn-outline-secondary mr-2">Notes</a>
-                            <form action="/customers/${data.customer.id}/delete" method="post" class="d-inline">
-                                <input type="hidden" name="csrf_token" value="${data.delete_csrf_token}">
-                                <button type="submit" class="btn btn-danger mr-2" data-confirm-message="Are you sure you want to delete this customer?">Delete</button>
-                            </form>
-                        </td>`;
-                    tbody.appendChild(row);
+                    if (data.row_html) {
+                        tbody.insertAdjacentHTML('beforeend', data.row_html);
+                    }
                     if (window.TableSort && typeof window.TableSort.bind === 'function') {
                         window.TableSort.bind(document.getElementById('customerTable'));
                     }
@@ -208,7 +185,10 @@
                     bootstrap.Modal.getInstance(modalEl).hide();
                 }
             } else {
-                console.error('Error creating customer');
+                const data = await response.json().catch(() => ({}));
+                const errors = data.errors || {};
+                const firstError = Object.values(errors).flat()[0];
+                window.alert(firstError || 'Unable to create customer. Please check the form and try again.');
             }
         });
     });

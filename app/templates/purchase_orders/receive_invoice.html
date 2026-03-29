@@ -354,7 +354,7 @@
         return Boolean(depositActive || hasLocation || glDiffers);
     }
 
-    function fetchUnits(selectEl, selectedUnitId=null) {
+    function fetchUnits(selectEl, selectedUnitId=null, { skipCostRefresh = false } = {}) {
         const itemId = selectEl.value;
         const row = selectEl.closest('.item-row');
         const unitSelect = row.querySelector('.unit-select');
@@ -377,7 +377,9 @@
             });
             unitSelect.innerHTML = opts;
             applyDefaultGlCode(row, data.purchase_gl_code);
-            fetchCost(selectEl.closest('.item-row'));
+            if (!skipCostRefresh) {
+                fetchCost(selectEl.closest('.item-row'));
+            }
         });
     }
 
@@ -571,7 +573,7 @@
                 locationSelect.value = '0';
             }
         }
-        fetchUnits(sel, selectedUnit);
+        fetchUnits(sel, selectedUnit, { skipCostRefresh: true });
         const glSelect = row.querySelector('.gl-code-select');
         if (glSelect && !glSelect.value) {
             glSelect.value = '0';

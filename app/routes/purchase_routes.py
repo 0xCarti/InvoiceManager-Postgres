@@ -310,6 +310,146 @@ def _parse_source_ids(raw_source_ids) -> list[int]:
     return source_ids
 
 
+def _coerce_bool_flag(raw_value, *, default: bool = False) -> bool:
+    if raw_value is None:
+        return default
+    if isinstance(raw_value, bool):
+        return raw_value
+    return str(raw_value).strip().lower() in {"1", "true", "yes", "on", "y"}
+
+
+def _iter_form_item_indexes(form_data) -> list[str]:
+    indexes: list[str] = []
+    seen_indexes: set[str] = set()
+    for key in form_data.keys():
+        match = re.match(r"^items-(\d+)-item$", str(key))
+        if not match:
+            continue
+        index = match.group(1)
+        if index in seen_indexes:
+            continue
+        seen_indexes.add(index)
+        indexes.append(index)
+    return sorted(indexes, key=int)
+
+
+def _collect_purchase_order_item_entries(form_data):
+    item_entries = []
+    has_incomplete_rows = False
+    fallback_counter = 0
+
+    for index in _iter_form_item_indexes(form_data):
+        item_id = form_data.get(f"items-{index}-item", type=int)
+        unit_id = form_data.get(f"items-{index}-unit", type=int)
+        quantity = coerce_float(form_data.get(f"items-{index}-quantity"), default=None)
+        unit_cost = coerce_float(form_data.get(f"items-{index}-cost"), default=None)
+        position = form_data.get(f"items-{index}-position", type=int)
+        item_label = (form_data.get(f"items-{index}-item-label") or "").strip()
+
+        has_row_data = bool(
+            item_id
+            or item_label
+            or unit_id
+            or quantity is not None
+            or unit_cost is not None
+        )
+        if not has_row_data:
+            continue
+
+        if not item_id or quantity is None:
+            has_incomplete_rows = True
+            continue
+
+        item_entries.append(
+            {
+                "item_id": item_id,
+                "unit_id": unit_id,
+                "quantity": quantity,
+                "unit_cost": unit_cost,
+                "position": position,
+                "fallback": fallback_counter,
+            }
+        )
+        fallback_counter += 1
+
+    item_entries.sort(
+        key=lambda entry: (
+            entry["position"]
+            if entry["position"] is not None
+            else entry["fallback"],
+            entry["fallback"],
+        )
+    )
+    return item_entries, has_incomplete_rows
+
+
+def _collect_receive_invoice_item_entries(form_data):
+    item_entries = []
+    has_incomplete_rows = False
+    fallback_counter = 0
+
+    for index in _iter_form_item_indexes(form_data):
+        item_id = form_data.get(f"items-{index}-item", type=int)
+        unit_id = form_data.get(f"items-{index}-unit", type=int)
+        quantity = coerce_float(form_data.get(f"items-{index}-quantity"), default=None)
+        cost = coerce_float(form_data.get(f"items-{index}-cost"), default=None)
+        container_deposit_raw = coerce_float(
+            form_data.get(f"items-{index}-container_deposit"),
+            default=None,
+        )
+        position = form_data.get(f"items-{index}-position", type=int)
+        gl_code_id = form_data.get(f"items-{index}-gl_code", type=int) or None
+        line_location_id = (
+            form_data.get(f"items-{index}-location_id", type=int) or None
+        )
+
+        has_row_data = bool(
+            item_id
+            or unit_id
+            or quantity is not None
+            or cost is not None
+            or container_deposit_raw is not None
+            or gl_code_id is not None
+            or line_location_id is not None
+        )
+        if not has_row_data:
+            continue
+
+        if not item_id or quantity is None or cost is None:
+            has_incomplete_rows = True
+            continue
+
+        item_entries.append(
+            {
+                "item_id": item_id,
+                "unit_id": unit_id,
+                "quantity": quantity,
+                "cost": abs(cost),
+                "container_deposit": (
+                    abs(container_deposit_raw)
+                    if container_deposit_raw is not None
+                    else 0.0
+                ),
+                "deposit_provided": container_deposit_raw is not None,
+                "position": position,
+                "fallback": fallback_counter,
+                "gl_code_id": gl_code_id,
+                "location_id": line_location_id,
+            }
+        )
+        fallback_counter += 1
+
+    item_entries.sort(
+        key=lambda entry: (
+            entry["position"]
+            if entry["position"] is not None
+            else entry["fallback"],
+            entry["fallback"],
+        )
+    )
+    return item_entries, has_incomplete_rows
+
+
 def _validate_json_csrf(payload: dict | None) -> None:
     token = request.headers.get("X-CSRFToken")
     if not token and payload:
@@ -402,16 +542,23 @@ def view_purchase_orders():
         item_ids = [item_id for item_id in item_ids if item_id in item_lookup]
         selected_items = [item_lookup[item_id] for item_id in item_ids]
 
-    start_date = (
-        datetime.datetime.strptime(start_date_str, "%Y-%m-%d").date()
-        if start_date_str
-        else None
-    )
-    end_date = (
-        datetime.datetime.strptime(end_date_str, "%Y-%m-%d").date()
-        if end_date_str
-        else None
-    )
+    start_date = None
+    end_date = None
+    if start_date_str:
+        try:
+            start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d").date()
+        except ValueError:
+            flash("Invalid start date.", "error")
+            return redirect(url_for("purchase.view_purchase_orders"))
+    if end_date_str:
+        try:
+            end_date = datetime.datetime.strptime(end_date_str, "%Y-%m-%d").date()
+        except ValueError:
+            flash("Invalid end date.", "error")
+            return redirect(url_for("purchase.view_purchase_orders"))
+    if start_date and end_date and start_date > end_date:
+        flash("Invalid date range: start cannot be after end.", "error")
+        return redirect(url_for("purchase.view_purchase_orders"))
 
     query = PurchaseOrder.query
 
@@ -500,9 +647,14 @@ def merge_purchase_orders_route():
             return jsonify({"error": str(exc)}), 400
         target_po_id = payload.get("target_po_id")
         raw_source_ids = payload.get("source_po_ids", [])
+        require_expected_date_match = _coerce_bool_flag(
+            payload.get("require_expected_date_match"),
+            default=True,
+        )
     else:
         target_po_id = form.target_po_id.data
         raw_source_ids = form.source_po_ids.data or ""
+        require_expected_date_match = form.require_expected_date_match.data
 
     try:
         target_id = int(target_po_id)
@@ -525,6 +677,7 @@ def merge_purchase_orders_route():
         merge_purchase_orders(
             target_po_id=target_id,
             source_po_ids=source_ids,
+            require_expected_date_match=require_expected_date_match,
         )
     except PurchaseMergeError as exc:
         return _merge_error_response(f"Merge failed: {exc}", wants_json)
@@ -847,6 +1000,7 @@ def create_purchase_order():
                 form.items[idx].item.data = entry.get("item_id")
                 form.items[idx].unit.data = entry.get("unit_id")
                 form.items[idx].quantity.data = entry.get("quantity")
+                form.items[idx].cost.data = entry.get("cost")
                 form.items[idx].position.data = idx
 
         if upload_state:
@@ -887,6 +1041,7 @@ def create_purchase_order():
                 form.items[idx].item.data = parsed_item.get("item_id")
                 form.items[idx].unit.data = parsed_item.get("unit_id")
                 form.items[idx].quantity.data = parsed_item.get("quantity")
+                form.items[idx].cost.data = parsed_item.get("cost")
                 form.items[idx].position.data = idx
 
     if request.method == "GET" and form.order_date.data is None:
@@ -894,81 +1049,58 @@ def create_purchase_order():
     if request.method == "GET" and form.expected_date.data is None:
         form.expected_date.data = datetime.date.today() + datetime.timedelta(days=1)
     if form.validate_on_submit():
-        vendor_record = db.session.get(Vendor, form.vendor.data)
-        vendor_name = (
-            f"{vendor_record.first_name} {vendor_record.last_name}"
-            if vendor_record
-            else ""
+        item_entries, has_incomplete_rows = _collect_purchase_order_item_entries(
+            request.form
         )
-        expected_total = (
-            float(form.expected_total_cost.data)
-            if form.expected_total_cost.data is not None
-            else None
-        )
-        po = PurchaseOrder(
-            vendor_id=form.vendor.data,
-            user_id=current_user.id,
-            vendor_name=vendor_name,
-            order_number=form.order_number.data or None,
-            order_date=form.order_date.data,
-            expected_date=form.expected_date.data,
-            expected_total_cost=expected_total,
-            delivery_charge=form.delivery_charge.data or 0.0,
-        )
-        db.session.add(po)
-        db.session.commit()
-
-        item_entries = []
-        fallback_counter = 0
-        items = [
-            key
-            for key in request.form.keys()
-            if key.startswith("items-") and key.endswith("-item")
-        ]
-        for field in items:
-            index = field.split("-")[1]
-            item_id = request.form.get(f"items-{index}-item", type=int)
-            unit_id = request.form.get(f"items-{index}-unit", type=int)
-            quantity = coerce_float(request.form.get(f"items-{index}-quantity"))
-            position = request.form.get(f"items-{index}-position", type=int)
-            if item_id and quantity is not None:
-                item_entries.append(
-                    {
-                        "item_id": item_id,
-                        "unit_id": unit_id,
-                        "quantity": quantity,
-                        "position": position,
-                        "fallback": fallback_counter,
-                    }
-                )
-                fallback_counter += 1
-
-        item_entries.sort(
-            key=lambda entry: (
-                entry["position"]
-                if entry["position"] is not None
-                else entry["fallback"],
-                entry["fallback"],
+        if has_incomplete_rows:
+            flash(
+                "Each populated purchase-order row must include a selected item and quantity.",
+                "error",
             )
-        )
-
-        for order_index, entry in enumerate(item_entries):
-            db.session.add(
-                PurchaseOrderItem(
-                    purchase_order_id=po.id,
-                    item_id=entry["item_id"],
-                    unit_id=entry["unit_id"],
-                    quantity=entry["quantity"],
-                    unit_cost=None,
-                    position=order_index,
-                )
+        elif not item_entries:
+            flash("Add at least one item before saving the purchase order.", "error")
+        else:
+            vendor_record = db.session.get(Vendor, form.vendor.data)
+            vendor_name = (
+                f"{vendor_record.first_name} {vendor_record.last_name}"
+                if vendor_record
+                else ""
             )
+            expected_total = (
+                float(form.expected_total_cost.data)
+                if form.expected_total_cost.data is not None
+                else None
+            )
+            po = PurchaseOrder(
+                vendor_id=form.vendor.data,
+                user_id=current_user.id,
+                vendor_name=vendor_name,
+                order_number=form.order_number.data or None,
+                order_date=form.order_date.data,
+                expected_date=form.expected_date.data,
+                expected_total_cost=expected_total,
+                delivery_charge=form.delivery_charge.data or 0.0,
+            )
+            db.session.add(po)
+            db.session.flush()
 
-        db.session.commit()
-        _clear_purchase_upload_state()
-        log_activity(f"Created purchase order {po.id}")
-        flash("Purchase order created successfully!", "success")
-        return redirect(url_for("purchase.view_purchase_orders"))
+            for order_index, entry in enumerate(item_entries):
+                db.session.add(
+                    PurchaseOrderItem(
+                        purchase_order_id=po.id,
+                        item_id=entry["item_id"],
+                        unit_id=entry["unit_id"],
+                        quantity=entry["quantity"],
+                        unit_cost=entry.get("unit_cost"),
+                        position=order_index,
+                    )
+                )
+
+            db.session.commit()
+            _clear_purchase_upload_state()
+            log_activity(f"Created purchase order {po.id}")
+            flash("Purchase order created successfully!", "success")
+            return redirect(url_for("purchase.view_purchase_orders"))
 
     selected_item_ids = []
     for item_form in form.items:
@@ -1165,87 +1297,69 @@ def edit_purchase_order(po_id):
     po = db.session.get(PurchaseOrder, po_id)
     if po is None:
         abort(404)
-    form = PurchaseOrderForm()
-    if form.validate_on_submit():
-        existing_unit_costs = {}
-        for poi in po.items:
-            key = (poi.item_id, poi.unit_id)
-            existing_unit_costs.setdefault(key, []).append(poi.unit_cost)
-
-        po.vendor_id = form.vendor.data
-        vendor_record = db.session.get(Vendor, form.vendor.data)
-        po.vendor_name = (
-            f"{vendor_record.first_name} {vendor_record.last_name}"
-            if vendor_record
-            else ""
-        )
-        po.order_number = form.order_number.data or None
-        po.order_date = form.order_date.data
-        po.expected_date = form.expected_date.data
-        po.expected_total_cost = (
-            float(form.expected_total_cost.data)
-            if form.expected_total_cost.data is not None
-            else None
-        )
-        po.delivery_charge = form.delivery_charge.data or 0.0
-
-        PurchaseOrderItem.query.filter_by(purchase_order_id=po.id).delete()
-
-        item_entries = []
-        fallback_counter = 0
-        items = [
-            key
-            for key in request.form.keys()
-            if key.startswith("items-") and key.endswith("-item")
-        ]
-        for field in items:
-            index = field.split("-")[1]
-            item_id = request.form.get(f"items-{index}-item", type=int)
-            unit_id = request.form.get(f"items-{index}-unit", type=int)
-            quantity = coerce_float(request.form.get(f"items-{index}-quantity"))
-            position = request.form.get(f"items-{index}-position", type=int)
-            unit_cost = None
-            key = (item_id, unit_id)
-            if key in existing_unit_costs and existing_unit_costs[key]:
-                unit_cost = existing_unit_costs[key].pop(0)
-            if item_id and quantity is not None:
-                item_entries.append(
-                    {
-                        "item_id": item_id,
-                        "unit_id": unit_id,
-                        "quantity": quantity,
-                        "unit_cost": unit_cost,
-                        "position": position,
-                        "fallback": fallback_counter,
-                    }
-                )
-                fallback_counter += 1
-
-        item_entries.sort(
-            key=lambda entry: (
-                entry["position"]
-                if entry["position"] is not None
-                else entry["fallback"],
-                entry["fallback"],
-            )
-        )
-
-        for order_index, entry in enumerate(item_entries):
-            db.session.add(
-                PurchaseOrderItem(
-                    purchase_order_id=po.id,
-                    item_id=entry["item_id"],
-                    unit_id=entry["unit_id"],
-                    quantity=entry["quantity"],
-                    unit_cost=entry.get("unit_cost"),
-                    position=order_index,
-                )
-            )
-
-        db.session.commit()
-        log_activity(f"Edited purchase order {po.id}")
-        flash("Purchase order updated successfully!", "success")
+    if po.received:
+        flash("Received purchase orders cannot be edited.", "error")
         return redirect(url_for("purchase.view_purchase_orders"))
+    form = PurchaseOrderForm()
+    if po.vendor_id and po.vendor_id not in {choice[0] for choice in form.vendor.choices}:
+        archived_vendor_label = po.vendor_name or f"Archived Vendor #{po.vendor_id}"
+        form.vendor.choices.append((po.vendor_id, archived_vendor_label))
+    if form.validate_on_submit():
+        item_entries, has_incomplete_rows = _collect_purchase_order_item_entries(
+            request.form
+        )
+        if has_incomplete_rows:
+            flash(
+                "Each populated purchase-order row must include a selected item and quantity.",
+                "error",
+            )
+        elif not item_entries:
+            flash("Add at least one item before saving the purchase order.", "error")
+        else:
+            existing_unit_costs = {}
+            for poi in po.items:
+                key = (poi.item_id, poi.unit_id)
+                existing_unit_costs.setdefault(key, []).append(poi.unit_cost)
+
+            po.vendor_id = form.vendor.data
+            vendor_record = db.session.get(Vendor, form.vendor.data)
+            po.vendor_name = (
+                f"{vendor_record.first_name} {vendor_record.last_name}"
+                if vendor_record
+                else po.vendor_name or ""
+            )
+            po.order_number = form.order_number.data or None
+            po.order_date = form.order_date.data
+            po.expected_date = form.expected_date.data
+            po.expected_total_cost = (
+                float(form.expected_total_cost.data)
+                if form.expected_total_cost.data is not None
+                else None
+            )
+            po.delivery_charge = form.delivery_charge.data or 0.0
+
+            PurchaseOrderItem.query.filter_by(purchase_order_id=po.id).delete()
+
+            for order_index, entry in enumerate(item_entries):
+                unit_cost = entry.get("unit_cost")
+                key = (entry["item_id"], entry["unit_id"])
+                if unit_cost is None and key in existing_unit_costs and existing_unit_costs[key]:
+                    unit_cost = existing_unit_costs[key].pop(0)
+                db.session.add(
+                    PurchaseOrderItem(
+                        purchase_order_id=po.id,
+                        item_id=entry["item_id"],
+                        unit_id=entry["unit_id"],
+                        quantity=entry["quantity"],
+                        unit_cost=unit_cost,
+                        position=order_index,
+                    )
+                )
+
+            db.session.commit()
+            log_activity(f"Edited purchase order {po.id}")
+            flash("Purchase order updated successfully!", "success")
+            return redirect(url_for("purchase.view_purchase_orders"))
 
     if request.method == "GET":
         form.vendor.data = po.vendor_id
@@ -1263,6 +1377,7 @@ def edit_purchase_order(po_id):
             form.items[i].item.data = poi.item_id
             form.items[i].unit.data = poi.unit_id
             form.items[i].quantity.data = poi.quantity
+            form.items[i].cost.data = poi.unit_cost
             form.items[i].position.data = poi.position
 
     selected_item_ids = []
@@ -1327,6 +1442,9 @@ def receive_invoice(po_id):
     po = db.session.get(PurchaseOrder, po_id)
     if po is None:
         abort(404)
+    if po.received:
+        flash("This purchase order has already been received.", "error")
+        return redirect(url_for("purchase.view_purchase_invoices"))
     form = ReceiveInvoiceForm()
     gl_code_choices = load_purchase_gl_code_choices()
     department_defaults = Setting.get_receive_location_defaults()
@@ -1427,6 +1545,31 @@ def receive_invoice(po_id):
             location_value = item_data.get("location_id")
             form.items[index].location_id.data = location_value or 0
     if form.validate_on_submit():
+        item_entries, has_incomplete_rows = _collect_receive_invoice_item_entries(
+            request.form
+        )
+        if has_incomplete_rows:
+            flash(
+                "Each populated invoice row must include an item, quantity, and cost.",
+                "error",
+            )
+            return render_template(
+                "purchase_orders/receive_invoice.html",
+                form=form,
+                po=po,
+                gl_code_choices=gl_code_choices,
+                department_defaults=department_defaults,
+            )
+        if not item_entries:
+            flash("Add at least one item before receiving the invoice.", "error")
+            return render_template(
+                "purchase_orders/receive_invoice.html",
+                form=form,
+                po=po,
+                gl_code_choices=gl_code_choices,
+                department_defaults=department_defaults,
+            )
+
         location_obj = db.session.get(Location, form.location_id.data)
         if not PurchaseOrderItemArchive.query.filter_by(
             purchase_order_id=po.id
@@ -1442,7 +1585,6 @@ def receive_invoice(po_id):
                         unit_cost=poi.unit_cost,
                     )
                 )
-            db.session.commit()
         invoice = PurchaseInvoice(
             purchase_order_id=po.id,
             user_id=current_user.id,
@@ -1461,58 +1603,15 @@ def receive_invoice(po_id):
         # committing the transaction yet. This keeps all updates in a single
         # commit so item cost changes persist reliably.
         db.session.flush()
-
-        item_entries = []
-        fallback_counter = 0
-        items = [
-            key
-            for key in request.form.keys()
-            if key.startswith("items-") and key.endswith("-item")
-        ]
-        for field in items:
-            index = field.split("-")[1]
-            item_id = request.form.get(f"items-{index}-item", type=int)
-            unit_id = request.form.get(f"items-{index}-unit", type=int)
-            quantity = coerce_float(request.form.get(f"items-{index}-quantity"))
-            cost = coerce_float(request.form.get(f"items-{index}-cost"))
-            container_deposit_raw = coerce_float(
-                request.form.get(f"items-{index}-container_deposit")
+        starting_item_costs = {}
+        for entry in item_entries:
+            item_id = entry["item_id"]
+            if item_id in starting_item_costs:
+                continue
+            item_obj = db.session.get(Item, item_id)
+            starting_item_costs[item_id] = (
+                item_obj.cost if item_obj and item_obj.cost else 0.0
             )
-            position = request.form.get(f"items-{index}-position", type=int)
-            gl_code_id = request.form.get(f"items-{index}-gl_code", type=int)
-            gl_code_id = gl_code_id or None
-            line_location_id = request.form.get(
-                f"items-{index}-location_id", type=int
-            )
-            line_location_id = line_location_id or None
-            if item_id and quantity is not None and cost is not None:
-                container_deposit = (
-                    abs(container_deposit_raw) if container_deposit_raw is not None else 0.0
-                )
-                item_entries.append(
-                    {
-                        "item_id": item_id,
-                        "unit_id": unit_id,
-                        "quantity": quantity,
-                        "cost": abs(cost),
-                        "container_deposit": container_deposit,
-                        "deposit_provided": container_deposit_raw is not None,
-                        "position": position,
-                        "fallback": fallback_counter,
-                        "gl_code_id": gl_code_id,
-                        "location_id": line_location_id,
-                    }
-                )
-                fallback_counter += 1
-
-        item_entries.sort(
-            key=lambda entry: (
-                entry["position"]
-                if entry["position"] is not None
-                else entry["fallback"],
-                entry["fallback"],
-            )
-        )
 
         for order_index, entry in enumerate(item_entries):
             item_obj = db.session.get(Item, entry["item_id"])
@@ -1520,7 +1619,7 @@ def receive_invoice(po_id):
                 db.session.get(ItemUnit, entry["unit_id"]) if entry["unit_id"] else None
             )
 
-            prev_cost = item_obj.cost if item_obj and item_obj.cost else 0.0
+            prev_cost = starting_item_costs.get(entry["item_id"], 0.0)
             quantity = entry["quantity"]
             cost = entry["cost"]
             container_deposit = entry.get("container_deposit", 0.0)
@@ -1710,7 +1809,14 @@ def view_purchase_invoices():
     if vendor_id:
         query = query.join(PurchaseOrder).filter(PurchaseOrder.vendor_id == vendor_id)
     if location_id:
-        query = query.filter(PurchaseInvoice.location_id == location_id)
+        query = query.filter(
+            or_(
+                PurchaseInvoice.location_id == location_id,
+                PurchaseInvoice.items.any(
+                    PurchaseInvoiceItem.location_id == location_id
+                ),
+            )
+        )
     if start_date:
         query = query.filter(PurchaseInvoice.received_date >= start_date)
     if end_date:

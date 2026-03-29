@@ -113,6 +113,46 @@ def test_filter_by_payment_status(client, app):
         assert b"INV3" not in unpaid_response.data
 
 
+def test_view_invoices_rejects_invalid_filter_dates(client, app):
+    user_email, _, _ = setup_invoices(app)
+
+    with client:
+        login(client, user_email, "pass")
+        response = client.get(
+            "/view_invoices?start_date=not-a-date",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"Invalid start date." in response.data
+
+
+def test_filter_invoices_api_rejects_invalid_filter_dates(client, app):
+    user_email, _, _ = setup_invoices(app)
+
+    with client:
+        login(client, user_email, "pass")
+        response = client.get("/api/filter_invoices?end_date=bad-date")
+
+    assert response.status_code == 400
+    assert response.get_json()["errors"]["end_date"] == ["Invalid end date."]
+
+
+def test_filter_invoices_api_rejects_reversed_date_range(client, app):
+    user_email, _, _ = setup_invoices(app)
+
+    with client:
+        login(client, user_email, "pass")
+        response = client.get(
+            "/api/filter_invoices?start_date=2023-03-01&end_date=2023-02-01"
+        )
+
+    assert response.status_code == 400
+    assert response.get_json()["errors"]["end_date"] == [
+        "Invalid date range: start cannot be after end."
+    ]
+
+
 def test_view_invoices_reports_dropdown_and_layout_markers(client, app):
     user_email, _, _ = setup_invoices(app)
 

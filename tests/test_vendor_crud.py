@@ -82,3 +82,31 @@ def test_view_vendors(client, app):
         login(client, email, "pass")
         resp = client.get("/vendors")
         assert resp.status_code == 200
+
+
+def test_create_vendor_ajax_returns_row_html(client, app):
+    email = setup_user(app)
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            "/vendors/create",
+            data={
+                "first_name": "Ajax",
+                "last_name": "Vendor",
+                "gst_exempt": "y",
+                "pst_exempt": "",
+            },
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["success"] is True
+    assert "Ajax Vendor" in payload["row_html"]
+
+    with app.app_context():
+        vendor = Vendor.query.filter_by(
+            first_name="Ajax", last_name="Vendor"
+        ).first()
+        assert vendor is not None

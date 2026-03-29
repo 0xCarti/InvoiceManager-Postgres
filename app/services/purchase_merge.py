@@ -25,6 +25,8 @@ class PurchaseMergeError(Exception):
 def merge_purchase_orders(
     target_po_id: int,
     source_po_ids: Sequence[int],
+    *,
+    require_expected_date_match: bool = True,
 ) -> PurchaseOrder:
     """Merge purchase orders into a single target order.
 
@@ -65,7 +67,11 @@ def merge_purchase_orders(
         target_order = order_lookup[target_po_id]
         source_orders = [order_lookup[po_id] for po_id in unique_source_ids]
 
-        _validate_orders(target_order, source_orders)
+        _validate_orders(
+            target_order,
+            source_orders,
+            require_expected_date_match=require_expected_date_match,
+        )
 
         position_map, aggregated_items = _aggregate_items(target_order, source_orders)
 
@@ -87,7 +93,10 @@ def merge_purchase_orders(
 
 
 def _validate_orders(
-    target_order: PurchaseOrder, source_orders: Sequence[PurchaseOrder]
+    target_order: PurchaseOrder,
+    source_orders: Sequence[PurchaseOrder],
+    *,
+    require_expected_date_match: bool = True,
 ) -> None:
     if target_order.received:
         raise PurchaseMergeError("Cannot merge into an order that has already been received.")
@@ -99,7 +108,7 @@ def _validate_orders(
             raise PurchaseMergeError("All source purchase orders must be unreceived.")
         if source.vendor_id != vendor_id:
             raise PurchaseMergeError("All purchase orders must share the same vendor.")
-        if source.expected_date != expected_date:
+        if require_expected_date_match and source.expected_date != expected_date:
             raise PurchaseMergeError("All purchase orders must share the same expected date.")
 
 

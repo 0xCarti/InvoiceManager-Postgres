@@ -279,13 +279,17 @@
                 </td>
                 <td class="col-po-user" data-sort-value="{{ order.user_id or '' }}">{{ order.user_id or '—' }}</td>
                 <td class="col-po-actions">
-                    <a href="{{ url_for('purchase.edit_purchase_order', po_id=order.id) }}" class="btn btn-sm btn-primary">Edit</a>
                     <a href="{{ url_for('notes.entity_notes', entity_type='purchase_order', entity_id=order.id) }}" class="btn btn-sm btn-outline-secondary">Notes</a>
+                    {% if not order.received %}
+                    <a href="{{ url_for('purchase.edit_purchase_order', po_id=order.id) }}" class="btn btn-sm btn-primary">Edit</a>
                     <a href="{{ url_for('purchase.receive_invoice', po_id=order.id) }}" class="btn btn-sm btn-success">Receive</a>
                     <form action="{{ url_for('purchase.delete_purchase_order', po_id=order.id) }}" method="post" class="d-inline">
                         {{ delete_form.hidden_tag() }}
                         <button type="submit" class="btn btn-sm btn-danger" data-confirm-message="Are you sure?">Delete</button>
                     </form>
+                    {% else %}
+                    <span class="badge text-bg-success">Received</span>
+                    {% endif %}
                 </td>
             </tr>
         {% endfor %}
