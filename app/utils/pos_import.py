@@ -82,6 +82,26 @@ _HEADER_ALIASES: dict[str, set[str]] = {
 }
 
 
+_DEFAULT_TERMINAL_SALES_COLUMN_MAP = {
+    "product_code": 0,
+    "product_name": 1,
+    "quantity": 4,
+    "net_inc": 7,
+    "discount": 8,
+    "amount": 5,
+}
+
+
+_ALT_STOCK_ITEM_SALES_COLUMN_MAP = {
+    "product_code": 0,
+    "product_name": 2,
+    "quantity": 8,
+    "net_inc": 12,
+    "discount": 13,
+    "amount": 19,
+}
+
+
 _EXCEL_ERROR_VALUES = {
     "#NULL!",
     "#DIV/0!",
@@ -193,11 +213,52 @@ def _detect_tolerant_header_indices(row: Sequence[object]) -> dict[str, int] | N
                 mapping[key] = idx
                 break
 
-    if "product_name" not in mapping:
-        return None
-    if not any(key in mapping for key in ("quantity", "net_inc", "discount", "amount")):
-        return None
-    return mapping
+    if "product_name" in mapping and any(
+        key in mapping for key in ("quantity", "net_inc", "discount", "amount")
+    ):
+        return mapping
+
+    # Some workbook variants place only the numeric sales headers on a global sheet
+    # header row and keep the code/name columns unlabeled.
+    if "quantity" in mapping and any(
+        key in mapping for key in ("net_inc", "discount", "amount")
+    ):
+        return mapping
+
+    return None
+
+
+def _looks_like_alt_stock_item_product_row(row: Sequence[object]) -> bool:
+    first_cell = row[0] if len(row) > 0 else None
+    second_cell = row[1] if len(row) > 1 else None
+    third_cell = row[2] if len(row) > 2 else None
+    if not terminal_sales_cell_is_blank(second_cell):
+        return False
+    if not isinstance(third_cell, str) or not third_cell.strip():
+        return False
+    if terminal_sales_cell_is_blank(first_cell):
+        return False
+
+    return any(
+        parse_terminal_sales_decimal(row[idx] if idx < len(row) else None) is not None
+        for idx in (8, 12, 13)
+    )
+
+
+def _build_terminal_sales_column_map(
+    row: Sequence[object], current_header: dict[str, int]
+) -> dict[str, int]:
+    column_map = dict(_DEFAULT_TERMINAL_SALES_COLUMN_MAP)
+    column_map.update(current_header)
+
+    if _looks_like_alt_stock_item_product_row(row):
+        alt_map = dict(_ALT_STOCK_ITEM_SALES_COLUMN_MAP)
+        for key in ("quantity", "net_inc", "discount", "amount"):
+            if key in current_header:
+                alt_map[key] = current_header[key]
+        column_map.update(alt_map)
+
+    return column_map
 
 
 def parse_terminal_sales_email_rows(
@@ -207,6 +268,7 @@ def parse_terminal_sales_email_rows(
 
     parsed: "OrderedDict[str, dict[str, list[dict]]]" = OrderedDict()
     current_location: str | None = None
+    global_header: dict[str, int] = {}
     current_header: dict[str, int] = {}
 
     for row_number, raw_row in enumerate(rows, start=1):
@@ -214,29 +276,24 @@ def parse_terminal_sales_email_rows(
         if not row:
             continue
 
+        header_indices = _detect_tolerant_header_indices(row)
+        if header_indices:
+            global_header.update(header_indices)
+            if current_location:
+                current_header.update(header_indices)
+            continue
+
         location_name = extract_terminal_sales_location(row)
         if location_name:
             current_location = location_name
-            current_header = {}
+            current_header = dict(global_header)
             parsed.setdefault(current_location, {"rows": [], "location_totals": []})
             continue
 
         if not current_location:
             continue
 
-        header_indices = _detect_tolerant_header_indices(row)
-        if header_indices:
-            current_header = header_indices
-            continue
-
-        column_map = {
-            "product_code": current_header.get("product_code", 0),
-            "product_name": current_header.get("product_name", 1),
-            "quantity": current_header.get("quantity", 4),
-            "net_inc": current_header.get("net_inc", 7),
-            "discount": current_header.get("discount", 8),
-            "amount": current_header.get("amount", 5),
-        }
+        column_map = _build_terminal_sales_column_map(row, current_header)
 
         def _get(col_name: str):
             idx = column_map[col_name]
@@ -448,6 +505,8 @@ def group_terminal_sales_rows(row_data: Iterable[dict]) -> dict[str, dict]:
                 "_raw_amount_total": 0.0,
                 "_quantity_override": None,
                 "_amount_override": None,
+                "_net_total_override": None,
+                "_discount_total_override": None,
             },
         )
         product_entry = None
@@ -484,20 +543,36 @@ def group_terminal_sales_rows(row_data: Iterable[dict]) -> dict[str, dict]:
             if amount is not None:
                 loc_entry["_amount_override"] = amount
         net_including_total = coerce_float(entry.get("net_including_tax_total"))
-        if net_including_total is not None:
-            loc_entry["net_including_tax_total"] += net_including_total
-            loc_entry["_has_net_including_tax_total"] = True
-            if product_entry is not None:
-                product_entry["net_including_tax_total"] += net_including_total
-                product_entry["_has_net_including_tax_total"] = True
         discount_total = coerce_float(entry.get("discount_total"))
-        if discount_total is not None:
-            loc_entry["discount_total"] += discount_total
-            loc_entry["_has_discount_total"] = True
-            if product_entry is not None:
-                product_entry["discount_total"] += discount_total
-                product_entry["_has_discount_total"] = True
+        if is_location_total:
+            if net_including_total is not None:
+                loc_entry["_net_total_override"] = net_including_total
+            if discount_total is not None:
+                loc_entry["_discount_total_override"] = discount_total
+        else:
+            if net_including_total is not None:
+                loc_entry["net_including_tax_total"] += net_including_total
+                loc_entry["_has_net_including_tax_total"] = True
+                if product_entry is not None:
+                    product_entry["net_including_tax_total"] += net_including_total
+                    product_entry["_has_net_including_tax_total"] = True
+            if discount_total is not None:
+                loc_entry["discount_total"] += discount_total
+                loc_entry["_has_discount_total"] = True
+                if product_entry is not None:
+                    product_entry["discount_total"] += discount_total
+                    product_entry["_has_discount_total"] = True
     for data in grouped.values():
+        net_total_override = data.get("_net_total_override")
+        if net_total_override is not None:
+            data["net_including_tax_total"] = net_total_override
+            data["_has_net_including_tax_total"] = True
+
+        discount_total_override = data.get("_discount_total_override")
+        if discount_total_override is not None:
+            data["discount_total"] = discount_total_override
+            data["_has_discount_total"] = True
+
         if not data["_has_net_including_tax_total"]:
             data["net_including_tax_total"] = None
         if not data["_has_discount_total"]:

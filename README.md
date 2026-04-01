@@ -441,6 +441,8 @@ for every pull request.
 
 ## Features
 - Manage items, products, and invoices.
+- Create sales invoices with either saved products or invoice-only custom lines
+  for ad hoc work such as repairs, services, and one-off fees.
 - User authentication and admin features.
 - Reporting and backups.
 

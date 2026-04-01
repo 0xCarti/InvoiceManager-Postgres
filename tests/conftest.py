@@ -9,7 +9,7 @@ import pytest
 from flask_migrate import upgrade
 from sqlalchemy import text
 
-from app import create_app, create_admin_user, db
+from app import create_app, create_admin_user, db, limiter
 from app.models import GLCode, Setting
 from app.utils.units import (
     DEFAULT_BASE_UNIT_CONVERSIONS,
@@ -50,11 +50,16 @@ def app(tmp_path):
         {
             "TESTING": True,
             "WTF_CSRF_ENABLED": False,
+            "RATELIMIT_ENABLED": False,
             "SQLALCHEMY_ENGINE_OPTIONS": {
                 "connect_args": {"options": f"-csearch_path={test_schema}"}
             },
         }
     )
+    limiter.enabled = False
+    limiter_extension = app.extensions.get("limiter")
+    if hasattr(limiter_extension, "enabled"):
+        limiter_extension.enabled = False
 
     with app.app_context():
         db.session.remove()

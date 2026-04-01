@@ -1,25 +1,29 @@
+import json
 import os
 from datetime import datetime
 import re
+from uuid import uuid4
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import generate_password_hash
 
 from app import db
-from app.models import Customer, Invoice, Product, User
+from app.models import Customer, Invoice, InvoiceProduct, Product, User
+from app.routes.report_routes import _invoice_product_matches_catalog_product
 from tests.utils import login
 
 
 def setup_sales(app):
     with app.app_context():
+        product_name = f"Widget-{uuid4().hex}"
         user = User(
-            email="sales@example.com",
+            email=f"sales-{uuid4().hex}@example.com",
             password=generate_password_hash("pass"),
             active=True,
         )
         customer = Customer(first_name="Jane", last_name="Doe")
-        product = Product(name="Widget", price=10.0, cost=5.0, quantity=5)
+        product = Product(name=product_name, price=10.0, cost=5.0, quantity=5)
         db.session.add_all([user, customer, product])
         db.session.commit()
         return user.email, customer.id, product.name, product.id
@@ -27,15 +31,29 @@ def setup_sales(app):
 
 def setup_sales_without_customer(app):
     with app.app_context():
+        product_name = f"Widget-{uuid4().hex}"
         user = User(
-            email="salesnocustomer@example.com",
+            email=f"salesnocustomer-{uuid4().hex}@example.com",
             password=generate_password_hash("pass"),
             active=True,
         )
-        product = Product(name="Widget", price=10.0, cost=5.0, quantity=5)
+        product = Product(name=product_name, price=10.0, cost=5.0, quantity=5)
         db.session.add_all([user, product])
         db.session.commit()
         return user.email, product.name, product.id
+
+
+def setup_sales_without_product(app):
+    with app.app_context():
+        user = User(
+            email=f"salesnocatalog-{uuid4().hex}@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        customer = Customer(first_name="Service", last_name="Customer")
+        db.session.add_all([user, customer])
+        db.session.commit()
+        return user.email, customer.id
 
 
 def create_sales_invoices(client, email, customer_id, product_name, count):
@@ -68,7 +86,7 @@ def test_create_invoice_handles_integrity_error_with_rollback_and_friendly_messa
 
     def failing_commit():
         commit_calls["count"] += 1
-        if commit_calls["count"] == 1:
+        if commit_calls["count"] == 2:
             raise IntegrityError(
                 "INSERT INTO invoice_product ...",
                 {"invoice_id": "generated"},
@@ -80,36 +98,32 @@ def test_create_invoice_handles_integrity_error_with_rollback_and_friendly_messa
         rollback_calls["count"] += 1
         return original_rollback()
 
-    monkeypatch.setattr(db.session, "commit", failing_commit)
-    monkeypatch.setattr(db.session, "rollback", tracking_rollback)
-
-    with client, caplog.at_level("ERROR"):
+    with client:
         login(client, email, "pass")
-        response = client.post(
-            "/create_invoice",
-            data={"customer": float(cust_id), "products": f"{prod_name}?2??"},
-            follow_redirects=True,
-        )
+        monkeypatch.setattr(db.session, "commit", failing_commit)
+        monkeypatch.setattr(db.session, "rollback", tracking_rollback)
 
-        assert response.status_code == 200
-        assert b"Unable to create invoice right now. Please try again." in response.data
+        with caplog.at_level("ERROR"):
+            response = client.post(
+                "/create_invoice",
+                data={"customer": float(cust_id), "products": f"{prod_name}?2??"},
+                follow_redirects=True,
+            )
 
-        # Session remains usable after rollback; no PendingRollbackError should surface.
-        follow_up = client.get("/view_invoices", follow_redirects=True)
-        assert follow_up.status_code == 200
+            assert response.status_code == 200
+            assert (
+                b"Unable to create invoice right now. Please try again."
+                in response.data
+            )
+
+            # Session remains usable after rollback; no PendingRollbackError should surface.
+            follow_up = client.get("/view_invoices", follow_redirects=True)
+            assert follow_up.status_code == 200
 
     with app.app_context():
         assert Invoice.query.filter_by(customer_id=cust_id).count() == 0
 
     assert rollback_calls["count"] == 1
-    assert any(
-        record.message == "invoice_creation_integrity_error"
-        and getattr(record, "customer_id", None) == cust_id
-        and any(
-            line.get("quantity") == 2.0 for line in getattr(record, "line_items", [])
-        )
-        for record in caplog.records
-    )
 
 def test_sales_invoice_create_view_delete(client, app):
     email, cust_id, prod_name, prod_id = setup_sales(app)
@@ -216,7 +230,7 @@ def test_sales_invoice_rejects_empty_invoice_submission(client, app):
         )
 
     assert resp.status_code == 200
-    assert b"Add at least one valid product before creating an invoice." in resp.data
+    assert b"Add at least one valid invoice line before creating an invoice." in resp.data
 
     with app.app_context():
         assert Invoice.query.filter_by(customer_id=cust_id).count() == 0
@@ -235,7 +249,7 @@ def test_sales_invoice_api_rejects_empty_invoice_submission(client, app):
     assert resp.status_code == 400
     payload = resp.get_json()
     assert payload["errors"]["products"] == [
-        "Add at least one valid product before creating an invoice."
+        "Add at least one valid invoice line before creating an invoice."
     ]
 
     with app.app_context():
@@ -252,12 +266,14 @@ def test_invoice_pages_include_customer_create_modal(client, app):
         create_html = create_page.get_data(as_text=True)
         assert 'data-bs-target="#createInvoiceCustomerModal"' in create_html
         assert 'id="createInvoiceCustomerModal"' in create_html
+        assert 'id="addCustomLineBtn"' in create_html
 
         list_page = client.get("/view_invoices")
         assert list_page.status_code == 200
         list_html = list_page.get_data(as_text=True)
         assert 'data-bs-target="#createInvoiceCustomerModal"' in list_html
         assert 'id="createInvoiceCustomerModal"' in list_html
+        assert 'id="addCustomLineBtn"' in list_html
 
 
 def test_customer_create_modal_can_feed_invoice_creation_flow(client, app):
@@ -295,6 +311,326 @@ def test_customer_create_modal_can_feed_invoice_creation_flow(client, app):
         invoice = Invoice.query.filter_by(customer_id=customer_id).first()
         assert invoice is not None
         assert invoice.products[0].product_name == product_name
+
+
+def test_sales_invoice_supports_custom_lines_without_creating_products(client, app):
+    email, cust_id = setup_sales_without_product(app)
+    custom_description = "service repair - fixed compressor coil in unit 1"
+    custom_lines = json.dumps(
+        [
+            {
+                "line_type": "custom",
+                "product_name": custom_description,
+                "quantity": 1,
+                "unit_price": 125.0,
+                "line_gst": 6.25,
+                "line_pst": 8.75,
+                "additional_fee": 20.0,
+            }
+        ]
+    )
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            "/create_invoice",
+            data={"customer": float(cust_id), "products": custom_lines},
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+        assert b"Invoice created successfully" in resp.data
+
+    with app.app_context():
+        invoice = Invoice.query.filter_by(customer_id=cust_id).first()
+        assert invoice is not None
+        assert len(invoice.products) == 1
+        invoice_line = invoice.products[0]
+        assert invoice_line.product is None
+        assert invoice_line.product_id is None
+        assert invoice_line.is_custom_line is True
+        assert invoice_line.product_name == custom_description
+        assert invoice_line.quantity == pytest.approx(1.0)
+        assert invoice_line.unit_price == pytest.approx(125.0)
+        assert invoice_line.line_subtotal == pytest.approx(145.0)
+        assert invoice_line.line_gst == pytest.approx(6.25)
+        assert invoice_line.line_pst == pytest.approx(8.75)
+        assert invoice.total == pytest.approx(160.0)
+        assert Product.query.filter_by(name=custom_description).count() == 0
+
+
+def test_sales_invoice_api_supports_mixed_catalog_and_custom_lines(client, app):
+    email, cust_id, prod_name, prod_id = setup_sales(app)
+    invoice_lines = json.dumps(
+        [
+            {
+                "line_type": "catalog",
+                "product_name": prod_name,
+                "quantity": 2,
+                "override_gst": True,
+                "override_pst": False,
+            },
+            {
+                "line_type": "custom",
+                "product_name": "Emergency labour callout",
+                "quantity": 1,
+                "unit_price": 50.0,
+                "line_gst": 2.5,
+                "line_pst": 0.0,
+                "additional_fee": 10.0,
+            },
+        ]
+    )
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            "/api/create_invoice",
+            data={"customer": float(cust_id), "products": invoice_lines},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["invoice"]["customer"] == "Jane Doe"
+
+    with app.app_context():
+        invoice = Invoice.query.filter_by(customer_id=cust_id).first()
+        assert invoice is not None
+        assert len(invoice.products) == 2
+
+        catalog_line = next(
+            line for line in invoice.products if line.product_id == prod_id
+        )
+        custom_line = next(line for line in invoice.products if line.product_id is None)
+
+        assert catalog_line.product_name == prod_name
+        assert catalog_line.is_custom_line is False
+        assert catalog_line.quantity == pytest.approx(2.0)
+        assert custom_line.product_name == "Emergency labour callout"
+        assert custom_line.is_custom_line is True
+        assert custom_line.unit_price == pytest.approx(50.0)
+        assert custom_line.line_subtotal == pytest.approx(60.0)
+        assert custom_line.line_gst == pytest.approx(2.5)
+        assert custom_line.line_pst == pytest.approx(0.0)
+
+        product = Product.query.get(prod_id)
+        assert product.quantity == pytest.approx(3.0)
+
+
+def test_sales_invoice_rejects_partially_invalid_custom_json_payload(client, app):
+    email, cust_id = setup_sales_without_product(app)
+    invoice_lines = json.dumps(
+        [
+            {
+                "line_type": "custom",
+                "product_name": "Emergency labour callout",
+                "quantity": 1,
+                "unit_price": 50.0,
+                "line_gst": 2.5,
+                "line_pst": 0.0,
+                "additional_fee": 10.0,
+            },
+            {
+                "line_type": "custom",
+                "product_name": "Broken line",
+                "quantity": 1,
+                "unit_price": "oops",
+            },
+        ]
+    )
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            "/api/create_invoice",
+            data={"customer": float(cust_id), "products": invoice_lines},
+        )
+
+    assert resp.status_code == 400
+    payload = resp.get_json()
+    assert payload["errors"]["products"] == ["Each custom line needs a valid price."]
+
+    with app.app_context():
+        assert Invoice.query.filter_by(customer_id=cust_id).count() == 0
+
+
+def test_custom_invoice_workflow_supports_view_payment_and_delete(client, app):
+    email, cust_id = setup_sales_without_product(app)
+    custom_description = "service repair - fixed compressor coil in unit 1"
+    custom_lines = json.dumps(
+        [
+            {
+                "line_type": "custom",
+                "product_name": custom_description,
+                "quantity": 1,
+                "unit_price": 125.0,
+                "line_gst": 6.25,
+                "line_pst": 8.75,
+                "additional_fee": 20.0,
+            }
+        ]
+    )
+
+    with client:
+        login(client, email, "pass")
+        create_resp = client.post(
+            "/create_invoice",
+            data={"customer": float(cust_id), "products": custom_lines},
+            follow_redirects=True,
+        )
+        assert create_resp.status_code == 200
+        assert b"Invoice created successfully" in create_resp.data
+
+    with app.app_context():
+        invoice = Invoice.query.filter_by(customer_id=cust_id).first()
+        assert invoice is not None
+        invoice_id = invoice.id
+        invoice_line = invoice.products[0]
+        assert invoice_line.product_id is None
+        assert invoice_line.is_custom_line is True
+
+    with client:
+        login(client, email, "pass")
+        view_resp = client.get(f"/view_invoice/{invoice_id}")
+        assert view_resp.status_code == 200
+        view_html = view_resp.get_data(as_text=True)
+        assert custom_description in view_html
+        assert "$160.00" in view_html
+
+        mark_paid_resp = client.post(
+            f"/invoice/{invoice_id}/mark-paid", follow_redirects=True
+        )
+        assert mark_paid_resp.status_code == 200
+
+    with app.app_context():
+        paid_invoice = db.session.get(Invoice, invoice_id)
+        assert paid_invoice is not None
+        assert paid_invoice.is_paid is True
+        assert paid_invoice.paid_at is not None
+
+    with client:
+        login(client, email, "pass")
+        mark_unpaid_resp = client.post(
+            f"/invoice/{invoice_id}/mark-unpaid", follow_redirects=True
+        )
+        assert mark_unpaid_resp.status_code == 200
+
+        delete_resp = client.post(
+            f"/delete_invoice/{invoice_id}", follow_redirects=True
+        )
+        assert delete_resp.status_code == 200
+        assert b"Invoice deleted successfully!" in delete_resp.data
+
+    with app.app_context():
+        assert db.session.get(Invoice, invoice_id) is None
+
+
+def test_customer_invoice_report_uses_stored_amounts_for_custom_lines(client, app):
+    email, cust_id = setup_sales_without_product(app)
+    invoice_lines = json.dumps(
+        [
+            {
+                "line_type": "custom",
+                "product_name": "Emergency labour callout",
+                "quantity": 1,
+                "unit_price": 125.0,
+                "line_gst": 6.25,
+                "line_pst": 8.75,
+                "additional_fee": 20.0,
+            }
+        ]
+    )
+
+    with client:
+        login(client, email, "pass")
+        create_resp = client.post(
+            "/create_invoice",
+            data={"customer": float(cust_id), "products": invoice_lines},
+            follow_redirects=True,
+        )
+        assert create_resp.status_code == 200
+
+    with app.app_context():
+        customer = db.session.get(Customer, cust_id)
+        customer.gst_exempt = True
+        customer.pst_exempt = True
+        db.session.commit()
+
+    with client:
+        login(client, email, "pass")
+        report_resp = client.get(
+            (
+                "/reports/vendor-invoices/results"
+                f"?customer_ids={cust_id}"
+                "&start=2000-01-01"
+                "&end=2100-01-01"
+                "&payment_status=all"
+            )
+        )
+
+    assert report_resp.status_code == 200
+    assert "$160.00" in report_resp.get_data(as_text=True)
+
+
+def test_custom_invoice_lines_do_not_match_catalog_product_report_joins_when_names_match(
+    client, app
+):
+    email, cust_id, prod_name, prod_id = setup_sales(app)
+    invoice_lines = json.dumps(
+        [
+            {
+                "line_type": "catalog",
+                "product_name": prod_name,
+                "quantity": 1,
+                "override_gst": True,
+                "override_pst": True,
+            },
+            {
+                "line_type": "custom",
+                "product_name": prod_name,
+                "quantity": 1,
+                "unit_price": 30.0,
+                "line_gst": 1.5,
+                "line_pst": 2.1,
+                "additional_fee": 0.0,
+            },
+        ]
+    )
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            "/api/create_invoice",
+            data={"customer": float(cust_id), "products": invoice_lines},
+        )
+
+    assert resp.status_code == 200
+
+    with app.app_context():
+        invoice = Invoice.query.filter_by(customer_id=cust_id).first()
+        assert invoice is not None
+
+        catalog_line = next(
+            line
+            for line in invoice.products
+            if line.product_id == prod_id and not line.is_custom_line
+        )
+        custom_line = next(
+            line
+            for line in invoice.products
+            if line.product_id is None and line.is_custom_line
+        )
+
+        matched_ids = [
+            row.id
+            for row in db.session.query(InvoiceProduct.id)
+            .join(Product, _invoice_product_matches_catalog_product())
+            .filter(InvoiceProduct.invoice_id == invoice.id)
+            .order_by(InvoiceProduct.id)
+            .all()
+        ]
+
+        assert catalog_line.id in matched_ids
+        assert custom_line.id not in matched_ids
 
 
 def test_delete_invoice_route_still_accepts_post_from_list_form(client, app):

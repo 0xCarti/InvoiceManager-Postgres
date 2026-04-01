@@ -15,26 +15,45 @@
         </div>
     </div>
     {{ form.products(id="products") }}
-    <div class="form-group">
-        <label for="productSearch">Search Products:</label>
-        <input type="text" class="form-control" id="productSearch" placeholder="Enter product name..." autocomplete="off">
-        <div id="productSuggestions" class="list-group"></div>
+    <div class="row g-4 mb-3">
+        <div class="col-lg-7">
+            <div class="form-group mb-0">
+                <label for="productSearch">Search Products:</label>
+                <input type="text" class="form-control" id="productSearch" placeholder="Enter product name..." autocomplete="off">
+                <div id="productSuggestions" class="list-group"></div>
+                <div class="form-text">
+                    Add an existing product with its saved invoice price and the customer's default tax treatment.
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-5">
+            <label class="form-label d-block">Custom Lines</label>
+            <p class="text-muted small mb-2">
+                Add one-off service work, repairs, fees, or any other ad hoc line item without creating a saved product.
+            </p>
+            <button type="button" class="btn btn-outline-primary" id="addCustomLineBtn">
+                Add Custom Line
+            </button>
+        </div>
     </div>
     <div class="table-responsive">
     <table class="table" id="productTable">
         <thead>
             <tr>
-                <th>Product Name</th>
+                <th>Product / Description</th>
                 <th>Quantity</th>
                 <th>Price</th>
                 <th>Total (with Tax)</th>
-                <th>Override Tax</th>
+                <th>Tax / Fees</th>
                 <th>Action</th>
             </tr>
         </thead>
         <tbody>
         </tbody>
     </table>
+    </div>
+    <div class="form-text mb-3">
+        Custom lines are saved only on this invoice. They do not create products or affect recipe-backed inventory.
     </div>
     <button type="submit" class="btn btn-primary">Create Invoice</button>
 </form>

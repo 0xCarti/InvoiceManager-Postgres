@@ -617,6 +617,33 @@ def test_group_terminal_sales_rows_preserves_spreadsheet_unit_prices():
     assert any(math.isclose(value, 9.75, abs_tol=0.01) for value in spreadsheet_prices)
 
 
+def test_group_terminal_sales_rows_uses_summary_totals_without_double_counting():
+    rows = [
+        {
+            "location": "AG CENTRE",
+            "product": "591ml Pepsi",
+            "quantity": 5.0,
+            "net_including_tax_total": 19.18,
+            "discount_total": 3.32,
+        },
+        {
+            "location": "AG CENTRE",
+            "is_location_total": True,
+            "quantity": 5.0,
+            "net_including_tax_total": 19.18,
+            "discount_total": 3.32,
+        },
+    ]
+
+    grouped = group_terminal_sales_rows(rows)
+    summary = grouped["AG CENTRE"]
+
+    assert summary["total"] == pytest.approx(5.0)
+    assert summary["net_including_tax_total"] == pytest.approx(19.18)
+    assert summary["discount_total"] == pytest.approx(3.32)
+    assert summary["total_amount"] == pytest.approx(22.5)
+
+
 def test_terminal_sales_stays_on_products_until_finish(app, client):
     with app.app_context():
         event = Event(

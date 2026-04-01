@@ -38,7 +38,7 @@
                         <td>{{ invoice_product.quantity }}</td>
                         <td>${{ "%.2f"|format(invoice_product.unit_price) }}</td>
                         <td>{{ tax_flags }}</td>
-                        <td>${{ "%.2f"|format(invoice_product.line_subtotal + invoice_product.line_pst) }}</td>
+                        <td>${{ "%.2f"|format(invoice_product.line_subtotal + invoice_product.line_gst + invoice_product.line_pst) }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>

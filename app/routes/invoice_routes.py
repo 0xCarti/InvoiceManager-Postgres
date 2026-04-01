@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 
 from flask import (
@@ -43,8 +44,24 @@ class InvoiceFilterError(Exception):
         self.field = field
 
 
-def _parse_invoice_product_entries(raw_product_data):
-    """Return valid invoice line payloads extracted from the hidden form field."""
+def _parse_invoice_override_flag(raw_value):
+    """Return a normalized invoice tax override flag."""
+
+    if raw_value is None:
+        return None
+
+    normalized = str(raw_value).strip().lower()
+    if not normalized:
+        return None
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _parse_legacy_invoice_product_entries(raw_product_data):
+    """Return legacy invoice lines from the historical delimiter format."""
 
     entries = []
     for raw_entry in (raw_product_data or "").removesuffix(":").split(":"):
@@ -61,13 +78,118 @@ def _parse_invoice_product_entries(raw_product_data):
             continue
         entries.append(
             {
+                "line_type": "catalog",
                 "product_name": product_name,
                 "quantity": quantity_value,
-                "override_gst": override_gst,
-                "override_pst": override_pst,
+                "override_gst": _parse_invoice_override_flag(override_gst),
+                "override_pst": _parse_invoice_override_flag(override_pst),
             }
         )
     return entries
+
+
+def _parse_optional_invoice_amount(raw_value, *, error_message):
+    """Parse an optional currency amount, treating blanks as zero."""
+
+    if raw_value is None:
+        return 0.0
+
+    raw_text = str(raw_value).strip()
+    if not raw_text:
+        return 0.0
+
+    parsed_value = coerce_float(raw_text, default=None)
+    if parsed_value is None:
+        raise InvoiceCreationError(error_message)
+    return parsed_value
+
+
+def _parse_json_invoice_product_entries(raw_product_data):
+    """Return structured invoice lines from the JSON payload format."""
+
+    try:
+        raw_entries = json.loads(raw_product_data)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        raise InvoiceCreationError("Invoice lines payload is invalid.")
+
+    if not isinstance(raw_entries, list):
+        raise InvoiceCreationError("Invoice lines payload is invalid.")
+
+    entries = []
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, dict):
+            raise InvoiceCreationError("Invoice lines payload is invalid.")
+
+        line_type = str(raw_entry.get("line_type") or "catalog").strip().lower()
+        if line_type not in {"catalog", "custom"}:
+            raise InvoiceCreationError("Invoice lines payload is invalid.")
+
+        product_name = str(raw_entry.get("product_name") or "").strip()
+        quantity_value = coerce_float(raw_entry.get("quantity"), default=None)
+        if not product_name:
+            raise InvoiceCreationError("Each invoice line needs a description.")
+        if quantity_value is None:
+            raise InvoiceCreationError("Each invoice line needs a valid quantity.")
+
+        if line_type == "custom":
+            unit_price = coerce_float(raw_entry.get("unit_price"), default=None)
+            if unit_price is None:
+                raise InvoiceCreationError("Each custom line needs a valid price.")
+
+            entries.append(
+                {
+                    "line_type": "custom",
+                    "product_name": product_name,
+                    "quantity": quantity_value,
+                    "unit_price": unit_price,
+                    "line_gst": _parse_optional_invoice_amount(
+                        raw_entry.get("line_gst"),
+                        error_message=(
+                            "Custom GST, PST, and fee values must be valid numbers."
+                        ),
+                    ),
+                    "line_pst": _parse_optional_invoice_amount(
+                        raw_entry.get("line_pst"),
+                        error_message=(
+                            "Custom GST, PST, and fee values must be valid numbers."
+                        ),
+                    ),
+                    "additional_fee": _parse_optional_invoice_amount(
+                        raw_entry.get("additional_fee"),
+                        error_message=(
+                            "Custom GST, PST, and fee values must be valid numbers."
+                        ),
+                    ),
+                }
+            )
+            continue
+
+        entries.append(
+            {
+                "line_type": "catalog",
+                "product_name": product_name,
+                "quantity": quantity_value,
+                "override_gst": _parse_invoice_override_flag(
+                    raw_entry.get("override_gst")
+                ),
+                "override_pst": _parse_invoice_override_flag(
+                    raw_entry.get("override_pst")
+                ),
+            }
+        )
+
+    return entries
+
+
+def _parse_invoice_product_entries(raw_product_data):
+    """Return valid invoice line payloads extracted from the hidden form field."""
+
+    raw_text = str(raw_product_data or "").strip()
+    if not raw_text:
+        return []
+    if raw_text.startswith("["):
+        return _parse_json_invoice_product_entries(raw_text)
+    return _parse_legacy_invoice_product_entries(raw_text)
 
 
 def _parse_invoice_filter_dates(start_date_str, end_date_str):
@@ -99,7 +221,9 @@ def _create_invoice_from_form(form):
         abort(404)
     parsed_entries = _parse_invoice_product_entries(form.products.data)
     if not parsed_entries:
-        raise InvoiceCreationError("Add at least one valid product before creating an invoice.")
+        raise InvoiceCreationError(
+            "Add at least one valid invoice line before creating an invoice."
+        )
 
     today = datetime.now().strftime("%d%m%y")
     count = (
@@ -116,7 +240,11 @@ def _create_invoice_from_form(form):
     )
     db.session.add(invoice)
 
-    product_names = {entry["product_name"] for entry in parsed_entries}
+    product_names = {
+        entry["product_name"]
+        for entry in parsed_entries
+        if entry.get("line_type") == "catalog"
+    }
 
     products = (
         Product.query.filter(Product.name.in_(product_names)).all()
@@ -127,8 +255,31 @@ def _create_invoice_from_form(form):
     created_line_count = 0
 
     for entry in parsed_entries:
+        line_type = entry.get("line_type", "catalog")
         product_name = entry["product_name"]
         quantity = entry["quantity"]
+        if line_type == "custom":
+            unit_price = float(entry["unit_price"])
+            additional_fee = float(entry.get("additional_fee", 0.0) or 0.0)
+            line_subtotal = (quantity * unit_price) + additional_fee
+
+            invoice_product = InvoiceProduct(
+                invoice_id=invoice.id,
+                product_id=None,
+                is_custom_line=True,
+                product_name=product_name,
+                quantity=quantity,
+                override_gst=None,
+                override_pst=None,
+                unit_price=unit_price,
+                line_subtotal=line_subtotal,
+                line_gst=float(entry.get("line_gst", 0.0) or 0.0),
+                line_pst=float(entry.get("line_pst", 0.0) or 0.0),
+            )
+            db.session.add(invoice_product)
+            created_line_count += 1
+            continue
+
         override_gst = entry["override_gst"]
         override_pst = entry["override_pst"]
         product = product_lookup.get(product_name)
@@ -143,10 +294,10 @@ def _create_invoice_from_form(form):
             line_subtotal = quantity * unit_price
 
             override_gst = (
-                None if override_gst == "" else bool(int(override_gst))
+                _parse_invoice_override_flag(override_gst)
             )
             override_pst = (
-                None if override_pst == "" else bool(int(override_pst))
+                _parse_invoice_override_flag(override_pst)
             )
 
             apply_gst = (
@@ -166,6 +317,7 @@ def _create_invoice_from_form(form):
             invoice_product = InvoiceProduct(
                 invoice_id=invoice.id,
                 product_id=product.id,
+                is_custom_line=False,
                 product_name=product.name,
                 quantity=quantity,
                 override_gst=override_gst,
@@ -189,7 +341,9 @@ def _create_invoice_from_form(form):
 
     if created_line_count == 0:
         db.session.rollback()
-        raise InvoiceCreationError("Add at least one valid product before creating an invoice.")
+        raise InvoiceCreationError(
+            "Add at least one valid invoice line before creating an invoice."
+        )
 
     try:
         db.session.commit()

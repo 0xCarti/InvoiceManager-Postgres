@@ -581,6 +581,9 @@ class InvoiceProduct(db.Model):
         nullable=True,
     )
     product = relationship("Product", back_populates="invoice_products")
+    is_custom_line = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
     product_name = db.Column(db.String(100), nullable=False)
     unit_price = db.Column(db.Float, nullable=False)
     line_subtotal = db.Column(db.Float, nullable=False)

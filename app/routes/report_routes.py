@@ -171,6 +171,19 @@ def _compute_vendor_invoice_line_base(invoice: Invoice, item: InvoiceProduct) ->
     return 0.0
 
 
+def _invoice_product_matches_catalog_product():
+    """Join custom-safe invoice lines back to catalog products when applicable."""
+
+    return or_(
+        InvoiceProduct.product_id == Product.id,
+        and_(
+            InvoiceProduct.product_id.is_(None),
+            InvoiceProduct.is_custom_line.is_(False),
+            InvoiceProduct.product_name == Product.name,
+        ),
+    )
+
+
 _DEPARTMENT_SALES_STATE_KEY = "department_sales_forecast_state"
 _SKIP_SELECTION_VALUE = "__skip__"
 _CREATE_SELECTION_VALUE = "__create__"
@@ -970,11 +983,16 @@ def customer_invoice_report_results():
     # Convert comma-separated IDs to list of ints
     id_list = [int(cid) for cid in customer_ids.split(",") if cid.isdigit()]
     customers = Customer.query.filter(Customer.id.in_(id_list)).all()
+    try:
+        start_date = datetime.fromisoformat(start).date()
+        end_date = datetime.fromisoformat(end).date()
+    except (TypeError, ValueError):
+        abort(400)
 
     invoice_query = Invoice.query.filter(
         Invoice.customer_id.in_(id_list),
-        Invoice.date_created >= start,
-        Invoice.date_created <= end,
+        Invoice.date_created >= datetime.combine(start_date, datetime.min.time()),
+        Invoice.date_created <= datetime.combine(end_date, datetime.max.time()),
     )
 
     if payment_status == "paid":
@@ -984,7 +1002,8 @@ def customer_invoice_report_results():
 
     invoices = invoice_query.all()
 
-    # Compute totals with proper GST/PST logic
+    # Use stored invoice amounts so reports remain stable even if customer tax
+    # settings change after the invoice is created.
     enriched_invoices = []
     for invoice in invoices:
         subtotal = 0
@@ -992,24 +1011,9 @@ def customer_invoice_report_results():
         pst_total = 0
 
         for item in invoice.products:
-            line_base = _compute_vendor_invoice_line_base(invoice, item)
-            subtotal += line_base
-
-            apply_gst = (
-                item.override_gst
-                if item.override_gst is not None
-                else not invoice.customer.gst_exempt
-            )
-            apply_pst = (
-                item.override_pst
-                if item.override_pst is not None
-                else not invoice.customer.pst_exempt
-            )
-
-            if apply_gst:
-                gst_total += line_base * 0.05
-            if apply_pst:
-                pst_total += line_base * 0.07
+            subtotal += _compute_vendor_invoice_line_base(invoice, item)
+            gst_total += _coerce_float(item.line_gst) or 0.0
+            pst_total += _coerce_float(item.line_pst) or 0.0
 
         enriched_invoices.append(
             {"invoice": invoice, "total": subtotal + gst_total + pst_total}
@@ -1019,8 +1023,8 @@ def customer_invoice_report_results():
         "report_vendor_invoice_results.html",
         customers=customers,
         invoices=enriched_invoices,
-        start=start,
-        end=end,
+        start=start_date,
+        end=end_date,
         payment_status=payment_status,
     )
 
@@ -1359,13 +1363,7 @@ def inventory_variance_report():
                 .join(Product, Product.id == ProductRecipeItem.product_id)
                 .join(
                     InvoiceProduct,
-                    or_(
-                        InvoiceProduct.product_id == Product.id,
-                        and_(
-                            InvoiceProduct.product_id.is_(None),
-                            InvoiceProduct.product_name == Product.name,
-                        ),
-                    ),
+                    _invoice_product_matches_catalog_product(),
                 )
                 .join(Invoice, Invoice.id == InvoiceProduct.invoice_id)
                 .outerjoin(ItemUnit, ItemUnit.id == ProductRecipeItem.unit_id)
@@ -2066,13 +2064,7 @@ def product_stock_usage_report():
                 .join(Product, Product.id == ProductRecipeItem.product_id)
                 .join(
                     InvoiceProduct,
-                    or_(
-                        InvoiceProduct.product_id == Product.id,
-                        and_(
-                            InvoiceProduct.product_id.is_(None),
-                            InvoiceProduct.product_name == Product.name,
-                        ),
-                    ),
+                    _invoice_product_matches_catalog_product(),
                 )
                 .join(Invoice, Invoice.id == InvoiceProduct.invoice_id)
                 .outerjoin(ItemUnit, ItemUnit.id == ProductRecipeItem.unit_id)
@@ -2116,13 +2108,7 @@ def product_stock_usage_report():
                 .join(InvoiceProduct, InvoiceProduct.invoice_id == Invoice.id)
                 .join(
                     Product,
-                    or_(
-                        InvoiceProduct.product_id == Product.id,
-                        and_(
-                            InvoiceProduct.product_id.is_(None),
-                            InvoiceProduct.product_name == Product.name,
-                        ),
-                    ),
+                    _invoice_product_matches_catalog_product(),
                 )
                 .join(Customer, Customer.id == Invoice.customer_id)
                 .outerjoin(

@@ -1,0 +1,372 @@
+<script nonce="{{ csp_nonce }}">
+$(document).ready(function () {
+    const invoiceFormSubmitMode = {{ invoice_form_submit_mode|default('page')|tojson }};
+    const createCustomerUrl = {{ url_for('customer.create_customer_modal')|tojson }};
+    const searchProductsUrl = {{ url_for('product.search_products')|tojson }};
+    const createInvoiceApiUrl = {{ url_for('invoice.create_invoice_api')|tojson }};
+    const $invoiceForm = $('#invoiceForm');
+    const $customerSelect = $('#customerSelect');
+    const $productTableBody = $('#productTable tbody');
+    const $productsField = $('#products');
+    let currentTaxStatus = { gst_exempt: false, pst_exempt: false };
+    let reopenInvoiceModalAfterCustomer = false;
+
+    if (!$invoiceForm.length) {
+        return;
+    }
+
+    function parseValue(value) {
+        if (window.NumericInput) {
+            const parsed = window.NumericInput.parseValue(value);
+            return Number.isFinite(parsed) ? parsed : NaN;
+        }
+        const parsed = parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : NaN;
+    }
+
+    function parseOptionalNumber(value) {
+        const trimmed = String(value ?? '').trim();
+        if (!trimmed) {
+            return 0;
+        }
+        const parsed = parseValue(trimmed);
+        return Number.isFinite(parsed) ? parsed : NaN;
+    }
+
+    function formatCurrency(value) {
+        return Number(value || 0).toFixed(2);
+    }
+
+    function syncCustomerSelection(customer) {
+        const fullName = `${customer.first_name} ${customer.last_name}`.trim();
+        let option = $customerSelect.find(`option[value="${customer.id}"]`);
+        if (!option.length) {
+            option = $('<option>').val(String(customer.id)).text(fullName);
+            $customerSelect.append(option);
+        } else {
+            option.text(fullName);
+        }
+        $customerSelect.val(String(customer.id)).trigger('change');
+    }
+
+    function updateCustomerTaxStatus(customerId) {
+        if (!customerId) {
+            currentTaxStatus = { gst_exempt: false, pst_exempt: false };
+            return;
+        }
+        $.get(`/get_customer_tax_status/${customerId}`, function (data) {
+            currentTaxStatus = data;
+        });
+    }
+
+    function updateRowTotal(row) {
+        const $row = $(row);
+        const lineKind = $row.data('lineKind');
+        const quantity = parseOptionalNumber($row.find('.quantity').val());
+
+        if (!Number.isFinite(quantity)) {
+            $row.find('.total').text('$0.00');
+            return;
+        }
+
+        if (lineKind === 'custom') {
+            const unitPrice = parseOptionalNumber($row.find('.custom-unit-price').val());
+            const lineGst = parseOptionalNumber($row.find('.custom-gst-amount').val());
+            const linePst = parseOptionalNumber($row.find('.custom-pst-amount').val());
+            const additionalFee = parseOptionalNumber($row.find('.custom-additional-fee').val());
+
+            if (![unitPrice, lineGst, linePst, additionalFee].every(Number.isFinite)) {
+                $row.find('.total').text('$0.00');
+                return;
+            }
+
+            const subtotal = (quantity * unitPrice) + additionalFee;
+            const total = subtotal + lineGst + linePst;
+            $row.find('.total').text(`$${formatCurrency(total)}`);
+            return;
+        }
+
+        const unitPrice = parseOptionalNumber($row.find('.catalog-price').data('price'));
+        if (!Number.isFinite(unitPrice)) {
+            $row.find('.total').text('$0.00');
+            return;
+        }
+
+        const applyGST = $row.find('.override-gst').is(':checked');
+        const applyPST = $row.find('.override-pst').is(':checked');
+        const subtotal = quantity * unitPrice;
+        const gst = applyGST ? subtotal * 0.05 : 0;
+        const pst = applyPST ? subtotal * 0.07 : 0;
+        const total = subtotal + gst + pst;
+        $row.find('.total').text(`$${formatCurrency(total)}`);
+    }
+
+    function addCatalogRow(productName, productPrice) {
+        const unitPrice = Number(productPrice || 0);
+        const catalogRow = `
+<tr class="product-row" data-line-kind="catalog">
+    <td class="align-middle">
+        <div class="fw-semibold catalog-product-name">${productName}</div>
+        <div class="form-text">Saved product</div>
+    </td>
+    <td><input type="text" class="form-control quantity" value="1" inputmode="text" data-numeric-input="1"></td>
+    <td class="align-middle">
+        <span class="catalog-price" data-price="${unitPrice}">$${formatCurrency(unitPrice)}</span>
+    </td>
+    <td class="align-middle total">$${formatCurrency(unitPrice)}</td>
+    <td>
+        <label class="form-check-label d-block">
+            <input type="checkbox" class="form-check-input override-gst"${!currentTaxStatus.gst_exempt ? ' checked' : ''}> GST
+        </label>
+        <label class="form-check-label d-block">
+            <input type="checkbox" class="form-check-input override-pst"${!currentTaxStatus.pst_exempt ? ' checked' : ''}> PST
+        </label>
+    </td>
+    <td class="align-top"><button type="button" class="btn btn-danger btn-sm">Remove</button></td>
+</tr>`;
+        $productTableBody.append(catalogRow);
+        const row = $productTableBody.find('tr').last();
+        if (window.NumericInput) {
+            window.NumericInput.enableWithin(row.get(0));
+        }
+        updateRowTotal(row);
+    }
+
+    function addCustomRow() {
+        const customRow = `
+<tr class="product-row" data-line-kind="custom">
+    <td>
+        <input
+            type="text"
+            class="form-control custom-product-name"
+            placeholder="Service repair - fixed compressor coil in unit 1"
+        >
+        <div class="form-text">Custom line only for this invoice.</div>
+    </td>
+    <td>
+        <input type="text" class="form-control quantity" value="1" inputmode="text" data-numeric-input="1">
+    </td>
+    <td>
+        <input type="text" class="form-control custom-unit-price" placeholder="0.00" inputmode="text" data-numeric-input="1">
+    </td>
+    <td class="align-middle total">$0.00</td>
+    <td>
+        <div class="row g-2">
+            <div class="col-12">
+                <label class="form-label small mb-1">GST</label>
+                <input type="text" class="form-control form-control-sm custom-gst-amount" placeholder="0.00" inputmode="text" data-numeric-input="1">
+            </div>
+            <div class="col-12">
+                <label class="form-label small mb-1">PST</label>
+                <input type="text" class="form-control form-control-sm custom-pst-amount" placeholder="0.00" inputmode="text" data-numeric-input="1">
+            </div>
+            <div class="col-12">
+                <label class="form-label small mb-1">Fee</label>
+                <input type="text" class="form-control form-control-sm custom-additional-fee" placeholder="0.00" inputmode="text" data-numeric-input="1">
+            </div>
+        </div>
+    </td>
+    <td class="align-top"><button type="button" class="btn btn-danger btn-sm">Remove</button></td>
+</tr>`;
+        $productTableBody.append(customRow);
+        const row = $productTableBody.find('tr').last();
+        if (window.NumericInput) {
+            window.NumericInput.enableWithin(row.get(0));
+        }
+        row.find('.custom-product-name').trigger('focus');
+        updateRowTotal(row);
+    }
+
+    function collectInvoiceLines() {
+        const lines = [];
+        let validationError = null;
+
+        $productTableBody.find('tr').each(function () {
+            if (validationError) {
+                return;
+            }
+
+            const $row = $(this);
+            const lineKind = $row.data('lineKind');
+            const quantityRaw = $row.find('.quantity').val();
+            const quantity = parseValue(quantityRaw);
+
+            if (!Number.isFinite(quantity)) {
+                validationError = 'Each invoice line needs a valid quantity.';
+                return;
+            }
+
+            if (lineKind === 'custom') {
+                const productName = String($row.find('.custom-product-name').val() || '').trim();
+                const unitPriceRaw = String($row.find('.custom-unit-price').val() || '').trim();
+                const lineGstRaw = String($row.find('.custom-gst-amount').val() || '').trim();
+                const linePstRaw = String($row.find('.custom-pst-amount').val() || '').trim();
+                const additionalFeeRaw = String($row.find('.custom-additional-fee').val() || '').trim();
+
+                const isCompletelyBlank = (
+                    !productName &&
+                    !unitPriceRaw &&
+                    !lineGstRaw &&
+                    !linePstRaw &&
+                    !additionalFeeRaw
+                );
+                if (isCompletelyBlank) {
+                    return;
+                }
+
+                if (!productName) {
+                    validationError = 'Each custom line needs a description.';
+                    return;
+                }
+
+                const unitPrice = parseValue(unitPriceRaw);
+                if (!Number.isFinite(unitPrice)) {
+                    validationError = 'Each custom line needs a valid price.';
+                    return;
+                }
+
+                const lineGst = parseOptionalNumber(lineGstRaw);
+                const linePst = parseOptionalNumber(linePstRaw);
+                const additionalFee = parseOptionalNumber(additionalFeeRaw);
+                if (![lineGst, linePst, additionalFee].every(Number.isFinite)) {
+                    validationError = 'Custom GST, PST, and fee values must be valid numbers.';
+                    return;
+                }
+
+                lines.push({
+                    line_type: 'custom',
+                    product_name: productName,
+                    quantity: quantity,
+                    unit_price: unitPrice,
+                    line_gst: lineGst,
+                    line_pst: linePst,
+                    additional_fee: additionalFee
+                });
+                return;
+            }
+
+            const productName = String($row.find('.catalog-product-name').text() || '').trim();
+            if (!productName) {
+                validationError = 'Each product row must include a product name.';
+                return;
+            }
+
+            lines.push({
+                line_type: 'catalog',
+                product_name: productName,
+                quantity: quantity,
+                override_gst: $row.find('.override-gst').is(':checked'),
+                override_pst: $row.find('.override-pst').is(':checked')
+            });
+        });
+
+        return { lines, validationError };
+    }
+
+    $('#createInvoiceCustomerModal #customerForm').on('submit', async function (e) {
+        e.preventDefault();
+        const formEl = this;
+        try {
+            const response = await fetch(createCustomerUrl, {
+                method: 'POST',
+                body: new FormData(formEl)
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || !payload.success) {
+                const errors = payload.errors || {};
+                const firstError = Object.values(errors).flat()[0];
+                window.alert(firstError || 'Unable to create customer. Please check the form and try again.');
+                return;
+            }
+            syncCustomerSelection(payload.customer);
+            formEl.reset();
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('createInvoiceCustomerModal')).hide();
+        } catch (error) {
+            window.alert('Unable to create customer. Please check the form and try again.');
+        }
+    });
+
+    $('#createInvoiceModal').on('click', '[data-bs-target="#createInvoiceCustomerModal"]', function () {
+        reopenInvoiceModalAfterCustomer = true;
+    });
+
+    $('#createInvoiceCustomerModal').on('hidden.bs.modal', function () {
+        const parentModal = document.getElementById('createInvoiceModal');
+        if (reopenInvoiceModalAfterCustomer && parentModal) {
+            bootstrap.Modal.getOrCreateInstance(parentModal).show();
+        }
+        reopenInvoiceModalAfterCustomer = false;
+    });
+
+    updateCustomerTaxStatus($customerSelect.val());
+    $customerSelect.on('change', function () {
+        updateCustomerTaxStatus($(this).val());
+    });
+
+    $('#productSearch').on('keyup', function () {
+        const query = $(this).val();
+        $.ajax({
+            url: searchProductsUrl,
+            data: { query: query },
+            success: function (response) {
+                const suggestions = response.map(function (product) {
+                    const invoicePrice = product.invoice_sale_price ?? product.price;
+                    return '<a href="#" class="list-group-item list-group-item-action" data-name="' + product.name + '" data-price="' + invoicePrice + '">' + product.name + ' - $' + invoicePrice + '</a>';
+                });
+                $('#productSuggestions').html(suggestions.join(''));
+            }
+        });
+    });
+
+    $('#productSuggestions').on('click', '.list-group-item', function (e) {
+        e.preventDefault();
+        addCatalogRow($(this).data('name'), $(this).data('price'));
+    });
+
+    $('#addCustomLineBtn').on('click', function () {
+        addCustomRow();
+    });
+
+    $('#productTable').on(
+        'input change',
+        '.quantity, .override-gst, .override-pst, .custom-unit-price, .custom-gst-amount, .custom-pst-amount, .custom-additional-fee',
+        function () {
+            updateRowTotal($(this).closest('tr'));
+        }
+    );
+
+    $('#productTable').on('click', '.btn-danger', function () {
+        $(this).closest('tr').remove();
+    });
+
+    $invoiceForm.on('submit', function (e) {
+        e.preventDefault();
+
+        const { lines, validationError } = collectInvoiceLines();
+        if (validationError) {
+            window.alert(validationError);
+            return;
+        }
+        if (!lines.length) {
+            window.alert('Add at least one valid invoice line before creating an invoice.');
+            return;
+        }
+
+        $productsField.val(JSON.stringify(lines));
+
+        if (invoiceFormSubmitMode === 'ajax') {
+            $.post(createInvoiceApiUrl, $invoiceForm.serialize(), function () {
+                window.location.reload();
+            }).fail(function (xhr) {
+                const payload = xhr.responseJSON || {};
+                const errors = payload.errors || {};
+                const firstError = Object.values(errors).flat()[0];
+                window.alert(firstError || 'Unable to create invoice. Please check the form and try again.');
+            });
+            return;
+        }
+
+        this.submit();
+    });
+});
+</script>
