@@ -117,7 +117,7 @@
         <div class="card">
             <div class="card-header">Locations</div>
             <div class="list-group list-group-flush">
-                {% for location in sales_import.locations %}
+                {% for location in sorted_locations %}
                 <a
                     href="{{ url_for('admin.sales_import_detail', import_id=sales_import.id, location_id=location.id) }}"
                     class="list-group-item list-group-item-action {% if selected_location and selected_location.id == location.id %}active{% endif %}"
@@ -129,8 +129,8 @@
                                 Mapped: {{ location.location.name if location.location else 'Unmapped' }}
                             </div>
                         </div>
-                        <span class="badge {% if selected_location and selected_location.id == location.id %}bg-light text-dark{% else %}bg-secondary{% endif %}">
-                            {{ location.rows|length }}
+                        <span class="badge bg-danger text-white">
+                            {{ location_issue_counts.get(location.id, 0) }}
                         </span>
                     </div>
                     <div class="small mt-1 {% if selected_location and selected_location.id == location.id %}text-white-50{% else %}text-muted{% endif %}">

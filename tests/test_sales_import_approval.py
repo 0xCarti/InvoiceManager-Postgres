@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 from app import db
 from app.models import (
@@ -306,6 +307,174 @@ def test_sales_import_detail_hides_price_review_when_file_and_app_prices_align(
         assert detail_response.status_code == 200
         assert b"Aligned" in detail_response.data
         assert b"Price review" not in detail_response.data
+
+
+def test_sales_import_detail_sidebar_shows_issue_counts_and_sorts_locations(
+    client, app
+):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        clean_alpha = Location(name="Alpha Clean")
+        clean_bravo = Location(name="Bravo Clean")
+        issue_location = Location(name="Echo Issue")
+        product_unmapped = Product(name="Mapped For Unmapped", price=3.0, cost=1.0)
+        product_issue = Product(name="Issue Product", price=6.0, cost=1.0)
+        product_clean_alpha = Product(name="Clean Alpha Product", price=4.0, cost=1.0)
+        product_clean_bravo = Product(name="Clean Bravo Product", price=5.0, cost=1.0)
+        db.session.add_all(
+            [
+                clean_alpha,
+                clean_bravo,
+                issue_location,
+                product_unmapped,
+                product_issue,
+                product_clean_alpha,
+                product_clean_bravo,
+            ]
+        )
+        db.session.flush()
+
+        sales_import = PosSalesImport(
+            source_provider="mailgun",
+            message_id="msg-sidebar-issues",
+            attachment_filename="sales.xls",
+            attachment_sha256="1" * 64,
+            status="pending",
+        )
+        db.session.add(sales_import)
+        db.session.flush()
+
+        unmapped_import_location = PosSalesImportLocation(
+            import_id=sales_import.id,
+            source_location_name="Zulu Unmapped",
+            normalized_location_name="zulu_unmapped",
+            location_id=None,
+            parse_index=0,
+        )
+        issue_import_location = PosSalesImportLocation(
+            import_id=sales_import.id,
+            source_location_name="Echo Issue",
+            normalized_location_name="echo_issue",
+            location_id=issue_location.id,
+            parse_index=1,
+        )
+        clean_alpha_import_location = PosSalesImportLocation(
+            import_id=sales_import.id,
+            source_location_name="Alpha Clean",
+            normalized_location_name="alpha_clean",
+            location_id=clean_alpha.id,
+            parse_index=2,
+        )
+        clean_bravo_import_location = PosSalesImportLocation(
+            import_id=sales_import.id,
+            source_location_name="Bravo Clean",
+            normalized_location_name="bravo_clean",
+            location_id=clean_bravo.id,
+            parse_index=3,
+        )
+        db.session.add_all(
+            [
+                unmapped_import_location,
+                issue_import_location,
+                clean_alpha_import_location,
+                clean_bravo_import_location,
+            ]
+        )
+        db.session.flush()
+
+        db.session.add_all(
+            [
+                PosSalesImportRow(
+                    import_id=sales_import.id,
+                    location_import_id=unmapped_import_location.id,
+                    source_product_name=product_unmapped.name,
+                    normalized_product_name="mapped_for_unmapped",
+                    product_id=product_unmapped.id,
+                    quantity=1.0,
+                    computed_unit_price=product_unmapped.price,
+                    parse_index=0,
+                ),
+                PosSalesImportRow(
+                    import_id=sales_import.id,
+                    location_import_id=issue_import_location.id,
+                    source_product_name=product_issue.name,
+                    normalized_product_name="issue_product",
+                    product_id=product_issue.id,
+                    quantity=1.0,
+                    computed_unit_price=7.5,
+                    parse_index=0,
+                ),
+                PosSalesImportRow(
+                    import_id=sales_import.id,
+                    location_import_id=issue_import_location.id,
+                    source_product_name="Still Unmapped",
+                    normalized_product_name="still_unmapped",
+                    product_id=None,
+                    quantity=1.0,
+                    parse_index=1,
+                ),
+                PosSalesImportRow(
+                    import_id=sales_import.id,
+                    location_import_id=clean_alpha_import_location.id,
+                    source_product_name=product_clean_alpha.name,
+                    normalized_product_name="clean_alpha_product",
+                    product_id=product_clean_alpha.id,
+                    quantity=1.0,
+                    computed_unit_price=product_clean_alpha.price,
+                    parse_index=0,
+                ),
+                PosSalesImportRow(
+                    import_id=sales_import.id,
+                    location_import_id=clean_bravo_import_location.id,
+                    source_product_name=product_clean_bravo.name,
+                    normalized_product_name="clean_bravo_product",
+                    product_id=product_clean_bravo.id,
+                    quantity=1.0,
+                    computed_unit_price=product_clean_bravo.price,
+                    parse_index=0,
+                ),
+            ]
+        )
+        db.session.commit()
+        sales_import_id = sales_import.id
+
+    with client:
+        login(client, admin_email, admin_pass)
+        detail_response = client.get(
+            f"/controlpanel/sales-imports/{sales_import_id}",
+            follow_redirects=True,
+        )
+        assert detail_response.status_code == 200
+
+        html = detail_response.data.decode("utf-8")
+        sidebar_cards = re.findall(
+            r'<a\s+href="[^"]*location_id=\d+"[^>]*>.*?<div class="fw-semibold">([^<]+)</div>.*?<span class="badge ([^"]*)">\s*([^<]+)\s*</span>',
+            html,
+            re.S,
+        )
+        sidebar_names = [name.strip() for name, _, _ in sidebar_cards[:4]]
+        sidebar_counts = {
+            name.strip(): count.strip() for name, _, count in sidebar_cards[:4]
+        }
+        sidebar_badges = {
+            name.strip(): classes for name, classes, _ in sidebar_cards[:4]
+        }
+
+        assert sidebar_names == [
+            "Zulu Unmapped",
+            "Echo Issue",
+            "Alpha Clean",
+            "Bravo Clean",
+        ]
+        assert sidebar_counts == {
+            "Zulu Unmapped": "1",
+            "Echo Issue": "2",
+            "Alpha Clean": "0",
+            "Bravo Clean": "0",
+        }
+        assert all("bg-danger" in classes for classes in sidebar_badges.values())
 
 
 def test_sales_import_price_review_can_keep_app_price_on_approval(client, app):

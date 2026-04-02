@@ -2744,24 +2744,51 @@ def sales_import_detail(import_id: int):
     unresolved_location_count = issue_state["unresolved_location_count"]
     unresolved_row_count = issue_state["unresolved_row_count"]
 
+    review_context = issue_state["review_context"]
+    row_review_data = review_context["row_review_data"]
+    location_discount_totals = review_context["location_discount_totals"]
+    unresolved_price_count = issue_state["unresolved_price_count"]
+    unresolved_location_ids = review_context["unresolved_location_ids"]
+    unresolved_row_ids = review_context["unresolved_row_ids"]
+    unresolved_price_row_ids = review_context["unresolved_price_row_ids"]
+
+    location_issue_counts: dict[int, int] = {}
+    for location in sales_import.locations:
+        location_issue_counts[location.id] = int(location.id in unresolved_location_ids)
+        location_issue_counts[location.id] += sum(
+            1 for row in location.rows if row.id in unresolved_row_ids
+        )
+        location_issue_counts[location.id] += sum(
+            1 for row in location.rows if row.id in unresolved_price_row_ids
+        )
+
+    sorted_locations = sorted(
+        sales_import.locations,
+        key=lambda location: (
+            0
+            if location.location_id is None
+            else 1
+            if location_issue_counts.get(location.id, 0) > 0
+            else 2,
+            (location.source_location_name or "").casefold(),
+            location.parse_index or 0,
+            location.id,
+        ),
+    )
+
     selected_location_id = request.args.get("location_id", type=int)
     selected_location = None
     if selected_location_id is not None:
         selected_location = next(
             (
                 location
-                for location in sales_import.locations
+                for location in sorted_locations
                 if location.id == selected_location_id
             ),
             None,
         )
-    if selected_location is None and sales_import.locations:
-        selected_location = sales_import.locations[0]
-
-    review_context = issue_state["review_context"]
-    row_review_data = review_context["row_review_data"]
-    location_discount_totals = review_context["location_discount_totals"]
-    unresolved_price_count = issue_state["unresolved_price_count"]
+    if selected_location is None and sorted_locations:
+        selected_location = sorted_locations[0]
 
     import_totals = {
         "quantity": sum(float(loc.total_quantity or 0.0) for loc in sales_import.locations),
@@ -2811,6 +2838,8 @@ def sales_import_detail(import_id: int):
     return render_template(
         "admin/sales_import_detail.html",
         sales_import=sales_import,
+        sorted_locations=sorted_locations,
+        location_issue_counts=location_issue_counts,
         selected_location=selected_location,
         import_totals=import_totals,
         location_errors=location_errors,
