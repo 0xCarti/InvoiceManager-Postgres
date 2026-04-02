@@ -262,6 +262,7 @@ def test_sales_import_detail_shows_price_review_and_blocks_unresolved_price_diff
             follow_redirects=True,
         )
         assert detail_response.status_code == 200
+        assert b"Price review" in detail_response.data
         assert b"File Price" in detail_response.data
         assert b"App Price" in detail_response.data
         assert b"Needs Review" in detail_response.data
@@ -282,6 +283,29 @@ def test_sales_import_detail_shows_price_review_and_blocks_unresolved_price_diff
         product = db.session.get(Product, review_import["product_id"])
         assert sales_import.status == "pending"
         assert product.price == 4.0
+
+
+def test_sales_import_detail_hides_price_review_when_file_and_app_prices_align(
+    client, app
+):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    review_import = _create_price_review_import(
+        app,
+        message_id="msg-price-review-aligned",
+        product_price=5.0,
+        file_price=5.0,
+    )
+
+    with client:
+        login(client, admin_email, admin_pass)
+        detail_response = client.get(
+            f"/controlpanel/sales-imports/{review_import['import_id']}",
+            follow_redirects=True,
+        )
+        assert detail_response.status_code == 200
+        assert b"Aligned" in detail_response.data
+        assert b"Price review" not in detail_response.data
 
 
 def test_sales_import_price_review_can_keep_app_price_on_approval(client, app):

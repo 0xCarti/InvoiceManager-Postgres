@@ -267,7 +267,7 @@
                             <div class="alert alert-light border small mb-0">
                                 Quantity is zero for this row, so it is informational only and does not require a price decision.
                             </div>
-                            {% elif row.product_id is not none %}
+                            {% elif row.product_id is not none and review.price_mismatch %}
                             <div class="vstack gap-2">
                                 <div class="small fw-semibold">Price review</div>
                                 <form method="post" class="vstack gap-2">
@@ -287,11 +287,6 @@
                                     <input type="text" class="form-control form-control-sm" name="custom_price" value="{% if review.custom_price is not none %}{{ '%.2f'|format(review.custom_price) }}{% endif %}" placeholder="Used only for custom price" {% if price_review_locked %}disabled{% endif %}>
                                     <button type="submit" class="btn btn-outline-primary btn-sm w-100" {% if price_review_locked %}disabled{% endif %}>Save Price Choice</button>
                                 </form>
-                                {% if not review.price_mismatch and not review.action %}
-                                <div class="form-text text-muted">
-                                    File and app prices already match. Saving a choice is optional unless you want to override or skip this row.
-                                </div>
-                                {% endif %}
                             </div>
                             {% elif row.product_id is none %}
                             <div class="vstack gap-2">
@@ -413,7 +408,7 @@
                                     </span>
                                 </td>
                             </tr>
-                            {% elif row.product_id is not none %}
+                            {% elif row.product_id is not none and review.price_mismatch %}
                             <tr class="table-light">
                                 <td colspan="10">
                                     <div class="small fw-semibold mb-2">Price review for "{{ row.source_product_name }}"</div>
@@ -451,11 +446,6 @@
                                             <button type="submit" class="btn btn-outline-primary btn-sm w-100" {% if price_review_locked %}disabled{% endif %}>Save Price Choice</button>
                                         </div>
                                     </form>
-                                    {% if not review.price_mismatch and not review.action %}
-                                    <div class="form-text text-muted">
-                                        File and app prices already match. Saving a choice is optional unless you want to override or skip this row.
-                                    </div>
-                                    {% endif %}
                                 </td>
                             </tr>
                             {% endif %}
