@@ -94,6 +94,7 @@ from app.services.purchase_imports import (
     normalize_vendor_alias_text,
     update_or_create_vendor_alias,
 )
+from app.utils.numeric import coerce_float
 from app.utils.units import (
     DEFAULT_BASE_UNIT_CONVERSIONS,
     get_allowed_target_units,
@@ -1566,7 +1567,7 @@ def terminal_sales_mappings():
     )
 
 
-@admin.route("/controlpanel/sales-imports", methods=["GET"])
+@admin.route("/controlpanel/sales-imports", methods=["GET", "POST"])
 @login_required
 def sales_imports():
     """Render staged POS sales imports for admin review."""
@@ -1574,11 +1575,40 @@ def sales_imports():
     if not current_user.is_admin:
         abort(403)
 
+    available_statuses = [
+        "pending",
+        "needs_mapping",
+        "approved",
+        "reversed",
+        "failed",
+    ]
     status_filter = (request.args.get("status") or "").strip().lower()
+    if status_filter not in available_statuses:
+        status_filter = ""
+    if request.method == "POST":
+        status_filter = (request.form.get("status") or status_filter).strip().lower()
+        if status_filter not in available_statuses:
+            status_filter = ""
+        action = (request.form.get("action") or "").strip()
+        if action == "approve_import":
+            import_id = request.form.get("import_id", type=int)
+            if not import_id:
+                flash("Unable to find the selected sales import.", "danger")
+            else:
+                _approve_sales_import(import_id)
+        return redirect(
+            url_for("admin.sales_imports", status=status_filter)
+            if status_filter
+            else url_for("admin.sales_imports")
+        )
 
-    query = PosSalesImport.query.options(
-        selectinload(PosSalesImport.locations),
-        selectinload(PosSalesImport.rows),
+    query = PosSalesImport.query.filter(
+        PosSalesImport.status != "deleted"
+    ).options(
+        selectinload(PosSalesImport.locations)
+        .selectinload(PosSalesImportLocation.rows)
+        .selectinload(PosSalesImportRow.product),
+        selectinload(PosSalesImport.rows).selectinload(PosSalesImportRow.product),
     ).order_by(
         PosSalesImport.received_at.desc(),
         PosSalesImport.id.desc(),
@@ -1587,14 +1617,22 @@ def sales_imports():
         query = query.filter(PosSalesImport.status == status_filter)
 
     imports = query.limit(200).all()
-    available_statuses = [
-        "pending",
-        "needs_mapping",
-        "approved",
-        "reversed",
-        "deleted",
-        "failed",
-    ]
+    status_changed = False
+    for import_record in imports:
+        issue_state = _refresh_sales_import_mapping_status(import_record)
+        status_changed = status_changed or issue_state["status_changed"]
+        actionable_issue_count = (
+            issue_state["issue_count"]
+            if import_record.status in {"pending", "needs_mapping"}
+            else 0
+        )
+        import_record.issue_count = actionable_issue_count
+        import_record.can_direct_approve = (
+            import_record.status == "pending" and actionable_issue_count == 0
+        )
+
+    if status_changed:
+        db.session.commit()
 
     return render_template(
         "admin/sales_imports.html",
@@ -1605,18 +1643,460 @@ def sales_imports():
 
 
 def _parse_sales_import_approval_changes(row: PosSalesImportRow) -> list[dict]:
-    if not row.approval_metadata:
-        return []
-    try:
-        payload = json.loads(row.approval_metadata)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return []
-    if not isinstance(payload, dict):
+    payload = _parse_sales_import_row_metadata(row)
+    if not payload:
         return []
     changes = payload.get("changes") or []
     if not isinstance(changes, list):
         return []
     return [change for change in changes if isinstance(change, dict)]
+
+
+_SALES_IMPORT_PRICE_ACTIONS = {"file", "app", "custom", "skip"}
+
+
+def _parse_sales_import_row_metadata(row: PosSalesImportRow) -> dict[str, Any]:
+    if not row.approval_metadata:
+        return {}
+    try:
+        payload = json.loads(row.approval_metadata)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return payload
+
+
+def _write_sales_import_row_metadata(
+    row: PosSalesImportRow, payload: dict[str, Any]
+) -> None:
+    row.approval_metadata = json.dumps(payload) if payload else None
+
+
+def _normalize_sales_import_price_action(raw_value: Any) -> str | None:
+    action = (raw_value or "").strip().lower()
+    if action in _SALES_IMPORT_PRICE_ACTIONS:
+        return action
+    return None
+
+
+def _get_sales_import_row_review(row: PosSalesImportRow) -> dict[str, Any]:
+    payload = _parse_sales_import_row_metadata(row)
+    review = payload.get("review")
+    if not isinstance(review, dict):
+        return {}
+    return review
+
+
+def _sales_import_prices_match(
+    file_price: float | None, app_price: float | None
+) -> bool:
+    if file_price is None or app_price is None:
+        return False
+    try:
+        return abs(float(file_price) - float(app_price)) <= 0.01
+    except (TypeError, ValueError):
+        return False
+
+
+def _sales_import_discount_value(
+    discount_raw: Any, discount_abs: float | None = None
+) -> float:
+    parsed_value = coerce_float(discount_raw)
+    if parsed_value is not None:
+        return parsed_value
+    fallback_value = coerce_float(discount_abs, default=0.0)
+    return fallback_value or 0.0
+
+
+def _build_sales_import_review_context(
+    sales_import: PosSalesImport,
+) -> dict[str, Any]:
+    row_review_data: dict[int, dict[str, Any]] = {}
+    location_discount_totals: dict[int, float] = {}
+    unresolved_location_ids: set[int] = set()
+    unresolved_row_ids: set[int] = set()
+    unresolved_price_row_ids: set[int] = set()
+    grouped_product_prices: dict[int, list[tuple[int, float]]] = {}
+
+    import_discount_total = 0.0
+
+    for location in sales_import.locations:
+        location_discount_total = 0.0
+        location_has_active_rows = False
+
+        for row in location.rows:
+            review = _get_sales_import_row_review(row)
+            action = _normalize_sales_import_price_action(review.get("price_action"))
+            custom_price = coerce_float(review.get("selected_price"))
+            file_price = coerce_float(row.computed_unit_price, default=0.0)
+            app_price = (
+                coerce_float(row.product.price)
+                if row.product is not None
+                else None
+            )
+            row_discount = _sales_import_discount_value(
+                row.discount_raw, row.discount_abs
+            )
+            is_skipped = action == "skip"
+            is_active = not row.is_zero_quantity and not is_skipped
+            location_discount_total += row_discount
+
+            price_mismatch = bool(
+                row.product is not None
+                and is_active
+                and not _sales_import_prices_match(file_price, app_price)
+            )
+
+            resolved_price = None
+            resolved_source = None
+            if action == "file":
+                resolved_price = file_price
+                resolved_source = "file"
+            elif action == "app":
+                resolved_price = app_price
+                resolved_source = "app"
+            elif action == "custom" and custom_price is not None:
+                resolved_price = custom_price
+                resolved_source = "custom"
+            elif action == "skip":
+                resolved_source = "skip"
+            elif row.product is not None and not price_mismatch:
+                resolved_price = app_price
+                resolved_source = "aligned"
+
+            requires_mapping = bool(is_active and row.product_id is None)
+            requires_price_resolution = bool(
+                row.product is not None and is_active and price_mismatch and resolved_price is None
+            )
+
+            if is_active:
+                location_has_active_rows = True
+            if requires_mapping:
+                unresolved_row_ids.add(row.id)
+            if requires_price_resolution:
+                unresolved_price_row_ids.add(row.id)
+            if (
+                is_active
+                and row.product_id is not None
+                and resolved_price is not None
+            ):
+                grouped_product_prices.setdefault(row.product_id, []).append(
+                    (row.id, resolved_price)
+                )
+
+            row_review_data[row.id] = {
+                "action": action,
+                "custom_price": custom_price,
+                "file_price": file_price,
+                "app_price": app_price,
+                "discount": row_discount,
+                "is_skipped": is_skipped,
+                "is_active": is_active,
+                "price_mismatch": price_mismatch,
+                "resolved_price": resolved_price,
+                "resolved_source": resolved_source,
+                "requires_mapping": requires_mapping,
+                "requires_price_resolution": requires_price_resolution,
+                "has_price_conflict": False,
+            }
+
+        location_discount_totals[location.id] = location_discount_total
+        import_discount_total += location_discount_total
+        if location.location_id is None and location_has_active_rows:
+            unresolved_location_ids.add(location.id)
+
+    conflicting_row_ids: set[int] = set()
+    for grouped_rows in grouped_product_prices.values():
+        if len(grouped_rows) < 2:
+            continue
+        baseline_price = grouped_rows[0][1]
+        if any(
+            not _sales_import_prices_match(price, baseline_price)
+            for _, price in grouped_rows[1:]
+        ):
+            conflicting_row_ids.update(row_id for row_id, _ in grouped_rows)
+
+    for row_id in conflicting_row_ids:
+        row_review_data[row_id]["has_price_conflict"] = True
+        unresolved_price_row_ids.add(row_id)
+
+    return {
+        "row_review_data": row_review_data,
+        "location_discount_totals": location_discount_totals,
+        "import_discount_total": import_discount_total,
+        "unresolved_location_ids": unresolved_location_ids,
+        "unresolved_row_ids": unresolved_row_ids,
+        "unresolved_price_row_ids": unresolved_price_row_ids,
+    }
+
+
+def _collect_sales_import_issue_state(
+    import_record: PosSalesImport,
+) -> dict[str, Any]:
+    review_context = _build_sales_import_review_context(import_record)
+    unresolved_location_count = len(review_context["unresolved_location_ids"])
+    unresolved_row_count = len(review_context["unresolved_row_ids"])
+    unresolved_price_count = len(review_context["unresolved_price_row_ids"])
+    errors: list[str] = []
+    if unresolved_location_count:
+        errors.append(
+            f"{unresolved_location_count} import location"
+            f"{'s are' if unresolved_location_count != 1 else ' is'} unresolved."
+        )
+    if unresolved_row_count:
+        errors.append(
+            f"{unresolved_row_count} import row"
+            f"{'s are' if unresolved_row_count != 1 else ' is'} unresolved."
+        )
+    if unresolved_price_count:
+        errors.append(
+            f"{unresolved_price_count} import row"
+            f"{'s need' if unresolved_price_count != 1 else ' needs'} price review."
+        )
+    return {
+        "review_context": review_context,
+        "unresolved_location_count": unresolved_location_count,
+        "unresolved_row_count": unresolved_row_count,
+        "unresolved_price_count": unresolved_price_count,
+        "issue_count": (
+            unresolved_location_count
+            + unresolved_row_count
+            + unresolved_price_count
+        ),
+        "errors": errors,
+    }
+
+
+def _refresh_sales_import_mapping_status(
+    import_record: PosSalesImport,
+) -> dict[str, Any]:
+    issue_state = _collect_sales_import_issue_state(import_record)
+    next_status = (
+        "needs_mapping"
+        if issue_state["unresolved_location_count"] or issue_state["unresolved_row_count"]
+        else "pending"
+    )
+    status_changed = False
+    if (
+        import_record.status in {"pending", "needs_mapping"}
+        and import_record.status != next_status
+    ):
+        import_record.status = next_status
+        status_changed = True
+    issue_state["status_changed"] = status_changed
+    return issue_state
+
+
+def _detach_sales_import_attachment(import_record: PosSalesImport) -> None:
+    attachment_path = (import_record.attachment_storage_path or "").strip()
+    import_record.attachment_storage_path = None
+    if not attachment_path:
+        return
+
+    active_reference_exists = (
+        PosSalesImport.query.with_entities(PosSalesImport.id)
+        .filter(
+            PosSalesImport.id != import_record.id,
+            PosSalesImport.attachment_storage_path == attachment_path,
+            PosSalesImport.status != "deleted",
+        )
+        .first()
+        is not None
+    )
+    if active_reference_exists:
+        return
+
+    deleted_imports = PosSalesImport.query.filter(
+        PosSalesImport.attachment_storage_path == attachment_path,
+        PosSalesImport.status == "deleted",
+    ).all()
+    for deleted_import in deleted_imports:
+        deleted_import.attachment_storage_path = None
+
+    if os.path.exists(attachment_path):
+        os.remove(attachment_path)
+
+
+def _approve_sales_import(import_id: int) -> bool:
+    try:
+        locked_import = (
+            PosSalesImport.query.filter(PosSalesImport.id == import_id)
+            .with_for_update()
+            .first()
+        )
+        if locked_import is None:
+            flash("The requested import could not be found.", "danger")
+            return False
+
+        locked_import = (
+            PosSalesImport.query.options(
+                selectinload(PosSalesImport.locations)
+                .selectinload(PosSalesImportLocation.rows)
+                .selectinload(PosSalesImportRow.product)
+                .selectinload(Product.recipe_items)
+                .selectinload(ProductRecipeItem.unit),
+                selectinload(PosSalesImport.locations)
+                .selectinload(PosSalesImportLocation.rows)
+                .selectinload(PosSalesImportRow.product)
+                .selectinload(Product.recipe_items)
+                .selectinload(ProductRecipeItem.item),
+            )
+            .filter(PosSalesImport.id == import_id)
+            .first()
+        )
+        if locked_import is None:
+            flash("The requested import could not be found.", "danger")
+            return False
+
+        if locked_import.status != "pending":
+            flash(
+                "Import approval is only allowed while the import status is Pending.",
+                "warning",
+            )
+            return False
+
+        issue_state = _collect_sales_import_issue_state(locked_import)
+        if issue_state["errors"]:
+            flash(
+                "Approval blocked: resolve mappings and price review issues before approval.",
+                "warning",
+            )
+            for error in issue_state["errors"]:
+                flash(error, "warning")
+            return False
+
+        approval_batch_id = f"pos-import-{locked_import.id}-{uuid.uuid4().hex[:12]}"
+        approval_time = datetime.utcnow()
+        row_change_count = 0
+        row_review_data = issue_state["review_context"]["row_review_data"]
+        product_price_updates: dict[int, float] = {}
+
+        for row in locked_import.rows:
+            row_review = row_review_data.get(row.id, {})
+            if (
+                not row_review.get("is_active")
+                or row.product_id is None
+                or row_review.get("resolved_price") is None
+            ):
+                continue
+            product_price_updates[row.product_id] = row_review["resolved_price"]
+
+        for product_id, selected_price in product_price_updates.items():
+            product = db.session.get(Product, product_id)
+            if product is None:
+                continue
+            product.price = selected_price
+
+        for import_location in locked_import.locations:
+            active_rows = [
+                row
+                for row in import_location.rows
+                if row_review_data.get(row.id, {}).get("is_active")
+            ]
+            if import_location.location_id is None or not active_rows:
+                continue
+            import_location.approval_batch_id = approval_batch_id
+            for row in import_location.rows:
+                row_review = row_review_data.get(row.id, {})
+                if row.product_id is None or not row_review.get("is_active"):
+                    continue
+
+                product = row.product
+                if product is None:
+                    continue
+
+                row_changes: list[dict] = []
+                for recipe_item in product.recipe_items:
+                    if not recipe_item.countable or recipe_item.item_id is None:
+                        continue
+                    factor = recipe_item.unit.factor if recipe_item.unit else 1.0
+                    units_per_product = float(recipe_item.quantity or 0.0) * float(
+                        factor or 1.0
+                    )
+                    if units_per_product <= 0:
+                        continue
+
+                    sold_quantity = float(row.quantity or 0.0)
+                    delta = sold_quantity * units_per_product
+                    if abs(delta) < 1e-9:
+                        continue
+
+                    record = LocationStandItem.query.filter_by(
+                        location_id=import_location.location_id,
+                        item_id=recipe_item.item_id,
+                    ).first()
+                    if record is None:
+                        record = LocationStandItem(
+                            location_id=import_location.location_id,
+                            item_id=recipe_item.item_id,
+                            expected_count=0,
+                            purchase_gl_code_id=(
+                                recipe_item.item.purchase_gl_code_id
+                                if recipe_item.item is not None
+                                else None
+                            ),
+                        )
+                        db.session.add(record)
+                        db.session.flush()
+                    elif (
+                        record.purchase_gl_code_id is None
+                        and recipe_item.item is not None
+                        and recipe_item.item.purchase_gl_code_id is not None
+                    ):
+                        record.purchase_gl_code_id = recipe_item.item.purchase_gl_code_id
+
+                    expected_before = float(record.expected_count or 0.0)
+                    expected_after = expected_before - delta
+                    record.expected_count = expected_after
+
+                    item = db.session.get(Item, recipe_item.item_id)
+                    item_qty_before = float(item.quantity or 0.0) if item else 0.0
+                    item_qty_after = item_qty_before - delta
+                    if item is not None:
+                        item.quantity = item_qty_after
+
+                    row_changes.append(
+                        {
+                            "item_id": recipe_item.item_id,
+                            "location_id": import_location.location_id,
+                            "location_stand_item_id": record.id,
+                            "expected_count_before": expected_before,
+                            "expected_count_after": expected_after,
+                            "item_quantity_before": item_qty_before,
+                            "item_quantity_after": item_qty_after,
+                            "consumed_quantity": delta,
+                        }
+                    )
+
+                row.approval_batch_id = approval_batch_id
+                metadata = _parse_sales_import_row_metadata(row)
+                if row_changes:
+                    metadata["approval_batch_id"] = approval_batch_id
+                    metadata["approved_at"] = approval_time.isoformat()
+                    metadata["changes"] = row_changes
+                    _write_sales_import_row_metadata(row, metadata)
+                    row_change_count += 1
+
+        locked_import.status = "approved"
+        locked_import.approved_by = current_user.id
+        locked_import.approved_at = approval_time
+        locked_import.approval_batch_id = approval_batch_id
+        db.session.commit()
+        flash(
+            f"Import approved. Applied inventory updates for {row_change_count} row"
+            f"{'s' if row_change_count != 1 else ''}.",
+            "success",
+        )
+        log_activity(
+            f"Approved POS sales import {locked_import.id} "
+            f"(batch {approval_batch_id})"
+        )
+        return True
+    except Exception:
+        db.session.rollback()
+        flash("Unable to approve import due to an unexpected error.", "danger")
+        return False
 
 
 def _check_negative_sales_import_reverse(import_record: PosSalesImport) -> list[str]:
@@ -1702,29 +2182,6 @@ def sales_import_detail(import_id: int):
         .first_or_404()
     )
 
-    def _refresh_import_mapping_status() -> tuple[int, int]:
-        unresolved_location_count = sum(
-            1 for location in sales_import.locations if location.location_id is None
-        )
-        unresolved_row_count = sum(
-            1
-            for location in sales_import.locations
-            for row in location.rows
-            if row.product_id is None
-        )
-        next_status = (
-            "needs_mapping"
-            if unresolved_location_count or unresolved_row_count
-            else "pending"
-        )
-        if (
-            sales_import.status in {"pending", "needs_mapping"}
-            and sales_import.status != next_status
-        ):
-            sales_import.status = next_status
-            db.session.commit()
-        return unresolved_location_count, unresolved_row_count
-
     def _apply_auto_mappings() -> bool:
         changed = False
 
@@ -1793,31 +2250,6 @@ def sales_import_detail(import_id: int):
                     changed = True
 
         return changed
-
-    def _collect_mapping_state(
-        import_record: PosSalesImport,
-    ) -> tuple[int, int, list[str]]:
-        unresolved_location_count = sum(
-            1 for location in import_record.locations if location.location_id is None
-        )
-        unresolved_row_count = sum(
-            1
-            for location in import_record.locations
-            for row in location.rows
-            if row.product_id is None
-        )
-        errors: list[str] = []
-        if unresolved_location_count:
-            errors.append(
-                f"{unresolved_location_count} import location"
-                f"{'s are' if unresolved_location_count != 1 else ' is'} unresolved."
-            )
-        if unresolved_row_count:
-            errors.append(
-                f"{unresolved_row_count} import row"
-                f"{'s are' if unresolved_row_count != 1 else ' is'} unresolved."
-            )
-        return unresolved_location_count, unresolved_row_count, errors
 
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()
@@ -2002,6 +2434,74 @@ def sales_import_detail(import_id: int):
                     f"'{row_record.source_product_name}' -> product {created_product.id}"
                 )
 
+        elif action == "resolve_row_price":
+            row_id = request.form.get("row_id", type=int)
+            resolution = _normalize_sales_import_price_action(
+                request.form.get("price_resolution")
+            )
+            row_record = next(
+                (
+                    row
+                    for location in sales_import.locations
+                    for row in location.rows
+                    if row.id == row_id
+                ),
+                None,
+            )
+            if not row_record:
+                flash("Unable to find the selected import row.", "danger")
+            elif sales_import.status not in {"pending", "needs_mapping"}:
+                flash(
+                    "Price review can only be changed while the import is pending approval.",
+                    "warning",
+                )
+            elif resolution is None:
+                flash("Choose how this row should handle pricing before saving.", "warning")
+            elif row_record.product_id is None and resolution != "skip":
+                flash("Map the product before choosing a row price.", "warning")
+            else:
+                selected_price = None
+                if resolution == "custom":
+                    selected_price = coerce_float(request.form.get("custom_price"))
+                    if selected_price is None:
+                        flash("Enter a valid custom price before saving.", "warning")
+                        return redirect(
+                            url_for(
+                                "admin.sales_import_detail",
+                                import_id=sales_import.id,
+                                location_id=selected_location_id,
+                            )
+                        )
+
+                payload = _parse_sales_import_row_metadata(row_record)
+                review = _get_sales_import_row_review(row_record).copy()
+                review["price_action"] = resolution
+                review["selected_price"] = (
+                    selected_price if resolution == "custom" else None
+                )
+                review["updated_at"] = datetime.utcnow().isoformat()
+                review["updated_by"] = current_user.id
+                payload["review"] = review
+                _write_sales_import_row_metadata(row_record, payload)
+                db.session.commit()
+
+                if resolution == "skip":
+                    flash(
+                        "Row skipped. It will be excluded from stock operations and price updates.",
+                        "success",
+                    )
+                elif resolution == "file":
+                    flash("This row will use the file price on approval.", "success")
+                elif resolution == "app":
+                    flash("This row will keep the app price on approval.", "success")
+                else:
+                    flash("Custom row price saved.", "success")
+
+                log_activity(
+                    f"Saved price review for POS sales import {sales_import.id} row {row_record.id}: "
+                    f"{resolution}"
+                )
+
         elif action == "refresh_auto_mapping":
             if _apply_auto_mappings():
                 db.session.commit()
@@ -2010,166 +2510,7 @@ def sales_import_detail(import_id: int):
             else:
                 flash("No additional automatic mappings were found.", "info")
         elif action == "approve_import":
-            try:
-                locked_import = (
-                    PosSalesImport.query.filter(PosSalesImport.id == sales_import.id)
-                    .with_for_update()
-                    .first()
-                )
-                if locked_import is None:
-                    flash("The requested import could not be found.", "danger")
-                    return redirect(
-                        url_for("admin.sales_imports")
-                    )
-
-                locked_import = (
-                    PosSalesImport.query.options(
-                        selectinload(PosSalesImport.locations)
-                        .selectinload(PosSalesImportLocation.rows)
-                        .selectinload(PosSalesImportRow.product)
-                        .selectinload(Product.recipe_items)
-                        .selectinload(ProductRecipeItem.unit),
-                        selectinload(PosSalesImport.locations)
-                        .selectinload(PosSalesImportLocation.rows)
-                        .selectinload(PosSalesImportRow.product)
-                        .selectinload(Product.recipe_items)
-                        .selectinload(ProductRecipeItem.item),
-                    )
-                    .filter(PosSalesImport.id == sales_import.id)
-                    .first()
-                )
-                if locked_import is None:
-                    flash("The requested import could not be found.", "danger")
-                    return redirect(url_for("admin.sales_imports"))
-
-                if locked_import.status != "pending":
-                    flash(
-                        "Import approval is only allowed while the import status is Pending.",
-                        "warning",
-                    )
-                    return redirect(
-                        url_for("admin.sales_import_detail", import_id=sales_import.id)
-                    )
-
-                _, _, mapping_errors = _collect_mapping_state(locked_import)
-                if mapping_errors:
-                    flash(
-                        "Approval blocked: resolve mappings before approval.",
-                        "warning",
-                    )
-                    for error in mapping_errors:
-                        flash(error, "warning")
-                    return redirect(
-                        url_for("admin.sales_import_detail", import_id=sales_import.id)
-                    )
-
-                approval_batch_id = f"pos-import-{locked_import.id}-{uuid.uuid4().hex[:12]}"
-                approval_time = datetime.utcnow()
-                row_change_count = 0
-
-                for import_location in locked_import.locations:
-                    if import_location.location_id is None:
-                        continue
-                    import_location.approval_batch_id = approval_batch_id
-                    for row in import_location.rows:
-                        if row.product_id is None or row.is_zero_quantity:
-                            continue
-
-                        product = row.product
-                        if product is None:
-                            continue
-
-                        row_changes: list[dict] = []
-                        for recipe_item in product.recipe_items:
-                            if not recipe_item.countable or recipe_item.item_id is None:
-                                continue
-                            factor = recipe_item.unit.factor if recipe_item.unit else 1.0
-                            units_per_product = float(recipe_item.quantity or 0.0) * float(
-                                factor or 1.0
-                            )
-                            if units_per_product <= 0:
-                                continue
-
-                            sold_quantity = float(row.quantity or 0.0)
-                            delta = sold_quantity * units_per_product
-                            if abs(delta) < 1e-9:
-                                continue
-
-                            record = LocationStandItem.query.filter_by(
-                                location_id=import_location.location_id,
-                                item_id=recipe_item.item_id,
-                            ).first()
-                            if record is None:
-                                record = LocationStandItem(
-                                    location_id=import_location.location_id,
-                                    item_id=recipe_item.item_id,
-                                    expected_count=0,
-                                    purchase_gl_code_id=(
-                                        recipe_item.item.purchase_gl_code_id
-                                        if recipe_item.item is not None
-                                        else None
-                                    ),
-                                )
-                                db.session.add(record)
-                                db.session.flush()
-                            elif (
-                                record.purchase_gl_code_id is None
-                                and recipe_item.item is not None
-                                and recipe_item.item.purchase_gl_code_id is not None
-                            ):
-                                record.purchase_gl_code_id = recipe_item.item.purchase_gl_code_id
-
-                            expected_before = float(record.expected_count or 0.0)
-                            expected_after = expected_before - delta
-                            record.expected_count = expected_after
-
-                            item = db.session.get(Item, recipe_item.item_id)
-                            item_qty_before = float(item.quantity or 0.0) if item else 0.0
-                            item_qty_after = item_qty_before - delta
-                            if item is not None:
-                                item.quantity = item_qty_after
-
-                            row_changes.append(
-                                {
-                                    "item_id": recipe_item.item_id,
-                                    "location_id": import_location.location_id,
-                                    "location_stand_item_id": record.id,
-                                    "expected_count_before": expected_before,
-                                    "expected_count_after": expected_after,
-                                    "item_quantity_before": item_qty_before,
-                                    "item_quantity_after": item_qty_after,
-                                    "consumed_quantity": delta,
-                                }
-                            )
-
-                        row.approval_batch_id = approval_batch_id
-                        if row_changes:
-                            row.approval_metadata = json.dumps(
-                                {
-                                    "approval_batch_id": approval_batch_id,
-                                    "approved_at": approval_time.isoformat(),
-                                    "changes": row_changes,
-                                }
-                            )
-                            row_change_count += 1
-
-                locked_import.status = "approved"
-                locked_import.approved_by = current_user.id
-                locked_import.approved_at = approval_time
-                locked_import.approval_batch_id = approval_batch_id
-                db.session.commit()
-                flash(
-                    f"Import approved. Applied inventory updates for {row_change_count} row"
-                    f"{'s' if row_change_count != 1 else ''}.",
-                    "success",
-                )
-                log_activity(
-                    f"Approved POS sales import {locked_import.id} "
-                    f"(batch {approval_batch_id})"
-                )
-            except Exception:
-                db.session.rollback()
-                flash("Unable to approve import due to an unexpected error.", "danger")
+            _approve_sales_import(sales_import.id)
         elif action == "undo_approved_import":
             reversal_reason = (request.form.get("reversal_reason") or "").strip()
             has_warning_confirmation = request.form.get("confirm_reversal") == "1"
@@ -2370,6 +2711,7 @@ def sales_import_detail(import_id: int):
                 locked_import.deleted_by = current_user.id
                 locked_import.deleted_at = datetime.utcnow()
                 locked_import.deletion_reason = deletion_reason or None
+                _detach_sales_import_attachment(locked_import)
                 db.session.commit()
                 flash("Import marked as deleted.", "success")
                 log_activity(
@@ -2380,6 +2722,7 @@ def sales_import_detail(import_id: int):
                         else ""
                     )
                 )
+                return redirect(url_for("admin.sales_imports"))
             except Exception:
                 db.session.rollback()
                 flash("Unable to delete import due to an unexpected error.", "danger")
@@ -2395,7 +2738,11 @@ def sales_import_detail(import_id: int):
     if _apply_auto_mappings():
         db.session.commit()
 
-    unresolved_location_count, unresolved_row_count = _refresh_import_mapping_status()
+    issue_state = _refresh_sales_import_mapping_status(sales_import)
+    if issue_state["status_changed"]:
+        db.session.commit()
+    unresolved_location_count = issue_state["unresolved_location_count"]
+    unresolved_row_count = issue_state["unresolved_row_count"]
 
     selected_location_id = request.args.get("location_id", type=int)
     selected_location = None
@@ -2411,12 +2758,15 @@ def sales_import_detail(import_id: int):
     if selected_location is None and sales_import.locations:
         selected_location = sales_import.locations[0]
 
+    review_context = issue_state["review_context"]
+    row_review_data = review_context["row_review_data"]
+    location_discount_totals = review_context["location_discount_totals"]
+    unresolved_price_count = issue_state["unresolved_price_count"]
+
     import_totals = {
         "quantity": sum(float(loc.total_quantity or 0.0) for loc in sales_import.locations),
         "net_inc": sum(float(loc.net_inc or 0.0) for loc in sales_import.locations),
-        "discounts_abs": sum(
-            float(loc.discounts_abs or 0.0) for loc in sales_import.locations
-        ),
+        "discount": review_context["import_discount_total"],
         "computed_total": sum(
             float(loc.computed_total or 0.0) for loc in sales_import.locations
         ),
@@ -2426,17 +2776,30 @@ def sales_import_detail(import_id: int):
     row_errors: dict[int, list[str]] = {}
     for location in sales_import.locations:
         errors: list[str] = []
-        if location.location_id is None:
+        if location.id in review_context["unresolved_location_ids"]:
             errors.append("Location is not mapped.")
         location_errors[location.id] = errors
 
         for row in location.rows:
             row_validation_errors: list[str] = []
-            if row.product_id is None:
+            row_review = row_review_data.get(row.id, {})
+            if row_review.get("is_skipped"):
+                row_validation_errors.append(
+                    "Row is skipped; it will not affect inventory or update product pricing."
+                )
+            elif row_review.get("requires_mapping"):
                 row_validation_errors.append("Product is not mapped.")
             if row.is_zero_quantity:
                 row_validation_errors.append(
                     "Quantity is zero; treat as informational and exclude from stock operations."
+                )
+            if row_review.get("requires_price_resolution"):
+                row_validation_errors.append(
+                    "Resolve the file/app price difference before approval."
+                )
+            if row_review.get("has_price_conflict"):
+                row_validation_errors.append(
+                    "Chosen price conflicts with another row for this product in this import."
                 )
             row_errors[row.id] = row_validation_errors
 
@@ -2456,7 +2819,11 @@ def sales_import_detail(import_id: int):
         products=Product.query.order_by(Product.name).all(),
         unresolved_location_count=unresolved_location_count,
         unresolved_row_count=unresolved_row_count,
+        unresolved_price_count=unresolved_price_count,
         reversal_warnings=reversal_warnings,
+        row_review_data=row_review_data,
+        location_discount_totals=location_discount_totals,
+        price_review_locked=sales_import.status not in {"pending", "needs_mapping"},
         undo_confirm_form=undo_confirm_form,
     )
 

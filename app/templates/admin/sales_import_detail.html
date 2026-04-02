@@ -3,19 +3,22 @@
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
         <h1 class="mb-1">Sales Import #{{ sales_import.id }}</h1>
-        <p class="text-muted mb-0">Status: {{ sales_import.status|replace('_', ' ')|title }} • Source: {{ sales_import.source_provider }}</p>
+        <p class="text-muted mb-0">
+            Status: {{ sales_import.status|replace('_', ' ')|title }}
+            &middot; Source: {{ sales_import.source_provider }}
+        </p>
         {% if sales_import.reversed_at %}
         <p class="text-muted mb-0 small">
             Reversed by {{ sales_import.reverser.username if sales_import.reverser else ('User #' ~ sales_import.reversed_by) }}
             at {{ sales_import.reversed_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}
-            {% if sales_import.reversal_reason %}• Reason: {{ sales_import.reversal_reason }}{% endif %}
+            {% if sales_import.reversal_reason %}&middot; Reason: {{ sales_import.reversal_reason }}{% endif %}
         </p>
         {% endif %}
         {% if sales_import.deleted_at %}
         <p class="text-muted mb-0 small">
             Deleted by {{ sales_import.deleter.username if sales_import.deleter else ('User #' ~ sales_import.deleted_by) }}
             at {{ sales_import.deleted_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}
-            {% if sales_import.deletion_reason %}• Reason: {{ sales_import.deletion_reason }}{% endif %}
+            {% if sales_import.deletion_reason %}&middot; Reason: {{ sales_import.deletion_reason }}{% endif %}
         </p>
         {% endif %}
     </div>
@@ -27,7 +30,7 @@
             <button
                 type="submit"
                 class="btn btn-success btn-sm"
-                {% if unresolved_location_count or unresolved_row_count or sales_import.status != 'pending' %}disabled{% endif %}
+                {% if unresolved_location_count or unresolved_row_count or unresolved_price_count or sales_import.status != 'pending' %}disabled{% endif %}
             >
                 Approve Import
             </button>
@@ -60,16 +63,18 @@
     </div>
 </div>
 
-{% if unresolved_location_count or unresolved_row_count %}
+{% if unresolved_location_count or unresolved_row_count or unresolved_price_count %}
 <div class="alert alert-warning">
-    <div class="fw-semibold">Approval blocked while unresolved mappings remain.</div>
+    <div class="fw-semibold">Approval blocked while unresolved review items remain.</div>
     <div class="small">
-        Unresolved locations: {{ unresolved_location_count }} • Unresolved product rows: {{ unresolved_row_count }}
+        Unresolved locations: {{ unresolved_location_count }}
+        &middot; Unresolved product rows: {{ unresolved_row_count }}
+        &middot; Unresolved price rows: {{ unresolved_price_count }}
     </div>
 </div>
 {% else %}
 <div class="alert alert-success py-2">
-    All mappings are resolved. This import is ready for approval.
+    All mappings and price checks are resolved. This import is ready for approval.
 </div>
 {% endif %}
 
@@ -99,8 +104,8 @@
     </div>
     <div class="col-md-3">
         <div class="card h-100"><div class="card-body">
-            <div class="small text-muted">Discount (Abs)</div>
-            <div class="h5 mb-0">{{ '%.2f'|format(import_totals.discounts_abs) }}</div>
+            <div class="small text-muted">Discount</div>
+            <div class="h5 mb-0">{{ '%.2f'|format(import_totals.discount) }}</div>
         </div></div>
     </div>
     <div class="col-md-3">
@@ -117,8 +122,10 @@
             <div class="card-header">Locations</div>
             <div class="list-group list-group-flush">
                 {% for location in sales_import.locations %}
-                <a href="{{ url_for('admin.sales_import_detail', import_id=sales_import.id, location_id=location.id) }}"
-                   class="list-group-item list-group-item-action {% if selected_location and selected_location.id == location.id %}active{% endif %}">
+                <a
+                    href="{{ url_for('admin.sales_import_detail', import_id=sales_import.id, location_id=location.id) }}"
+                    class="list-group-item list-group-item-action {% if selected_location and selected_location.id == location.id %}active{% endif %}"
+                >
                     <div class="d-flex justify-content-between align-items-start gap-2">
                         <div>
                             <div class="fw-semibold">{{ location.source_location_name }}</div>
@@ -126,7 +133,9 @@
                                 Mapped: {{ location.location.name if location.location else 'Unmapped' }}
                             </div>
                         </div>
-                        <span class="badge {% if selected_location and selected_location.id == location.id %}bg-light text-dark{% else %}bg-secondary{% endif %}">{{ location.rows|length }}</span>
+                        <span class="badge {% if selected_location and selected_location.id == location.id %}bg-light text-dark{% else %}bg-secondary{% endif %}">
+                            {{ location.rows|length }}
+                        </span>
                     </div>
                     <div class="small mt-1 {% if selected_location and selected_location.id == location.id %}text-white-50{% else %}text-muted{% endif %}">
                         Totals: Qty {{ '%.2f'|format(location.total_quantity) }}, Total {{ '%.2f'|format(location.computed_total) }}
@@ -143,7 +152,7 @@
             <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
                 <div>
                     <span class="fw-semibold">{{ selected_location.source_location_name }}</span>
-                    <span class="text-muted">→ {{ selected_location.location.name if selected_location.location else 'Unmapped location' }}</span>
+                    <span class="text-muted">&rarr; {{ selected_location.location.name if selected_location.location else 'Unmapped location' }}</span>
                 </div>
                 <span class="badge bg-light text-dark border">{{ selected_location.rows|length }} item rows</span>
             </div>
@@ -197,7 +206,7 @@
                 <div class="row g-2">
                     <div class="col-sm-6 col-md-3"><div class="border rounded p-2"><div class="small text-muted">Quantity</div><div class="fw-semibold">{{ '%.2f'|format(selected_location.total_quantity) }}</div></div></div>
                     <div class="col-sm-6 col-md-3"><div class="border rounded p-2"><div class="small text-muted">Net (Inc)</div><div class="fw-semibold">{{ '%.2f'|format(selected_location.net_inc) }}</div></div></div>
-                    <div class="col-sm-6 col-md-3"><div class="border rounded p-2"><div class="small text-muted">Discount (Abs)</div><div class="fw-semibold">{{ '%.2f'|format(selected_location.discounts_abs) }}</div></div></div>
+                    <div class="col-sm-6 col-md-3"><div class="border rounded p-2"><div class="small text-muted">Discount</div><div class="fw-semibold">{{ '%.2f'|format(location_discount_totals.get(selected_location.id, 0.0)) }}</div></div></div>
                     <div class="col-sm-6 col-md-3"><div class="border rounded p-2"><div class="small text-muted">Computed Total</div><div class="fw-semibold">{{ '%.2f'|format(selected_location.computed_total) }}</div></div></div>
                 </div>
             </div>
@@ -214,8 +223,10 @@
                                 <th>Product</th>
                                 <th class="text-end">Qty</th>
                                 <th class="text-end">Net</th>
-                                <th class="text-end">Discount Abs</th>
-                                <th class="text-end">Computed Price</th>
+                                <th class="text-end">Discount</th>
+                                <th class="text-end">File Price</th>
+                                <th class="text-end">App Price</th>
+                                <th>Price Used</th>
                                 <th>Mapped Product</th>
                                 <th>Mapped Location</th>
                                 <th>Validation Errors</th>
@@ -223,12 +234,44 @@
                         </thead>
                         <tbody>
                             {% for row in selected_location.rows %}
-                            <tr>
+                            {% set review = row_review_data.get(row.id, {}) %}
+                            <tr class="{% if review.is_skipped %}table-secondary{% elif review.has_price_conflict %}table-warning-subtle{% elif review.requires_price_resolution %}table-danger-subtle{% endif %}">
                                 <td class="text-break">{{ row.source_product_name }}</td>
                                 <td class="text-end">{{ '%.2f'|format(row.quantity) }}</td>
                                 <td class="text-end">{{ '%.2f'|format(row.net_inc) }}</td>
-                                <td class="text-end">{{ '%.2f'|format(row.discount_abs) }}</td>
-                                <td class="text-end">{{ '%.2f'|format(row.computed_unit_price) }}</td>
+                                <td class="text-end">{{ '%.2f'|format(review.discount|default(0.0)) }}</td>
+                                <td class="text-end">{{ '%.2f'|format(review.file_price|default(0.0)) }}</td>
+                                <td class="text-end">
+                                    {% if review.app_price is not none %}
+                                    {{ '%.2f'|format(review.app_price) }}
+                                    {% else %}
+                                    <span class="text-muted">n/a</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if review.is_skipped %}
+                                    <span class="badge bg-secondary">Skipped</span>
+                                    {% elif review.has_price_conflict %}
+                                    <span class="badge bg-warning text-dark">Conflict</span>
+                                    <div class="small text-muted">Choose one consistent price for this product.</div>
+                                    {% elif review.requires_price_resolution %}
+                                    <span class="badge bg-danger">Needs Review</span>
+                                    {% elif review.resolved_source == 'file' %}
+                                    <span class="badge bg-primary">File Price</span>
+                                    <div class="small text-muted">${{ '%.2f'|format(review.resolved_price) }}</div>
+                                    {% elif review.resolved_source == 'app' %}
+                                    <span class="badge bg-secondary">App Price</span>
+                                    <div class="small text-muted">${{ '%.2f'|format(review.resolved_price) }}</div>
+                                    {% elif review.resolved_source == 'custom' %}
+                                    <span class="badge bg-info text-dark">Custom Price</span>
+                                    <div class="small text-muted">${{ '%.2f'|format(review.resolved_price) }}</div>
+                                    {% elif review.resolved_source == 'aligned' %}
+                                    <span class="badge bg-success">Aligned</span>
+                                    <div class="small text-muted">${{ '%.2f'|format(review.resolved_price) }}</div>
+                                    {% else %}
+                                    <span class="text-muted">n/a</span>
+                                    {% endif %}
+                                </td>
                                 <td>{{ row.product.name if row.product else 'Unmapped' }}</td>
                                 <td>{{ selected_location.location.name if selected_location.location else 'Unmapped' }}</td>
                                 <td>
@@ -244,10 +287,64 @@
                                     {% endif %}
                                 </td>
                             </tr>
+                            {% if row.is_zero_quantity %}
+                            <tr class="table-light">
+                                <td colspan="10">
+                                    <span class="small text-muted">
+                                        Quantity is zero for this row, so it is informational only and does not require a price decision.
+                                    </span>
+                                </td>
+                            </tr>
+                            {% elif row.product_id is not none %}
+                            <tr class="table-light">
+                                <td colspan="10">
+                                    <div class="small fw-semibold mb-2">Price review for "{{ row.source_product_name }}"</div>
+                                    <form method="post" class="row g-2 align-items-end">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="action" value="resolve_row_price">
+                                        <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
+                                        <input type="hidden" name="row_id" value="{{ row.id }}">
+                                        <div class="col-md-4">
+                                            <label class="form-label mb-1">Price action</label>
+                                            <select class="form-select form-select-sm" name="price_resolution" {% if price_review_locked %}disabled{% endif %}>
+                                                <option value="" {% if not review.action %}selected{% endif %}>Select an option</option>
+                                                <option value="file" {% if review.action == 'file' %}selected{% endif %}>
+                                                    Use file price (${{ '%.2f'|format(review.file_price|default(0.0)) }})
+                                                </option>
+                                                <option value="app" {% if review.action == 'app' %}selected{% endif %}>
+                                                    Use app price{% if review.app_price is not none %} (${{ '%.2f'|format(review.app_price) }}){% endif %}
+                                                </option>
+                                                <option value="custom" {% if review.action == 'custom' %}selected{% endif %}>Edit to custom price</option>
+                                                <option value="skip" {% if review.action == 'skip' %}selected{% endif %}>Skip row</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label mb-1">Custom price</label>
+                                            <input
+                                                type="text"
+                                                class="form-control form-control-sm"
+                                                name="custom_price"
+                                                value="{% if review.custom_price is not none %}{{ '%.2f'|format(review.custom_price) }}{% endif %}"
+                                                placeholder="Used only for custom price"
+                                                {% if price_review_locked %}disabled{% endif %}
+                                            >
+                                        </div>
+                                        <div class="col-md-4">
+                                            <button type="submit" class="btn btn-outline-primary btn-sm w-100" {% if price_review_locked %}disabled{% endif %}>Save Price Choice</button>
+                                        </div>
+                                    </form>
+                                    {% if not review.price_mismatch and not review.action %}
+                                    <div class="form-text text-muted">
+                                        File and app prices already match. Saving a choice is optional unless you want to override or skip this row.
+                                    </div>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endif %}
                             {% if row.product_id is none %}
                             <tr class="table-warning-subtle">
-                                <td colspan="8">
-                                    <div class="small fw-semibold mb-2">Resolve product mapping for “{{ row.source_product_name }}”</div>
+                                <td colspan="10">
+                                    <div class="small fw-semibold mb-2">Resolve product mapping for "{{ row.source_product_name }}"</div>
                                     <form method="post" class="row g-2 align-items-end mb-2">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="action" value="map_product">
@@ -266,7 +363,7 @@
                                             <button type="submit" class="btn btn-primary btn-sm w-100">Save Mapping</button>
                                         </div>
                                     </form>
-                                    <form method="post" class="row g-2 align-items-end">
+                                    <form method="post" class="row g-2 align-items-end mb-2">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="action" value="create_product">
                                         <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
@@ -277,6 +374,21 @@
                                         </div>
                                         <div class="col-md-4">
                                             <button type="submit" class="btn btn-outline-primary btn-sm w-100">Create + Map</button>
+                                        </div>
+                                    </form>
+                                    <form method="post" class="row g-2 align-items-end">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="action" value="resolve_row_price">
+                                        <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
+                                        <input type="hidden" name="row_id" value="{{ row.id }}">
+                                        <input type="hidden" name="price_resolution" value="skip">
+                                        <div class="col-md-8">
+                                            <div class="small text-muted">
+                                                If you do not want to import this item row, you can skip it without mapping a product.
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <button type="submit" class="btn btn-outline-secondary btn-sm w-100" {% if price_review_locked %}disabled{% endif %}>Skip Row</button>
                                         </div>
                                     </form>
                                 </td>
@@ -334,6 +446,7 @@
         </div>
     </div>
 </div>
+
 <div class="modal fade" id="deleteImportModal" tabindex="-1" aria-labelledby="deleteImportModalLabel" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">

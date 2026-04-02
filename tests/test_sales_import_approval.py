@@ -15,6 +15,82 @@ from app.models import (
 from tests.utils import login
 
 
+def _create_price_review_import(
+    app,
+    *,
+    message_id: str,
+    product_price: float = 4.0,
+    file_price: float = 5.0,
+    quantity: float = 2.0,
+):
+    with app.app_context():
+        location = Location(name=f"Price Stand {message_id}")
+        item = Item(name=f"Price Item {message_id}", base_unit="each", quantity=10.0)
+        product = Product(name=f"Price Product {message_id}", price=product_price, cost=1.0)
+        db.session.add_all([location, item, product])
+        db.session.flush()
+
+        db.session.add(
+            ProductRecipeItem(
+                product_id=product.id,
+                item_id=item.id,
+                quantity=1.0,
+                countable=True,
+            )
+        )
+        db.session.add(
+            LocationStandItem(
+                location_id=location.id,
+                item_id=item.id,
+                expected_count=10.0,
+            )
+        )
+
+        sales_import = PosSalesImport(
+            source_provider="mailgun",
+            message_id=message_id,
+            attachment_filename="sales.xls",
+            attachment_sha256=(message_id[-1] or "p") * 64,
+            status="pending",
+        )
+        db.session.add(sales_import)
+        db.session.flush()
+
+        import_location = PosSalesImportLocation(
+            import_id=sales_import.id,
+            source_location_name=location.name,
+            normalized_location_name=location.name.lower().replace(" ", "_"),
+            location_id=location.id,
+            parse_index=0,
+        )
+        db.session.add(import_location)
+        db.session.flush()
+
+        row = PosSalesImportRow(
+            import_id=sales_import.id,
+            location_import_id=import_location.id,
+            source_product_name=product.name,
+            normalized_product_name=product.name.lower().replace(" ", "_"),
+            product_id=product.id,
+            quantity=quantity,
+            computed_unit_price=file_price,
+            discount_raw="-1.25",
+            discount_abs=1.25,
+            parse_index=0,
+        )
+        db.session.add(row)
+        db.session.commit()
+
+        return {
+            "import_id": sales_import.id,
+            "location_import_id": import_location.id,
+            "row_id": row.id,
+            "product_id": product.id,
+            "item_id": item.id,
+            "location_id": location.id,
+        }
+
+
 def test_admin_can_approve_sales_import_and_apply_inventory(client, app):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
@@ -69,6 +145,7 @@ def test_admin_can_approve_sales_import_and_apply_inventory(client, app):
             normalized_product_name="hot_dog",
             product_id=product.id,
             quantity=3.0,
+            computed_unit_price=product.price,
             parse_index=0,
         )
         db.session.add(row)
@@ -171,6 +248,285 @@ def test_sales_import_approval_blocked_for_unresolved_mappings(client, app):
         assert sales_import.approved_at is None
 
 
+def test_sales_import_detail_shows_price_review_and_blocks_unresolved_price_differences(
+    client, app
+):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    review_import = _create_price_review_import(app, message_id="msg-price-review-1")
+
+    with client:
+        login(client, admin_email, admin_pass)
+        detail_response = client.get(
+            f"/controlpanel/sales-imports/{review_import['import_id']}",
+            follow_redirects=True,
+        )
+        assert detail_response.status_code == 200
+        assert b"File Price" in detail_response.data
+        assert b"App Price" in detail_response.data
+        assert b"Needs Review" in detail_response.data
+        assert b"Discount Abs" not in detail_response.data
+        assert b"Discount" in detail_response.data
+        assert b"-1.25" in detail_response.data
+
+        approve_response = client.post(
+            f"/controlpanel/sales-imports/{review_import['import_id']}",
+            data={"action": "approve_import"},
+            follow_redirects=True,
+        )
+        assert approve_response.status_code == 200
+        assert b"price review issues" in approve_response.data
+
+    with app.app_context():
+        sales_import = db.session.get(PosSalesImport, review_import["import_id"])
+        product = db.session.get(Product, review_import["product_id"])
+        assert sales_import.status == "pending"
+        assert product.price == 4.0
+
+
+def test_sales_import_price_review_can_keep_app_price_on_approval(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    review_import = _create_price_review_import(app, message_id="msg-price-review-2")
+
+    with client:
+        login(client, admin_email, admin_pass)
+        review_response = client.post(
+            f"/controlpanel/sales-imports/{review_import['import_id']}",
+            data={
+                "action": "resolve_row_price",
+                "selected_location_id": review_import["location_import_id"],
+                "row_id": review_import["row_id"],
+                "price_resolution": "app",
+            },
+            follow_redirects=True,
+        )
+        assert review_response.status_code == 200
+        assert b"keep the app price" in review_response.data
+
+        approve_response = client.post(
+            f"/controlpanel/sales-imports/{review_import['import_id']}",
+            data={"action": "approve_import"},
+            follow_redirects=True,
+        )
+        assert approve_response.status_code == 200
+        assert b"Import approved" in approve_response.data
+
+    with app.app_context():
+        product = db.session.get(Product, review_import["product_id"])
+        item = db.session.get(Item, review_import["item_id"])
+        sales_import = db.session.get(PosSalesImport, review_import["import_id"])
+        assert sales_import.status == "approved"
+        assert product.price == 4.0
+        assert item.quantity == 8.0
+
+
+def test_sales_import_price_review_can_use_file_price_on_approval(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    review_import = _create_price_review_import(app, message_id="msg-price-review-3")
+
+    with client:
+        login(client, admin_email, admin_pass)
+        review_response = client.post(
+            f"/controlpanel/sales-imports/{review_import['import_id']}",
+            data={
+                "action": "resolve_row_price",
+                "selected_location_id": review_import["location_import_id"],
+                "row_id": review_import["row_id"],
+                "price_resolution": "file",
+            },
+            follow_redirects=True,
+        )
+        assert review_response.status_code == 200
+        assert b"use the file price" in review_response.data
+
+        approve_response = client.post(
+            f"/controlpanel/sales-imports/{review_import['import_id']}",
+            data={"action": "approve_import"},
+            follow_redirects=True,
+        )
+        assert approve_response.status_code == 200
+        assert b"Import approved" in approve_response.data
+
+    with app.app_context():
+        product = db.session.get(Product, review_import["product_id"])
+        item = db.session.get(Item, review_import["item_id"])
+        assert product.price == 5.0
+        assert item.quantity == 8.0
+
+
+def test_sales_import_price_review_can_use_custom_price_on_approval(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    review_import = _create_price_review_import(app, message_id="msg-price-review-4")
+
+    with client:
+        login(client, admin_email, admin_pass)
+        review_response = client.post(
+            f"/controlpanel/sales-imports/{review_import['import_id']}",
+            data={
+                "action": "resolve_row_price",
+                "selected_location_id": review_import["location_import_id"],
+                "row_id": review_import["row_id"],
+                "price_resolution": "custom",
+                "custom_price": "4.75",
+            },
+            follow_redirects=True,
+        )
+        assert review_response.status_code == 200
+        assert b"Custom row price saved" in review_response.data
+
+        approve_response = client.post(
+            f"/controlpanel/sales-imports/{review_import['import_id']}",
+            data={"action": "approve_import"},
+            follow_redirects=True,
+        )
+        assert approve_response.status_code == 200
+        assert b"Import approved" in approve_response.data
+
+    with app.app_context():
+        product = db.session.get(Product, review_import["product_id"])
+        item = db.session.get(Item, review_import["item_id"])
+        assert product.price == 4.75
+        assert item.quantity == 8.0
+
+
+def test_sales_import_row_can_be_skipped_without_product_mapping(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        location = Location(name="Skipped Import Stand")
+        db.session.add(location)
+        db.session.flush()
+
+        sales_import = PosSalesImport(
+            source_provider="mailgun",
+            message_id="msg-skip-row",
+            attachment_filename="sales.xls",
+            attachment_sha256="s" * 64,
+            status="pending",
+        )
+        db.session.add(sales_import)
+        db.session.flush()
+
+        import_location = PosSalesImportLocation(
+            import_id=sales_import.id,
+            source_location_name=location.name,
+            normalized_location_name="skipped_import_stand",
+            location_id=location.id,
+            parse_index=0,
+        )
+        db.session.add(import_location)
+        db.session.flush()
+
+        row = PosSalesImportRow(
+            import_id=sales_import.id,
+            location_import_id=import_location.id,
+            source_product_name="Skip Me",
+            normalized_product_name="skip_me",
+            product_id=None,
+            quantity=2.0,
+            computed_unit_price=5.0,
+            parse_index=0,
+        )
+        db.session.add(row)
+        db.session.commit()
+
+        sales_import_id = sales_import.id
+        location_import_id = import_location.id
+        row_id = row.id
+
+    with client:
+        login(client, admin_email, admin_pass)
+        skip_response = client.post(
+            f"/controlpanel/sales-imports/{sales_import_id}",
+            data={
+                "action": "resolve_row_price",
+                "selected_location_id": location_import_id,
+                "row_id": row_id,
+                "price_resolution": "skip",
+            },
+            follow_redirects=True,
+        )
+        assert skip_response.status_code == 200
+        assert b"Row skipped" in skip_response.data
+
+        approve_response = client.post(
+            f"/controlpanel/sales-imports/{sales_import_id}",
+            data={"action": "approve_import"},
+            follow_redirects=True,
+        )
+        assert approve_response.status_code == 200
+        assert b"Import approved" in approve_response.data
+
+    with app.app_context():
+        sales_import = db.session.get(PosSalesImport, sales_import_id)
+        row = db.session.get(PosSalesImportRow, row_id)
+        metadata = json.loads(row.approval_metadata)
+        assert sales_import.status == "approved"
+        assert metadata["review"]["price_action"] == "skip"
+
+
+def test_sales_imports_list_shows_issue_counts_and_direct_approve_button(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    ready_import = _create_price_review_import(
+        app,
+        message_id="msg-list-ready",
+        product_price=5.0,
+        file_price=5.0,
+    )
+    _create_price_review_import(
+        app,
+        message_id="msg-list-issue",
+        product_price=4.0,
+        file_price=5.0,
+    )
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.get("/controlpanel/sales-imports", follow_redirects=True)
+        assert response.status_code == 200
+        assert b"Issues" in response.data
+        assert b"Approve" in response.data
+        assert b">1<" in response.data
+
+    with app.app_context():
+        ready_record = db.session.get(PosSalesImport, ready_import["import_id"])
+        assert ready_record.status == "pending"
+
+
+def test_admin_can_approve_sales_import_from_list_page(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    ready_import = _create_price_review_import(
+        app,
+        message_id="msg-list-approve",
+        product_price=5.0,
+        file_price=5.0,
+    )
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            "/controlpanel/sales-imports",
+            data={
+                "action": "approve_import",
+                "import_id": ready_import["import_id"],
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Sales Imports" in response.data
+        assert b"Import approved" in response.data
+
+    with app.app_context():
+        sales_import = db.session.get(PosSalesImport, ready_import["import_id"])
+        assert sales_import.status == "approved"
+
+
 def test_admin_can_undo_approved_sales_import_and_restore_inventory(client, app):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
@@ -225,6 +581,7 @@ def test_admin_can_undo_approved_sales_import_and_restore_inventory(client, app)
             normalized_product_name="burger",
             product_id=product.id,
             quantity=4.0,
+            computed_unit_price=product.price,
             parse_index=0,
         )
         db.session.add(row)
@@ -391,16 +748,19 @@ def test_sales_import_detail_shows_undo_negative_inventory_warnings(client, app)
         assert b"Potential negative inventory impact" in response.data
 
 
-def test_admin_can_soft_delete_sales_import(client, app):
+def test_admin_can_soft_delete_sales_import(client, app, tmp_path):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    attachment_path = tmp_path / "sales-delete-unique.xls"
+    attachment_path.write_bytes(b"delete me")
 
     with app.app_context():
         sales_import = PosSalesImport(
             source_provider="mailgun",
             message_id="msg-delete-1",
-            attachment_filename="sales.xls",
+            attachment_filename="sales-delete-unique.xls",
             attachment_sha256="f" * 64,
+            attachment_storage_path=str(attachment_path),
             status="pending",
         )
         db.session.add(sales_import)
@@ -419,14 +779,25 @@ def test_admin_can_soft_delete_sales_import(client, app):
         )
         assert response.status_code == 200
         assert b"Import marked as deleted" in response.data
+        assert b"Sales Imports" in response.data
+        assert b"sales-delete-unique.xls" not in response.data
 
     with app.app_context():
         sales_import = db.session.get(PosSalesImport, sales_import_id)
         assert sales_import is not None
         assert sales_import.status == "deleted"
+        assert sales_import.attachment_storage_path is None
         assert sales_import.deleted_by is not None
         assert sales_import.deleted_at is not None
         assert sales_import.deletion_reason == "Duplicate staging run"
+
+    assert not attachment_path.exists()
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.get("/controlpanel/sales-imports", follow_redirects=True)
+        assert response.status_code == 200
+        assert b"sales-delete-unique.xls" not in response.data
 
 
 def test_sales_import_approval_applies_stock_changes_only_once(client, app):
@@ -484,6 +855,7 @@ def test_sales_import_approval_applies_stock_changes_only_once(client, app):
                 normalized_product_name="once_dog",
                 product_id=product.id,
                 quantity=4.0,
+                computed_unit_price=product.price,
                 parse_index=0,
             )
         )
@@ -574,6 +946,7 @@ def test_sales_import_undo_applies_reversal_only_once(client, app):
                 normalized_product_name="undo_once_burger",
                 product_id=product.id,
                 quantity=3.0,
+                computed_unit_price=product.price,
                 parse_index=0,
             )
         )

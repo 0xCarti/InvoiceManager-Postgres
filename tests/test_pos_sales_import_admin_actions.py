@@ -145,6 +145,7 @@ def test_mapping_resolution_create_or_map_flow_updates_rows_and_aliases(client, 
         ("create_location", {"location_import_id": 1, "new_location_name": "Created"}),
         ("map_product", {"row_id": 1, "target_product_id": 1}),
         ("create_product", {"row_id": 1, "new_product_name": "Created Product"}),
+        ("resolve_row_price", {"row_id": 1, "price_resolution": "skip"}),
         ("refresh_auto_mapping", {}),
         ("approve_import", {}),
         (
@@ -173,6 +174,13 @@ def test_sales_import_actions_require_admin_authorization(client, app, action, d
         follow_redirects=False,
     )
     assert response.status_code == 403
+
+    list_response = client.post(
+        "/controlpanel/sales-imports",
+        data={"action": "approve_import", "import_id": import_id},
+        follow_redirects=False,
+    )
+    assert list_response.status_code == 403
 
 
 def test_sales_import_and_terminal_mapping_actions_require_csrf(client, app):
@@ -210,6 +218,7 @@ def test_sales_import_and_terminal_mapping_actions_require_csrf(client, app):
             {"action": "create_location", "location_import_id": location_import_id, "new_location_name": "CSRF Created Stand"},
             {"action": "map_product", "row_id": row_id, "target_product_id": product_id},
             {"action": "create_product", "row_id": row_id, "new_product_name": "CSRF Created Product"},
+            {"action": "resolve_row_price", "row_id": row_id, "price_resolution": "skip"},
             {"action": "refresh_auto_mapping"},
             {"action": "approve_import"},
             {"action": "undo_approved_import", "reversal_reason": "rollback", "confirm_reversal": "1"},
@@ -230,3 +239,21 @@ def test_sales_import_and_terminal_mapping_actions_require_csrf(client, app):
                 follow_redirects=False,
             )
             assert allowed.status_code in {302, 303}
+
+        denied_list = client.post(
+            "/controlpanel/sales-imports",
+            data={"action": "approve_import", "import_id": import_id},
+            follow_redirects=False,
+        )
+        assert denied_list.status_code == 400
+
+        allowed_list = client.post(
+            "/controlpanel/sales-imports",
+            data={
+                "action": "approve_import",
+                "import_id": import_id,
+                "csrf_token": csrf_token,
+            },
+            follow_redirects=False,
+        )
+        assert allowed_list.status_code in {302, 303}
