@@ -336,24 +336,29 @@
                             <tr>
                                 <th>Product</th>
                                 <th class="text-end">Qty</th>
-                                <th class="text-end">Net</th>
-                                <th class="text-end">Discount</th>
                                 <th class="text-end">File Price</th>
                                 <th class="text-end">App Price</th>
-                                <th>Price Used</th>
                                 <th>Mapped Product</th>
-                                <th>Mapped Location</th>
-                                <th>Validation Errors</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for row in selected_location.rows %}
                             {% set review = row_review_data.get(row.id, {}) %}
+                            {% set row_has_error = review.requires_mapping or review.requires_price_resolution or review.has_price_conflict %}
                             <tr class="{% if review.is_skipped %}table-secondary{% elif review.has_price_conflict %}table-warning-subtle{% elif review.requires_price_resolution %}table-danger-subtle{% endif %}">
-                                <td class="text-break">{{ row.source_product_name }}</td>
+                                <td class="text-break">
+                                    <div class="fw-semibold">{{ row.source_product_name }}</div>
+                                    <div class="mt-1">
+                                        {% if review.is_skipped %}
+                                        <span class="badge bg-secondary">Skipped</span>
+                                        {% elif row_has_error %}
+                                        <span class="badge bg-danger">Error</span>
+                                        {% else %}
+                                        <span class="badge bg-success">Matching</span>
+                                        {% endif %}
+                                    </div>
+                                </td>
                                 <td class="text-end">{{ '%.2f'|format(row.quantity) }}</td>
-                                <td class="text-end">{{ '%.2f'|format(row.net_inc) }}</td>
-                                <td class="text-end">{{ '%.2f'|format(review.discount|default(0.0)) }}</td>
                                 <td class="text-end">{{ '%.2f'|format(review.file_price|default(0.0)) }}</td>
                                 <td class="text-end">
                                     {% if review.app_price is not none %}
@@ -362,48 +367,11 @@
                                     <span class="text-muted">n/a</span>
                                     {% endif %}
                                 </td>
-                                <td>
-                                    {% if review.is_skipped %}
-                                    <span class="badge bg-secondary">Skipped</span>
-                                    {% elif review.has_price_conflict %}
-                                    <span class="badge bg-warning text-dark">Conflict</span>
-                                    <div class="small text-muted">Choose one consistent price for this product.</div>
-                                    {% elif review.requires_price_resolution %}
-                                    <span class="badge bg-danger">Needs Review</span>
-                                    {% elif review.resolved_source == 'file' %}
-                                    <span class="badge bg-primary">File Price</span>
-                                    <div class="small text-muted">${{ '%.2f'|format(review.resolved_price) }}</div>
-                                    {% elif review.resolved_source == 'app' %}
-                                    <span class="badge bg-secondary">App Price</span>
-                                    <div class="small text-muted">${{ '%.2f'|format(review.resolved_price) }}</div>
-                                    {% elif review.resolved_source == 'custom' %}
-                                    <span class="badge bg-info text-dark">Custom Price</span>
-                                    <div class="small text-muted">${{ '%.2f'|format(review.resolved_price) }}</div>
-                                    {% elif review.resolved_source == 'aligned' %}
-                                    <span class="badge bg-success">Aligned</span>
-                                    <div class="small text-muted">${{ '%.2f'|format(review.resolved_price) }}</div>
-                                    {% else %}
-                                    <span class="text-muted">n/a</span>
-                                    {% endif %}
-                                </td>
                                 <td>{{ row.product.name if row.product else 'Unmapped' }}</td>
-                                <td>{{ selected_location.location.name if selected_location.location else 'Unmapped' }}</td>
-                                <td>
-                                    {% set errors = row_errors.get(row.id, []) %}
-                                    {% if errors %}
-                                    <ul class="mb-0 ps-3">
-                                        {% for error in errors %}
-                                        <li>{{ error }}</li>
-                                        {% endfor %}
-                                    </ul>
-                                    {% else %}
-                                    <span class="text-muted">None</span>
-                                    {% endif %}
-                                </td>
                             </tr>
                             {% if row.is_zero_quantity %}
                             <tr class="table-light">
-                                <td colspan="10">
+                                <td colspan="5">
                                     <span class="small text-muted">
                                         Quantity is zero for this row, so it is informational only and does not require a price decision.
                                     </span>
@@ -411,7 +379,7 @@
                             </tr>
                             {% elif row.product_id is not none and review.price_mismatch %}
                             <tr class="table-light">
-                                <td colspan="10">
+                                <td colspan="5">
                                     <div class="small fw-semibold mb-2">Price review for "{{ row.source_product_name }}"</div>
                                     <form method="post" class="row g-2 align-items-end">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -452,7 +420,7 @@
                             {% endif %}
                             {% if row.product_id is none %}
                             <tr class="table-warning-subtle">
-                                <td colspan="10">
+                                <td colspan="5">
                                     <div class="small fw-semibold mb-2">Resolve product mapping for "{{ row.source_product_name }}"</div>
                                     <form method="post" class="row g-2 align-items-end mb-2">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

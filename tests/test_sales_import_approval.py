@@ -306,7 +306,11 @@ def test_sales_import_detail_hides_price_review_when_file_and_app_prices_align(
         )
         assert detail_response.status_code == 200
         assert b"Aligned" in detail_response.data
+        assert b"Matching" in detail_response.data
         assert b"Price review" not in detail_response.data
+        assert b"Price Used" not in detail_response.data
+        assert b"Mapped Location" not in detail_response.data
+        assert b"Validation Errors" not in detail_response.data
 
 
 def test_sales_import_detail_sidebar_shows_issue_counts_and_sorts_locations(
