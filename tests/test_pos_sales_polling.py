@@ -84,3 +84,48 @@ def test_poll_once_rejects_messages_when_sender_allowlist_missing(app, monkeypat
 
     assert result == {"messages": 1, "imports": 0, "duplicates": 0, "errors": 1}
     assert provider.ack_tokens == []
+
+
+def test_poll_once_allows_exact_sender_or_domain_match(app, monkeypatch, tmp_path):
+    spreadsheet = Path(__file__).resolve().parents[1] / "game_sales.xls"
+    content = spreadsheet.read_bytes()
+
+    provider = _StubProvider(
+        [
+            PollMessage(
+                message_id="<poll-test-exact-sender>",
+                sender="Keystone Centre Reports <keystonecentrereports@gmail.com>",
+                ack_token="uid-3",
+                attachments=[
+                    PollAttachment(filename="game_sales.xls", content=content)
+                ],
+            ),
+            PollMessage(
+                message_id="<poll-test-domain-sender>",
+                sender="reports@mail.brycecotton.ca",
+                ack_token="uid-4",
+                attachments=[
+                    PollAttachment(filename="game_sales.xls", content=content)
+                ],
+            ),
+        ]
+    )
+
+    app.config.update(
+        {
+            "POS_IMPORT_INGEST_MODE": "poll",
+            "MAILGUN_INBOUND_STORAGE_DIR": str(tmp_path / "mailgun_staging"),
+            "MAILGUN_ALLOWED_SENDERS": "keystonecentrereports@gmail.com",
+            "MAILGUN_ALLOWED_SENDER_DOMAINS": "mail.brycecotton.ca,brycecotton.ca",
+        }
+    )
+
+    monkeypatch.setattr(pos_sales_polling, "_build_provider", lambda _app: provider)
+
+    result = pos_sales_polling.run_pos_sales_mailbox_poll_once(app)
+
+    assert result == {"messages": 2, "imports": 2, "duplicates": 0, "errors": 0}
+    assert provider.ack_tokens == ["uid-3", "uid-4"]
+
+    with app.app_context():
+        assert PosSalesImport.query.count() == 2

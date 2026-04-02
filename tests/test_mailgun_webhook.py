@@ -148,6 +148,37 @@ def test_mailgun_webhook_requires_sender_allowlist(client, app):
     assert response.get_json()["error"] == "sender_allowlist_not_configured"
 
 
+def test_mailgun_webhook_allows_exact_sender_or_domain_match(client, app):
+    app.config.update(
+        {
+            "MAILGUN_WEBHOOK_SIGNING_KEY": "secret-key",
+            "MAILGUN_ALLOWED_SENDERS": "keystonecentrereports@gmail.com",
+            "MAILGUN_ALLOWED_SENDER_DOMAINS": "mail.brycecotton.ca,brycecotton.ca",
+        }
+    )
+
+    exact_sender = client.post(
+        "/webhooks/mailgun/inbound",
+        data=_payload("secret-key", sender="keystonecentrereports@gmail.com"),
+    )
+    assert exact_sender.status_code == 400
+    assert exact_sender.get_json()["error"] == "missing_attachment"
+
+    domain_sender = client.post(
+        "/webhooks/mailgun/inbound",
+        data=_payload("secret-key", sender="reports@mail.brycecotton.ca"),
+    )
+    assert domain_sender.status_code == 400
+    assert domain_sender.get_json()["error"] == "missing_attachment"
+
+    rejected = client.post(
+        "/webhooks/mailgun/inbound",
+        data=_payload("secret-key", sender="reports@example.com"),
+    )
+    assert rejected.status_code == 403
+    assert rejected.get_json()["error"] == "sender_not_allowed"
+
+
 def test_mailgun_webhook_rejects_oversized_attachment(client, app):
     app.config.update(
         {

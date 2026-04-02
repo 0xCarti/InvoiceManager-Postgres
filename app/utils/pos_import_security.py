@@ -15,11 +15,16 @@ def csv_config_set(value: str | None) -> set[str]:
     return {entry.strip().lower() for entry in value.split(",") if entry.strip()}
 
 
-def extract_email_domain(email_value: str | None) -> str:
+def extract_email_address(email_value: str | None) -> str:
     if not email_value:
         return ""
     _, parsed = parseaddr(email_value)
     candidate = parsed or email_value
+    return candidate.strip().lower()
+
+
+def extract_email_domain(email_value: str | None) -> str:
+    candidate = extract_email_address(email_value)
     if "@" not in candidate:
         return ""
     return candidate.split("@", 1)[1].strip().lower()
@@ -31,13 +36,20 @@ def sender_policy_error(
     allowed_senders: set[str],
     allowed_domains: set[str],
 ) -> str | None:
-    normalized_sender = (sender_value or "").strip().lower()
+    normalized_sender = extract_email_address(sender_value)
     if not allowed_senders and not allowed_domains:
         return "sender_allowlist_not_configured"
-    if allowed_senders and normalized_sender not in allowed_senders:
-        return "sender_not_allowed"
     sender_domain = extract_email_domain(normalized_sender)
-    if allowed_domains and sender_domain not in allowed_domains:
+    sender_allowed = bool(allowed_senders) and normalized_sender in allowed_senders
+    domain_allowed = bool(allowed_domains) and sender_domain in allowed_domains
+
+    if allowed_senders and allowed_domains:
+        if sender_allowed or domain_allowed:
+            return None
+        return "sender_not_allowed"
+    if allowed_senders and not sender_allowed:
+        return "sender_not_allowed"
+    if allowed_domains and not domain_allowed:
         return "sender_domain_not_allowed"
     return None
 
