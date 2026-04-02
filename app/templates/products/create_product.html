@@ -4,7 +4,18 @@
 
 {% block content %}
 <div class="container mt-5">
-    <h2>{{ title or "Create Product" }}</h2>
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <h2 class="mb-0">{{ title or "Create Product" }}</h2>
+        {% if return_to_sales_import_url %}
+        <a href="{{ return_to_sales_import_url }}" class="btn btn-outline-secondary btn-sm">Back to Sales Import</a>
+        {% endif %}
+    </div>
+    {% if sales_import_context %}
+    <div class="alert alert-info">
+        Creating a product for sales import #{{ sales_import_context.sales_import_id }}.
+        When you save, "{{ sales_import_context.row_record.source_product_name }}" will be mapped back to this new product.
+    </div>
+    {% endif %}
     {% set form_action = form_action or url_for('product.create_product') %}
     {% set form_id = 'create-product-form-page' %}
     {% include 'products/_create_product_form.html' %}

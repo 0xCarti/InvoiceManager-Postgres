@@ -2381,7 +2381,6 @@ def sales_import_detail(import_id: int):
 
         elif action == "create_product":
             row_id = request.form.get("row_id", type=int)
-            new_product_name = (request.form.get("new_product_name") or "").strip()
             row_record = next(
                 (
                     row
@@ -2393,45 +2392,19 @@ def sales_import_detail(import_id: int):
             )
             if not row_record:
                 flash("Unable to find the selected import row.", "danger")
-            elif not new_product_name:
-                flash("Enter a new product name before creating.", "warning")
             else:
-                existing = Product.query.filter_by(name=new_product_name).first()
-                if existing:
-                    created_product = existing
-                else:
-                    created_product = Product(
-                        name=new_product_name,
-                        price=0.0,
-                        invoice_sale_price=0,
-                        cost=0.0,
+                target_location_id = selected_location_id or row_record.location_import_id
+                flash(
+                    "Complete the full product form, then the new product will map back to this sales import row.",
+                    "info",
+                )
+                return redirect(
+                    url_for(
+                        "product.create_product",
+                        sales_import_id=sales_import.id,
+                        import_row_id=row_record.id,
+                        return_location_id=target_location_id,
                     )
-                    db.session.add(created_product)
-                    db.session.flush()
-
-                normalized_key = row_record.normalized_product_name
-                for scoped_row in sales_import.rows:
-                    if scoped_row.normalized_product_name == normalized_key:
-                        scoped_row.product_id = created_product.id
-
-                alias = TerminalSaleProductAlias.query.filter_by(
-                    normalized_name=normalized_key
-                ).first()
-                if alias is None:
-                    alias = TerminalSaleProductAlias(
-                        source_name=row_record.source_product_name,
-                        normalized_name=normalized_key,
-                        product_id=created_product.id,
-                    )
-                    db.session.add(alias)
-                else:
-                    alias.source_name = row_record.source_product_name
-                    alias.product_id = created_product.id
-                db.session.commit()
-                flash("Product created and mapping saved.", "success")
-                log_activity(
-                    f"Created/saved product mapping for POS sales import {sales_import.id}: "
-                    f"'{row_record.source_product_name}' -> product {created_product.id}"
                 )
 
         elif action == "resolve_row_price":

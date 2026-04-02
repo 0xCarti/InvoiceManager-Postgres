@@ -129,7 +129,7 @@
                                 Mapped: {{ location.location.name if location.location else 'Unmapped' }}
                             </div>
                         </div>
-                        <span class="badge bg-danger text-white">
+                        <span class="badge {% if location_issue_counts.get(location.id, 0) > 0 %}bg-danger text-white{% else %}bg-success text-white{% endif %}">
                             {{ location_issue_counts.get(location.id, 0) }}
                         </span>
                     </div>
@@ -305,15 +305,16 @@
                                     </select>
                                     <button type="submit" class="btn btn-primary btn-sm w-100">Save Mapping</button>
                                 </form>
-                                <form method="post" class="vstack gap-2 mb-2">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <input type="hidden" name="action" value="create_product">
-                                    <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
-                                    <input type="hidden" name="row_id" value="{{ row.id }}">
-                                    <label class="form-label mb-0">Create new product</label>
-                                    <input type="text" class="form-control form-control-sm" name="new_product_name" placeholder="New product name" required>
-                                    <button type="submit" class="btn btn-outline-primary btn-sm w-100">Create + Map</button>
-                                </form>
+                                <div class="vstack gap-2 mb-2">
+                                    <div class="small fw-semibold">Create new product</div>
+                                    <div class="small text-muted">Opens the full product form so you can set pricing and recipe items before mapping it back to this import row.</div>
+                                    <a
+                                        href="{{ url_for('product.create_product', sales_import_id=sales_import.id, import_row_id=row.id, return_location_id=selected_location.id) }}"
+                                        class="btn btn-outline-primary btn-sm w-100"
+                                    >
+                                        Create + Map
+                                    </a>
+                                </div>
                                 <form method="post" class="vstack gap-2">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <input type="hidden" name="action" value="resolve_row_price">
@@ -471,19 +472,22 @@
                                             <button type="submit" class="btn btn-primary btn-sm w-100">Save Mapping</button>
                                         </div>
                                     </form>
-                                    <form method="post" class="row g-2 align-items-end mb-2">
-                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                        <input type="hidden" name="action" value="create_product">
-                                        <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
-                                        <input type="hidden" name="row_id" value="{{ row.id }}">
+                                    <div class="row g-2 align-items-end mb-2">
                                         <div class="col-md-8">
                                             <label class="form-label mb-1">Or create new product</label>
-                                            <input type="text" class="form-control form-control-sm" name="new_product_name" placeholder="New product name" required>
+                                            <div class="small text-muted">
+                                                Opens the full product form so you can add recipe items before mapping the new product back to this import row.
+                                            </div>
                                         </div>
                                         <div class="col-md-4">
-                                            <button type="submit" class="btn btn-outline-primary btn-sm w-100">Create + Map</button>
+                                            <a
+                                                href="{{ url_for('product.create_product', sales_import_id=sales_import.id, import_row_id=row.id, return_location_id=selected_location.id) }}"
+                                                class="btn btn-outline-primary btn-sm w-100"
+                                            >
+                                                Create + Map
+                                            </a>
                                         </div>
-                                    </form>
+                                    </div>
                                     <form method="post" class="row g-2 align-items-end">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="action" value="resolve_row_price">

@@ -110,12 +110,24 @@ def test_mapping_resolution_create_or_map_flow_updates_rows_and_aliases(client, 
             data={
                 "action": "create_product",
                 "row_id": row_id,
-                "new_product_name": "Created Pretzel",
             },
             follow_redirects=True,
         )
         assert create_product_response.status_code == 200
-        assert b"Product created and mapping saved" in create_product_response.data
+        assert b"Create Product for Sales Import" in create_product_response.data
+        assert b"Mega Pretzel" in create_product_response.data
+
+        save_created_product_response = client.post(
+            f"/products/create?sales_import_id={import_id}&import_row_id={row_id}&return_location_id={location_import_id}",
+            data={
+                "name": "Created Pretzel",
+                "price": 6.5,
+                "cost": 2.5,
+            },
+            follow_redirects=True,
+        )
+        assert save_created_product_response.status_code == 200
+        assert b"Product created and mapped back to the sales import" in save_created_product_response.data
 
     with app.app_context():
         import_record = db.session.get(PosSalesImport, import_id)
@@ -134,6 +146,7 @@ def test_mapping_resolution_create_or_map_flow_updates_rows_and_aliases(client, 
         assert import_record is not None
         assert location_record.location_id == created_location.id
         assert row_record.product_id == created_product.id
+        assert created_product.price == pytest.approx(6.5)
         assert location_alias.location_id == created_location.id
         assert product_alias.product_id == created_product.id
 

@@ -474,7 +474,10 @@ def test_sales_import_detail_sidebar_shows_issue_counts_and_sorts_locations(
             "Alpha Clean": "0",
             "Bravo Clean": "0",
         }
-        assert all("bg-danger" in classes for classes in sidebar_badges.values())
+        assert "bg-danger" in sidebar_badges["Zulu Unmapped"]
+        assert "bg-danger" in sidebar_badges["Echo Issue"]
+        assert "bg-success" in sidebar_badges["Alpha Clean"]
+        assert "bg-success" in sidebar_badges["Bravo Clean"]
 
 
 def test_sales_import_price_review_can_keep_app_price_on_approval(client, app):

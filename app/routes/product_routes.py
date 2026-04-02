@@ -28,6 +28,8 @@ from app.models import (
     GLCode,
     Item,
     ItemUnit,
+    PosSalesImport,
+    PosSalesImportRow,
     Product,
     ProductRecipeItem,
     Customer,
@@ -264,6 +266,77 @@ def _render_product_bulk_form(form: BulkProductUpdateForm):
     return render_template("products/bulk_update_form.html", form=form)
 
 
+def _get_sales_import_product_create_context():
+    sales_import_id = request.args.get("sales_import_id", type=int)
+    import_row_id = request.args.get("import_row_id", type=int)
+    return_location_id = request.args.get("return_location_id", type=int)
+
+    if sales_import_id is None and import_row_id is None and return_location_id is None:
+        return None
+
+    if not current_user.is_admin:
+        abort(403)
+    if sales_import_id is None or import_row_id is None:
+        abort(400)
+
+    import_record = (
+        PosSalesImport.query.options(selectinload(PosSalesImport.rows))
+        .filter(PosSalesImport.id == sales_import_id)
+        .first()
+    )
+    if import_record is None:
+        abort(404)
+
+    row_record = next(
+        (row for row in import_record.rows if row.id == import_row_id),
+        None,
+    )
+    if row_record is None:
+        abort(404)
+
+    if return_location_id is None:
+        return_location_id = row_record.location_import_id
+
+    return {
+        "sales_import_id": import_record.id,
+        "import_record": import_record,
+        "row_record": row_record,
+        "return_location_id": return_location_id,
+        "return_url": url_for(
+            "admin.sales_import_detail",
+            import_id=import_record.id,
+            location_id=return_location_id,
+        ),
+        "form_action": url_for(
+            "product.create_product",
+            sales_import_id=import_record.id,
+            import_row_id=row_record.id,
+            return_location_id=return_location_id,
+        ),
+    }
+
+
+def _map_product_to_sales_import(import_record, row_record, product_id: int) -> None:
+    normalized_key = row_record.normalized_product_name
+    for scoped_row in import_record.rows:
+        if scoped_row.normalized_product_name == normalized_key:
+            scoped_row.product_id = product_id
+
+    alias = TerminalSaleProductAlias.query.filter_by(
+        normalized_name=normalized_key
+    ).first()
+    if alias is None:
+        alias = TerminalSaleProductAlias(
+            source_name=row_record.source_product_name,
+            normalized_name=normalized_key,
+            product_id=product_id,
+        )
+        db.session.add(alias)
+    else:
+        alias.source_name = row_record.source_product_name
+        alias.product_id = product_id
+
+
 @product.route("/products/bulk-update", methods=["GET", "POST"])
 @login_required
 def bulk_update_products():
@@ -461,7 +534,11 @@ def bulk_update_products():
 @login_required
 def create_product():
     """Add a new product definition."""
+    sales_import_context = _get_sales_import_product_create_context()
     form = ProductWithRecipeForm()
+    if request.method == "GET" and sales_import_context is not None and not form.name.data:
+        form.name.data = sales_import_context["row_record"].source_product_name
+
     if form.validate_on_submit():
         yield_quantity = form.recipe_yield_quantity.data
         if yield_quantity is None or yield_quantity <= 0:
@@ -491,7 +568,7 @@ def create_product():
             if gl:
                 product.gl_code = gl.code
         db.session.add(product)
-        db.session.commit()
+        db.session.flush()
 
         for item_form in form.items:
             item_id = item_form.item.data
@@ -508,14 +585,48 @@ def create_product():
                         countable=countable,
                     )
                 )
+        if sales_import_context is not None:
+            _map_product_to_sales_import(
+                sales_import_context["import_record"],
+                sales_import_context["row_record"],
+                product.id,
+            )
+
         db.session.commit()
         log_activity(f"Created product {product.name}")
+        if sales_import_context is not None:
+            log_activity(
+                f"Mapped POS sales import {sales_import_context['sales_import_id']} "
+                f"product '{sales_import_context['row_record'].source_product_name}' "
+                f"to created product {product.id}"
+            )
+            flash("Product created and mapped back to the sales import.", "success")
+            return redirect(sales_import_context["return_url"])
+
         flash("Product created successfully!", "success")
         return redirect(url_for("product.view_products"))
     if form.recipe_yield_quantity.data is None:
         form.recipe_yield_quantity.data = 1
     return render_template(
-        "products/create_product.html", form=form, product_id=None
+        "products/create_product.html",
+        form=form,
+        product_id=None,
+        form_action=(
+            sales_import_context["form_action"]
+            if sales_import_context is not None
+            else url_for("product.create_product")
+        ),
+        title=(
+            "Create Product for Sales Import"
+            if sales_import_context is not None
+            else "Create Product"
+        ),
+        return_to_sales_import_url=(
+            sales_import_context["return_url"]
+            if sales_import_context is not None
+            else None
+        ),
+        sales_import_context=sales_import_context,
     )
 
 
