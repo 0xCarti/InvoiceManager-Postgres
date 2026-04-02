@@ -1,14 +1,51 @@
 {% extends 'base.html' %}
 {% from 'macros/filter_modal.html' import filter_modal %}
 {% block content %}
-<div class="container mt-4">
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .mobile-list-page .mobile-toolbar,
+    .mobile-list-page .mobile-pagination-controls {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .mobile-list-page .mobile-toolbar > *,
+    .mobile-list-page .mobile-toolbar .btn,
+    .mobile-list-page .mobile-toolbar .dropdown,
+    .mobile-list-page .mobile-toolbar .dropdown > .btn,
+    .mobile-list-page .mobile-pagination-controls > *,
+    .mobile-list-page .mobile-pagination-controls form,
+    .mobile-list-page .mobile-pagination-controls .pagination {
+        width: 100%;
+    }
+    .mobile-list-page .mobile-table-wrap .table {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+    .mobile-list-page .mobile-table-wrap .table th,
+    .mobile-list-page .mobile-table-wrap .table td {
+        white-space: normal !important;
+        vertical-align: top;
+    }
+    .mobile-list-page .mobile-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .375rem;
+    }
+    .mobile-list-page .mobile-actions .btn,
+    .mobile-list-page .mobile-actions form {
+        margin: 0 !important;
+    }
+}
+</style>
+<div class="container mt-4 mobile-list-page">
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
         <div>
             <h2 class="mb-1">Purchase Invoices</h2>
             <p class="text-muted mb-0">Review received vendor invoices and related details</p>
         </div>
     </div>
-    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3 mobile-toolbar">
         <div class="dropdown d-md-none">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                 More actions
@@ -229,8 +266,8 @@
         {% endif %}
     </div>
     {% endif %}
-    <div class="table-responsive">
-    <table class="table sortable" id="purchase-invoices-table">
+    <div class="table-responsive mobile-table-wrap">
+    <table class="table sortable table-mobile-card" id="purchase-invoices-table">
         <thead>
             <tr>
                 <th class="col-invoice-id" data-type="number">ID</th>
@@ -297,20 +334,22 @@
                 </td>
                 <td class="col-invoice-user" data-sort-value="{{ inv.user_id or '' }}">{{ inv.user_id or '—' }}</td>
                 <td class="col-invoice-actions">
-                    <a href="{{ url_for('purchase.view_purchase_invoice', invoice_id=inv.id) }}" class="btn btn-sm btn-primary">View</a>
-                    <a href="{{ url_for('report.invoice_gl_code_report', invoice_id=inv.id) }}" class="btn btn-sm btn-outline-primary">Invoice GL Code Report</a>
-                    <a href="{{ url_for('notes.entity_notes', entity_type='purchase_invoice', entity_id=inv.id) }}" class="btn btn-sm btn-outline-secondary">Notes</a>
-                    <form method="post" action="{{ url_for('purchase.reverse_purchase_invoice', invoice_id=inv.id) }}" class="d-inline">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="btn btn-sm btn-danger">Reverse</button>
-                    </form>
+                    <div class="mobile-actions mobile-card-actions">
+                        <a href="{{ url_for('purchase.view_purchase_invoice', invoice_id=inv.id) }}" class="btn btn-sm btn-primary">View</a>
+                        <a href="{{ url_for('report.invoice_gl_code_report', invoice_id=inv.id) }}" class="btn btn-sm btn-outline-primary">Invoice GL Code Report</a>
+                        <a href="{{ url_for('notes.entity_notes', entity_type='purchase_invoice', entity_id=inv.id) }}" class="btn btn-sm btn-outline-secondary">Notes</a>
+                        <form method="post" action="{{ url_for('purchase.reverse_purchase_invoice', invoice_id=inv.id) }}" class="d-inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-danger">Reverse</button>
+                        </form>
+                    </div>
                 </td>
             </tr>
         {% endfor %}
         </tbody>
     </table>
     </div>
-    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3 mobile-pagination-controls">
         <nav aria-label="Purchase invoice pagination">
             <ul class="pagination mb-0">
                 <li class="page-item {% if not invoices.has_prev %}disabled{% endif %}">

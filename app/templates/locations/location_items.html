@@ -1,5 +1,29 @@
 {% extends 'base.html' %}
 {% block content %}
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .mobile-list-page .mobile-pagination-controls {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .mobile-list-page .mobile-table-wrap .table {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+    .mobile-list-page .mobile-table-wrap .table th,
+    .mobile-list-page .mobile-table-wrap .table td {
+        white-space: normal !important;
+        vertical-align: top;
+    }
+    .mobile-list-page .mobile-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .375rem;
+    }
+}
+</style>
+<div class="mobile-list-page">
 <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
     <h2 class="mb-0">{{ location.name }} Items</h2>
     <a class="btn btn-outline-secondary" href="{{ url_for('notes.entity_notes', entity_type='location', entity_id=location.id) }}">
@@ -36,7 +60,7 @@
 {% endif %}
 <form method="post" class="mb-3">
     {{ form.hidden_tag() }}
-    <div class="table-responsive">
+    <div class="table-responsive mobile-table-wrap">
         <table class="table align-middle">
             <thead>
                 <tr>
@@ -101,7 +125,7 @@
     </div>
     <button type="submit" class="btn btn-primary">Save Changes</button>
 </form>
-<div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3 mobile-pagination-controls">
     <nav aria-label="Location item pagination">
         <ul class="pagination mb-0">
             <li class="page-item {% if not entries.has_prev %}disabled{% endif %}">

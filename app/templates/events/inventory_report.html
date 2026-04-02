@@ -1,7 +1,60 @@
 {% extends 'base.html' %}
 {% block content %}
-<h1>Inventory Report - {{ event.name }}</h1>
-<table class="table table-striped">
+<style>
+@media (max-width: 767.98px) {
+  .inventory-report-table thead,
+  .inventory-report-gl-table thead {
+    display: none;
+  }
+
+  .inventory-report-table,
+  .inventory-report-table tbody,
+  .inventory-report-table tr,
+  .inventory-report-table td,
+  .inventory-report-gl-table,
+  .inventory-report-gl-table tbody,
+  .inventory-report-gl-table tr,
+  .inventory-report-gl-table td,
+  .inventory-report-gl-table th {
+    display: block;
+    width: 100%;
+  }
+
+  .inventory-report-table tr,
+  .inventory-report-gl-table tr {
+    margin-bottom: 1rem;
+    border: 1px solid #dee2e6;
+    border-radius: 0.5rem;
+    overflow: hidden;
+    background: #fff;
+  }
+
+  .inventory-report-table td,
+  .inventory-report-gl-table td,
+  .inventory-report-gl-table th {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    white-space: normal;
+    padding: 0.65rem 0.75rem;
+    border-left: 0;
+    border-right: 0;
+  }
+
+  .inventory-report-table td::before,
+  .inventory-report-gl-table td::before,
+  .inventory-report-gl-table th::before {
+    content: attr(data-label);
+    font-weight: 600;
+    flex: 0 0 40%;
+    min-width: 40%;
+  }
+}
+</style>
+<div class="container mt-4">
+<h1 class="h3 mb-3">Inventory Report - {{ event.name }}</h1>
+<div class="table-responsive">
+<table class="table table-striped table-sm align-middle inventory-report-table">
   <thead>
     <tr>
       <th>Location</th>
@@ -16,27 +69,31 @@
   <tbody>
     {% for row in rows %}
     <tr>
-      <td>{{ row.location.name }}</td>
-      <td>{{ row.item.name }}</td>
-      <td>{{ row.expected }}</td>
-      <td>{{ row.actual }}</td>
-      <td>{{ row.variance }}</td>
-      <td>{{ row.gl_code }}</td>
-      <td>{{ '%.2f'|format(row.cost_total) }}</td>
+      <td data-label="Location">{{ row.location.name }}</td>
+      <td data-label="Item">{{ row.item.name }}</td>
+      <td data-label="Expected">{{ row.expected }}</td>
+      <td data-label="Actual">{{ row.actual }}</td>
+      <td data-label="Variance">{{ row.variance }}</td>
+      <td data-label="GL Code">{{ row.gl_code }}</td>
+      <td data-label="Cost">{{ '%.2f'|format(row.cost_total) }}</td>
     </tr>
     {% endfor %}
   </tbody>
-</table>
+    </table>
+</div>
 <h2>Totals by GL Code</h2>
-<table class="table table-striped">
+<div class="table-responsive">
+<table class="table table-striped table-sm align-middle inventory-report-gl-table">
   <thead>
     <tr><th>GL Code</th><th>Total Cost</th></tr>
   </thead>
   <tbody>
     {% for code, total in gl_totals.items() %}
-    <tr><td>{{ code }}</td><td>{{ '%.2f'|format(total) }}</td></tr>
+    <tr><td data-label="GL Code">{{ code }}</td><td data-label="Total Cost">{{ '%.2f'|format(total) }}</td></tr>
     {% endfor %}
-    <tr><th>Grand Total</th><th>{{ '%.2f'|format(grand_total) }}</th></tr>
+    <tr><th data-label="GL Code">Grand Total</th><th data-label="Total Cost">{{ '%.2f'|format(grand_total) }}</th></tr>
   </tbody>
 </table>
+</div>
+</div>
 {% endblock %}

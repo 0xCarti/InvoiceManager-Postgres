@@ -1,20 +1,66 @@
 {% extends 'base.html' %}
 {% block content %}
-<h2>Terminal Sales - {{ event_location.location.name }}</h2>
+<style>
+@media (max-width: 767.98px) {
+    .terminal-sales-table thead {
+        display: none;
+    }
+
+    .terminal-sales-table,
+    .terminal-sales-table tbody,
+    .terminal-sales-table tr,
+    .terminal-sales-table td {
+        display: block;
+        width: 100%;
+    }
+
+    .terminal-sales-table tr {
+        margin-bottom: 1rem;
+        border: 1px solid #dee2e6;
+        border-radius: 0.5rem;
+        overflow: hidden;
+        background: #fff;
+    }
+
+    .terminal-sales-table td {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.75rem;
+        white-space: normal;
+        padding: 0.65rem 0.75rem;
+        border-left: 0;
+        border-right: 0;
+    }
+
+    .terminal-sales-table td::before {
+        content: attr(data-label);
+        font-weight: 600;
+        flex: 0 0 40%;
+        min-width: 40%;
+    }
+}
+</style>
+<div class="container mt-4">
+<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-end gap-2 mb-3">
+    <div>
+        <h2 class="mb-1">Terminal Sales - {{ event_location.location.name }}</h2>
+        <p class="text-muted mb-0">Enter the sold quantity for each product.</p>
+    </div>
+</div>
 <form method="post" id="terminal-sales-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
     <div class="table-responsive">
-    <table class="table">
+    <table class="table table-sm align-middle terminal-sales-table">
         <thead>
-            <tr><th>Product</th><th class="text-end">Price</th><th>Quantity</th></tr>
+            <tr><th scope="col">Product</th><th scope="col" class="text-end">Price</th><th scope="col">Quantity</th></tr>
         </thead>
         <tbody>
         {% set product_list = products or event_location.location.products %}
         {% for product in product_list %}
         <tr data-price="{{ product.price | float }}">
-            <td>{{ product.name }}</td>
-            <td class="text-end">${{ '{:,.2f}'.format(product.price) }}</td>
-            <td>
+            <td class="text-break" data-label="Product">{{ product.name }}</td>
+            <td class="text-end" data-label="Price">${{ '{:,.2f}'.format(product.price) }}</td>
+            <td data-label="Quantity">
                 <input type="text" step="any" inputmode="text" data-numeric-input="1" name="qty_{{ product.id }}" class="form-control terminal-sale-input"
                        value="{{ existing_sales.get(product.id, '') }}">
             </td>
@@ -27,8 +73,9 @@
         <strong>Grand Total:</strong>
         <span id="terminal-sales-grand-total">$0.00</span>
     </div>
-    <button type="submit" class="btn btn-primary mt-2">Submit</button>
+    <button type="submit" class="btn btn-primary mt-3">Submit</button>
 </form>
+</div>
 <script nonce="{{ csp_nonce }}">
     document.addEventListener('DOMContentLoaded', () => {
         const form = document.getElementById('terminal-sales-form');

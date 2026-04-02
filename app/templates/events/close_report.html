@@ -1,6 +1,46 @@
 {% extends 'base.html' %}
 
 {% block content %}
+<style>
+@media (max-width: 767.98px) {
+    .close-report-table thead {
+        display: none;
+    }
+
+    .close-report-table,
+    .close-report-table tbody,
+    .close-report-table tr,
+    .close-report-table td {
+        display: block;
+        width: 100%;
+    }
+
+    .close-report-table tr {
+        margin-bottom: 1rem;
+        border: 1px solid #dee2e6;
+        border-radius: 0.5rem;
+        overflow: hidden;
+        background: #fff;
+    }
+
+    .close-report-table td {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.75rem;
+        white-space: normal;
+        padding: 0.65rem 0.75rem;
+        border-left: 0;
+        border-right: 0;
+    }
+
+    .close-report-table td::before {
+        content: attr(data-label);
+        font-weight: 600;
+        flex: 0 0 40%;
+        min-width: 40%;
+    }
+}
+</style>
 <div class="container mt-4">
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
         <div>
@@ -74,7 +114,7 @@
             <div class="card-body p-0">
                 {% if report.stand_items %}
                     <div class="table-responsive">
-                        <table class="table table-striped table-sm mb-0 align-middle">
+                        <table class="table table-striped table-sm mb-0 align-middle close-report-table">
                             <thead>
                                 <tr>
                                     <th scope="col">Item</th>
@@ -95,7 +135,7 @@
                             <tbody>
                                 {% for entry in report.stand_items %}
                                     <tr>
-                                        <td>
+                                        <td data-label="Item">
                                             {% if entry.item %}
                                                 {{ entry.item.name }}
                                             {% else %}
@@ -105,71 +145,71 @@
                                                 <div class="text-muted small">{{ entry.report_unit_label }}</div>
                                             {% endif %}
                                         </td>
-                                        <td>
+                                        <td data-label="Prior Close">
                                             {% if entry.expected is not none %}
                                                 {{ '%.2f'|format(entry.expected) }}
                                             {% else %}
                                                 <span class="text-muted">—</span>
                                             {% endif %}
                                         </td>
-                                        <td>
+                                        <td data-label="Pre-Event Count">
                                             {% if entry.sheet_values.opening_count is not none %}
                                                 {{ '%.2f'|format(entry.sheet_values.opening_count) }}
                                             {% else %}
                                                 <span class="text-muted">—</span>
                                             {% endif %}
                                         </td>
-                                        <td>
+                                        <td data-label="Transferred In">
                                             {% if entry.sheet_values.transferred_in is not none %}
                                                 {{ '%.2f'|format(entry.sheet_values.transferred_in) }}
                                             {% else %}
                                                 <span class="text-muted">—</span>
                                             {% endif %}
                                         </td>
-                                        <td>
+                                        <td data-label="Transferred Out">
                                             {% if entry.sheet_values.transferred_out is not none %}
                                                 {{ '%.2f'|format(entry.sheet_values.transferred_out) }}
                                             {% else %}
                                                 <span class="text-muted">—</span>
                                             {% endif %}
                                         </td>
-                                        <td>
+                                        <td data-label="Adjustments">
                                             {% if entry.sheet_values.adjustments is not none %}
                                                 {{ '%.2f'|format(entry.sheet_values.adjustments) }}
                                             {% else %}
                                                 <span class="text-muted">—</span>
                                             {% endif %}
                                         </td>
-                                        <td>{{ '%.2f'|format(entry.sales) }}</td>
-                                        <td>
+                                        <td data-label="Terminal Sales">{{ '%.2f'|format(entry.sales) }}</td>
+                                        <td data-label="Eaten">
                                             {% if entry.sheet_values.eaten is not none %}
                                                 {{ '%.2f'|format(entry.sheet_values.eaten) }}
                                             {% else %}
                                                 <span class="text-muted">—</span>
                                             {% endif %}
                                         </td>
-                                        <td>
+                                        <td data-label="Spoiled">
                                             {% if entry.sheet_values.spoiled is not none %}
                                                 {{ '%.2f'|format(entry.sheet_values.spoiled) }}
                                             {% else %}
                                                 <span class="text-muted">—</span>
                                             {% endif %}
                                         </td>
-                                        <td>
+                                        <td data-label="Closing Count">
                                             {% if entry.sheet_values.closing_count is not none %}
                                                 {{ '%.2f'|format(entry.sheet_values.closing_count) }}
                                             {% else %}
                                                 <span class="text-muted">—</span>
                                             {% endif %}
                                         </td>
-                                        <td>
+                                        <td data-label="Physical Sales">
                                             {% if entry.physical_units_display is not none %}
                                                 {{ '%.2f'|format(entry.physical_units_display) }}
                                             {% else %}
                                                 <span class="text-muted">—</span>
                                             {% endif %}
                                         </td>
-                                        <td>
+                                        <td data-label="Sales Variance">
                                             {% set terminal_sales = entry.sales if entry.sales is not none else none %}
                                             {% set physical_sales = entry.physical_units_display %}
                                             {% if terminal_sales is not none and physical_sales is not none %}
@@ -178,7 +218,7 @@
                                                 <span class="text-muted">—</span>
                                             {% endif %}
                                         </td>
-                                        <td>
+                                        <td data-label="Physical Amount">
                                             {% if entry.physical_amount is not none %}
                                                 ${{ '%.2f'|format(entry.physical_amount) }}
                                             {% else %}

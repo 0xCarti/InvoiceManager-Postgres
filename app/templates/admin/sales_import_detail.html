@@ -22,16 +22,12 @@
         </p>
         {% endif %}
     </div>
-    <div class="d-flex gap-2">
-        <form method="post" class="d-inline">
+    <div class="d-grid gap-2 d-sm-flex flex-wrap">
+        <form method="post">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="action" value="approve_import">
             <input type="hidden" name="selected_location_id" value="{{ selected_location.id if selected_location else '' }}">
-            <button
-                type="submit"
-                class="btn btn-success btn-sm"
-                {% if unresolved_location_count or unresolved_row_count or unresolved_price_count or sales_import.status != 'pending' %}disabled{% endif %}
-            >
+            <button type="submit" class="btn btn-success btn-sm" {% if unresolved_location_count or unresolved_row_count or unresolved_price_count or sales_import.status != 'pending' %}disabled{% endif %}>
                 Approve Import
             </button>
         </form>
@@ -44,7 +40,7 @@
         >
             Undo Approved Import
         </button>
-        <form method="post" class="d-inline">
+        <form method="post">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="action" value="refresh_auto_mapping">
             <input type="hidden" name="selected_location_id" value="{{ selected_location.id if selected_location else '' }}">
@@ -216,7 +212,129 @@
             <div class="card-header">Item Rows (Totals row excluded from stock operations)</div>
             <div class="card-body p-0">
                 {% if selected_location.rows %}
-                <div class="table-responsive">
+                <div class="d-lg-none p-3 vstack gap-3">
+                    {% for row in selected_location.rows %}
+                    {% set review = row_review_data.get(row.id, {}) %}
+                    {% set errors = row_errors.get(row.id, []) %}
+                    <div class="card {% if review.is_skipped %}border-secondary{% elif review.has_price_conflict %}border-warning{% elif review.requires_price_resolution %}border-danger{% endif %}">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                                <div class="min-w-0">
+                                    <div class="fw-semibold text-break">{{ row.source_product_name }}</div>
+                                    <div class="small text-muted">
+                                        {{ row.product.name if row.product else 'Unmapped product' }}
+                                    </div>
+                                </div>
+                                {% if review.is_skipped %}
+                                <span class="badge bg-secondary">Skipped</span>
+                                {% elif review.has_price_conflict %}
+                                <span class="badge bg-warning text-dark">Conflict</span>
+                                {% elif review.requires_price_resolution %}
+                                <span class="badge bg-danger">Needs Review</span>
+                                {% elif review.resolved_source == 'file' %}
+                                <span class="badge bg-primary">File Price</span>
+                                {% elif review.resolved_source == 'app' %}
+                                <span class="badge bg-secondary">App Price</span>
+                                {% elif review.resolved_source == 'custom' %}
+                                <span class="badge bg-info text-dark">Custom Price</span>
+                                {% elif review.resolved_source == 'aligned' %}
+                                <span class="badge bg-success">Aligned</span>
+                                {% endif %}
+                            </div>
+                            <div class="row g-2 small mb-3">
+                                <div class="col-6"><div class="border rounded p-2"><div class="text-muted">Qty</div><div class="fw-semibold">{{ '%.2f'|format(row.quantity) }}</div></div></div>
+                                <div class="col-6"><div class="border rounded p-2"><div class="text-muted">Net</div><div class="fw-semibold">{{ '%.2f'|format(row.net_inc) }}</div></div></div>
+                                <div class="col-6"><div class="border rounded p-2"><div class="text-muted">Discount</div><div class="fw-semibold">{{ '%.2f'|format(review.discount|default(0.0)) }}</div></div></div>
+                                <div class="col-6"><div class="border rounded p-2"><div class="text-muted">File</div><div class="fw-semibold">{{ '%.2f'|format(review.file_price|default(0.0)) }}</div></div></div>
+                                <div class="col-6"><div class="border rounded p-2"><div class="text-muted">App</div><div class="fw-semibold">{% if review.app_price is not none %}{{ '%.2f'|format(review.app_price) }}{% else %}n/a{% endif %}</div></div></div>
+                                <div class="col-6"><div class="border rounded p-2"><div class="text-muted">Mapped</div><div class="fw-semibold text-break">{{ row.product.name if row.product else 'Unmapped' }}</div></div></div>
+                            </div>
+                            <div class="small text-muted mb-2">
+                                Location: {{ selected_location.location.name if selected_location.location else 'Unmapped' }}
+                            </div>
+                            {% if errors %}
+                            <div class="alert alert-warning py-2 small mb-3">
+                                <ul class="mb-0 ps-3">
+                                    {% for error in errors %}
+                                    <li>{{ error }}</li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                            {% else %}
+                            <div class="text-muted small mb-3">No validation errors.</div>
+                            {% endif %}
+                            {% if row.is_zero_quantity %}
+                            <div class="alert alert-light border small mb-0">
+                                Quantity is zero for this row, so it is informational only and does not require a price decision.
+                            </div>
+                            {% elif row.product_id is not none %}
+                            <div class="vstack gap-2">
+                                <div class="small fw-semibold">Price review</div>
+                                <form method="post" class="vstack gap-2">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="action" value="resolve_row_price">
+                                    <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
+                                    <input type="hidden" name="row_id" value="{{ row.id }}">
+                                    <label class="form-label mb-0">Price action</label>
+                                    <select class="form-select form-select-sm" name="price_resolution" {% if price_review_locked %}disabled{% endif %}>
+                                        <option value="" {% if not review.action %}selected{% endif %}>Select an option</option>
+                                        <option value="file" {% if review.action == 'file' %}selected{% endif %}>Use file price (${{ '%.2f'|format(review.file_price|default(0.0)) }})</option>
+                                        <option value="app" {% if review.action == 'app' %}selected{% endif %}>Use app price{% if review.app_price is not none %} (${{ '%.2f'|format(review.app_price) }}){% endif %}</option>
+                                        <option value="custom" {% if review.action == 'custom' %}selected{% endif %}>Edit to custom price</option>
+                                        <option value="skip" {% if review.action == 'skip' %}selected{% endif %}>Skip row</option>
+                                    </select>
+                                    <label class="form-label mb-0">Custom price</label>
+                                    <input type="text" class="form-control form-control-sm" name="custom_price" value="{% if review.custom_price is not none %}{{ '%.2f'|format(review.custom_price) }}{% endif %}" placeholder="Used only for custom price" {% if price_review_locked %}disabled{% endif %}>
+                                    <button type="submit" class="btn btn-outline-primary btn-sm w-100" {% if price_review_locked %}disabled{% endif %}>Save Price Choice</button>
+                                </form>
+                                {% if not review.price_mismatch and not review.action %}
+                                <div class="form-text text-muted">
+                                    File and app prices already match. Saving a choice is optional unless you want to override or skip this row.
+                                </div>
+                                {% endif %}
+                            </div>
+                            {% elif row.product_id is none %}
+                            <div class="vstack gap-2">
+                                <div class="small fw-semibold">Resolve product mapping</div>
+                                <form method="post" class="vstack gap-2 mb-2">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="action" value="map_product">
+                                    <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
+                                    <input type="hidden" name="row_id" value="{{ row.id }}">
+                                    <label class="form-label mb-0">Map to existing product</label>
+                                    <select class="form-select form-select-sm" name="target_product_id" required>
+                                        <option value="">Select product</option>
+                                        {% for product in products %}
+                                        <option value="{{ product.id }}">{{ product.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <button type="submit" class="btn btn-primary btn-sm w-100">Save Mapping</button>
+                                </form>
+                                <form method="post" class="vstack gap-2 mb-2">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="action" value="create_product">
+                                    <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
+                                    <input type="hidden" name="row_id" value="{{ row.id }}">
+                                    <label class="form-label mb-0">Create new product</label>
+                                    <input type="text" class="form-control form-control-sm" name="new_product_name" placeholder="New product name" required>
+                                    <button type="submit" class="btn btn-outline-primary btn-sm w-100">Create + Map</button>
+                                </form>
+                                <form method="post" class="vstack gap-2">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="action" value="resolve_row_price">
+                                    <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
+                                    <input type="hidden" name="row_id" value="{{ row.id }}">
+                                    <input type="hidden" name="price_resolution" value="skip">
+                                    <div class="small text-muted">Skip this row without mapping a product.</div>
+                                    <button type="submit" class="btn btn-outline-secondary btn-sm w-100" {% if price_review_locked %}disabled{% endif %}>Skip Row</button>
+                                </form>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="d-none d-lg-block table-responsive">
                     <table class="table table-sm table-striped mb-0 align-middle">
                         <thead>
                             <tr>

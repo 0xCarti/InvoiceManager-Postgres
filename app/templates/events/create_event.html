@@ -1,15 +1,40 @@
 {% extends 'base.html' %}
 {% block content %}
-<h2>Create Event</h2>
-<form method="post">
-    {{ form.csrf_token }}
-    {{ form.name.label }} {{ form.name(class='form-control') }}
-    {{ form.start_date.label }} {{ form.start_date(class='form-control') }}
-    {{ form.end_date.label }} {{ form.end_date(class='form-control') }}
-    {{ form.event_type.label }} {{ form.event_type(class='form-control') }}
-    {{ form.estimated_sales.label }} {{ form.estimated_sales(class='form-control', placeholder='Optional') }}
-    {{ form.submit(class='btn btn-primary mt-2') }}
-</form>
+<div class="container mt-4">
+<div class="row justify-content-center">
+    <div class="col-12 col-lg-8">
+        <h2 class="h3 mb-3">Create Event</h2>
+        <form method="post" class="card">
+            <div class="card-body">
+                {{ form.csrf_token }}
+                <div class="mb-3">
+                    {{ form.name.label(class='form-label') }}
+                    {{ form.name(class='form-control') }}
+                </div>
+                <div class="row g-3">
+                    <div class="col-12 col-md-6">
+                        {{ form.start_date.label(class='form-label') }}
+                        {{ form.start_date(class='form-control') }}
+                    </div>
+                    <div class="col-12 col-md-6">
+                        {{ form.end_date.label(class='form-label') }}
+                        {{ form.end_date(class='form-control') }}
+                    </div>
+                </div>
+                <div class="mb-3 mt-3">
+                    {{ form.event_type.label(class='form-label') }}
+                    {{ form.event_type(class='form-control') }}
+                </div>
+                <div class="mb-3">
+                    {{ form.estimated_sales.label(class='form-label') }}
+                    {{ form.estimated_sales(class='form-control', placeholder='Optional') }}
+                </div>
+                {{ form.submit(class='btn btn-primary w-100') }}
+            </div>
+        </form>
+    </div>
+</div>
+</div>
 <script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function () {
     const form = document.querySelector('form');

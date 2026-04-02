@@ -42,9 +42,11 @@
     </td>
     <td class="col-archived" data-sort-value="{{ '1' if item.archived else '0' }}">{{ 'Yes' if item.archived else 'No' }}</td>
     <td class="col-actions">
-        <a href="{{ url_for('item.view_item', item_id=item.id) }}" class="btn btn-primary">View</a>
-        <button type="button" class="btn btn-secondary edit-item-btn ms-1" data-item-id="{{ item.id }}">Edit</button>
-        <button type="button" class="btn btn-secondary copy-item-btn ms-1" data-item-id="{{ item.id }}">Copy</button>
-        <a href="{{ url_for('item.item_locations', item_id=item.id) }}" class="btn btn-info ms-1">Locations</a>
+        <div class="mobile-actions mobile-card-actions">
+            <a href="{{ url_for('item.view_item', item_id=item.id) }}" class="btn btn-primary btn-sm">View</a>
+            <button type="button" class="btn btn-secondary btn-sm edit-item-btn" data-item-id="{{ item.id }}">Edit</button>
+            <button type="button" class="btn btn-secondary btn-sm copy-item-btn" data-item-id="{{ item.id }}">Copy</button>
+            <a href="{{ url_for('item.item_locations', item_id=item.id) }}" class="btn btn-info btn-sm">Locations</a>
+        </div>
     </td>
 </tr>

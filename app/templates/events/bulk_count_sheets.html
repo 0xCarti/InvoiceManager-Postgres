@@ -4,6 +4,43 @@
 <style>
     .navbar { display: none; }
     .page-break { page-break-after: always; }
+    .table td {
+        vertical-align: middle;
+    }
+    @media screen and (max-width: 767.98px) {
+        .table thead {
+            display: none;
+        }
+        .table,
+        .table tbody,
+        .table tr,
+        .table td {
+            display: block;
+            width: 100%;
+        }
+        .table tr {
+            margin-bottom: 1rem;
+            border: 1px solid #dee2e6;
+            border-radius: 0.5rem;
+            overflow: hidden;
+            background: #fff;
+        }
+        .table td {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            white-space: normal;
+            padding: 0.65rem 0.75rem;
+            border-left: 0;
+            border-right: 0;
+        }
+        .table td::before {
+            content: attr(data-label);
+            font-weight: 600;
+            flex: 0 0 40%;
+            min-width: 40%;
+        }
+    }
     @media print {
         .no-print { display: none; }
     }
@@ -29,10 +66,10 @@
         <tbody>
             {% for entry in block.stand_items %}
             <tr>
-                <td>{{ entry.item.name }}</td>
-                <td>{% if entry.recv_unit %} _____ {{ entry.recv_unit.name }} of {{ entry.recv_unit.factor }} {{ entry.item.base_unit }}{% endif %}</td>
-                <td>{% if entry.trans_unit %} _____ {{ entry.trans_unit.name }} of {{ entry.trans_unit.factor }} {{ entry.item.base_unit }}{% endif %}</td>
-                <td>_____ {{ entry.item.base_unit }}</td>
+                <td data-label="Item">{{ entry.item.name }}</td>
+                <td data-label="Receiving Quantity">{% if entry.recv_unit %} _____ {{ entry.recv_unit.name }} of {{ entry.recv_unit.factor }} {{ entry.item.base_unit }}{% endif %}</td>
+                <td data-label="Transfer Quantity">{% if entry.trans_unit %} _____ {{ entry.trans_unit.name }} of {{ entry.trans_unit.factor }} {{ entry.item.base_unit }}{% endif %}</td>
+                <td data-label="Base Quantity">_____ {{ entry.item.base_unit }}</td>
             </tr>
             {% endfor %}
         </tbody>

@@ -32,6 +32,9 @@ body {
   border: 1px solid #000;
   padding: 2px 4px;
 }
+.table td {
+  vertical-align: middle;
+}
 .table th {
   text-align: center;
 }
@@ -66,6 +69,44 @@ body {
 .standsheet-page:last-child {
   page-break-after: auto;
 }
+@media screen and (max-width: 767.98px) {
+  .table thead {
+    display: none;
+  }
+  .table,
+  .table tbody,
+  .table tr,
+  .table td {
+    display: block;
+    width: 100%;
+  }
+  .table tr {
+    margin-bottom: 1rem;
+    border: 1px solid #dee2e6;
+    border-radius: 0.5rem;
+    overflow: hidden;
+    background: #fff;
+  }
+  .table td {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    white-space: normal;
+    padding: 0.65rem 0.75rem;
+    border-left: 0;
+    border-right: 0;
+    text-align: left;
+  }
+  .table td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    flex: 0 0 40%;
+    min-width: 40%;
+  }
+  .table td:first-child {
+    text-align: left;
+  }
+}
 @media print {
   .no-print { display: none; }
 }
@@ -76,7 +117,7 @@ body {
     <div>Location: {{ location.name }}</div>
   </div>
   <div class="table">
-    <table>
+    <table class="table-mobile-card">
       <colgroup>
         <col style="width:35%">
         <col style="width:7%">
@@ -121,17 +162,17 @@ body {
           {% endif %}
         {% endfor %}
         <tr>
-          <td>{{ s.item.name }}{% if s.report_unit_label %} ({{ s.report_unit_label }}){% endif %}</td>
-          <td>{% if s.expected is not none %}{{ '%.2f'|format(s.expected) }}{% endif %}</td>
-          <td></td>
-          <td class="border-right"></td>
-          <td></td>
-          <td></td>
-          <td class="border-right"></td>
-          <td></td>
-          <td></td>
-          <td>{% if price.value is not none %}${{ '%.2f'|format(price.value) }}{% endif %}</td>
-          <td></td>
+          <td data-label="Stock Item (Report Unit)">{{ s.item.name }}{% if s.report_unit_label %} ({{ s.report_unit_label }}){% endif %}</td>
+          <td data-label="Expected Opening Count">{% if s.expected is not none %}{{ '%.2f'|format(s.expected) }}{% endif %}</td>
+          <td data-label="Opening Count"></td>
+          <td class="border-right" data-label="Event Transfers In"></td>
+          <td data-label="Event Transfers Out"></td>
+          <td data-label="Eaten"></td>
+          <td class="border-right" data-label="Spoilage"></td>
+          <td data-label="Closing Count"></td>
+          <td data-label="Units Sold"></td>
+          <td data-label="Price">{% if price.value is not none %}${{ '%.2f'|format(price.value) }}{% endif %}</td>
+          <td data-label="Variance"></td>
         </tr>
         {% endfor %}
       </tbody>

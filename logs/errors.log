@@ -28,3 +28,127 @@ AttributeError: 'DeleteForm' object has no attribute 'csrf_token'
                          ^^^^^^^^^^^^^^^^^^^^^^
 AttributeError: 'DeleteForm' object has no attribute 'csrf_token'
 
+2026-04-01 23:49:36,853 ERROR token=d59e525415c0ea46 path=/auth/login method=GET user=anonymous remote_addr=127.0.0.1 user_agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/146.0.0.0 Safari/537.36 traceback=Traceback (most recent call last):
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\connection.py", line 276, in connect
+    sock = self.retry.call_with_retry(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\retry.py", line 46, in call_with_retry
+    return do()
+           ^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\connection.py", line 277, in <lambda>
+    lambda: self._connect(), lambda error: self.disconnect(error)
+            ^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\connection.py", line 607, in _connect
+    for res in socket.getaddrinfo(
+               ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\AppData\Local\Programs\Python\Python311\Lib\socket.py", line 962, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+socket.gaierror: [Errno 11001] getaddrinfo failed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\flask_limiter\extension.py", line 1294, in __inner
+    self.limiter._check_request_limit(
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\flask_limiter\extension.py", line 1168, in _check_request_limit
+    raise e
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\flask_limiter\extension.py", line 1149, in _check_request_limit
+    self.__evaluate_limits(endpoint, all_limits)
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\flask_limiter\extension.py", line 1086, in __evaluate_limits
+    if not method(lim.limit, *args, **kwargs):
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\limits\strategies.py", line 157, in hit
+    self.storage.incr(
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\limits\storage\base.py", line 25, in inner
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\limits\storage\redis.py", line 224, in incr
+    return int(self.lua_incr_expire([key], [expiry, amount]))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\commands\core.py", line 5934, in __call__
+    return client.evalsha(self.sha, len(keys), *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\commands\core.py", line 5310, in evalsha
+    return self._evalsha("EVALSHA", sha, numkeys, *keys_and_args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\commands\core.py", line 5294, in _evalsha
+    return self.execute_command(command, sha, numkeys, *keys_and_args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\client.py", line 542, in execute_command
+    conn = self.connection or pool.get_connection(command_name, **options)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\connection.py", line 1109, in get_connection
+    connection.connect()
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\connection.py", line 282, in connect
+    raise ConnectionError(self._error_message(e))
+redis.exceptions.ConnectionError: Error 11001 connecting to redis:6379. getaddrinfo failed.
+
+2026-04-01 23:49:51,488 ERROR token=4bb950bc1e87498c path=/auth/login method=GET user=anonymous remote_addr=127.0.0.1 user_agent=Werkzeug/3.1.7 traceback=Traceback (most recent call last):
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\connection.py", line 276, in connect
+    sock = self.retry.call_with_retry(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\retry.py", line 46, in call_with_retry
+    return do()
+           ^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\connection.py", line 277, in <lambda>
+    lambda: self._connect(), lambda error: self.disconnect(error)
+            ^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\connection.py", line 607, in _connect
+    for res in socket.getaddrinfo(
+               ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\AppData\Local\Programs\Python\Python311\Lib\socket.py", line 962, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+socket.gaierror: [Errno 11001] getaddrinfo failed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\flask_limiter\extension.py", line 1294, in __inner
+    self.limiter._check_request_limit(
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\flask_limiter\extension.py", line 1168, in _check_request_limit
+    raise e
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\flask_limiter\extension.py", line 1149, in _check_request_limit
+    self.__evaluate_limits(endpoint, all_limits)
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\flask_limiter\extension.py", line 1086, in __evaluate_limits
+    if not method(lim.limit, *args, **kwargs):
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\limits\strategies.py", line 157, in hit
+    self.storage.incr(
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\limits\storage\base.py", line 25, in inner
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\limits\storage\redis.py", line 224, in incr
+    return int(self.lua_incr_expire([key], [expiry, amount]))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\commands\core.py", line 5934, in __call__
+    return client.evalsha(self.sha, len(keys), *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\commands\core.py", line 5310, in evalsha
+    return self._evalsha("EVALSHA", sha, numkeys, *keys_and_args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\commands\core.py", line 5294, in _evalsha
+    return self.execute_command(command, sha, numkeys, *keys_and_args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\client.py", line 542, in execute_command
+    conn = self.connection or pool.get_connection(command_name, **options)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\connection.py", line 1109, in get_connection
+    connection.connect()
+  File "C:\Users\bryce\Desktop\IM\InvoiceManager-Postgres\.codex-pydeps311\redis\connection.py", line 282, in connect
+    raise ConnectionError(self._error_message(e))
+redis.exceptions.ConnectionError: Error 11001 connecting to redis:6379. getaddrinfo failed.
+

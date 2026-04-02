@@ -9,10 +9,10 @@
             <p class="text-muted mb-0">Invite and manage user access</p>
         </div>
     </div>
-    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
-        <form action="{{ url_for('admin.users') }}" method="post" class="d-flex flex-grow-1 flex-wrap align-items-center gap-2">
+    <div class="d-flex flex-column flex-lg-row align-items-stretch align-items-lg-center gap-2 mb-3">
+        <form action="{{ url_for('admin.users') }}" method="post" class="d-flex flex-column flex-sm-row flex-grow-1 gap-2">
             {{ invite_form.hidden_tag() }}
-            {{ invite_form.email(class_='form-control', placeholder='Email', style='max-width: 24rem;') }}
+            {{ invite_form.email(class_='form-control flex-grow-1', placeholder='Email') }}
             <button type="submit" class="btn btn-primary">{{ invite_form.submit.label.text }}</button>
         </form>
         <div>
@@ -30,54 +30,98 @@
             ) }}
         </div>
     </div>
-    <div class="table-responsive">
-    <table class="table sortable" id="admin-users-table">
-        <thead>
-        <tr>
-            <th scope="col" class="col-user-email">Email</th>
-            <th scope="col" class="col-user-active">Active</th>
-            <th scope="col" class="col-user-admin">Admin</th>
-            <th scope="col" class="col-user-actions" data-sortable="false">Actions</th>
-            <th scope="col" class="col-user-profile" data-sortable="false">Profile</th>
-        </tr>
-        </thead>
-        <tbody>
+    <div class="d-md-none vstack gap-3">
         {% for user in users %}
-        <tr>
-            <td class="col-user-email">{{ user.email }}</td>
-            <td class="col-user-active">{{ user.active }}</td>
-            <td class="col-user-admin">{{ user.is_admin }}</td>
-            <td class="col-user-actions">
-                <form action="{{ url_for('admin.users', user_id=user.id) }}" method="post" class="d-inline">
-                    {{ form.hidden_tag() }}
-                    <button type="submit" name="action" value="toggle_active" class="btn btn-sm btn-primary"
-                            data-confirm-message="Are you sure you want to toggle the active status?">
-                        Toggle Active
-                    </button>
-                </form>
-                <form action="{{ url_for('admin.users', user_id=user.id) }}" method="post" class="d-inline">
-                    {{ form.hidden_tag() }}
-                    <button type="submit" name="action" value="toggle_admin" class="btn btn-sm btn-secondary"
-                            data-confirm-message="Are you sure you want to toggle the admin status?">
-                        Toggle Admin
-                    </button>
-                </form>
-                <!-- Separate form for deletion to ensure clear user intent -->
-                <form action="{{ url_for('admin.delete_user', user_id=user.id) }}" method="post" class="d-inline">
-                    {{ form.hidden_tag() }}
-                    <button type="submit" class="btn btn-sm btn-danger"
-                            data-confirm-message="Are you sure you want to delete this user?">
-                        Delete
-                    </button>
-                </form>
-            </td>
-            <td class="col-user-profile">
-                <a href="{{ url_for('admin.user_profile', user_id=user.id) }}" class="btn btn-sm btn-info">View Profile</a>
-            </td>
-        </tr>
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                    <div class="min-w-0">
+                        <div class="fw-semibold text-break">{{ user.email }}</div>
+                        <div class="small text-muted">Profile: {{ user.id }}</div>
+                    </div>
+                    <span class="badge {% if user.active %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+                        {{ 'Active' if user.active else 'Inactive' }}
+                    </span>
+                </div>
+                <div class="small mb-3">
+                    Admin access:
+                    <span class="fw-semibold">{{ 'Yes' if user.is_admin else 'No' }}</span>
+                </div>
+                <div class="vstack gap-2">
+                    <form action="{{ url_for('admin.users', user_id=user.id) }}" method="post">
+                        {{ form.hidden_tag() }}
+                        <button type="submit" name="action" value="toggle_active" class="btn btn-primary btn-sm w-100"
+                                data-confirm-message="Are you sure you want to toggle the active status?">
+                            Toggle Active
+                        </button>
+                    </form>
+                    <form action="{{ url_for('admin.users', user_id=user.id) }}" method="post">
+                        {{ form.hidden_tag() }}
+                        <button type="submit" name="action" value="toggle_admin" class="btn btn-secondary btn-sm w-100"
+                                data-confirm-message="Are you sure you want to toggle the admin status?">
+                            Toggle Admin
+                        </button>
+                    </form>
+                    <form action="{{ url_for('admin.delete_user', user_id=user.id) }}" method="post">
+                        {{ form.hidden_tag() }}
+                        <button type="submit" class="btn btn-danger btn-sm w-100"
+                                data-confirm-message="Are you sure you want to delete this user?">
+                            Delete
+                        </button>
+                    </form>
+                    <a href="{{ url_for('admin.user_profile', user_id=user.id) }}" class="btn btn-info btn-sm w-100">View Profile</a>
+                </div>
+            </div>
+        </div>
         {% endfor %}
-        </tbody>
-    </table>
+    </div>
+    <div class="d-none d-md-block table-responsive">
+        <table class="table sortable" id="admin-users-table">
+            <thead>
+            <tr>
+                <th scope="col" class="col-user-email">Email</th>
+                <th scope="col" class="col-user-active">Active</th>
+                <th scope="col" class="col-user-admin">Admin</th>
+                <th scope="col" class="col-user-actions" data-sortable="false">Actions</th>
+                <th scope="col" class="col-user-profile" data-sortable="false">Profile</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for user in users %}
+            <tr>
+                <td class="col-user-email">{{ user.email }}</td>
+                <td class="col-user-active">{{ user.active }}</td>
+                <td class="col-user-admin">{{ user.is_admin }}</td>
+                <td class="col-user-actions">
+                    <form action="{{ url_for('admin.users', user_id=user.id) }}" method="post" class="d-inline">
+                        {{ form.hidden_tag() }}
+                        <button type="submit" name="action" value="toggle_active" class="btn btn-sm btn-primary"
+                                data-confirm-message="Are you sure you want to toggle the active status?">
+                            Toggle Active
+                        </button>
+                    </form>
+                    <form action="{{ url_for('admin.users', user_id=user.id) }}" method="post" class="d-inline">
+                        {{ form.hidden_tag() }}
+                        <button type="submit" name="action" value="toggle_admin" class="btn btn-sm btn-secondary"
+                                data-confirm-message="Are you sure you want to toggle the admin status?">
+                            Toggle Admin
+                        </button>
+                    </form>
+                    <form action="{{ url_for('admin.delete_user', user_id=user.id) }}" method="post" class="d-inline">
+                        {{ form.hidden_tag() }}
+                        <button type="submit" class="btn btn-sm btn-danger"
+                                data-confirm-message="Are you sure you want to delete this user?">
+                            Delete
+                        </button>
+                    </form>
+                </td>
+                <td class="col-user-profile">
+                    <a href="{{ url_for('admin.user_profile', user_id=user.id) }}" class="btn btn-sm btn-info">View Profile</a>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
     </div>
 </div>
 {% endblock %}

@@ -2,16 +2,22 @@
 
 {% block content %}
 <div class="container mt-4">
-    <h2>System Information</h2>
-    <table class="table">
-        <tbody>
-            <tr><th>Platform</th><td>{{ info.platform }}</td></tr>
-            <tr><th>Python Version</th><td>{{ info.python_version }}</td></tr>
-            <tr><th>Flask Version</th><td>{{ info.flask_version }}</td></tr>
-            <tr><th>Application Version</th><td>{{ info.version }}</td></tr>
-            <tr><th>Start Time</th><td>{{ info.started_at }}</td></tr>
-            <tr><th>Uptime</th><td>{{ info.uptime }}</td></tr>
-        </tbody>
-    </table>
+    <h2 class="h4 mb-3">System Information</h2>
+    <div class="card">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-sm mb-0 align-middle">
+                    <tbody>
+                        <tr><th>Platform</th><td class="text-break">{{ info.platform }}</td></tr>
+                        <tr><th>Python Version</th><td class="text-break">{{ info.python_version }}</td></tr>
+                        <tr><th>Flask Version</th><td class="text-break">{{ info.flask_version }}</td></tr>
+                        <tr><th>Application Version</th><td class="text-break">{{ info.version }}</td></tr>
+                        <tr><th>Start Time</th><td class="text-break">{{ info.started_at }}</td></tr>
+                        <tr><th>Uptime</th><td class="text-break">{{ info.uptime }}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}

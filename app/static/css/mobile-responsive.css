@@ -1,0 +1,251 @@
+/* Shared mobile responsiveness helpers used across the app templates. */
+
+.page-header-stack,
+.mobile-header-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.page-header-stack > *,
+.mobile-header-wrap > * {
+    min-width: 0;
+}
+
+.mobile-toolbar,
+.mobile-filter-toolbar,
+.mobile-inline-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: flex-end;
+}
+
+.mobile-toolbar > *,
+.mobile-filter-toolbar > *,
+.mobile-inline-actions > * {
+    min-width: 0;
+}
+
+.mobile-toolbar .btn,
+.mobile-toolbar .btn-group,
+.mobile-toolbar .dropdown,
+.mobile-toolbar .input-group,
+.mobile-toolbar .form-control,
+.mobile-toolbar .form-select,
+.mobile-filter-toolbar .btn,
+.mobile-filter-toolbar .btn-group,
+.mobile-filter-toolbar .dropdown,
+.mobile-filter-toolbar .input-group,
+.mobile-filter-toolbar .form-control,
+.mobile-filter-toolbar .form-select {
+    max-width: 100%;
+}
+
+.mobile-toolbar .toolbar-spacer,
+.mobile-filter-toolbar .toolbar-spacer {
+    flex: 1 1 auto;
+}
+
+.mobile-toolbar .toolbar-narrow,
+.mobile-filter-toolbar .toolbar-narrow {
+    flex: 0 1 auto;
+}
+
+.mobile-toolbar .toolbar-wide,
+.mobile-filter-toolbar .toolbar-wide {
+    flex: 1 1 16rem;
+}
+
+.table-mobile-wrap th,
+.table-mobile-wrap td {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.table-mobile-compact th,
+.table-mobile-compact td {
+    vertical-align: top;
+}
+
+.table-mobile-card th,
+.table-mobile-card td {
+    white-space: normal;
+}
+
+.table-mobile-card th[data-label=""]::before,
+.table-mobile-card td[data-label=""]::before {
+    display: none;
+}
+
+.mobile-summary-grid {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.mobile-summary-card {
+    min-width: 0;
+}
+
+@media (max-width: 767.98px) {
+    .page-header-stack,
+    .mobile-header-wrap,
+    .card-header.d-flex {
+        flex-wrap: wrap;
+        align-items: flex-start !important;
+    }
+
+    .page-header-stack > *,
+    .mobile-header-wrap > *,
+    .card-header.d-flex > * {
+        width: 100%;
+    }
+
+    .page-header-stack .btn,
+    .page-header-stack .btn-group,
+    .mobile-header-wrap .btn,
+    .mobile-header-wrap .btn-group,
+    .card-header.d-flex .btn,
+    .card-header.d-flex .btn-group {
+        width: auto;
+        max-width: 100%;
+    }
+
+    .mobile-toolbar > *,
+    .mobile-filter-toolbar > * {
+        flex: 1 1 100%;
+        width: 100%;
+    }
+
+    .mobile-toolbar .btn,
+    .mobile-toolbar .btn-group,
+    .mobile-toolbar .dropdown,
+    .mobile-toolbar .input-group,
+    .mobile-toolbar .form-control,
+    .mobile-toolbar .form-select,
+    .mobile-filter-toolbar .btn,
+    .mobile-filter-toolbar .btn-group,
+    .mobile-filter-toolbar .dropdown,
+    .mobile-filter-toolbar .input-group,
+    .mobile-filter-toolbar .form-control,
+    .mobile-filter-toolbar .form-select {
+        width: 100%;
+    }
+
+    .mobile-inline-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .mobile-inline-actions > * {
+        width: 100%;
+    }
+
+    .mobile-inline-actions .btn,
+    .mobile-inline-actions .btn-group,
+    .mobile-inline-actions .dropdown,
+    .mobile-inline-actions form {
+        width: 100%;
+    }
+
+    .mobile-inline-actions form .btn,
+    td[class*="actions"] form,
+    td[class*="-actions"] form {
+        width: 100%;
+    }
+
+    td[class*="actions"] .btn,
+    td[class*="actions"] .dropdown,
+    td[class*="-actions"] .btn,
+    td[class*="-actions"] .dropdown {
+        width: 100%;
+    }
+
+    td[class*="actions"] .dropdown > .btn,
+    td[class*="-actions"] .dropdown > .btn {
+        width: 100%;
+    }
+
+    .btn {
+        width: auto;
+        margin-bottom: 0;
+    }
+
+    .btn-group,
+    .dropdown,
+    .input-group {
+        max-width: 100%;
+    }
+
+    .table {
+        font-size: 0.9rem;
+    }
+
+    .table-responsive {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .table-responsive > .table {
+        width: 100%;
+    }
+
+    .table-mobile-wrap th,
+    .table-mobile-wrap td,
+    .table-mobile-card th,
+    .table-mobile-card td {
+        white-space: normal !important;
+    }
+
+    .table-mobile-card thead {
+        display: none;
+    }
+
+    .table-mobile-card tbody,
+    .table-mobile-card tr,
+    .table-mobile-card th,
+    .table-mobile-card td {
+        display: block;
+        width: 100%;
+    }
+
+    .table-mobile-card tr {
+        margin-bottom: 0.85rem;
+        padding: 0.85rem 0.9rem;
+        border: 1px solid var(--bs-border-color);
+        border-radius: 0.65rem;
+        background: var(--bs-body-bg);
+    }
+
+    .table-mobile-card th,
+    .table-mobile-card td {
+        border: 0 !important;
+        padding: 0.3rem 0;
+    }
+
+    .table-mobile-card th::before,
+    .table-mobile-card td::before {
+        content: attr(data-label);
+        display: block;
+        margin-bottom: 0.15rem;
+        font-size: 0.74rem;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        color: var(--bs-secondary-color);
+        text-transform: none;
+    }
+
+    .table-mobile-card .mobile-card-primary {
+        font-size: 1rem;
+        font-weight: 700;
+    }
+
+    .table-mobile-card .mobile-card-actions {
+        margin-top: 0.45rem;
+    }
+
+    .mobile-summary-grid {
+        grid-template-columns: 1fr;
+    }
+}

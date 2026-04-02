@@ -35,6 +35,10 @@
         font-size: 0.9rem;
     }
 
+    .stand-sheet-table td {
+        vertical-align: middle;
+    }
+
     .stand-sheet-table .sales,
     .stand-sheet-table .variance {
         min-width: 5.5rem;
@@ -42,6 +46,56 @@
 
     .stand-sheet-table .adjustments {
         min-width: 5.5rem;
+    }
+
+    @media (max-width: 767.98px) {
+        .stand-sheet-table thead {
+            display: none;
+        }
+
+        .stand-sheet-table,
+        .stand-sheet-table tbody,
+        .stand-sheet-table tr,
+        .stand-sheet-table td {
+            display: block;
+            width: 100%;
+        }
+
+        .stand-sheet-table tr {
+            margin-bottom: 1rem;
+            border: 1px solid #dee2e6;
+            border-radius: 0.5rem;
+            overflow: hidden;
+            background: #fff;
+        }
+
+        .stand-sheet-table td {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            border-left: 0;
+            border-right: 0;
+            white-space: normal;
+            padding: 0.65rem 0.75rem;
+        }
+
+        .stand-sheet-table td::before {
+            content: attr(data-label);
+            font-weight: 600;
+            flex: 0 0 40%;
+            min-width: 40%;
+        }
+
+        .stand-sheet-table td:first-child {
+            position: static;
+            min-width: 0;
+            background: transparent;
+        }
+
+        .stand-sheet-table input.form-control {
+            max-width: none;
+            width: 100%;
+        }
     }
 </style>
 <div class="container mt-4">
@@ -53,7 +107,7 @@
             <div>Event Date/Time: {{ event.start_date }}</div>
         </div>
     <div class="table-responsive">
-    <table class="table table-bordered stand-sheet-table">
+    <table class="table table-bordered table-sm stand-sheet-table">
         <thead>
             <tr>
                 <th>Item (Report Unit)</th>
@@ -80,40 +134,40 @@
             {% set close_val = entry.sheet_values.closing_count or 0 %}
             {% set variance = opening_val + in_val + adjustments_val - out_val - entry.sales - eaten_val - spoiled_val - close_val %}
             <tr>
-                <td>
+                <td data-label="Item">
                     {{ entry.item.name }}
                     {% if entry.report_unit_label %}
                         ({{ entry.report_unit_label }})
                     {% endif %}
                 </td>
-                <td>
+                <td data-label="Prior Event Close">
                     {% if entry.expected is not none %}
                         {{ '%.2f'|format(entry.expected) }}
                     {% endif %}
                 </td>
-                <td>
+                <td data-label="Pre-Event Count">
                     <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="open_{{ entry.item.id }}" value="{% if entry.sheet_values.opening_count is not none %}{{ '%.4f'|format(entry.sheet_values.opening_count) }}{% endif %}">
                 </td>
-                <td>
+                <td data-label="Transferred In">
                     <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="in_{{ entry.item.id }}" value="{% if entry.sheet_values.transferred_in is not none %}{{ '%.4f'|format(entry.sheet_values.transferred_in) }}{% endif %}">
                 </td>
-                <td>
+                <td data-label="Transferred Out">
                     <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="out_{{ entry.item.id }}" value="{% if entry.sheet_values.transferred_out is not none %}{{ '%.4f'|format(entry.sheet_values.transferred_out) }}{% endif %}">
                 </td>
-                <td>
+                <td data-label="Adjustments">
                     <input type="text" inputmode="text" data-numeric-input="1" class="form-control adjustments" name="adjust_{{ entry.item.id }}" value="{% if entry.sheet_values.adjustments is not none %}{{ '%.4f'|format(entry.sheet_values.adjustments) }}{% endif %}">
                 </td>
-                <td class="sales" data-sales="{{ '%.4f'|format(entry.sales) }}">{{ '%.2f'|format(entry.sales) }}</td>
-                <td>
+                <td class="sales" data-label="Sales" data-sales="{{ '%.4f'|format(entry.sales) }}">{{ '%.2f'|format(entry.sales) }}</td>
+                <td data-label="Eaten">
                     <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="eaten_{{ entry.item.id }}" value="{% if entry.sheet_values.eaten is not none %}{{ '%.4f'|format(entry.sheet_values.eaten) }}{% endif %}">
                 </td>
-                <td>
+                <td data-label="Spoiled">
                     <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="spoiled_{{ entry.item.id }}" value="{% if entry.sheet_values.spoiled is not none %}{{ '%.4f'|format(entry.sheet_values.spoiled) }}{% endif %}">
                 </td>
-                <td>
+                <td data-label="Closing Count">
                     <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="close_{{ entry.item.id }}" value="{% if entry.sheet_values.closing_count is not none %}{{ '%.4f'|format(entry.sheet_values.closing_count) }}{% endif %}">
                 </td>
-                <td class="variance">{% if entry.sheet %}{{ '%.2f'|format(variance) }}{% else %}0.00{% endif %}</td>
+                <td class="variance" data-label="Variance">{% if entry.sheet %}{{ '%.2f'|format(variance) }}{% else %}0.00{% endif %}</td>
             </tr>
             {% endfor %}
         </tbody>

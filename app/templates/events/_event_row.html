@@ -1,19 +1,20 @@
 <tr>
-    <td class="col-event-name">{{ e.name }}</td>
-    <td class="col-event-type">{{ type_labels.get(e.event_type, e.event_type) }}</td>
-    <td class="col-event-start">{{ e.start_date }}</td>
-    <td class="col-event-end">{{ e.end_date }}</td>
-    <td class="col-event-estimated-sales">
+    <td class="col-event-name text-break" data-label="Name">{{ e.name }}</td>
+    <td class="col-event-type" data-label="Type">{{ type_labels.get(e.event_type, e.event_type) }}</td>
+    <td class="col-event-start" data-label="Start">{{ e.start_date }}</td>
+    <td class="col-event-end" data-label="End">{{ e.end_date }}</td>
+    <td class="col-event-estimated-sales" data-label="Estimated Sales">
         {% if e.estimated_sales is not none %}
             ${{ '{:,.2f}'.format(e.estimated_sales) }}
         {% else %}
             —
         {% endif %}
     </td>
-    <td class="col-event-closed">{{ 'Yes' if e.closed else 'No' }}</td>
-    <td class="col-event-actions">
-        <a href="{{ url_for('event.view_event', event_id=e.id) }}">View</a>
-        |
-        <a href="{{ url_for('event.edit_event', event_id=e.id) }}">Edit</a>
+    <td class="col-event-closed" data-label="Closed">{{ 'Yes' if e.closed else 'No' }}</td>
+    <td class="col-event-actions" data-label="Actions">
+        <div class="d-flex flex-column flex-sm-row flex-wrap gap-1">
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.view_event', event_id=e.id) }}">View</a>
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.edit_event', event_id=e.id) }}">Edit</a>
+        </div>
     </td>
 </tr>

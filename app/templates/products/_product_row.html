@@ -62,7 +62,7 @@
         {% for location in product.locations %}
             {% set location_ns.entries = location_ns.entries + [{'name': location.name, 'url': url_for('locations.edit_location', location_id=location.id)}] %}
         {% endfor %}
-        <div class="d-flex flex-wrap gap-1">
+        <div class="mobile-actions mobile-card-actions">
             <button type="button"
                     class="btn btn-outline-primary btn-sm view-product-menus"
                     data-bs-toggle="modal"

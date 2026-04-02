@@ -28,7 +28,6 @@
         min-height: 1.05rem;
         font-size: 0.78rem;
         line-height: 1.05rem;
-        white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         margin-top: 0;
@@ -60,6 +59,27 @@
 
     .profile-actions .btn {
         min-width: 11rem;
+    }
+
+    @media (max-width: 575.98px) {
+        .profile-feedback {
+            white-space: normal;
+            overflow: visible;
+            text-overflow: clip;
+        }
+
+        .profile-actions {
+            justify-content: stretch;
+        }
+
+        .profile-actions .btn {
+            width: 100%;
+            min-width: 0;
+        }
+
+        .profile-activity-header {
+            align-items: flex-start;
+        }
     }
 
     .profile-header {
@@ -274,9 +294,9 @@
                                         </span>
                                     </div>
                                     <div class="profile-activity-meta">
-                                        {{ t.from_location_name }} → {{ t.to_location_name }}
+                                        {{ t.from_location_name }} -> {{ t.to_location_name }}
                                         {% if t.date_created %}
-                                        · {{ t.date_created.strftime('%Y-%m-%d') }}
+                                        | {{ t.date_created.strftime('%Y-%m-%d') }}
                                         {% endif %}
                                     </div>
                                 </a>
@@ -297,7 +317,8 @@
                             {% endif %}
                         </div>
                         <div class="profile-activity-list">
-                            <table class="table table-sm table-hover profile-activity-table">
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover profile-activity-table mb-0">
                                 <thead class="table-light sticky-top">
                                     <tr>
                                         <th scope="col">ID</th>
@@ -312,7 +333,7 @@
                                     <td>
                                         <a href="{{ url_for('invoice.view_invoice', invoice_id=inv.id) }}">#{{ inv.id }}</a>
                                     </td>
-                                    <td>{{ inv.date_created.strftime('%Y-%m-%d') if inv.date_created else '—' }}</td>
+                                    <td>{{ inv.date_created.strftime('%Y-%m-%d') if inv.date_created else '-' }}</td>
                                     <td>
                                         <span class="badge text-bg-{{ 'success' if inv.is_paid else 'secondary' }}">
                                             {{ 'Paid' if inv.is_paid else 'Unpaid' }}
@@ -326,7 +347,8 @@
                                 </tr>
                             {% endfor %}
                                 </tbody>
-                            </table>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>

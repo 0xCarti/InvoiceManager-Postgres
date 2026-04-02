@@ -14,24 +14,26 @@
         {{ ns.completed_items }}/{{ total_items }} ({{ "%.0f"|format(completion_percentage) }}%)
     </td>
     <td class="col-transfer-actions">
-        <a href="{{ url_for('transfer.view_transfer', transfer_id=transfer.id) }}" class="btn btn-primary" target="_blank">View</a>
-        <button type="button" class="btn btn-secondary edit-transfer-btn" data-id="{{ transfer.id }}">Edit</button>
+        <div class="mobile-actions mobile-card-actions">
+        <a href="{{ url_for('transfer.view_transfer', transfer_id=transfer.id) }}" class="btn btn-primary btn-sm" target="_blank">View</a>
+        <button type="button" class="btn btn-secondary btn-sm edit-transfer-btn" data-id="{{ transfer.id }}">Edit</button>
         {% if transfer.completed %}
         <form method="post" action="{{ url_for('transfer.uncomplete_transfer', transfer_id=transfer.id) }}" class="d-inline">
             {{ form.hidden_tag() }}
-            <button type="submit" class="btn btn-success">Incomplete</button>
+            <button type="submit" class="btn btn-success btn-sm">Incomplete</button>
         </form>
         {% else %}
         <form method="post" action="{{ url_for('transfer.complete_transfer', transfer_id=transfer.id) }}" class="d-inline">
             {{ form.hidden_tag() }}
-            <button type="submit" class="btn btn-success">
+            <button type="submit" class="btn btn-success btn-sm">
                 {% if ns.completed_items > 0 %}Finish{% else %}Complete{% endif %}
             </button>
         </form>
         {% endif %}
         <form action="{{ url_for('transfer.delete_transfer', transfer_id=transfer.id) }}" method="post" class="d-inline">
             {{ form.hidden_tag() }}
-            <input type="submit" value="Delete" class="btn btn-danger" data-confirm-message="Are you sure?">
+            <input type="submit" value="Delete" class="btn btn-danger btn-sm" data-confirm-message="Are you sure?">
         </form>
+        </div>
     </td>
 </tr>

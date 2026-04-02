@@ -5,7 +5,44 @@
 {% block title %}View Vendors{% endblock %}
 
 {% block content %}
-<div class="container mt-5">
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .mobile-list-page .mobile-toolbar,
+    .mobile-list-page .mobile-pagination-controls {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .mobile-list-page .mobile-toolbar > *,
+    .mobile-list-page .mobile-toolbar .btn,
+    .mobile-list-page .mobile-toolbar .dropdown,
+    .mobile-list-page .mobile-toolbar .dropdown > .btn,
+    .mobile-list-page .mobile-pagination-controls > *,
+    .mobile-list-page .mobile-pagination-controls form,
+    .mobile-list-page .mobile-pagination-controls .pagination {
+        width: 100%;
+    }
+    .mobile-list-page .mobile-table-wrap .table {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+    .mobile-list-page .mobile-table-wrap .table th,
+    .mobile-list-page .mobile-table-wrap .table td {
+        white-space: normal !important;
+        vertical-align: top;
+    }
+    .mobile-list-page .mobile-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .375rem;
+    }
+    .mobile-list-page .mobile-actions .btn,
+    .mobile-list-page .mobile-actions form {
+        margin: 0 !important;
+    }
+}
+</style>
+<div class="container mt-5 mobile-list-page">
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
         <div>
             <h2 class="mb-1">Vendors</h2>
@@ -15,7 +52,7 @@
             <button type="button" class="btn btn-primary" id="createVendorBtn">Create Vendor</button>
         </div>
     </div>
-    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3 mobile-toolbar">
         <div>
             {{ column_visibility_dropdown(
                 table_id='vendorTable',
@@ -29,7 +66,7 @@
             ) }}
         </div>
     </div>
-    <div class="table-responsive">
+    <div class="table-responsive mobile-table-wrap">
     <table class="table sortable" id="vendorTable">
         <thead>
             <tr>
@@ -46,7 +83,7 @@
         </tbody>
     </table>
     </div>
-    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3 mobile-pagination-controls">
         <nav aria-label="Vendor pagination">
             <ul class="pagination mb-0">
                 <li class="page-item {% if not vendors.has_prev %}disabled{% endif %}">

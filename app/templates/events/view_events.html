@@ -2,6 +2,54 @@
 {% from 'macros/column_visibility.html' import column_visibility_dropdown %}
 {% from 'macros/filter_modal.html' import filter_modal %}
 {% block content %}
+<style>
+@media (max-width: 767.98px) {
+    #events-table thead {
+        display: none;
+    }
+
+    #events-table,
+    #events-table tbody,
+    #events-table tr,
+    #events-table td {
+        display: block;
+        width: 100%;
+    }
+
+    #events-table tr {
+        margin-bottom: 1rem;
+        border: 1px solid #dee2e6;
+        border-radius: 0.5rem;
+        overflow: hidden;
+        background: #fff;
+    }
+
+    #events-table td {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.75rem;
+        white-space: normal;
+        padding: 0.65rem 0.75rem;
+        border-left: 0;
+        border-right: 0;
+    }
+
+    #events-table td::before {
+        content: attr(data-label);
+        font-weight: 600;
+        flex: 0 0 40%;
+        min-width: 40%;
+    }
+
+    #events-table td.col-event-actions .d-flex {
+        width: 100%;
+    }
+
+    #events-table td.col-event-actions .btn {
+        width: 100%;
+    }
+}
+</style>
 <div class="container mt-5">
 <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
     <div>
@@ -12,7 +60,7 @@
         <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createEventModal">Create Event</button>
     </div>
 </div>
-<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+<div class="d-flex flex-column flex-md-row flex-wrap align-items-stretch align-items-md-center gap-2 mb-3">
     <div class="dropdown d-md-none">
         <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
             More actions
@@ -29,7 +77,7 @@
             <li><a class="dropdown-item" href="{{ url_for('report.event_terminal_sales_report') }}">Event Terminal Sales Report</a></li>
         </ul>
     </div>
-    <div>
+    <div class="flex-grow-1">
         {{ column_visibility_dropdown(
             table_id='events-table',
             storage_key='eventsTableColumnVisibility',
@@ -63,7 +111,7 @@
 </div>
 {% endif %}
 <div class="table-responsive">
-<table class="table mt-3 sortable" id="events-table">
+<table class="table table-sm align-middle mt-3 sortable" id="events-table">
     <thead>
         <tr>
             <th scope="col" class="col-event-name">Name</th>
@@ -116,21 +164,21 @@
         <div class="form-text">Shows events active on the selected date.</div>
     </div>
     <div class="row g-2 mb-3">
-        <div class="col-sm-6">
+        <div class="col-12 col-sm-6">
             <label for="filter-start-date-from" class="form-label">Start Date From</label>
             <input type="date" name="start_date_from" id="filter-start-date-from" class="form-control" value="{{ filter_values.start_date_from }}" />
         </div>
-        <div class="col-sm-6">
+        <div class="col-12 col-sm-6">
             <label for="filter-start-date-to" class="form-label">Start Date To</label>
             <input type="date" name="start_date_to" id="filter-start-date-to" class="form-control" value="{{ filter_values.start_date_to }}" />
         </div>
     </div>
     <div class="row g-2 mb-3">
-        <div class="col-sm-6">
+        <div class="col-12 col-sm-6">
             <label for="filter-end-date-from" class="form-label">End Date From</label>
             <input type="date" name="end_date_from" id="filter-end-date-from" class="form-control" value="{{ filter_values.end_date_from }}" />
         </div>
-        <div class="col-sm-6">
+        <div class="col-12 col-sm-6">
             <label for="filter-end-date-to" class="form-label">End Date To</label>
             <input type="date" name="end_date_to" id="filter-end-date-to" class="form-control" value="{{ filter_values.end_date_to }}" />
         </div>

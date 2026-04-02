@@ -2,7 +2,7 @@
 {% block content %}
 <div class="row">
     <div class="col-12">
-        <h1 class="mb-3">Vendor Item Aliases</h1>
+        <h1 class="h4 mb-3">Vendor Item Aliases</h1>
         <p class="text-muted">Link vendor SKUs and descriptions to inventory items so future purchase-order imports map automatically.</p>
     </div>
 </div>
@@ -65,7 +65,46 @@
             </div>
             <div class="card-body">
                 {% if aliases %}
-                <div class="table-responsive">
+                <div class="d-lg-none vstack gap-3">
+                    {% for alias in aliases %}
+                    <div class="card border">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                                <div class="min-w-0">
+                                    <div class="fw-semibold text-break">{{ alias.vendor.first_name }} {{ alias.vendor.last_name }}</div>
+                                    <div class="small text-muted text-break">{{ alias.vendor_sku or 'No SKU' }}</div>
+                                </div>
+                                <span class="badge bg-secondary">{{ alias.item.name if alias.item else 'Unmapped item' }}</span>
+                            </div>
+                            <div class="small mb-2 text-break">
+                                {{ alias.vendor_description or 'No vendor description' }}
+                            </div>
+                            <dl class="row mb-3 small">
+                                <dt class="col-5 text-muted">Pack/Size</dt>
+                                <dd class="col-7 mb-1">{{ alias.pack_size or '-' }}</dd>
+                                <dt class="col-5 text-muted">Unit</dt>
+                                <dd class="col-7 mb-1">{{ alias.item_unit.name if alias.item_unit else 'Receiving default' }}</dd>
+                                <dt class="col-5 text-muted">Default Cost</dt>
+                                <dd class="col-7 mb-0">
+                                    {% if alias.default_cost is not none %}
+                                        ${{ '%.2f'|format(alias.default_cost) }}
+                                    {% else %}
+                                        <span class="text-muted">—</span>
+                                    {% endif %}
+                                </dd>
+                            </dl>
+                            <div class="vstack gap-2">
+                                <a class="btn btn-sm btn-outline-primary w-100" href="{{ url_for('admin.vendor_item_aliases', alias_id=alias.id) }}">Edit</a>
+                                <form method="post" action="{{ url_for('admin.delete_vendor_item_alias', alias_id=alias.id) }}">
+                                    {{ delete_form.hidden_tag() }}
+                                    <button type="submit" class="btn btn-sm btn-danger w-100" data-confirm-message="Delete this alias?">Delete</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="d-none d-lg-block table-responsive">
                     <table class="table table-striped align-middle">
                         <thead>
                             <tr>
@@ -83,16 +122,16 @@
                             {% for alias in aliases %}
                             <tr>
                                 <td>{{ alias.vendor.first_name }} {{ alias.vendor.last_name }}</td>
-                                <td>{{ alias.vendor_sku or '—' }}</td>
-                                <td class="text-wrap">{{ alias.vendor_description or '—' }}</td>
-                                <td>{{ alias.pack_size or '—' }}</td>
-                                <td>{{ alias.item.name if alias.item else '—' }}</td>
+                                <td>{{ alias.vendor_sku or '-' }}</td>
+                                <td class="text-wrap">{{ alias.vendor_description or '-' }}</td>
+                                <td>{{ alias.pack_size or '-' }}</td>
+                                <td>{{ alias.item.name if alias.item else '-' }}</td>
                                 <td>{{ alias.item_unit.name if alias.item_unit else 'Receiving default' }}</td>
                                 <td>
                                     {% if alias.default_cost is not none %}
                                         ${{ '%.2f'|format(alias.default_cost) }}
                                     {% else %}
-                                        <span class="text-muted">—</span>
+                                        <span class="text-muted">-</span>
                                     {% endif %}
                                 </td>
                                 <td class="text-end">

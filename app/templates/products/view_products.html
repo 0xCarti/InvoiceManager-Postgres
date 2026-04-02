@@ -4,7 +4,44 @@
 {% block title %}View Products{% endblock %}
 
 {% block content %}
-<div class="container mt-5">
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .mobile-list-page .mobile-toolbar,
+    .mobile-list-page .mobile-pagination-controls {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .mobile-list-page .mobile-toolbar > *,
+    .mobile-list-page .mobile-toolbar .btn,
+    .mobile-list-page .mobile-toolbar .dropdown,
+    .mobile-list-page .mobile-toolbar .dropdown > .btn,
+    .mobile-list-page .mobile-pagination-controls > *,
+    .mobile-list-page .mobile-pagination-controls form,
+    .mobile-list-page .mobile-pagination-controls .pagination {
+        width: 100%;
+    }
+    .mobile-list-page .mobile-table-wrap .table {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+    .mobile-list-page .mobile-table-wrap .table th,
+    .mobile-list-page .mobile-table-wrap .table td {
+        white-space: normal !important;
+        vertical-align: top;
+    }
+    .mobile-list-page .mobile-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .375rem;
+    }
+    .mobile-list-page .mobile-actions .btn,
+    .mobile-list-page .mobile-actions form {
+        margin: 0 !important;
+    }
+}
+</style>
+<div class="container mt-5 mobile-list-page">
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
         <div>
             <h2 class="mb-1">Products</h2>
@@ -14,7 +51,7 @@
             <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createProductModal">Create Product</button>
         </div>
     </div>
-    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3 mobile-toolbar">
         <button type="submit" class="btn btn-warning" form="bulk-cost-form">Set Cost From Recipe</button>
         <button type="button" class="btn btn-outline-secondary" id="bulkEditProductsBtn" disabled>Bulk Edit</button>
         <div class="dropdown d-md-none">
@@ -264,8 +301,8 @@
     {% endif %}
     <form id="bulk-cost-form" action="{{ url_for('product.bulk_set_cost_from_recipe') }}" method="post">
         {{ bulk_cost_form.hidden_tag() }}
-        <div class="table-responsive">
-        <table class="table sortable" id="product-table">
+    <div class="table-responsive mobile-table-wrap">
+        <table class="table sortable table-mobile-card" id="product-table">
         <thead>
             <tr>
                 <th class="col-select"><input type="checkbox" id="select-all-products" style="transform: scale(1.5);"></th>
@@ -296,7 +333,7 @@
         </table>
         </div>
     </form>
-    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3 mobile-pagination-controls">
         <nav aria-label="Product pagination">
             <ul class="pagination mb-0">
                 <li class="page-item {% if not products.has_prev %}disabled{% endif %}">

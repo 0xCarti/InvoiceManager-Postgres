@@ -480,6 +480,7 @@
             }
         }
     </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile-responsive.css') }}">
 </head>
 
 <body class="{% if current_user.is_authenticated %}has-auth-sidebar{% endif %}">
@@ -677,6 +678,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
     <script src="{{ url_for('static', filename='js/table-sort.js') }}"></script>
     <script src="{{ url_for('static', filename='js/column_visibility.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/responsive_tables.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/filter_defaults.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/security.js') }}" defer></script>
     <script nonce="{{ csp_nonce }}">

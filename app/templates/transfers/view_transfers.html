@@ -2,7 +2,44 @@
 {% from 'macros/column_visibility.html' import column_visibility_dropdown %}
 
 {% block content %}
-<div class="container mt-5">
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .mobile-list-page .mobile-toolbar,
+    .mobile-list-page .mobile-pagination-controls {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .mobile-list-page .mobile-toolbar > *,
+    .mobile-list-page .mobile-toolbar .btn,
+    .mobile-list-page .mobile-toolbar .dropdown,
+    .mobile-list-page .mobile-toolbar .dropdown > .btn,
+    .mobile-list-page .mobile-pagination-controls > *,
+    .mobile-list-page .mobile-pagination-controls form,
+    .mobile-list-page .mobile-pagination-controls .pagination {
+        width: 100%;
+    }
+    .mobile-list-page .mobile-table-wrap .table {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+    .mobile-list-page .mobile-table-wrap .table th,
+    .mobile-list-page .mobile-table-wrap .table td {
+        white-space: normal !important;
+        vertical-align: top;
+    }
+    .mobile-list-page .mobile-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .375rem;
+    }
+    .mobile-list-page .mobile-actions .btn,
+    .mobile-list-page .mobile-actions form {
+        margin: 0 !important;
+    }
+}
+</style>
+<div class="container mt-5 mobile-list-page">
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
         <div>
             <h2 class="mb-1">Transfers</h2>
@@ -12,7 +49,7 @@
             <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addTransferModal">Add New Transfer</button>
         </div>
     </div>
-    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3 mobile-toolbar">
         <button id="new-transfer-alert" type="button" class="btn btn-warning" data-action="reload"
                 style="display: none;">
                 <img src="{{ url_for('static', filename='img/alert_icon.png') }}" alt="Reload"
@@ -50,8 +87,8 @@
         </div>
         <button class="btn btn-outline-secondary d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#searchModal">Search/Filter</button>
     </div>
-    <div class="table-responsive">
-    <table class="table sortable" id="transfer-table">
+    <div class="table-responsive mobile-table-wrap">
+    <table class="table sortable table-mobile-card" id="transfer-table">
         <thead>
         <tr>
             <th scope="col" class="col-transfer-id" data-type="number">#</th>
@@ -70,7 +107,7 @@
     </table>
     </div>
     {% if transfers is defined %}
-    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3 mobile-pagination-controls">
         <nav aria-label="Transfer pagination">
             <ul class="pagination mb-0">
                 <li class="page-item {% if not transfers.has_prev %}disabled{% endif %}">

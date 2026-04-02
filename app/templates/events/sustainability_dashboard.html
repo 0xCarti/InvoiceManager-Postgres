@@ -1,10 +1,50 @@
 {% extends 'base.html' %}
 {% block content %}
+<style>
+@media (max-width: 767.98px) {
+  .sustainability-table thead {
+    display: none;
+  }
+
+  .sustainability-table,
+  .sustainability-table tbody,
+  .sustainability-table tr,
+  .sustainability-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .sustainability-table tr {
+    margin-bottom: 1rem;
+    border: 1px solid #dee2e6;
+    border-radius: 0.5rem;
+    overflow: hidden;
+    background: #fff;
+  }
+
+  .sustainability-table td {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    white-space: normal;
+    padding: 0.65rem 0.75rem;
+    border-left: 0;
+    border-right: 0;
+  }
+
+  .sustainability-table td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    flex: 0 0 40%;
+    min-width: 40%;
+  }
+}
+</style>
 <div class="container mt-4">
-  <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1>Sustainability Dashboard - {{ event.name }}</h1>
+  <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+    <h1 class="h3 mb-0">Sustainability Dashboard - {{ event.name }}</h1>
     {% if not print_view %}
-    <div class="btn-group" role="group">
+    <div class="d-flex flex-wrap gap-2">
       <a class="btn btn-outline-secondary" href="{{ url_for('event.sustainability_dashboard_csv', event_id=event.id) }}">Export CSV</a>
       <a class="btn btn-outline-secondary" href="{{ url_for('event.sustainability_dashboard_print', event_id=event.id) }}" target="_blank">Print View</a>
     </div>
@@ -76,7 +116,8 @@
   </div>
 
   <h2>Location Breakdown</h2>
-  <table class="table table-striped">
+  <div class="table-responsive">
+  <table class="table table-striped table-sm align-middle sustainability-table">
     <thead>
       <tr>
         <th>Location</th>
@@ -88,10 +129,10 @@
     <tbody>
       {% for entry in report.location_breakdown %}
       <tr>
-        <td>{{ entry.location }}</td>
-        <td>{{ '%.2f'|format(entry.waste) }}</td>
-        <td>${{ '%.2f'|format(entry.cost) }}</td>
-        <td>{{ '%.2f'|format(entry.carbon) }}</td>
+        <td data-label="Location">{{ entry.location }}</td>
+        <td data-label="Waste (units)">{{ '%.2f'|format(entry.waste) }}</td>
+        <td data-label="Cost">${{ '%.2f'|format(entry.cost) }}</td>
+        <td data-label="Carbon (kg COâ‚‚e)">{{ '%.2f'|format(entry.carbon) }}</td>
       </tr>
       {% else %}
       <tr>
@@ -100,9 +141,11 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 
   <h2>Item Waste Leaderboard</h2>
-  <table class="table table-striped">
+  <div class="table-responsive">
+  <table class="table table-striped table-sm align-middle sustainability-table">
     <thead>
       <tr>
         <th>Item</th>
@@ -114,10 +157,10 @@
     <tbody>
       {% for entry in report.item_leaderboard %}
       <tr>
-        <td>{{ entry.item }}</td>
-        <td>{{ '%.2f'|format(entry.waste) }}</td>
-        <td>${{ '%.2f'|format(entry.cost) }}</td>
-        <td>{{ '%.2f'|format(entry.carbon) }}</td>
+        <td data-label="Item">{{ entry.item }}</td>
+        <td data-label="Waste (units)">{{ '%.2f'|format(entry.waste) }}</td>
+        <td data-label="Cost">${{ '%.2f'|format(entry.cost) }}</td>
+        <td data-label="Carbon (kg COâ‚‚e)">{{ '%.2f'|format(entry.carbon) }}</td>
       </tr>
       {% else %}
       <tr>
@@ -126,6 +169,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 
 {% if not print_view and report.location_breakdown %}

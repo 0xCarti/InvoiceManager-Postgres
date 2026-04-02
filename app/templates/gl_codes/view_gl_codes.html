@@ -3,7 +3,44 @@
 {% from 'macros/filter_modal.html' import filter_modal %}
 {% block title %}GL Codes{% endblock %}
 {% block content %}
-<div class="container mt-5">
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .mobile-list-page .mobile-toolbar,
+    .mobile-list-page .mobile-pagination-controls {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .mobile-list-page .mobile-toolbar > *,
+    .mobile-list-page .mobile-toolbar .btn,
+    .mobile-list-page .mobile-toolbar .dropdown,
+    .mobile-list-page .mobile-toolbar .dropdown > .btn,
+    .mobile-list-page .mobile-pagination-controls > *,
+    .mobile-list-page .mobile-pagination-controls form,
+    .mobile-list-page .mobile-pagination-controls .pagination {
+        width: 100%;
+    }
+    .mobile-list-page .mobile-table-wrap .table {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+    .mobile-list-page .mobile-table-wrap .table th,
+    .mobile-list-page .mobile-table-wrap .table td {
+        white-space: normal !important;
+        vertical-align: top;
+    }
+    .mobile-list-page .mobile-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .375rem;
+    }
+    .mobile-list-page .mobile-actions .btn,
+    .mobile-list-page .mobile-actions form {
+        margin: 0 !important;
+    }
+}
+</style>
+<div class="container mt-5 mobile-list-page">
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
         <div>
             <h2 class="mb-1">GL Codes</h2>
@@ -13,7 +50,7 @@
             <button id="add-gl-code" type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#glCodeModal">Add GL Code</button>
         </div>
     </div>
-    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3 mobile-toolbar">
         <div class="dropdown d-md-none">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                 More actions
@@ -67,7 +104,7 @@
         {% endif %}
     </div>
     {% endif %}
-    <div class="table-responsive">
+    <div class="table-responsive mobile-table-wrap">
     <table class="table sortable" id="gl-codes-table">
         <thead>
             <tr>
@@ -82,18 +119,20 @@
                 <td class="col-gl-code gl-code">{{ code.code }}</td>
                 <td class="col-gl-description gl-description">{{ code.description or '' }}</td>
                 <td class="col-gl-actions">
-                    <button type="button" class="btn btn-secondary btn-sm edit-gl-code" data-id="{{ code.id }}" data-code="{{ code.code }}" data-description="{{ code.description or '' }}">Edit</button>
-                    <form action="{{ url_for('glcode.delete_gl_code', code_id=code.id) }}" method="post" class="d-inline">
-                        {{ delete_form.hidden_tag() }}
-                        <button type="submit" class="btn btn-danger btn-sm" data-confirm-message="Are you sure?">Delete</button>
-                    </form>
+                    <div class="mobile-actions">
+                        <button type="button" class="btn btn-secondary btn-sm edit-gl-code" data-id="{{ code.id }}" data-code="{{ code.code }}" data-description="{{ code.description or '' }}">Edit</button>
+                        <form action="{{ url_for('glcode.delete_gl_code', code_id=code.id) }}" method="post" class="d-inline">
+                            {{ delete_form.hidden_tag() }}
+                            <button type="submit" class="btn btn-danger btn-sm" data-confirm-message="Are you sure?">Delete</button>
+                        </form>
+                    </div>
                 </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
     </div>
-    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3 mobile-pagination-controls">
         <nav aria-label="GL code pagination">
             <ul class="pagination mb-0">
                 <li class="page-item {% if not codes.has_prev %}disabled{% endif %}">
@@ -208,11 +247,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td class="col-gl-code gl-code">${data.code}</td>
                     <td class="col-gl-description gl-description">${data.description}</td>
                     <td class="col-gl-actions">
+                        <div class="mobile-actions">
                         <button type="button" class="btn btn-secondary btn-sm edit-gl-code" data-id="${data.id}" data-code="${data.code}" data-description="${data.description}">Edit</button>
                         <form action="/gl_codes/${data.id}/delete" method="post" class="d-inline">
                             <input type="hidden" name="csrf_token" value="${csrfToken}">
                             <button type="submit" class="btn btn-danger btn-sm" data-confirm-message="Are you sure?">Delete</button>
                         </form>
+                        </div>
                     </td>`;
                 tbody.prepend(row);
                 attachEditHandlers();

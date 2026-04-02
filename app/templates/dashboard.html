@@ -1,10 +1,53 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="container mt-4" data-dashboard-container data-user-id="{{ current_user.id if current_user.is_authenticated else 'guest' }}">
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .dashboard-mobile-page .dashboard-header-actions,
+    .dashboard-mobile-page .dashboard-meta-row,
+    .dashboard-mobile-page .dashboard-list-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start !important;
+    }
+
+    .dashboard-mobile-page .dashboard-header-actions > *,
+    .dashboard-mobile-page .dashboard-meta-row > *,
+    .dashboard-mobile-page .dashboard-list-row > * {
+        min-width: 0;
+    }
+
+    .dashboard-mobile-page .dashboard-queue-actions {
+        width: 100%;
+        align-items: stretch !important;
+    }
+
+    .dashboard-mobile-page .dashboard-queue-actions form,
+    .dashboard-mobile-page .dashboard-queue-actions .btn {
+        width: 100%;
+    }
+
+    .dashboard-mobile-page .event-calendar-grid {
+        grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+    }
+
+    .dashboard-mobile-page .event-calendar-day {
+        min-width: 0;
+        padding: 0.35rem 0.25rem;
+    }
+
+    .dashboard-mobile-page .event-calendar-day .d-flex {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start !important;
+        gap: 0.15rem;
+    }
+}
+</style>
+<div class="container mt-4 dashboard-mobile-page" data-dashboard-container data-user-id="{{ current_user.id if current_user.is_authenticated else 'guest' }}">
     {% set can_manage_operations = current_user.is_admin %}
     {% set action_denied_message = "You do not have permission to perform this action." %}
-    <div class="d-flex align-items-center justify-content-between mb-4">
+    <div class="d-flex align-items-center justify-content-between mb-4 page-header-stack">
         <div>
             <h1 class="mb-0">Dashboard</h1>
             <p class="text-muted mb-0">A quick overview of transfer activity, purchases, invoices, and events.</p>
@@ -132,7 +175,7 @@
                         <ul class="list-group list-group-flush">
                             {% for location in context.transfer_completion_by_location %}
                                 <li class="list-group-item px-0">
-                                    <div class="d-flex justify-content-between align-items-center gap-2">
+                                    <div class="d-flex justify-content-between align-items-center gap-2 dashboard-meta-row">
                                         <div class="fw-semibold">{{ location.location_name }}</div>
                                         <div class="text-end">
                                             <div class="small text-muted">{{ location.transfer_count }} transfers</div>
@@ -293,7 +336,7 @@
                         <div class="row g-3 mt-2">
                             <div class="col-lg-6">
                                 <div class="border rounded p-3 h-100">
-                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <div class="d-flex justify-content-between align-items-center mb-2 dashboard-meta-row">
                                         <h6 class="mb-0">Pending purchase orders</h6>
                                         {% if context.queues.purchase_orders.total > context.queues.purchase_orders['items']|length %}
                                             <a class="small" href="{{ url_for('purchase.view_purchase_orders') }}">Show more</a>
@@ -303,7 +346,7 @@
                                         {% for po in context.queues.purchase_orders['items'] %}
                                             {% set vendor_label = po.vendor_name or (po.vendor and (po.vendor.first_name ~ ' ' ~ po.vendor.last_name)) or 'Unknown vendor' %}
                                             <li class="list-group-item px-0">
-                                                <div class="d-flex justify-content-between align-items-start gap-3">
+                                                <div class="d-flex justify-content-between align-items-start gap-3 dashboard-list-row">
                                                     <div>
                                                         <div class="fw-semibold">{{ vendor_label }}</div>
                                                         <div class="text-muted small">Due {{ po.expected_date.strftime('%b %d, %Y') }} · ${{ '%.2f'|format(po.expected_total_cost or 0) }}</div>
@@ -325,9 +368,9 @@
                             </div>
                             <div class="col-lg-6">
                                 <div class="border rounded p-3 h-100">
-                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <div class="d-flex justify-content-between align-items-center mb-2 dashboard-meta-row">
                                         <h6 class="mb-0">Transfers awaiting approval</h6>
-                                        <div class="d-flex align-items-center gap-2">
+                                        <div class="d-flex align-items-center gap-2 dashboard-header-actions">
                                             <a class="btn btn-sm btn-primary" href="{{ url_for('transfer.add_transfer') }}">Start Transfer</a>
                                             {% if context.queues.transfers.total > context.queues.transfers['items']|length %}
                                                 <a class="small" href="{{ url_for('transfer.view_transfers') }}">Show more</a>
@@ -337,12 +380,12 @@
                                     <ul class="list-group list-group-flush">
                                         {% for transfer in context.queues.transfers['items'] %}
                                             <li class="list-group-item px-0">
-                                                <div class="d-flex justify-content-between align-items-start gap-3">
+                                                <div class="d-flex justify-content-between align-items-start gap-3 dashboard-list-row">
                                                     <div>
                                                         <div class="fw-semibold">{{ transfer.from_location_name or transfer.from_location.name }} → {{ transfer.to_location_name or transfer.to_location.name }}</div>
                                                         <div class="text-muted small">Created {{ transfer.date_created.strftime('%b %d, %Y') }}</div>
                                                     </div>
-                                                    <div class="text-end d-flex flex-column align-items-end gap-1">
+                                                    <div class="text-end d-flex flex-column align-items-end gap-1 dashboard-queue-actions">
                                                         {% if can_manage_operations %}
                                                             <form method="post" action="{{ url_for('transfer.complete_transfer', transfer_id=transfer.id) }}" class="d-inline">
                                                                 {{ confirm_form.hidden_tag() }}
@@ -376,7 +419,7 @@
                         <h5 class="mb-0">Event Schedule</h5>
                         <p class="text-muted mb-0 small">Browse upcoming and active events; overdue dates are highlighted.</p>
                     </div>
-                    <div class="d-flex align-items-center gap-2">
+                    <div class="d-flex align-items-center gap-2 dashboard-header-actions">
                         {% if can_manage_operations %}
                             <a class="btn btn-primary btn-sm" href="{{ url_for('event.create_event') }}">Schedule event</a>
                         {% endif %}
@@ -397,7 +440,7 @@
                         <div class="row g-3 mt-3 align-items-start">
                             <div class="col-12 col-lg-8">
                                 <div class="border rounded p-3 h-100">
-                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <div class="d-flex justify-content-between align-items-center mb-2 dashboard-meta-row">
                                         <h6 class="mb-0">{{ context.events.schedule.calendar.month_label }}</h6>
                                         <span class="badge bg-light text-body-secondary">Today: {{ context.events.schedule.calendar.today.strftime('%b %d') }}</span>
                                     </div>
@@ -418,7 +461,7 @@
                                                 aria-haspopup="true"
                                                 aria-expanded="false"
                                             >
-                                                <div class="d-flex justify-content-between align-items-center">
+                                                <div class="d-flex justify-content-between align-items-center dashboard-meta-row">
                                                     <span class="fw-semibold">{{ day.day }}</span>
                                                     {% if has_events %}
                                                         <span class="badge bg-primary">{{ day.count }}</span>
@@ -433,14 +476,14 @@
                             </div>
                             <div class="col-12 col-lg-4">
                                 <div class="border rounded p-3 h-100 d-flex flex-column">
-                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <div class="d-flex justify-content-between align-items-center mb-2 dashboard-meta-row">
                                         <h6 class="mb-0">Scheduled events</h6>
                                         <span class="small text-muted" data-event-filter-label>Selecting a date opens the filtered events view</span>
                                     </div>
                                     <ul class="list-group list-group-flush flex-grow-1" id="event-schedule-list">
                                         {% for ev in context.events.schedule.sidebar_events %}
                                             <li class="list-group-item" data-event-row data-start-date="{{ ev.start_date.isoformat() }}" data-end-date="{{ ev.end_date.isoformat() }}">
-                                                <div class="d-flex justify-content-between align-items-start gap-3">
+                                                <div class="d-flex justify-content-between align-items-start gap-3 dashboard-list-row">
                                                     <div>
                                                         <div class="fw-semibold">{{ ev.name }}</div>
                                                         <div class="text-muted small">{{ ev.start_date.strftime('%b %d, %Y') }} – {{ ev.end_date.strftime('%b %d, %Y') }}</div>
