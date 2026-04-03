@@ -105,24 +105,28 @@ $(document).ready(function () {
         const unitPrice = Number(productPrice || 0);
         const catalogRow = `
 <tr class="product-row" data-line-kind="catalog">
-    <td class="align-middle">
-        <div class="fw-semibold catalog-product-name">${productName}</div>
-        <div class="form-text">Saved product</div>
+    <td class="align-middle invoice-line-product" data-label="Product / Description">
+        <div class="fw-semibold catalog-product-name mobile-card-primary">${productName}</div>
+        <div class="form-text mb-0">Saved product</div>
     </td>
-    <td><input type="text" class="form-control quantity" value="1" inputmode="text" data-numeric-input="1"></td>
-    <td class="align-middle">
+    <td class="invoice-line-quantity" data-label="Quantity">
+        <input type="text" class="form-control quantity invoice-quantity-input" value="1" inputmode="text" data-numeric-input="1">
+    </td>
+    <td class="align-middle invoice-line-price" data-label="Price">
         <span class="catalog-price" data-price="${unitPrice}">$${formatCurrency(unitPrice)}</span>
     </td>
-    <td class="align-middle total">$${formatCurrency(unitPrice)}</td>
-    <td>
-        <label class="form-check-label d-block">
+    <td class="align-middle total invoice-line-total" data-label="Total">$${formatCurrency(unitPrice)}</td>
+    <td class="invoice-line-charges" data-label="Tax / Fees">
+        <div class="invoice-tax-toggle-list">
+        <label class="form-check-label d-block mb-0">
             <input type="checkbox" class="form-check-input override-gst"${!currentTaxStatus.gst_exempt ? ' checked' : ''}> GST
         </label>
-        <label class="form-check-label d-block">
+        <label class="form-check-label d-block mb-0">
             <input type="checkbox" class="form-check-input override-pst"${!currentTaxStatus.pst_exempt ? ' checked' : ''}> PST
         </label>
+        </div>
     </td>
-    <td class="align-top"><button type="button" class="btn btn-danger btn-sm">Remove</button></td>
+    <td class="align-top invoice-line-actions" data-label="Action"><button type="button" class="btn btn-danger btn-sm">Remove</button></td>
 </tr>`;
         $productTableBody.append(catalogRow);
         const row = $productTableBody.find('tr').last();
@@ -135,38 +139,41 @@ $(document).ready(function () {
     function addCustomRow() {
         const customRow = `
 <tr class="product-row" data-line-kind="custom">
-    <td>
+    <td class="invoice-line-product" data-label="Product / Description">
         <input
             type="text"
-            class="form-control custom-product-name"
+            class="form-control custom-product-name invoice-custom-description"
             placeholder="Service repair - fixed compressor coil in unit 1"
         >
-        <div class="form-text">Custom line only for this invoice.</div>
+        <div class="form-text mb-0">Custom line only for this invoice.</div>
     </td>
-    <td>
-        <input type="text" class="form-control quantity" value="1" inputmode="text" data-numeric-input="1">
+    <td class="invoice-line-quantity" data-label="Quantity">
+        <input type="text" class="form-control quantity invoice-quantity-input" value="1" inputmode="text" data-numeric-input="1">
     </td>
-    <td>
-        <input type="text" class="form-control custom-unit-price" placeholder="0.00" inputmode="text" data-numeric-input="1">
+    <td class="invoice-line-price" data-label="Price">
+        <div class="input-group input-group-sm invoice-money-input">
+            <span class="input-group-text">$</span>
+            <input type="text" class="form-control custom-unit-price" placeholder="0.00" inputmode="text" data-numeric-input="1">
+        </div>
     </td>
-    <td class="align-middle total">$0.00</td>
-    <td>
-        <div class="row g-2">
-            <div class="col-12">
-                <label class="form-label small mb-1">GST</label>
-                <input type="text" class="form-control form-control-sm custom-gst-amount" placeholder="0.00" inputmode="text" data-numeric-input="1">
+    <td class="align-middle total invoice-line-total" data-label="Total">$0.00</td>
+    <td class="invoice-line-charges" data-label="Tax / Fees">
+        <div class="invoice-custom-charge-grid">
+            <div class="input-group input-group-sm invoice-charge-input">
+                <span class="input-group-text">GST</span>
+                <input type="text" class="form-control custom-gst-amount" placeholder="0.00" inputmode="text" data-numeric-input="1">
             </div>
-            <div class="col-12">
-                <label class="form-label small mb-1">PST</label>
-                <input type="text" class="form-control form-control-sm custom-pst-amount" placeholder="0.00" inputmode="text" data-numeric-input="1">
+            <div class="input-group input-group-sm invoice-charge-input">
+                <span class="input-group-text">PST</span>
+                <input type="text" class="form-control custom-pst-amount" placeholder="0.00" inputmode="text" data-numeric-input="1">
             </div>
-            <div class="col-12">
-                <label class="form-label small mb-1">Fee</label>
-                <input type="text" class="form-control form-control-sm custom-additional-fee" placeholder="0.00" inputmode="text" data-numeric-input="1">
+            <div class="input-group input-group-sm invoice-charge-input">
+                <span class="input-group-text">Fee</span>
+                <input type="text" class="form-control custom-additional-fee" placeholder="0.00" inputmode="text" data-numeric-input="1">
             </div>
         </div>
     </td>
-    <td class="align-top"><button type="button" class="btn btn-danger btn-sm">Remove</button></td>
+    <td class="align-top invoice-line-actions" data-label="Action"><button type="button" class="btn btn-danger btn-sm">Remove</button></td>
 </tr>`;
         $productTableBody.append(customRow);
         const row = $productTableBody.find('tr').last();

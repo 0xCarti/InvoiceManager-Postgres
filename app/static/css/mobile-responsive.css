@@ -112,6 +112,55 @@
     height: auto;
 }
 
+.invoice-lines-table th,
+.invoice-lines-table td {
+    white-space: normal;
+    vertical-align: top;
+}
+
+.invoice-lines-table .invoice-line-product {
+    min-width: 16rem;
+}
+
+.invoice-lines-table .invoice-line-quantity {
+    width: 7rem;
+}
+
+.invoice-lines-table .invoice-line-price,
+.invoice-lines-table .invoice-line-total {
+    width: 8rem;
+}
+
+.invoice-lines-table .invoice-line-charges {
+    width: 20rem;
+}
+
+.invoice-lines-table .invoice-line-actions {
+    width: 1%;
+}
+
+.invoice-lines-table .invoice-custom-charge-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem;
+    max-width: 20rem;
+}
+
+.invoice-lines-table .invoice-custom-charge-grid .input-group-text {
+    padding-left: 0.55rem;
+    padding-right: 0.55rem;
+}
+
+.invoice-lines-table .invoice-tax-toggle-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.invoice-lines-table .invoice-line-actions .btn {
+    white-space: nowrap;
+}
+
 @media (max-width: 767.98px) {
     .page-header-stack,
     .mobile-header-wrap,
@@ -328,6 +377,52 @@
 
     .purchase-order-quick-add {
         min-height: 44px;
+    }
+
+    .invoice-entry-toolbar > [class*="col-"] {
+        width: 100%;
+    }
+
+    .invoice-lines-table-wrap {
+        overflow: visible;
+    }
+
+    .invoice-lines-table tr {
+        padding: 1rem;
+    }
+
+    .invoice-lines-table .invoice-line-product,
+    .invoice-lines-table .invoice-line-quantity,
+    .invoice-lines-table .invoice-line-price,
+    .invoice-lines-table .invoice-line-total,
+    .invoice-lines-table .invoice-line-charges,
+    .invoice-lines-table .invoice-line-actions {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .invoice-lines-table .invoice-quantity-input,
+    .invoice-lines-table .custom-unit-price,
+    .invoice-lines-table .invoice-line-actions .btn {
+        min-height: 44px;
+    }
+
+    .invoice-lines-table .invoice-custom-charge-grid {
+        grid-template-columns: 1fr;
+        max-width: none;
+    }
+
+    .invoice-lines-table .invoice-custom-charge-grid .input-group {
+        width: 100%;
+    }
+
+    .invoice-lines-table .invoice-custom-charge-grid .form-control,
+    .invoice-lines-table .invoice-custom-charge-grid .input-group-text {
+        min-height: 44px;
+    }
+
+    .invoice-lines-table .invoice-line-actions .btn {
+        width: 100%;
     }
 
     .barcode-row .form-control,

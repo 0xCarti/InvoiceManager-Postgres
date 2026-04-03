@@ -15,7 +15,7 @@
         </div>
     </div>
     {{ form.products(id="products") }}
-    <div class="row g-4 mb-3">
+    <div class="row g-4 mb-3 invoice-entry-toolbar">
         <div class="col-lg-7">
             <div class="form-group mb-0">
                 <label for="productSearch">Search Products:</label>
@@ -36,14 +36,14 @@
             </button>
         </div>
     </div>
-    <div class="table-responsive">
-    <table class="table" id="productTable">
+    <div class="table-responsive invoice-lines-table-wrap">
+    <table class="table table-mobile-card table-mobile-compact invoice-lines-table" id="productTable">
         <thead>
             <tr>
                 <th>Product / Description</th>
                 <th>Quantity</th>
                 <th>Price</th>
-                <th>Total (with Tax)</th>
+                <th>Total</th>
                 <th>Tax / Fees</th>
                 <th>Action</th>
             </tr>
