@@ -28,44 +28,54 @@
             {{ form.delivery_charge.label(class="form-label") }}
             {{ form.delivery_charge(class="form-control narrow-field") }}
         </div>
-        <h4>Items</h4>
-        <button id="quick-add-item" type="button" class="btn btn-link p-0">Create New Item</button>
-        <div id="items" data-next-index="{{ form.items|length }}">
+        <div class="page-header-stack mb-2">
+            <h4 class="mb-0">Items</h4>
+            <button id="quick-add-item" type="button" class="btn btn-outline-secondary purchase-order-quick-add">Create New Item</button>
+        </div>
+        <div id="items" class="purchase-order-items-list" data-next-index="{{ form.items|length }}">
         {% for item in form.items %}
         {% set item_id = item.item.data %}
         {% set item_info = item_lookup.get(item_id|int) if item_id else None %}
         {% set selected_name = item_info['name'] if item_info else '' %}
         {% set selected_gl_code = item_info['gl_code'] if item_info else '' %}
         {% set input_value = request.form.get('items-' ~ loop.index0 ~ '-item-label', selected_name) %}
-        <div class="row g-2 mt-2 item-row align-items-center">
-            <div class="col position-relative">
-                <input type="text" name="items-{{ loop.index0 }}-item-label" class="form-control item-search" placeholder="Search for an item" autocomplete="off" value="{{ input_value }}">
+        <div class="row g-2 mt-2 item-row purchase-order-item-row align-items-start">
+            <div class="col-12 col-md position-relative purchase-order-item-search-column">
+                <label class="form-label form-label-sm mb-1 d-md-none" for="items-{{ loop.index0 }}-item-label">Item</label>
+                <input id="items-{{ loop.index0 }}-item-label" type="text" name="items-{{ loop.index0 }}-item-label" class="form-control item-search" placeholder="Search for an item" autocomplete="off" value="{{ input_value }}">
                 {{ item.item(class="item-id-field") }}
                 {{ item.cost(class="item-cost-field") }}
                 <input type="hidden" name="items-{{ loop.index0 }}-position" class="item-position" value="{{ item.position.data or loop.index0 }}">
                 <div class="list-group suggestion-list d-none position-absolute w-100" style="z-index: 1000; max-height: 200px; overflow-y: auto;"></div>
             </div>
-            <div class="col-auto gl-code-column">
+            <div class="col-12 col-md-auto gl-code-column purchase-order-gl-code-column">
+                <div class="form-label form-label-sm mb-1 d-md-none">GL Code</div>
                 <span class="gl-code-display badge bg-light text-dark" data-gl-code="{{ selected_gl_code }}">{{ selected_gl_code or 'Unassigned' }}</span>
             </div>
-            <div class="col">
+            <div class="col-8 col-md purchase-order-unit-column">
+                <label class="form-label form-label-sm mb-1 d-md-none" for="items-{{ loop.index0 }}-unit">Unit</label>
                 <div class="d-flex flex-column gap-1">
-                    <select name="items-{{ loop.index0 }}-unit" class="form-control unit-select" data-selected="{{ item.unit.data or '' }}"></select>
-                    <button type="button" class="btn btn-link btn-sm p-0 text-start manage-units-button" aria-label="Edit units of measure"{% if not item_id %} disabled{% endif %}>Edit units</button>
+                    <select id="items-{{ loop.index0 }}-unit" name="items-{{ loop.index0 }}-unit" class="form-control unit-select" data-selected="{{ item.unit.data or '' }}"></select>
+                    <button type="button" class="btn btn-outline-secondary btn-sm text-start manage-units-button" aria-label="Edit units of measure"{% if not item_id %} disabled{% endif %}>Edit units</button>
                 </div>
             </div>
-            <div class="col">{{ item.quantity(class="form-control quantity") }}</div>
-            <div class="col-auto">
-                <button type="button" class="btn btn-outline-secondary btn-sm drag-handle" aria-label="Drag to reorder" title="Drag to reorder">=</button>
+            <div class="col-4 col-md-2 purchase-order-quantity-column">
+                <label class="form-label form-label-sm mb-1 d-md-none" for="{{ item.quantity.id }}">Qty</label>
+                {{ item.quantity(class="form-control quantity") }}
             </div>
-            <div class="col-auto">
-                <button type="button" class="btn btn-danger remove-item">Remove</button>
+            <div class="col-12 col-md-auto purchase-order-item-actions">
+                <div class="d-flex flex-wrap gap-2 justify-content-md-end">
+                    <button type="button" class="btn btn-outline-secondary btn-sm drag-handle" aria-label="Drag to reorder" title="Drag to reorder">Move</button>
+                    <button type="button" class="btn btn-danger btn-sm remove-item">Remove</button>
+                </div>
             </div>
         </div>
         {% endfor %}
         </div>
-        <button id="add-item" type="button" class="btn btn-secondary mt-3">Add Item</button>
-        <button type="submit" class="btn btn-primary mt-3">Submit</button>
+        <div class="mobile-toolbar mt-3">
+            <button id="add-item" type="button" class="btn btn-secondary">Add Item</button>
+            <button type="submit" class="btn btn-primary">Submit</button>
+        </div>
     </form>
 
     {% include 'purchase_orders/_create_item_modal.html' %}

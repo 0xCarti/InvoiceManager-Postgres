@@ -679,15 +679,40 @@
 
         function createRowElement(index, options = {}) {
             const row = document.createElement("div");
-            row.classList.add("row", "g-2", "mt-2", "item-row", "align-items-center");
+            row.classList.add(
+                "row",
+                "g-2",
+                "mt-2",
+                "item-row",
+                "purchase-order-item-row",
+                "align-items-start"
+            );
 
             const itemCol = document.createElement("div");
-            itemCol.classList.add("col", "position-relative");
+            itemCol.classList.add(
+                "col-12",
+                "col-md",
+                "position-relative",
+                "purchase-order-item-search-column"
+            );
+
+            const itemLabel = document.createElement("label");
+            itemLabel.classList.add(
+                "form-label",
+                "form-label-sm",
+                "mb-1",
+                "d-md-none"
+            );
+            const itemInputId = `items-${index}-item-label`;
+            itemLabel.setAttribute("for", itemInputId);
+            itemLabel.textContent = "Item";
+            itemCol.appendChild(itemLabel);
 
             const searchInput = document.createElement("input");
             searchInput.type = "text";
             searchInput.name = `items-${index}-item-label`;
             searchInput.classList.add("form-control", "item-search");
+            searchInput.id = itemInputId;
             searchInput.placeholder = "Search for an item";
             searchInput.autocomplete = "off";
             if (options.itemName) {
@@ -736,7 +761,21 @@
             itemCol.appendChild(suggestionList);
 
             const glCodeCol = document.createElement("div");
-            glCodeCol.classList.add("col-auto", "gl-code-column");
+            glCodeCol.classList.add(
+                "col-12",
+                "col-md-auto",
+                "gl-code-column",
+                "purchase-order-gl-code-column"
+            );
+            const glCodeLabel = document.createElement("div");
+            glCodeLabel.classList.add(
+                "form-label",
+                "form-label-sm",
+                "mb-1",
+                "d-md-none"
+            );
+            glCodeLabel.textContent = "GL Code";
+            glCodeCol.appendChild(glCodeLabel);
             const glCodeBadge = document.createElement("span");
             glCodeBadge.classList.add(
                 "gl-code-display",
@@ -749,12 +788,24 @@
             glCodeCol.appendChild(glCodeBadge);
 
             const unitCol = document.createElement("div");
-            unitCol.classList.add("col");
+            unitCol.classList.add("col-8", "col-md", "purchase-order-unit-column");
+            const unitLabel = document.createElement("label");
+            unitLabel.classList.add(
+                "form-label",
+                "form-label-sm",
+                "mb-1",
+                "d-md-none"
+            );
+            const unitSelectId = `items-${index}-unit`;
+            unitLabel.setAttribute("for", unitSelectId);
+            unitLabel.textContent = "Unit";
+            unitCol.appendChild(unitLabel);
             const unitWrapper = document.createElement("div");
             unitWrapper.classList.add("d-flex", "flex-column", "gap-1");
             const unitSelect = document.createElement("select");
             unitSelect.name = `items-${index}-unit`;
             unitSelect.classList.add("form-control", "unit-select");
+            unitSelect.id = unitSelectId;
             unitSelect.dataset.selected = options.unitId
                 ? String(options.unitId)
                 : "";
@@ -763,9 +814,8 @@
             manageButton.type = "button";
             manageButton.classList.add(
                 "btn",
-                "btn-link",
+                "btn-outline-secondary",
                 "btn-sm",
-                "p-0",
                 "text-start",
                 "manage-units-button"
             );
@@ -779,12 +829,28 @@
             unitCol.appendChild(unitWrapper);
 
             const quantityCol = document.createElement("div");
-            quantityCol.classList.add("col");
+            quantityCol.classList.add(
+                "col-4",
+                "col-md-2",
+                "purchase-order-quantity-column"
+            );
+            const quantityLabel = document.createElement("label");
+            quantityLabel.classList.add(
+                "form-label",
+                "form-label-sm",
+                "mb-1",
+                "d-md-none"
+            );
+            const quantityInputId = `items-${index}-quantity`;
+            quantityLabel.setAttribute("for", quantityInputId);
+            quantityLabel.textContent = "Qty";
+            quantityCol.appendChild(quantityLabel);
             const quantityInput = document.createElement("input");
             quantityInput.type = "text";
             quantityInput.step = "any";
             quantityInput.name = `items-${index}-quantity`;
             quantityInput.classList.add("form-control", "quantity");
+            quantityInput.id = quantityInputId;
             quantityInput.setAttribute("data-numeric-input", "1");
             quantityInput.setAttribute("inputmode", "text");
             if (options.quantity !== undefined && options.quantity !== null) {
@@ -792,8 +858,20 @@
             }
             quantityCol.appendChild(quantityInput);
 
-            const reorderCol = document.createElement("div");
-            reorderCol.classList.add("col-auto");
+            const actionsCol = document.createElement("div");
+            actionsCol.classList.add(
+                "col-12",
+                "col-md-auto",
+                "purchase-order-item-actions"
+            );
+            const actionsWrap = document.createElement("div");
+            actionsWrap.classList.add(
+                "d-flex",
+                "flex-wrap",
+                "gap-2",
+                "justify-content-md-end"
+            );
+
             const dragButton = document.createElement("button");
             dragButton.type = "button";
             dragButton.classList.add(
@@ -804,24 +882,22 @@
             );
             dragButton.setAttribute("aria-label", "Drag to reorder");
             dragButton.setAttribute("title", "Drag to reorder");
-            dragButton.textContent = "=";
-            reorderCol.appendChild(dragButton);
+            dragButton.textContent = "Move";
+            actionsWrap.appendChild(dragButton);
 
-            const removeCol = document.createElement("div");
-            removeCol.classList.add("col-auto");
             const removeButton = document.createElement("button");
             removeButton.type = "button";
-            removeButton.classList.add("btn", "btn-danger", "remove-item");
+            removeButton.classList.add("btn", "btn-danger", "btn-sm", "remove-item");
             removeButton.textContent = "Remove";
-            removeCol.appendChild(removeButton);
+            actionsWrap.appendChild(removeButton);
+            actionsCol.appendChild(actionsWrap);
 
             row.append(
                 itemCol,
                 glCodeCol,
                 unitCol,
                 quantityCol,
-                reorderCol,
-                removeCol
+                actionsCol
             );
             return row;
         }

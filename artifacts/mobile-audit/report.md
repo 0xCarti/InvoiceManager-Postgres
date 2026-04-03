@@ -1,6 +1,6 @@
 # Mobile Usability Audit
 
-Generated: 2026-04-02 00:30:18
+Generated: 2026-04-02 22:22:34
 
 Target phone viewports (StatCounter, United States, March 2026):
 - `414x896`

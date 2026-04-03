@@ -798,6 +798,38 @@ def test_vendor_and_sales_reports(client, app):
     assert b"Gadget" not in resp.data
 
 
+def test_vendor_invoice_report_customer_multiselect_sorts_by_most_recent_invoice(
+    client, app
+):
+    setup_invoice(app)
+    login(client, "report@example.com", "pass")
+
+    with app.app_context():
+        user = User.query.filter_by(email="report@example.com").first()
+
+        recent_customer = Customer(first_name="Recent", last_name="Customer")
+        no_invoice_customer = Customer(first_name="NoInvoice", last_name="Customer")
+        db.session.add_all([recent_customer, no_invoice_customer])
+        db.session.flush()
+
+        db.session.add(
+            Invoice(
+                id="INVREPSORTRECENT",
+                user_id=user.id,
+                customer_id=recent_customer.id,
+                date_created=date(2024, 1, 15),
+            )
+        )
+        db.session.commit()
+
+    response = client.get("/reports/vendor-invoices")
+    assert response.status_code == 200
+
+    page = response.get_data(as_text=True)
+    assert page.index("Recent Customer") < page.index("Jane Doe")
+    assert page.index("Jane Doe") < page.index("NoInvoice Customer")
+
+
 def test_vendor_invoice_report_groups_results_by_customer_for_multi_select(client, app):
     first_customer_id = setup_invoice(app)
     login(client, "report@example.com", "pass")
@@ -851,6 +883,8 @@ def test_vendor_invoice_report_groups_results_by_customer_for_multi_select(clien
     assert b"INVREP001" in response.data
     assert b"INVREP003" in response.data
     assert b'<tr class="table-secondary">' in response.data
+    assert b"$31.36" in response.data
+    assert b"$15.00" in response.data
 
 
 def test_vendor_invoice_report_uses_line_subtotals_not_live_product_price(client, app):

@@ -44,7 +44,8 @@
             {% if show_customer_grouping and group.current_customer != invoice.customer_name %}
             {% set group.current_customer = invoice.customer_name %}
             <tr class="table-secondary">
-                <th colspan="5">{{ invoice.customer_name }}</th>
+                <th colspan="4">{{ invoice.customer_name }}</th>
+                <th>${{ "%.2f"|format(customer_totals.get(invoice.customer_id, 0.0)) }}</th>
             </tr>
             {% endif %}
             <tr>

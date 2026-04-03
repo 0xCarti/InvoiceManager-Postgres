@@ -951,9 +951,41 @@ def department_sales_forecast():
 def customer_invoice_report():
     """Form to select vendor invoice report parameters."""
     form = VendorInvoiceReportForm()
+    customer_last_invoice_dates = dict(
+        db.session.query(Invoice.customer_id, func.max(Invoice.date_created))
+        .group_by(Invoice.customer_id)
+        .all()
+    )
+    customers = Customer.query.order_by(Customer.last_name, Customer.first_name).all()
+
+    def _customer_sort_key(customer: Customer):
+        latest_invoice_created = customer_last_invoice_dates.get(customer.id)
+        if latest_invoice_created is None:
+            return (
+                1,
+                0.0,
+                (customer.last_name or "").casefold(),
+                (customer.first_name or "").casefold(),
+            )
+
+        if isinstance(latest_invoice_created, datetime):
+            latest_sort_value = latest_invoice_created.timestamp()
+        else:
+            latest_sort_value = datetime.combine(
+                latest_invoice_created,
+                datetime.min.time(),
+            ).timestamp()
+
+        return (
+            0,
+            -latest_sort_value,
+            (customer.last_name or "").casefold(),
+            (customer.first_name or "").casefold(),
+        )
+
     form.customer.choices = [
         (c.id, f"{c.first_name} {c.last_name}")
-        for c in Customer.query.order_by(Customer.last_name, Customer.first_name).all()
+        for c in sorted(customers, key=_customer_sort_key)
     ]
 
     if form.validate_on_submit():
@@ -1013,6 +1045,7 @@ def customer_invoice_report_results():
     # Use stored invoice amounts so reports remain stable even if customer tax
     # settings change after the invoice is created.
     enriched_invoices = []
+    customer_totals: dict[int | None, float] = {}
     for invoice in invoices:
         subtotal = 0
         gst_total = 0
@@ -1022,16 +1055,20 @@ def customer_invoice_report_results():
             subtotal += _compute_vendor_invoice_line_base(invoice, item)
             gst_total += _coerce_float(item.line_gst) or 0.0
             pst_total += _coerce_float(item.line_pst) or 0.0
-
+        invoice_total = subtotal + gst_total + pst_total
+        customer_totals[invoice.customer_id] = (
+            customer_totals.get(invoice.customer_id, 0.0) + invoice_total
+        )
         enriched_invoices.append(
             {
                 "invoice": invoice,
+                "customer_id": invoice.customer_id,
                 "customer_name": (
                     f"{invoice.customer.first_name} {invoice.customer.last_name}"
                     if invoice.customer is not None
                     else "Unknown Customer"
                 ),
-                "total": subtotal + gst_total + pst_total,
+                "total": invoice_total,
             }
         )
 
@@ -1049,6 +1086,7 @@ def customer_invoice_report_results():
         "report_vendor_invoice_results.html",
         customers=customers,
         invoices=enriched_invoices,
+        customer_totals=customer_totals,
         start=start_date,
         end=end_date,
         payment_status=payment_status,
