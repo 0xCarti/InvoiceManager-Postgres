@@ -2,5 +2,6 @@
 
 {% block form_content %}
     {% include 'items/item_form.html' %}
+    <script src="{{ url_for('static', filename='js/html5-qrcode.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/item_form.js') }}"></script>
 {% endblock %}

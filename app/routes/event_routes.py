@@ -1575,7 +1575,9 @@ def scan_counts(event_id, location_id):
 
             if not upc:
                 return (
-                    jsonify(success=False, error="A UPC value is required."),
+                    jsonify(
+                        success=False, error="A barcode value is required."
+                    ),
                     400,
                 )
             if quantity is None:
@@ -1602,17 +1604,17 @@ def scan_counts(event_id, location_id):
             upc = (form.upc.data or "").strip()
             quantity = float(form.quantity.data or 0)
 
-        item = Item.query.filter_by(upc=upc).first()
+        item = Item.lookup_by_barcode(upc)
         if item is None:
             if wants_json:
                 return (
                     jsonify(
                         success=False,
-                        error=f"No item found for UPC {upc}.",
+                        error=f"No item found for barcode {upc}.",
                     ),
                     404,
                 )
-            flash(f"No item found for UPC {upc}.", "danger")
+            flash(f"No item found for barcode {upc}.", "danger")
             location, totals = _serialize_scan_totals(el)
             return (
                 render_template(

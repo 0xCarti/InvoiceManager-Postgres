@@ -29,6 +29,7 @@ from app.models import (
     Invoice,
     InvoiceProduct,
     Item,
+    ItemBarcode,
     ItemUnit,
     Location,
     LocationStandItem,
@@ -62,6 +63,77 @@ item = Blueprint("item", __name__)
 # Only plain text files are allowed and uploads are capped at 1MB
 ALLOWED_IMPORT_EXTENSIONS = {".txt"}
 MAX_IMPORT_SIZE = 1 * 1024 * 1024  # 1 MB
+
+
+def _populate_item_barcode_form(form, item=None):
+    barcode_values = item.barcode_values if item is not None else []
+    target_count = max(1, len(barcode_values))
+    while len(form.barcodes) < target_count:
+        form.barcodes.append_entry()
+    for index, barcode_form in enumerate(form.barcodes):
+        barcode_form.form.code.data = (
+            barcode_values[index] if index < len(barcode_values) else ""
+        )
+
+
+def _collect_barcode_values(form):
+    barcode_values = []
+    seen = set()
+    has_errors = False
+    for barcode_form in form.barcodes:
+        value = Item.normalize_barcode(barcode_form.form.code.data)
+        barcode_form.form.code.data = value
+        if not value:
+            continue
+        if value in seen:
+            barcode_form.form.code.errors.append(
+                "Each barcode can only be entered once."
+            )
+            has_errors = True
+            continue
+        seen.add(value)
+        barcode_values.append(value)
+    return barcode_values, has_errors
+
+
+def _apply_barcode_conflicts(form, barcode_values, current_item_id=None):
+    if not barcode_values:
+        return False
+
+    conflicts = {}
+
+    item_query = Item.query.filter(Item.upc.in_(barcode_values))
+    if current_item_id is not None:
+        item_query = item_query.filter(Item.id != current_item_id)
+    for existing_item in item_query.all():
+        normalized = Item.normalize_barcode(existing_item.upc)
+        if normalized:
+            conflicts[normalized] = existing_item.name
+
+    alias_query = ItemBarcode.query.filter(ItemBarcode.code.in_(barcode_values))
+    if current_item_id is not None:
+        alias_query = alias_query.filter(ItemBarcode.item_id != current_item_id)
+    for alias in alias_query.all():
+        conflicts[alias.code] = alias.item.name if alias.item else "another item"
+
+    has_errors = False
+    for barcode_form in form.barcodes:
+        value = Item.normalize_barcode(barcode_form.form.code.data)
+        conflict_name = conflicts.get(value)
+        if not conflict_name:
+            continue
+        barcode_form.form.code.errors.append(
+            f'Barcode "{value}" is already assigned to {conflict_name}.'
+        )
+        has_errors = True
+    return has_errors
+
+
+def _sync_item_barcodes(item, barcode_values):
+    item.upc = barcode_values[0] if barcode_values else None
+    ItemBarcode.query.filter_by(item_id=item.id).delete()
+    for code in barcode_values[1:]:
+        db.session.add(ItemBarcode(item_id=item.id, code=code))
 
 
 @item.route("/items")
@@ -711,6 +783,7 @@ def add_item():
     """Add a new item to inventory."""
     form = ItemForm()
     if form.validate_on_submit():
+        barcode_values, barcode_errors = _collect_barcode_values(form)
         recv_count = sum(
             1
             for uf in form.units
@@ -732,6 +805,13 @@ def add_item():
             return render_template(
                 "items/item_form_page.html", form=form, title="Add Item"
             )
+        if barcode_errors or _apply_barcode_conflicts(form, barcode_values):
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                form_html = render_template("items/item_form.html", form=form)
+                return jsonify({"success": False, "form_html": form_html})
+            return render_template(
+                "items/item_form_page.html", form=form, title="Add Item"
+            )
         item = Item(
             name=form.name.data,
             base_unit=form.base_unit.data,
@@ -743,6 +823,7 @@ def add_item():
         )
         db.session.add(item)
         db.session.commit()
+        _sync_item_barcodes(item, barcode_values)
         receiving_set = False
         transfer_set = False
         for uf in form.units:
@@ -793,6 +874,7 @@ def copy_item(item_id):
     form.gl_code.data = item.gl_code
     form.gl_code_id.data = item.gl_code_id
     form.purchase_gl_code.data = item.purchase_gl_code_id
+    _populate_item_barcode_form(form)
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
         return render_template("items/item_form.html", form=form)
     return render_template("items/item_form_page.html", form=form, title="Add Item")
@@ -828,7 +910,9 @@ def edit_item(item_id):
         form.gl_code.data = item.gl_code
         form.gl_code_id.data = item.gl_code_id
         form.purchase_gl_code.data = item.purchase_gl_code_id
+        _populate_item_barcode_form(form, item)
     if form.validate_on_submit():
+        barcode_values, barcode_errors = _collect_barcode_values(form)
         recv_count = sum(
             1
             for uf in form.units
@@ -862,6 +946,28 @@ def edit_item(item_id):
                 purchase_gl_codes=purchase_gl_codes,
                 recipe_product_items=recipe_product_items,
             )
+        if barcode_errors or _apply_barcode_conflicts(
+            form, barcode_values, current_item_id=item.id
+        ):
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                form_html = render_template(
+                    "items/item_form.html",
+                    form=form,
+                    item=item,
+                    location_stand_items=location_stand_items,
+                    purchase_gl_codes=purchase_gl_codes,
+                    recipe_product_items=recipe_product_items,
+                )
+                return jsonify({"success": False, "form_html": form_html})
+            return render_template(
+                "items/item_form_page.html",
+                form=form,
+                item=item,
+                title="Edit Item",
+                location_stand_items=location_stand_items,
+                purchase_gl_codes=purchase_gl_codes,
+                recipe_product_items=recipe_product_items,
+            )
         item.name = form.name.data
         item.base_unit = form.base_unit.data
         if "gl_code" in request.form:
@@ -869,6 +975,7 @@ def edit_item(item_id):
         if "gl_code_id" in request.form:
             item.gl_code_id = form.gl_code_id.data
         item.purchase_gl_code_id = form.purchase_gl_code.data or None
+        _sync_item_barcodes(item, barcode_values)
         ItemUnit.query.filter_by(item_id=item.id).delete()
         receiving_set = False
         transfer_set = False
@@ -978,9 +1085,17 @@ def bulk_delete_items():
 def search_items():
     """Search items by name for autocomplete fields."""
     search_term = normalize_request_text_filter(request.args.get("term"))
+    if not search_term:
+        return jsonify([])
     items = (
         Item.query.options(selectinload(Item.purchase_gl_code))
-        .filter(build_text_match_predicate(Item.name, search_term, "contains"))
+        .filter(
+            or_(
+                build_text_match_predicate(Item.name, search_term, "contains"),
+                Item.upc == search_term,
+                Item.barcode_aliases.any(ItemBarcode.code == search_term),
+            )
+        )
         .order_by(Item.name)
         .limit(20)
         .all()

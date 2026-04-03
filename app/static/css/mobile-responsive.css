@@ -93,6 +93,25 @@
     overflow-wrap: anywhere;
 }
 
+.barcode-row .scan-barcode,
+.barcode-row .remove-barcode {
+    white-space: nowrap;
+}
+
+.item-barcode-scanner .item-barcode-reader {
+    min-height: 240px;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.75rem;
+    overflow: hidden;
+    background: #111;
+}
+
+.item-barcode-scanner .item-barcode-reader video {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
 @media (max-width: 767.98px) {
     .page-header-stack,
     .mobile-header-wrap,
@@ -309,5 +328,17 @@
 
     .purchase-order-quick-add {
         min-height: 44px;
+    }
+
+    .barcode-row .form-control,
+    .barcode-row .scan-barcode,
+    .barcode-row .remove-barcode {
+        min-height: 44px;
+    }
+
+    .barcode-row .scan-barcode,
+    .barcode-row .remove-barcode {
+        padding-left: 0.8rem;
+        padding-right: 0.8rem;
     }
 }

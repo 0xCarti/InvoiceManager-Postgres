@@ -214,6 +214,12 @@ class Item(db.Model):
     units = relationship(
         "ItemUnit", back_populates="item", cascade="all, delete-orphan"
     )
+    barcode_aliases = relationship(
+        "ItemBarcode",
+        back_populates="item",
+        cascade="all, delete-orphan",
+        order_by="ItemBarcode.id",
+    )
     gl_code_rel = relationship(
         "GLCode", foreign_keys=[gl_code_id], backref="items"
     )
@@ -230,6 +236,35 @@ class Item(db.Model):
             return lsi.purchase_gl_code
         return self.purchase_gl_code
 
+    @staticmethod
+    def normalize_barcode(value: Optional[str]) -> str:
+        return (value or "").strip()
+
+    @property
+    def barcode_values(self) -> list[str]:
+        values: list[str] = []
+        primary = self.normalize_barcode(self.upc)
+        if primary:
+            values.append(primary)
+        for alias in self.barcode_aliases:
+            code = self.normalize_barcode(alias.code)
+            if code and code not in values:
+                values.append(code)
+        return values
+
+    @classmethod
+    def lookup_by_barcode(cls, value: Optional[str]):
+        normalized = cls.normalize_barcode(value)
+        if not normalized:
+            return None
+        item = cls.query.filter_by(upc=normalized).first()
+        if item is not None:
+            return item
+        alias = ItemBarcode.query.filter_by(code=normalized).first()
+        if alias is None:
+            return None
+        return alias.item
+
     __table_args__ = (
         db.Index(
             "uix_item_name_active",
@@ -239,6 +274,16 @@ class Item(db.Model):
         ),
         db.Index("ix_item_archived", "archived"),
     )
+
+
+class ItemBarcode(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    code = db.Column(db.String(32), nullable=False)
+
+    item = relationship("Item", back_populates="barcode_aliases")
+
+    __table_args__ = (db.Index("ix_item_barcode_code", "code", unique=True),)
 
 
 class ItemUnit(db.Model):

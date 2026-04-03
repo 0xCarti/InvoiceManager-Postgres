@@ -557,9 +557,12 @@ class ItemUnitForm(FlaskForm):
     transfer_default = BooleanField("Transfer Default")
 
 
+class ItemBarcodeForm(FlaskForm):
+    code = StringField("Barcode", validators=[Optional(), Length(max=32)])
+
+
 class ItemForm(FlaskForm):
     name = StringField("Name", validators=[DataRequired()])
-    upc = StringField("UPC", validators=[Optional(), Length(max=32)])
     gl_code = SelectField("GL Code", validators=[Optional()])
     base_unit = SelectField(
         "Base Unit", choices=BASE_UNIT_CHOICES, validators=[DataRequired()]
@@ -570,6 +573,7 @@ class ItemForm(FlaskForm):
     purchase_gl_code = SelectField(
         "Purchase GL Code", coerce=int, validators=[Optional()]
     )
+    barcodes = FieldList(FormField(ItemBarcodeForm), min_entries=1)
     units = FieldList(FormField(ItemUnitForm), min_entries=1)
     submit = SubmitField("Submit")
 
@@ -1664,7 +1668,7 @@ class UpdateOpeningCountsForm(FlaskForm):
 
 
 class ScanCountForm(FlaskForm):
-    upc = StringField("UPC", validators=[DataRequired(), Length(max=32)])
+    upc = StringField("Barcode", validators=[DataRequired(), Length(max=32)])
     quantity = DecimalField(
         "Quantity", validators=[InputRequired()], default=1
     )

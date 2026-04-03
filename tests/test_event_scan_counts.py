@@ -10,6 +10,7 @@ from app.models import (
     EventLocation,
     EventStandSheetItem,
     Item,
+    ItemBarcode,
     ItemUnit,
     Location,
     LocationStandItem,
@@ -120,3 +121,23 @@ def test_scan_counts_records_totals(client, app):
         assert sheet is not None
         assert sheet.transferred_out == pytest.approx(5)
         assert sheet.closing_count == pytest.approx(5)
+
+
+def test_scan_counts_accepts_barcode_alias(client, app):
+    context = _setup_event(app)
+    alias_code = f"{uuid4().int % 10**12:012d}"
+    url = f"/events/{context['event_id']}/locations/{context['location_id']}/scan_counts"
+
+    with app.app_context():
+        db.session.add(
+            ItemBarcode(item_id=context["item_id"], code=alias_code)
+        )
+        db.session.commit()
+
+    with client:
+        login(client, context["email"], "pass")
+        post_resp = client.post(url, json={"upc": alias_code, "quantity": 2})
+        assert post_resp.status_code == 200
+        payload = post_resp.get_json()
+        assert payload["success"] is True
+        assert payload["item"]["total"] == pytest.approx(2)
