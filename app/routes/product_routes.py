@@ -274,7 +274,7 @@ def _get_sales_import_product_create_context():
     if sales_import_id is None and import_row_id is None and return_location_id is None:
         return None
 
-    if not current_user.is_admin:
+    if not current_user.has_permission("sales_imports.manage"):
         abort(403)
     if sales_import_id is None or import_row_id is None:
         abort(400)

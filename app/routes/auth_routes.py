@@ -42,11 +42,14 @@ from app.forms import (
     LoginForm,
     NotificationForm,
     PasswordResetRequestForm,
+    PermissionAssignmentForm,
+    PermissionGroupForm,
     RestoreBackupForm,
     SetPasswordForm,
     SettingsForm,
     TerminalSalesMappingDeleteForm,
     TimezoneForm,
+    UserAccessForm,
     VendorItemAliasForm,
     UserForm,
     MAX_BACKUP_SIZE,
@@ -63,6 +66,8 @@ from app.models import (
     PosSalesImport,
     PosSalesImportLocation,
     PosSalesImportRow,
+    Permission,
+    PermissionGroup,
     ProductRecipeItem,
     Product,
     Setting,
@@ -94,6 +99,7 @@ from app.services.purchase_imports import (
     normalize_vendor_alias_text,
     update_or_create_vendor_alias,
 )
+from app.permissions import get_default_landing_endpoint, get_permission_categories
 from app.utils.numeric import coerce_float
 from app.utils.units import (
     DEFAULT_BASE_UNIT_CONVERSIONS,
@@ -126,6 +132,52 @@ IMPORT_FILES = {
     "vendors": "example_vendors.csv",
     "users": "example_users.csv",
 }
+
+
+def _redirect_to_default_landing(user=None):
+    resolved_user = user or current_user
+    return redirect(url_for(get_default_landing_endpoint(resolved_user)))
+
+
+def _super_admin_count() -> int:
+    return User.query.filter_by(is_admin=True).count()
+
+
+def _selected_permission_categories(selected_codes: set[str] | None = None):
+    selected_codes = selected_codes or set()
+    categories = []
+    for category in get_permission_categories():
+        permissions = []
+        for definition in category["permissions"]:
+            permissions.append(
+                {
+                    "code": definition.code,
+                    "label": definition.label,
+                    "description": definition.description,
+                    "selected": definition.code in selected_codes,
+                }
+            )
+        categories.append(
+            {
+                "key": category["key"],
+                "label": category["label"],
+                "permissions": permissions,
+            }
+        )
+    return categories
+
+
+def _assign_permission_groups_to_user(user: User, group_ids: list[int] | None) -> None:
+    selected_ids = sorted({int(group_id) for group_id in (group_ids or [])})
+    groups = (
+        PermissionGroup.query.filter(PermissionGroup.id.in_(selected_ids))
+        .order_by(PermissionGroup.is_system.desc(), PermissionGroup.name)
+        .all()
+        if selected_ids
+        else []
+    )
+    user.permission_groups = groups
+    user.invalidate_permission_cache()
 
 
 def _cleanup_restored_user_favorites() -> int:
@@ -324,7 +376,7 @@ def login():
         db.session.commit()
         login_user(user, remember=form.remember.data)
         log_activity("Logged in", user.id)
-        return redirect(url_for("transfer.view_transfers"))
+        return _redirect_to_default_landing(user)
 
     from run import app
 
@@ -483,16 +535,13 @@ def toggle_favorite(link):
         parsed = urlparse(safe_referrer)
         if not parsed.scheme and not parsed.netloc:
             return redirect(safe_referrer)
-    return redirect(url_for("main.home"))
+    return _redirect_to_default_landing()
 
 
 @admin.route("/user_profile/<int:user_id>", methods=["GET", "POST"])
 @login_required
 def user_profile(user_id):
     """View or update another user's profile."""
-    if not current_user.is_admin:
-        abort(403)
-
     user = db.session.get(User, user_id)
     if user is None:
         abort(404)
@@ -580,8 +629,6 @@ def activate_user(user_id):
     form = CSRFOnlyForm()
     if not form.validate_on_submit():
         abort(400)
-    if not current_user.is_admin:
-        abort(403)  # Abort if the current user is not an admin
 
     user = db.session.get(User, user_id)
     if user is None:
@@ -599,10 +646,11 @@ def activate_user(user_id):
 @login_required
 def users():
     """Admin interface for managing users."""
-    if not current_user.is_admin:
-        return abort(403)  # Only allow admins to access this page
-
-    users = User.query.all()  # Fetch all users from the database
+    users = (
+        User.query.options(selectinload(User.permission_groups))
+        .order_by(User.email)
+        .all()
+    )
 
     form = UserForm()
     invite_form = InviteUserForm()
@@ -620,6 +668,7 @@ def users():
                 active=False,
                 is_admin=False,
             )
+            _assign_permission_groups_to_user(new_user, invite_form.group_ids.data)
             db.session.add(new_user)
             db.session.commit()
             token = generate_reset_token(new_user)
@@ -631,21 +680,33 @@ def users():
                 "You are invited to InvoiceManager",
                 f"Click the link to set your password: {invite_url}",
             )
+            log_activity(f"Invited user {email}")
             flash("Invitation sent.", "success")
         return redirect(url_for("admin.users"))
 
     if request.method == "POST" and form.validate_on_submit():
-        user_id = request.args.get("user_id")
+        user_id = request.args.get("user_id", type=int)
         action = request.form.get("action")
 
-        user = User.query.filter_by(id=user_id).first()
+        user = db.session.get(User, user_id)
         if user:
             if action == "toggle_active":
                 user.active = not user.active
                 log_activity(f"Toggled active for user {user_id}")
-            elif action == "toggle_admin":
+            elif action == "toggle_super_admin":
+                if not current_user.is_super_admin:
+                    abort(403)
+                if user.is_super_admin and _super_admin_count() <= 1:
+                    flash("At least one super admin is required.", "danger")
+                    return redirect(url_for("admin.users"))
                 user.is_admin = not user.is_admin
-                log_activity(f"Toggled admin for user {user_id}")
+                user.invalidate_permission_cache()
+                log_activity(
+                    f"Toggled super admin for user {user_id} to {user.is_admin}"
+                )
+            else:
+                flash("Unsupported action.", "danger")
+                return redirect(url_for("admin.users"))
             db.session.commit()
             flash("User updated successfully", "success")
         else:
@@ -661,16 +722,51 @@ def users():
     )
 
 
+@admin.route("/controlpanel/users/<int:user_id>/access", methods=["GET", "POST"])
+@login_required
+def user_access(user_id):
+    """View and update a user's assigned permission groups."""
+    user = (
+        User.query.options(selectinload(User.permission_groups))
+        .filter_by(id=user_id)
+        .first()
+    )
+    if user is None:
+        abort(404)
+
+    access_form = UserAccessForm(prefix="access")
+    if request.method == "GET":
+        access_form.group_ids.data = [
+            group.id for group in user.permission_groups
+        ]
+    elif access_form.submit.data and access_form.validate_on_submit():
+        _assign_permission_groups_to_user(user, access_form.group_ids.data)
+        db.session.commit()
+        log_activity(f"Updated permission groups for user {user.email}")
+        flash("User access updated.", "success")
+        return redirect(url_for("admin.user_access", user_id=user.id))
+    else:
+        access_form.group_ids.data = access_form.group_ids.data or [
+            group.id for group in user.permission_groups
+        ]
+
+    return render_template(
+        "admin/user_access.html",
+        managed_user=user,
+        access_form=access_form,
+    )
+
+
 @admin.route("/delete_user/<int:user_id>", methods=["POST"])
 @login_required
 def delete_user(user_id):
     """Remove a user from the system."""
-    if not current_user.is_admin:
-        abort(403)  # Abort if the current user is not an admin
-
     user_to_delete = db.session.get(User, user_id)
     if user_to_delete is None:
         abort(404)
+    if user_to_delete.is_super_admin and _super_admin_count() <= 1:
+        flash("At least one super admin is required.", "danger")
+        return redirect(url_for("admin.users"))
     user_to_delete.active = False
     db.session.commit()
     log_activity(f"Archived user {user_id}")
@@ -678,12 +774,215 @@ def delete_user(user_id):
     return redirect(url_for("admin.users"))
 
 
+@admin.route("/controlpanel/permission-groups", methods=["GET", "POST"])
+@login_required
+def permission_groups():
+    """List and create permission groups."""
+    groups = (
+        PermissionGroup.query.options(
+            selectinload(PermissionGroup.permissions),
+            selectinload(PermissionGroup.users),
+        )
+        .order_by(PermissionGroup.is_system.desc(), PermissionGroup.name)
+        .all()
+    )
+    create_form = PermissionGroupForm(prefix="create")
+
+    if create_form.submit.data and create_form.validate_on_submit():
+        name = (create_form.name.data or "").strip()
+        existing = PermissionGroup.query.filter_by(name=name).first()
+        if existing:
+            create_form.name.errors.append("A permission group with that name already exists.")
+        else:
+            group = PermissionGroup(
+                name=name,
+                description=(create_form.description.data or "").strip() or None,
+            )
+            db.session.add(group)
+            db.session.commit()
+            log_activity(f"Created permission group {group.name}")
+            flash("Permission group created.", "success")
+            return redirect(
+                url_for("admin.edit_permission_group", group_id=group.id)
+            )
+
+    return render_template(
+        "admin/permission_groups.html",
+        groups=groups,
+        create_form=create_form,
+    )
+
+
+@admin.route(
+    "/controlpanel/permission-groups/<int:group_id>",
+    methods=["GET", "POST"],
+)
+@login_required
+def edit_permission_group(group_id):
+    """View or edit a permission group."""
+    group = (
+        PermissionGroup.query.options(
+            selectinload(PermissionGroup.permissions),
+            selectinload(PermissionGroup.users),
+        )
+        .filter_by(id=group_id)
+        .first()
+    )
+    if group is None:
+        abort(404)
+
+    group_form = PermissionGroupForm(prefix="group", obj=group)
+    permission_form = PermissionAssignmentForm(prefix="permissions")
+
+    if request.method == "GET":
+        permission_form.permissions.data = [
+            permission.code for permission in group.permissions
+        ]
+    else:
+        if permission_form.permissions.data is None:
+            permission_form.permissions.data = [
+                permission.code for permission in group.permissions
+            ]
+
+        if group_form.submit.name in request.form:
+            if not current_user.has_permission("permission_groups.manage"):
+                abort(403)
+            if group.is_system:
+                flash("System permission groups cannot be edited.", "warning")
+                return redirect(
+                    url_for("admin.edit_permission_group", group_id=group.id)
+                )
+            if group_form.validate_on_submit():
+                group.name = (group_form.name.data or "").strip()
+                group.description = (
+                    (group_form.description.data or "").strip() or None
+                )
+                db.session.commit()
+                log_activity(f"Updated permission group {group.name}")
+                flash("Permission group updated.", "success")
+                return redirect(
+                    url_for("admin.edit_permission_group", group_id=group.id)
+                )
+
+        if permission_form.submit.name in request.form:
+            if not current_user.has_permission("permissions.manage"):
+                abort(403)
+            if group.is_system:
+                flash(
+                    "System permission groups cannot have their permissions edited.",
+                    "warning",
+                )
+                return redirect(
+                    url_for("admin.edit_permission_group", group_id=group.id)
+                )
+            if permission_form.validate_on_submit():
+                selected_codes = sorted(
+                    {code for code in (permission_form.permissions.data or []) if code}
+                )
+                permissions = (
+                    Permission.query.filter(Permission.code.in_(selected_codes))
+                    .order_by(Permission.category, Permission.code)
+                    .all()
+                    if selected_codes
+                    else []
+                )
+                group.permissions = permissions
+                db.session.commit()
+                log_activity(f"Updated permissions for group {group.name}")
+                flash("Group permissions updated.", "success")
+                return redirect(
+                    url_for("admin.edit_permission_group", group_id=group.id)
+                )
+
+    selected_codes = {
+        code for code in (permission_form.permissions.data or []) if code
+    }
+    permission_categories = _selected_permission_categories(selected_codes)
+
+    return render_template(
+        "admin/edit_permission_group.html",
+        group=group,
+        group_form=group_form,
+        permission_form=permission_form,
+        permission_categories=permission_categories,
+        can_manage_group=current_user.has_permission("permission_groups.manage"),
+        can_manage_permissions=current_user.has_permission("permissions.manage"),
+    )
+
+
+@admin.route(
+    "/controlpanel/permission-groups/<int:group_id>/delete",
+    methods=["POST"],
+)
+@login_required
+def delete_permission_group(group_id):
+    """Delete a permission group."""
+    form = DeleteForm()
+    if not form.validate_on_submit():
+        abort(400)
+
+    group = db.session.get(PermissionGroup, group_id)
+    if group is None:
+        abort(404)
+    if group.is_system:
+        flash("System permission groups cannot be deleted.", "warning")
+        return redirect(url_for("admin.permission_groups"))
+
+    group_name = group.name
+    db.session.delete(group)
+    db.session.commit()
+    log_activity(f"Deleted permission group {group_name}")
+    flash("Permission group deleted.", "success")
+    return redirect(url_for("admin.permission_groups"))
+
+
+@admin.route("/controlpanel/permissions", methods=["GET"])
+@login_required
+def permission_catalog():
+    """Display the full permission catalog and group assignments."""
+    permissions = (
+        Permission.query.options(selectinload(Permission.groups))
+        .order_by(Permission.category, Permission.code)
+        .all()
+    )
+    permissions_by_code = {permission.code: permission for permission in permissions}
+    permission_categories = []
+
+    for category in get_permission_categories():
+        category_rows = []
+        for definition in category["permissions"]:
+            permission = permissions_by_code.get(definition.code)
+            category_rows.append(
+                {
+                    "code": definition.code,
+                    "label": definition.label,
+                    "description": definition.description,
+                    "groups": sorted(
+                        permission.groups,
+                        key=lambda group: (not group.is_system, group.name.casefold()),
+                    )
+                    if permission is not None
+                    else [],
+                }
+            )
+        permission_categories.append(
+            {
+                "key": category["key"],
+                "label": category["label"],
+                "permissions": category_rows,
+            }
+        )
+
+    return render_template(
+        "admin/permission_catalog.html",
+        permission_categories=permission_categories,
+    )
+
+
 @admin.route("/controlpanel/backups", methods=["GET"])
 @login_required
 def backups():
     """List available database backups."""
-    if not current_user.is_admin:
-        abort(403)
     from flask import current_app
 
     backups_dir = current_app.config["BACKUP_FOLDER"]
@@ -706,8 +1005,6 @@ def backups():
 @login_required
 def create_backup_route():
     """Create a new database backup."""
-    if not current_user.is_admin:
-        abort(403)
     form = CreateBackupForm()
     if form.validate_on_submit():
         filename = create_backup()
@@ -720,8 +1017,6 @@ def create_backup_route():
 @login_required
 def restore_backup_route():
     """Restore the database from an uploaded backup."""
-    if not current_user.is_admin:
-        abort(403)
     form = RestoreBackupForm()
     if form.validate_on_submit():
         file = form.file.data
@@ -899,8 +1194,6 @@ def restore_backup_route():
 @login_required
 def restore_backup_file(filename):
     """Restore the database from an existing backup file."""
-    if not current_user.is_admin:
-        abort(403)
     from flask import current_app
 
     backups_dir = current_app.config["BACKUP_FOLDER"]
@@ -1079,8 +1372,6 @@ def restore_backup_file(filename):
 @login_required
 def download_backup(filename):
     """Download a backup file."""
-    if not current_user.is_admin:
-        abort(403)
     from flask import current_app, send_from_directory
 
     backups_dir = current_app.config["BACKUP_FOLDER"]
@@ -1092,8 +1383,6 @@ def download_backup(filename):
 @login_required
 def activity_logs():
     """Display a log of user actions."""
-    if not current_user.is_admin:
-        abort(403)
     form = ActivityLogFilterForm(meta={"csrf": False})
     user_choices = [(-1, "All Users"), (-2, "System Activity")]
     user_choices.extend(
@@ -1137,8 +1426,6 @@ def activity_logs():
 @login_required
 def system_info():
     """Display runtime system information."""
-    if not current_user.is_admin:
-        abort(403)
     start = current_app.config.get("START_TIME")
     uptime = None
     if start:
@@ -1166,8 +1453,6 @@ def system_info():
 @login_required
 def import_page():
     """Display import options."""
-    if not current_user.is_admin:
-        abort(403)
     forms = {key: ImportForm(prefix=key) for key in IMPORT_FILES}
     labels = {
         "locations": "Import Locations",
@@ -1189,8 +1474,6 @@ def download_example(data_type):
     """Download an example CSV file for the given data type."""
     from flask import current_app, send_from_directory
 
-    if not current_user.is_admin:
-        abort(403)
     if data_type not in IMPORT_FILES:
         abort(404)
     directory = current_app.config["IMPORT_FILES_FOLDER"]
@@ -1205,8 +1488,6 @@ def import_data(data_type):
     """Import a specific data type from an uploaded CSV file."""
     from flask import current_app
 
-    if not current_user.is_admin:
-        abort(403)
     form = ImportForm(prefix=data_type)
     if not form.validate_on_submit() or data_type not in IMPORT_FILES:
         abort(400)
@@ -1271,9 +1552,6 @@ def import_data(data_type):
 @login_required
 def settings():
     """Allow admins to update application settings like GST number."""
-    if not current_user.is_admin:
-        abort(403)
-
     gst_setting = Setting.query.filter_by(name="GST").first()
     if gst_setting is None:
         gst_setting = Setting(name="GST", value="")
@@ -1454,10 +1732,6 @@ def settings():
 @login_required
 def terminal_sales_mappings():
     """Allow admins to remove stored terminal sales aliases."""
-
-    if not current_user.is_admin:
-        abort(403)
-
     product_aliases = (
         TerminalSaleProductAlias.query.options(
             selectinload(TerminalSaleProductAlias.product)
@@ -1571,10 +1845,6 @@ def terminal_sales_mappings():
 @login_required
 def sales_imports():
     """Render staged POS sales imports for admin review."""
-
-    if not current_user.is_admin:
-        abort(403)
-
     available_statuses = [
         "pending",
         "needs_mapping",
@@ -2164,10 +2434,6 @@ def _check_negative_sales_import_reverse(import_record: PosSalesImport) -> list[
 @login_required
 def sales_import_detail(import_id: int):
     """Render location and row-level detail for a staged POS sales import."""
-
-    if not current_user.is_admin:
-        abort(403)
-
     sales_import = (
         PosSalesImport.query.options(
             selectinload(PosSalesImport.locations)
@@ -2837,10 +3103,6 @@ def sales_import_detail(import_id: int):
 @login_required
 def vendor_item_aliases(alias_id: int | None = None):
     """Allow admins to manage vendor item alias mappings."""
-
-    if not current_user.is_admin:
-        abort(403)
-
     alias_obj = db.session.get(VendorItemAlias, alias_id) if alias_id else None
     form = VendorItemAliasForm(obj=alias_obj)
     delete_form = DeleteForm()
@@ -2917,9 +3179,6 @@ def vendor_item_aliases(alias_id: int | None = None):
 )
 @login_required
 def delete_vendor_item_alias(alias_id: int):
-    if not current_user.is_admin:
-        abort(403)
-
     form = DeleteForm()
     if not form.validate_on_submit():
         flash("Unable to process the delete request.", "danger")

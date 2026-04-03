@@ -49,7 +49,7 @@
                     {% endif %}
                 </div>
                 <div class="d-flex flex-wrap gap-2">
-                    {% set can_manage_note = current_user.is_admin or note.user_id == current_user.id %}
+                    {% set can_manage_note = current_user.is_super_admin or note.user_id == current_user.id %}
                     {% if can_manage_note %}
                     <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('notes.edit_note', entity_type=entity_type, entity_id=entity_id, note_id=note.id) }}">Edit</a>
                     <form method="post" action="{{ url_for('notes.delete_note', entity_type=entity_type, entity_id=entity_id, note_id=note.id) }}" class="d-inline">

@@ -1921,6 +1921,39 @@ def test_create_purchase_order_rejects_unselected_item_rows(client, app):
         assert PurchaseOrder.query.count() == 0
 
 
+def test_create_purchase_order_accepts_blank_trailing_row(client, app):
+    email, vendor_id, item_id, _, unit_id = setup_purchase(app)
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            "/purchase_orders/create",
+            data={
+                "vendor": vendor_id,
+                "order_date": "2024-03-01",
+                "expected_date": "2024-03-02",
+                "items-0-item": item_id,
+                "items-0-unit": unit_id,
+                "items-0-quantity": 2,
+                "items-1-item": "",
+                "items-1-unit": "",
+                "items-1-quantity": "",
+                "items-1-item-label": "",
+            },
+            follow_redirects=True,
+        )
+
+    assert resp.status_code == 200
+    assert b"Purchase order created successfully!" in resp.data
+
+    with app.app_context():
+        po = PurchaseOrder.query.first()
+        assert po is not None
+        assert len(po.items) == 1
+        assert po.items[0].item_id == item_id
+        assert float(po.items[0].quantity) == 2.0
+
+
 def test_edit_purchase_order_rejects_invalid_rows_without_destroying_items(
     client, app
 ):

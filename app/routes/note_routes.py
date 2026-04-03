@@ -204,7 +204,7 @@ def entity_notes(entity_type: str, entity_id: str):
     form = NoteForm()
     delete_form = DeleteForm()
     pin_form = CSRFOnlyForm()
-    can_pin = current_user.is_admin
+    can_pin = current_user.is_super_admin
 
     if form.validate_on_submit():
         content = _ensure_content(form)
@@ -270,11 +270,11 @@ def edit_note(entity_type: str, entity_id: str, note_id: int):
     config, entity, identifier, note = _load_note_or_404(
         entity_type, entity_id, note_id
     )
-    if not (current_user.is_admin or note.user_id == current_user.id):
+    if not (current_user.is_super_admin or note.user_id == current_user.id):
         abort(403)
 
     form = NoteForm(obj=note)
-    can_pin = current_user.is_admin
+    can_pin = current_user.is_super_admin
 
     if form.validate_on_submit():
         content = _ensure_content(form)
@@ -324,7 +324,7 @@ def delete_note(entity_type: str, entity_id: str, note_id: int):
     config, entity, identifier, note = _load_note_or_404(
         entity_type, entity_id, note_id
     )
-    if not (current_user.is_admin or note.user_id == current_user.id):
+    if not (current_user.is_super_admin or note.user_id == current_user.id):
         abort(403)
     db.session.delete(note)
     db.session.commit()
@@ -347,7 +347,7 @@ def delete_note(entity_type: str, entity_id: str, note_id: int):
 )
 @login_required
 def toggle_pin(entity_type: str, entity_id: str, note_id: int):
-    if not current_user.is_admin:
+    if not current_user.is_super_admin:
         abort(403)
     form = CSRFOnlyForm()
     if not form.validate_on_submit():

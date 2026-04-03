@@ -490,7 +490,7 @@
                 aria-controls="navbarNav" aria-label="Toggle navigation">
                 <span class="navbar-toggler-icon"></span>
             </button>
-            <a class="navbar-icon-btn me-2" href="{{ url_for('main.home') }}" aria-label="Dashboard home">
+            <a class="navbar-icon-btn me-2" href="{{ default_home_url() }}" aria-label="Dashboard home">
                 <span aria-hidden="true">&#8962;</span>
             </a>
             <button class="navbar-toggler d-md-none me-2" type="button" data-bs-toggle="offcanvas"
@@ -596,11 +596,9 @@
                         </li>
 
                         {% else %}
-                        {% if current_user.is_admin %}
                         <li class="nav-item">
                             <hr class="dropdown-divider">
                         </li>
-                        {% endif %}
                         {% set profile_url = safe_url_for('auth.profile') %}
                         <li class="nav-item">
                             {% if profile_url %}
@@ -632,10 +630,9 @@
                     <button type="button" class="btn-close text-reset" data-bs-dismiss="offcanvas" aria-label="Close"></button>
                 </div>
                 <div class="offcanvas-body">
-                    <ul class="navbar-nav">
+                        <ul class="navbar-nav">
                         {% if current_user.is_authenticated %}
                         {% for fav in current_user.get_favorites() %}
-                        {% if not (fav.startswith('admin.') and not current_user.is_admin) %}
                         {% set label = NAV_LINKS.get(fav, fav.split('.')[-1].replace('_', ' ').title()) %}
                         {% set fav_url = safe_url_for(fav) %}
                         <li class="nav-item">
@@ -645,7 +642,6 @@
                             <span class="nav-link disabled" title="Unavailable in this build">{{ label }}</span>
                             {% endif %}
                         </li>
-                        {% endif %}
                         {% endfor %}
                         {% endif %}
                     </ul>

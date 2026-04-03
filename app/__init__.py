@@ -23,6 +23,12 @@ from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 from werkzeug.routing import BuildError
 from werkzeug.security import generate_password_hash
 
+from app.permissions import (
+    get_default_landing_endpoint,
+    sync_permission_data,
+    user_can_access_endpoint,
+)
+
 load_dotenv()
 db = SQLAlchemy()
 login_manager = LoginManager()
@@ -221,6 +227,8 @@ NAV_LINKS = {
     "admin.activity_logs": "Activity Logs",
     "admin.system_info": "System Info",
     "admin.vendor_item_aliases": "Vendor Item Aliases",
+    "admin.permission_groups": "Permission Groups",
+    "admin.permission_catalog": "Permissions",
 }
 
 NAV_GROUPS = (
@@ -290,6 +298,8 @@ NAV_GROUPS = (
             ("admin.activity_logs", "Activity Logs"),
             ("admin.terminal_sales_mappings", "Terminal Sales Mappings"),
             ("admin.vendor_item_aliases", "Vendor Item Aliases"),
+            ("admin.permission_groups", "Permission Groups"),
+            ("admin.permission_catalog", "Permissions"),
         ),
         True,
     ),
@@ -568,13 +578,46 @@ def create_app(args=None):
         def grouped_nav_links():
             if not current_user.is_authenticated:
                 return []
-            return [
-                (label, links)
-                for label, links, admin_only in NAV_GROUPS
-                if not admin_only or current_user.is_admin
-            ]
+            visible_groups = []
+            for label, links, _admin_only in NAV_GROUPS:
+                visible_links = [
+                    (endpoint, link_label)
+                    for endpoint, link_label in links
+                    if current_user.can_access_endpoint(endpoint, "GET")
+                ]
+                if visible_links:
+                    visible_groups.append((label, visible_links))
+            return visible_groups
 
         return {"GROUPED_NAV_LINKS": grouped_nav_links}
+
+    @app.context_processor
+    def inject_permission_helpers():
+        """Expose permission helpers to templates."""
+
+        def has_permission(code):
+            return bool(
+                current_user.is_authenticated
+                and current_user.has_permission(code)
+            )
+
+        def can_access_endpoint(endpoint, method="GET"):
+            if not current_user.is_authenticated:
+                return False
+            return current_user.can_access_endpoint(endpoint, method)
+
+        def default_home_url():
+            if not current_user.is_authenticated:
+                return url_for("auth.login")
+            if current_user.can_access_endpoint("main.home", "GET"):
+                return url_for("main.home")
+            return url_for(get_default_landing_endpoint(current_user))
+
+        return {
+            "has_permission": has_permission,
+            "can_access_endpoint": can_access_endpoint,
+            "default_home_url": default_home_url,
+        }
 
     @app.context_processor
     def inject_safe_url_for():
@@ -582,6 +625,11 @@ def create_app(args=None):
 
         def safe_url_for(endpoint, **kwargs):
             try:
+                if (
+                    current_user.is_authenticated
+                    and not user_can_access_endpoint(current_user, endpoint, "GET")
+                ):
+                    return None
                 return url_for(endpoint, **kwargs)
             except BuildError:
                 return None
@@ -640,6 +688,15 @@ def create_app(args=None):
             return Response(status=405)
 
     @app.before_request
+    def enforce_endpoint_permissions():
+        """Reject direct requests to endpoints the current user cannot access."""
+
+        if not current_user.is_authenticated:
+            return
+        if not user_can_access_endpoint(current_user, request.endpoint, request.method):
+            return Response(status=403)
+
+    @app.before_request
     def enforce_login_activity():
         """Log users out after inactivity and enforce periodic reauthentication."""
 
@@ -693,6 +750,7 @@ def create_app(args=None):
 
         if should_create_all:
             db.create_all()
+            sync_permission_data(db.session)
 
         from app.routes.auth_routes import admin, auth
         from app.routes.customer_routes import customer

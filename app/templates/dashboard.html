@@ -45,8 +45,15 @@
 }
 </style>
 <div class="container mt-4 dashboard-mobile-page" data-dashboard-container data-user-id="{{ current_user.id if current_user.is_authenticated else 'guest' }}">
-    {% set can_manage_operations = current_user.is_admin %}
-    {% set action_denied_message = "You do not have permission to perform this action." %}
+    {% set can_view_transfers = can_access_endpoint('transfer.view_transfers') %}
+    {% set can_create_transfers = has_permission('transfers.create') %}
+    {% set can_complete_transfers = has_permission('transfers.complete') %}
+    {% set can_view_purchase_orders = can_access_endpoint('purchase.view_purchase_orders') %}
+    {% set can_receive_purchase_invoices = has_permission('purchase_invoices.receive') %}
+    {% set can_view_purchase_invoices = can_access_endpoint('purchase.view_purchase_invoices') %}
+    {% set can_view_invoices = can_access_endpoint('invoice.view_invoices') %}
+    {% set can_view_events = can_access_endpoint('event.view_events') %}
+    {% set can_create_events = has_permission('events.create') %}
     <div class="d-flex align-items-center justify-content-between mb-4 page-header-stack">
         <div>
             <h1 class="mb-0">Dashboard</h1>
@@ -55,6 +62,7 @@
     </div>
 
     <div class="row g-3">
+        {% if can_view_transfers %}
         <div class="col-md-3 col-sm-6">
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
@@ -79,6 +87,8 @@
                 </div>
             </div>
         </div>
+        {% endif %}
+        {% if can_view_purchase_orders %}
         <div class="col-md-3 col-sm-6">
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
@@ -103,6 +113,8 @@
                 </div>
             </div>
         </div>
+        {% endif %}
+        {% if can_view_purchase_invoices or can_receive_purchase_invoices %}
         <div class="col-md-3 col-sm-6">
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
@@ -126,6 +138,8 @@
                 </div>
             </div>
         </div>
+        {% endif %}
+        {% if can_view_invoices %}
         <div class="col-md-3 col-sm-6">
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
@@ -149,8 +163,10 @@
                 </div>
             </div>
         </div>
+        {% endif %}
     </div>
 
+    {% if can_view_transfers %}
     <div class="row g-3 mt-1">
         <div class="col-12">
             <div class="card h-100">
@@ -192,7 +208,9 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
+    {% if can_view_transfers or can_view_purchase_orders or can_view_purchase_invoices or can_view_invoices %}
     <div class="row g-3 mt-1">
         <div class="col-12">
             <div class="card h-100">
@@ -268,6 +286,8 @@
             </div>
         </div>
     </div>
+    {% endif %}
+    {% if can_view_events %}
     <div class="row g-3 mt-1">
         <div class="col-12">
             <div class="card h-100">
@@ -311,7 +331,9 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
+    {% if can_view_purchase_orders or can_receive_purchase_invoices or can_view_transfers or can_create_transfers or can_complete_transfers %}
     <div class="row g-3 mt-1">
         <div class="col-12">
             <div class="card h-100">
@@ -338,7 +360,7 @@
                                 <div class="border rounded p-3 h-100">
                                     <div class="d-flex justify-content-between align-items-center mb-2 dashboard-meta-row">
                                         <h6 class="mb-0">Pending purchase orders</h6>
-                                        {% if context.queues.purchase_orders.total > context.queues.purchase_orders['items']|length %}
+                                        {% if can_view_purchase_orders and context.queues.purchase_orders.total > context.queues.purchase_orders['items']|length %}
                                             <a class="small" href="{{ url_for('purchase.view_purchase_orders') }}">Show more</a>
                                         {% endif %}
                                     </div>
@@ -352,10 +374,8 @@
                                                         <div class="text-muted small">Due {{ po.expected_date.strftime('%b %d, %Y') }} · ${{ '%.2f'|format(po.expected_total_cost or 0) }}</div>
                                                     </div>
                                                     <div class="text-end">
-                                                        {% if can_manage_operations %}
+                                                        {% if can_receive_purchase_invoices %}
                                                             <a class="btn btn-sm btn-primary" href="{{ url_for('purchase.receive_invoice', po_id=po.id) }}">Receive</a>
-                                                        {% else %}
-                                                            <span class="btn btn-sm btn-primary disabled" aria-disabled="true" title="{{ action_denied_message }}">Receive</span>
                                                         {% endif %}
                                                     </div>
                                                 </div>
@@ -371,8 +391,10 @@
                                     <div class="d-flex justify-content-between align-items-center mb-2 dashboard-meta-row">
                                         <h6 class="mb-0">Transfers awaiting approval</h6>
                                         <div class="d-flex align-items-center gap-2 dashboard-header-actions">
+                                            {% if can_create_transfers %}
                                             <a class="btn btn-sm btn-primary" href="{{ url_for('transfer.add_transfer') }}">Start Transfer</a>
-                                            {% if context.queues.transfers.total > context.queues.transfers['items']|length %}
+                                            {% endif %}
+                                            {% if can_view_transfers and context.queues.transfers.total > context.queues.transfers['items']|length %}
                                                 <a class="small" href="{{ url_for('transfer.view_transfers') }}">Show more</a>
                                             {% endif %}
                                         </div>
@@ -386,15 +408,15 @@
                                                         <div class="text-muted small">Created {{ transfer.date_created.strftime('%b %d, %Y') }}</div>
                                                     </div>
                                                     <div class="text-end d-flex flex-column align-items-end gap-1 dashboard-queue-actions">
-                                                        {% if can_manage_operations %}
+                                                        {% if can_complete_transfers %}
                                                             <form method="post" action="{{ url_for('transfer.complete_transfer', transfer_id=transfer.id) }}" class="d-inline">
                                                                 {{ confirm_form.hidden_tag() }}
                                                                 <button type="submit" class="btn btn-sm btn-success">Approve</button>
                                                             </form>
-                                                        {% else %}
-                                                            <button type="button" class="btn btn-sm btn-success" disabled title="{{ action_denied_message }}">Approve</button>
                                                         {% endif %}
+                                                        {% if can_view_transfers %}
                                                         <a class="small" href="{{ url_for('transfer.view_transfer', transfer_id=transfer.id) }}">Review</a>
+                                                        {% endif %}
                                                     </div>
                                                 </div>
                                             </li>
@@ -410,7 +432,9 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
+    {% if can_view_events %}
     <div class="row g-3 mt-1">
         <div class="col-12">
             <div class="card h-100">
@@ -420,7 +444,7 @@
                         <p class="text-muted mb-0 small">Browse upcoming and active events; overdue dates are highlighted.</p>
                     </div>
                     <div class="d-flex align-items-center gap-2 dashboard-header-actions">
-                        {% if can_manage_operations %}
+                        {% if can_create_events %}
                             <a class="btn btn-primary btn-sm" href="{{ url_for('event.create_event') }}">Schedule event</a>
                         {% endif %}
                         <button
@@ -516,6 +540,7 @@
             </div>
         </div>
     </div>
+    {% endif %}
 </div>
 {% endblock %}
 

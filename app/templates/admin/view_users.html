@@ -3,33 +3,60 @@
 
 {% block content %}
 <div class="container mt-4">
+    {% set can_manage_users = has_permission('users.manage') %}
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
         <div>
             <h2 class="mb-1">Manage Users</h2>
-            <p class="text-muted mb-0">Invite and manage user access</p>
+            <p class="text-muted mb-0">Invite users, assign permission groups, and manage super-admin access.</p>
+        </div>
+        {% if can_access_endpoint('admin.permission_groups') %}
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('admin.permission_groups') }}" class="btn btn-outline-secondary">Permission Groups</a>
+            {% if can_access_endpoint('admin.permission_catalog') %}
+            <a href="{{ url_for('admin.permission_catalog') }}" class="btn btn-outline-secondary">Permissions</a>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    {% if can_manage_users %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <h3 class="h6 mb-3">Invite User</h3>
+            <form action="{{ url_for('admin.users') }}" method="post" class="row g-3">
+                {{ invite_form.hidden_tag() }}
+                <div class="col-12 col-lg-5">
+                    {{ invite_form.email.label(class_='form-label') }}
+                    {{ invite_form.email(class_='form-control', placeholder='Email') }}
+                </div>
+                <div class="col-12 col-lg-5">
+                    {{ invite_form.group_ids.label(class_='form-label') }}
+                    {{ invite_form.group_ids(class_='form-select', multiple=true) }}
+                    <div class="form-text">Leave blank to use the default Full App Access group.</div>
+                </div>
+                <div class="col-12 col-lg-2 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary w-100">{{ invite_form.submit.label.text }}</button>
+                </div>
+            </form>
         </div>
     </div>
-    <div class="d-flex flex-column flex-lg-row align-items-stretch align-items-lg-center gap-2 mb-3">
-        <form action="{{ url_for('admin.users') }}" method="post" class="d-flex flex-column flex-sm-row flex-grow-1 gap-2">
-            {{ invite_form.hidden_tag() }}
-            {{ invite_form.email(class_='form-control flex-grow-1', placeholder='Email') }}
-            <button type="submit" class="btn btn-primary">{{ invite_form.submit.label.text }}</button>
-        </form>
-        <div>
-            {{ column_visibility_dropdown(
-                table_id='admin-users-table',
-                storage_key='adminUsersTableColumnVisibility',
-                align='end',
-                columns=[
-                    {'id': 'toggle-user-email', 'target': 'col-user-email', 'label': 'Email', 'checked': True},
-                    {'id': 'toggle-user-active', 'target': 'col-user-active', 'label': 'Active', 'checked': True},
-                    {'id': 'toggle-user-admin', 'target': 'col-user-admin', 'label': 'Admin', 'checked': True},
-                    {'id': 'toggle-user-actions', 'target': 'col-user-actions', 'label': 'Actions', 'checked': True},
-                    {'id': 'toggle-user-profile', 'target': 'col-user-profile', 'label': 'Profile', 'checked': True},
-                ]
-            ) }}
-        </div>
+    {% endif %}
+
+    <div class="d-flex justify-content-end mb-3">
+        {{ column_visibility_dropdown(
+            table_id='admin-users-table',
+            storage_key='adminUsersTableColumnVisibility',
+            align='end',
+            columns=[
+                {'id': 'toggle-user-email', 'target': 'col-user-email', 'label': 'Email', 'checked': True},
+                {'id': 'toggle-user-active', 'target': 'col-user-active', 'label': 'Status', 'checked': True},
+                {'id': 'toggle-user-access', 'target': 'col-user-access', 'label': 'Access', 'checked': True},
+                {'id': 'toggle-user-actions', 'target': 'col-user-actions', 'label': 'Actions', 'checked': True},
+                {'id': 'toggle-user-profile', 'target': 'col-user-profile', 'label': 'Profile', 'checked': True},
+            ]
+        ) }}
     </div>
+
     <div class="d-md-none vstack gap-3">
         {% for user in users %}
         <div class="card">
@@ -37,17 +64,26 @@
                 <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
                     <div class="min-w-0">
                         <div class="fw-semibold text-break">{{ user.email }}</div>
-                        <div class="small text-muted">Profile: {{ user.id }}</div>
+                        <div class="small text-muted">User #{{ user.id }}</div>
                     </div>
                     <span class="badge {% if user.active %}text-bg-success{% else %}text-bg-secondary{% endif %}">
                         {{ 'Active' if user.active else 'Inactive' }}
                     </span>
                 </div>
                 <div class="small mb-3">
-                    Admin access:
-                    <span class="fw-semibold">{{ 'Yes' if user.is_admin else 'No' }}</span>
+                    {% if user.is_super_admin %}
+                    <span class="badge text-bg-dark me-1">Super Admin</span>
+                    {% endif %}
+                    {% if user.permission_groups %}
+                        {% for group in user.permission_groups %}
+                        <span class="badge {% if group.is_system %}text-bg-secondary{% else %}text-bg-light border text-dark{% endif %} me-1 mb-1">{{ group.name }}</span>
+                        {% endfor %}
+                    {% else %}
+                    <span class="text-muted">No permission groups</span>
+                    {% endif %}
                 </div>
                 <div class="vstack gap-2">
+                    {% if can_manage_users %}
                     <form action="{{ url_for('admin.users', user_id=user.id) }}" method="post">
                         {{ form.hidden_tag() }}
                         <button type="submit" name="action" value="toggle_active" class="btn btn-primary btn-sm w-100"
@@ -55,33 +91,42 @@
                             Toggle Active
                         </button>
                     </form>
+                    {% if current_user.is_super_admin %}
                     <form action="{{ url_for('admin.users', user_id=user.id) }}" method="post">
                         {{ form.hidden_tag() }}
-                        <button type="submit" name="action" value="toggle_admin" class="btn btn-secondary btn-sm w-100"
-                                data-confirm-message="Are you sure you want to toggle the admin status?">
-                            Toggle Admin
+                        <button type="submit" name="action" value="toggle_super_admin" class="btn btn-secondary btn-sm w-100"
+                                data-confirm-message="Are you sure you want to toggle super-admin access?">
+                            Toggle Super Admin
                         </button>
                     </form>
+                    {% endif %}
                     <form action="{{ url_for('admin.delete_user', user_id=user.id) }}" method="post">
                         {{ form.hidden_tag() }}
                         <button type="submit" class="btn btn-danger btn-sm w-100"
-                                data-confirm-message="Are you sure you want to delete this user?">
-                            Delete
+                                data-confirm-message="Are you sure you want to archive this user?">
+                            Archive
                         </button>
                     </form>
+                    {% endif %}
+                    {% if can_access_endpoint('admin.user_access') %}
+                    <a href="{{ url_for('admin.user_access', user_id=user.id) }}" class="btn btn-outline-primary btn-sm w-100">Access</a>
+                    {% endif %}
+                    {% if can_access_endpoint('admin.user_profile') %}
                     <a href="{{ url_for('admin.user_profile', user_id=user.id) }}" class="btn btn-info btn-sm w-100">View Profile</a>
+                    {% endif %}
                 </div>
             </div>
         </div>
         {% endfor %}
     </div>
+
     <div class="d-none d-md-block table-responsive">
         <table class="table sortable" id="admin-users-table">
             <thead>
             <tr>
                 <th scope="col" class="col-user-email">Email</th>
-                <th scope="col" class="col-user-active">Active</th>
-                <th scope="col" class="col-user-admin">Admin</th>
+                <th scope="col" class="col-user-active">Status</th>
+                <th scope="col" class="col-user-access">Access</th>
                 <th scope="col" class="col-user-actions" data-sortable="false">Actions</th>
                 <th scope="col" class="col-user-profile" data-sortable="false">Profile</th>
             </tr>
@@ -90,9 +135,25 @@
             {% for user in users %}
             <tr>
                 <td class="col-user-email">{{ user.email }}</td>
-                <td class="col-user-active">{{ user.active }}</td>
-                <td class="col-user-admin">{{ user.is_admin }}</td>
+                <td class="col-user-active">
+                    <span class="badge {% if user.active %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+                        {{ 'Active' if user.active else 'Inactive' }}
+                    </span>
+                </td>
+                <td class="col-user-access">
+                    {% if user.is_super_admin %}
+                    <span class="badge text-bg-dark me-1">Super Admin</span>
+                    {% endif %}
+                    {% if user.permission_groups %}
+                        {% for group in user.permission_groups %}
+                        <span class="badge {% if group.is_system %}text-bg-secondary{% else %}text-bg-light border text-dark{% endif %} me-1 mb-1">{{ group.name }}</span>
+                        {% endfor %}
+                    {% else %}
+                    <span class="text-muted">No permission groups</span>
+                    {% endif %}
+                </td>
                 <td class="col-user-actions">
+                    {% if can_manage_users %}
                     <form action="{{ url_for('admin.users', user_id=user.id) }}" method="post" class="d-inline">
                         {{ form.hidden_tag() }}
                         <button type="submit" name="action" value="toggle_active" class="btn btn-sm btn-primary"
@@ -100,23 +161,35 @@
                             Toggle Active
                         </button>
                     </form>
+                    {% if current_user.is_super_admin %}
                     <form action="{{ url_for('admin.users', user_id=user.id) }}" method="post" class="d-inline">
                         {{ form.hidden_tag() }}
-                        <button type="submit" name="action" value="toggle_admin" class="btn btn-sm btn-secondary"
-                                data-confirm-message="Are you sure you want to toggle the admin status?">
-                            Toggle Admin
+                        <button type="submit" name="action" value="toggle_super_admin" class="btn btn-sm btn-secondary"
+                                data-confirm-message="Are you sure you want to toggle super-admin access?">
+                            Toggle Super Admin
                         </button>
                     </form>
+                    {% endif %}
                     <form action="{{ url_for('admin.delete_user', user_id=user.id) }}" method="post" class="d-inline">
                         {{ form.hidden_tag() }}
                         <button type="submit" class="btn btn-sm btn-danger"
-                                data-confirm-message="Are you sure you want to delete this user?">
-                            Delete
+                                data-confirm-message="Are you sure you want to archive this user?">
+                            Archive
                         </button>
                     </form>
+                    {% else %}
+                    <span class="text-muted">Read only</span>
+                    {% endif %}
                 </td>
                 <td class="col-user-profile">
-                    <a href="{{ url_for('admin.user_profile', user_id=user.id) }}" class="btn btn-sm btn-info">View Profile</a>
+                    <div class="d-flex flex-wrap gap-2">
+                        {% if can_access_endpoint('admin.user_access') %}
+                        <a href="{{ url_for('admin.user_access', user_id=user.id) }}" class="btn btn-sm btn-outline-primary">Access</a>
+                        {% endif %}
+                        {% if can_access_endpoint('admin.user_profile') %}
+                        <a href="{{ url_for('admin.user_profile', user_id=user.id) }}" class="btn btn-sm btn-info">View Profile</a>
+                        {% endif %}
+                    </div>
                 </td>
             </tr>
             {% endfor %}

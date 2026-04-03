@@ -4,9 +4,9 @@ from typing import Optional
 
 from flask import current_app, has_app_context
 from flask_login import UserMixin
-from sqlalchemy import func, select
+from sqlalchemy import event as sqlalchemy_event, func, select
 from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Session, relationship
 
 from app import db
 
@@ -46,6 +46,80 @@ menu_products = db.Table(
         "product_id", db.Integer, db.ForeignKey("product.id"), primary_key=True
     ),
 )
+
+user_permission_groups = db.Table(
+    "user_permission_groups",
+    db.Column(
+        "user_id",
+        db.Integer,
+        db.ForeignKey("user.id"),
+        primary_key=True,
+    ),
+    db.Column(
+        "permission_group_id",
+        db.Integer,
+        db.ForeignKey("permission_group.id"),
+        primary_key=True,
+    ),
+)
+
+permission_group_permissions = db.Table(
+    "permission_group_permissions",
+    db.Column(
+        "permission_group_id",
+        db.Integer,
+        db.ForeignKey("permission_group.id"),
+        primary_key=True,
+    ),
+    db.Column(
+        "permission_id",
+        db.Integer,
+        db.ForeignKey("permission.id"),
+        primary_key=True,
+    ),
+)
+
+
+class Permission(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(100), unique=True, nullable=False)
+    category = db.Column(db.String(50), nullable=False)
+    label = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text, nullable=False, default="")
+
+    groups = relationship(
+        "PermissionGroup",
+        secondary=permission_group_permissions,
+        back_populates="permissions",
+    )
+
+    __table_args__ = (db.Index("ix_permission_category_code", "category", "code"),)
+
+
+class PermissionGroup(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(64), unique=True, nullable=True)
+    name = db.Column(db.String(100), unique=True, nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    is_system = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
+
+    users = relationship(
+        "User",
+        secondary=user_permission_groups,
+        back_populates="permission_groups",
+    )
+    permissions = relationship(
+        "Permission",
+        secondary=permission_group_permissions,
+        back_populates="groups",
+        order_by="Permission.category, Permission.code",
+    )
+
+    __table_args__ = (
+        db.Index("ix_permission_group_is_system", "is_system"),
+    )
 
 
 class LocationStandItem(db.Model):
@@ -96,14 +170,68 @@ class User(UserMixin, db.Model):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    permission_groups = relationship(
+        "PermissionGroup",
+        secondary=user_permission_groups,
+        back_populates="users",
+        order_by="PermissionGroup.name",
+    )
+
+    @property
+    def is_super_admin(self) -> bool:
+        return bool(self.is_admin)
+
+    def get_permission_codes(self) -> set[str]:
+        if self.is_super_admin:
+            return set()
+        cached_codes = getattr(self, "_permission_code_cache", None)
+        if cached_codes is not None:
+            return cached_codes
+        codes = {
+            permission.code
+            for group in self.permission_groups
+            for permission in group.permissions
+        }
+        self._permission_code_cache = codes
+        return codes
+
+    def invalidate_permission_cache(self) -> None:
+        if hasattr(self, "_permission_code_cache"):
+            delattr(self, "_permission_code_cache")
+
+    def has_permission(self, code: str) -> bool:
+        if self.is_super_admin:
+            return True
+        if not code:
+            return False
+        return code in self.get_permission_codes()
+
+    def has_any_permission(self, *codes: str) -> bool:
+        return any(self.has_permission(code) for code in codes if code)
+
+    def has_all_permissions(self, *codes: str) -> bool:
+        valid_codes = [code for code in codes if code]
+        return all(self.has_permission(code) for code in valid_codes)
+
+    def can_access_endpoint(self, endpoint: str | None, method: str = "GET") -> bool:
+        from app.permissions import user_can_access_endpoint
+
+        return user_can_access_endpoint(self, endpoint, method)
 
     def get_favorites(self):
         """Return the user's favourite endpoint names as a list."""
         favorites = [f for f in (self.favorites or "").split(",") if f]
         if not has_app_context():
             return favorites
+        from app.permissions import user_can_access_endpoint
+
         valid_endpoints = {rule.endpoint for rule in current_app.url_map.iter_rules()}
-        return [favorite for favorite in favorites if favorite in valid_endpoints]
+        return [
+            favorite
+            for favorite in favorites
+            if favorite in valid_endpoints
+            and user_can_access_endpoint(self, favorite, "GET")
+        ]
 
     def toggle_favorite(self, endpoint: str):
         """Add or remove an endpoint from the favourites list."""
@@ -115,7 +243,7 @@ class User(UserMixin, db.Model):
         favs = {favorite for favorite in favs if favorite in valid_endpoints}
         if endpoint in favs:
             favs.remove(endpoint)
-        elif endpoint in valid_endpoints:
+        elif endpoint in valid_endpoints and self.can_access_endpoint(endpoint, "GET"):
             favs.add(endpoint)
         self.favorites = ",".join(sorted(favs))
 
@@ -135,6 +263,27 @@ class UserFilterPreference(db.Model):
             "user_id", "scope", name="uq_user_filter_preference_scope"
         ),
     )
+
+
+@sqlalchemy_event.listens_for(Session, "before_flush")
+def assign_default_permission_group(session, flush_context, instances):
+    from app.permissions import SYSTEM_FULL_ACCESS_GROUP_KEY
+
+    full_access_group = None
+    for obj in session.new:
+        if not isinstance(obj, User):
+            continue
+        if obj.is_super_admin or obj.permission_groups:
+            continue
+        if full_access_group is None:
+            full_access_group = (
+                session.query(PermissionGroup)
+                .filter_by(key=SYSTEM_FULL_ACCESS_GROUP_KEY)
+                .first()
+            )
+        if full_access_group is not None:
+            obj.permission_groups.append(full_access_group)
+            obj.invalidate_permission_cache()
 
 class Location(db.Model):
     id = db.Column(db.Integer, primary_key=True)

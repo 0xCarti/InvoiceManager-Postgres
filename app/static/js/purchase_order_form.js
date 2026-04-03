@@ -1972,7 +1972,6 @@
                 if (row) {
                     row.remove();
                     updatePositions();
-                    ensureTrailingBlankRow();
                 }
             } else if (target.classList.contains("suggestion-option")) {
                 handleSuggestionSelection(target);

@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-4">
+    {% set can_manage_users = has_permission('users.manage') %}
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">User Access</h2>
+            <p class="text-muted mb-0">{{ managed_user.email }}</p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('admin.users') }}" class="btn btn-outline-secondary">Back to Users</a>
+            {% if can_access_endpoint('admin.user_profile') %}
+            <a href="{{ url_for('admin.user_profile', user_id=managed_user.id) }}" class="btn btn-outline-secondary">Profile</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-12 col-lg-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h3 class="h6 mb-3">Status</h3>
+                    <div class="mb-2">
+                        <span class="badge {% if managed_user.active %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+                            {{ 'Active' if managed_user.active else 'Inactive' }}
+                        </span>
+                    </div>
+                    <div>
+                        {% if managed_user.is_super_admin %}
+                        <span class="badge text-bg-dark">Super Admin</span>
+                        {% else %}
+                        <span class="text-muted">Standard permission-based user</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-lg-8">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h3 class="h6 mb-3">Permission Groups</h3>
+                    {% if can_manage_users %}
+                    <form method="post" class="vstack gap-3">
+                        {{ access_form.hidden_tag() }}
+                        <div>
+                            {{ access_form.group_ids.label(class_='form-label') }}
+                            {{ access_form.group_ids(class_='form-select', multiple=true) }}
+                            <div class="form-text">Users can belong to multiple groups at once.</div>
+                        </div>
+                        <div class="d-flex justify-content-end">
+                            <button type="submit" class="btn btn-primary">{{ access_form.submit.label.text }}</button>
+                        </div>
+                    </form>
+                    {% else %}
+                    <div class="mb-3">
+                        {% if managed_user.permission_groups %}
+                            {% for group in managed_user.permission_groups %}
+                            <span class="badge {% if group.is_system %}text-bg-secondary{% else %}text-bg-light border text-dark{% endif %} me-1 mb-1">{{ group.name }}</span>
+                            {% endfor %}
+                        {% else %}
+                        <span class="text-muted">No permission groups assigned.</span>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

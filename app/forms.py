@@ -46,6 +46,7 @@ from app.models import (
     ItemUnit,
     Location,
     Menu,
+    PermissionGroup,
     Product,
     Vendor,
 )
@@ -284,6 +285,16 @@ def load_menu_choices(include_blank: bool = True):
     if include_blank:
         return [(0, "No Menu")] + choices
     return choices
+
+
+def load_permission_group_choices(include_system: bool = True):
+    """Return available permission group choices."""
+    query = PermissionGroup.query.order_by(
+        PermissionGroup.is_system.desc(), PermissionGroup.name
+    )
+    if not include_system:
+        query = query.filter_by(is_system=False)
+    return [(group.id, group.name) for group in query.all()]
 
 
 def load_purchase_gl_code_choices():
@@ -778,7 +789,58 @@ class UserForm(FlaskForm):
 
 class InviteUserForm(FlaskForm):
     email = StringField("Email", validators=[DataRequired(), Email()])
+    group_ids = SelectMultipleField(
+        "Permission Groups",
+        coerce=int,
+        validators=[Optional()],
+        render_kw={"size": 8},
+    )
     submit = SubmitField("Send Invite")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.group_ids.choices = load_permission_group_choices()
+
+
+class UserAccessForm(FlaskForm):
+    group_ids = SelectMultipleField(
+        "Permission Groups",
+        coerce=int,
+        validators=[Optional()],
+        render_kw={"size": 10},
+    )
+    submit = SubmitField("Save Access")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.group_ids.choices = load_permission_group_choices()
+
+
+class PermissionGroupForm(FlaskForm):
+    name = StringField("Group Name", validators=[DataRequired(), Length(max=100)])
+    description = TextAreaField(
+        "Description", validators=[Optional(), Length(max=1000)]
+    )
+    submit = SubmitField("Save Group")
+
+
+class PermissionAssignmentForm(FlaskForm):
+    permissions = SelectMultipleField(
+        "Permissions",
+        coerce=str,
+        validators=[Optional()],
+        render_kw={"size": 20},
+    )
+    submit = SubmitField("Save Permissions")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from app.permissions import PERMISSION_DEFINITIONS
+
+        self.permissions.choices = [
+            (definition.code, f"{definition.label} ({definition.code})")
+            for definition in PERMISSION_DEFINITIONS
+        ]
 
 
 class ChangePasswordForm(FlaskForm):
@@ -1406,7 +1468,7 @@ class POItemForm(FlaskForm):
     unit = SelectField(
         "Unit", coerce=int, validators=[Optional()], validate_choice=False
     )
-    quantity = DecimalField("Quantity", validators=[InputRequired()])
+    quantity = DecimalField("Quantity", validators=[Optional()])
     position = HiddenField("Position")
 
 

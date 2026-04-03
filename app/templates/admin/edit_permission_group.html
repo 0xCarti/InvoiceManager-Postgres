@@ -1,0 +1,108 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">{{ group.name }}</h2>
+            <p class="text-muted mb-0">{{ group.description or 'No description' }}</p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('admin.permission_groups') }}" class="btn btn-outline-secondary">Back to Groups</a>
+            {% if not group.is_system and can_manage_group %}
+            <form action="{{ url_for('admin.delete_permission_group', group_id=group.id) }}" method="post">
+                {{ group_form.hidden_tag() }}
+                <button type="submit" class="btn btn-danger" data-confirm-message="Delete this permission group?">Delete</button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-12 col-lg-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h3 class="h6 mb-3">Group Details</h3>
+                    {% if group.is_system %}
+                    <div class="alert alert-secondary mb-0">This is a system-managed group and cannot be edited or deleted.</div>
+                    {% elif can_manage_group %}
+                    <form method="post" class="vstack gap-3">
+                        {{ group_form.hidden_tag() }}
+                        <div>
+                            {{ group_form.name.label(class_='form-label') }}
+                            {{ group_form.name(class_='form-control') }}
+                        </div>
+                        <div>
+                            {{ group_form.description.label(class_='form-label') }}
+                            {{ group_form.description(class_='form-control', rows='4') }}
+                        </div>
+                        <div class="d-flex justify-content-end">
+                            <button type="submit" name="{{ group_form.submit.name }}" value="1" class="btn btn-primary">{{ group_form.submit.label.text }}</button>
+                        </div>
+                    </form>
+                    {% else %}
+                    <div class="text-muted">You can view this group but cannot edit its details.</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-lg-8">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h3 class="h6 mb-0">Permissions</h3>
+                        <span class="text-muted small">{{ group.permissions|length }} assigned</span>
+                    </div>
+                    {% if group.is_system %}
+                    <div class="alert alert-secondary">System groups keep a fixed permission set for migration safety.</div>
+                    {% elif can_manage_permissions %}
+                    <form method="post" class="vstack gap-3">
+                        {{ permission_form.hidden_tag() }}
+                        {% for category in permission_categories %}
+                        <div class="border rounded p-3">
+                            <h4 class="h6 mb-3">{{ category.label }}</h4>
+                            <div class="row g-2">
+                                {% for permission in category.permissions %}
+                                <div class="col-12 col-md-6">
+                                    <label class="form-check border rounded p-2 h-100">
+                                        <input class="form-check-input me-2" type="checkbox" name="{{ permission_form.permissions.name }}" value="{{ permission.code }}"
+                                               {% if permission.selected %}checked{% endif %}>
+                                        <span class="form-check-label">
+                                            <span class="fw-semibold d-block">{{ permission.label }}</span>
+                                            <span class="small text-muted">{{ permission.description }}</span>
+                                            <span class="small text-muted d-block"><code>{{ permission.code }}</code></span>
+                                        </span>
+                                    </label>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                        <div class="d-flex justify-content-end">
+                            <button type="submit" name="{{ permission_form.submit.name }}" value="1" class="btn btn-primary">{{ permission_form.submit.label.text }}</button>
+                        </div>
+                    </form>
+                    {% else %}
+                    {% for category in permission_categories %}
+                    <div class="border rounded p-3 mb-3">
+                        <h4 class="h6 mb-3">{{ category.label }}</h4>
+                        {% set selected = category.permissions | selectattr('selected') | list %}
+                        {% if selected %}
+                            {% for permission in selected %}
+                            <div class="mb-2">
+                                <div class="fw-semibold">{{ permission.label }}</div>
+                                <div class="small text-muted">{{ permission.description }}</div>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                        <div class="text-muted small">No permissions assigned in this category.</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

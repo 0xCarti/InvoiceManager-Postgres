@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Permission Catalog</h2>
+            <p class="text-muted mb-0">Review every permission and the groups that currently include it.</p>
+        </div>
+        {% if can_access_endpoint('admin.permission_groups') %}
+        <a href="{{ url_for('admin.permission_groups') }}" class="btn btn-outline-secondary">Permission Groups</a>
+        {% endif %}
+    </div>
+
+    {% for category in permission_categories %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <h3 class="h5 mb-3">{{ category.label }}</h3>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Permission</th>
+                            <th>Code</th>
+                            <th>Description</th>
+                            <th>Groups</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for permission in category.permissions %}
+                        <tr>
+                            <td>{{ permission.label }}</td>
+                            <td><code>{{ permission.code }}</code></td>
+                            <td>{{ permission.description }}</td>
+                            <td>
+                                {% if permission.groups %}
+                                    {% for group in permission.groups %}
+                                    <span class="badge {% if group.is_system %}text-bg-secondary{% else %}text-bg-light border text-dark{% endif %} me-1 mb-1">{{ group.name }}</span>
+                                    {% endfor %}
+                                {% else %}
+                                <span class="text-muted">None</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
