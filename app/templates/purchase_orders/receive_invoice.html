@@ -105,8 +105,26 @@
                     {% endfor %}
                 </select>
             </div>
-            <div class="col quantity-col">{{ item.quantity(class="form-control quantity") }}</div>
-            <div class="col cost-col">{{ item.cost(class="form-control cost") }}</div>
+            <div class="col quantity-col">
+                <label class="form-label mb-1 d-md-none" for="{{ item.quantity.id }}">Qty</label>
+                {{ item.quantity(class="form-control quantity", placeholder="Qty") }}
+            </div>
+            <div class="col cost-col">
+                <label class="form-label mb-1 d-md-none" for="{{ item.cost.id }}">Cost</label>
+                {{ item.cost(class="form-control cost", placeholder="Cost") }}
+            </div>
+            {% set deposit_value = request.form.get('items-' ~ loop.index0 ~ '-container_deposit') %}
+            {% if deposit_value is none %}
+                {% if item.container_deposit.data and item.container_deposit.data != 0 %}
+                    {% set deposit_value = '%.2f'|format(item.container_deposit.data|float) %}
+                {% else %}
+                    {% set deposit_value = '' %}
+                {% endif %}
+            {% endif %}
+            <div class="col deposit-col">
+                <label class="form-label mb-1 d-md-none" for="{{ item.container_deposit.id }}">Deposit</label>
+                {{ item.container_deposit(class="form-control deposit", value=deposit_value, placeholder="Deposit") }}
+            </div>
             <div class="col line-total-col"><span class="line-total">0.00</span></div>
             <div class="col-auto">
                 <div class="d-flex flex-column gap-1 move-button-stack">
@@ -118,23 +136,15 @@
                 <button type="button" class="btn btn-danger remove-item">Remove</button>
             </div>
             <div class="col-auto">
-                <button type="button" class="btn btn-outline-secondary btn-sm toggle-optional collapsed" aria-expanded="false">More</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm toggle-optional collapsed" aria-expanded="false">Details</button>
             </div>
             <div class="col-12 optional-panel">
                 <div class="row g-2 align-items-end">
-                    <div class="col-md-4 col-sm-6">
-                        <div class="d-flex gap-2 align-items-center">
-                            <button type="button" class="btn btn-outline-secondary btn-sm toggle-deposit" data-active="{% if item.container_deposit.data and item.container_deposit.data != 0 %}1{% else %}0{% endif %}">Add container deposit</button>
-                            <div class="flex-grow-1 deposit-col {% if not item.container_deposit.data or item.container_deposit.data == 0 %}d-none{% endif %}">
-                                {{ item.container_deposit(class="form-control deposit", **({'data-initial-enabled': '1'} if item.container_deposit.data and item.container_deposit.data != 0 else {'data-initial-enabled': '0', 'disabled': True})) }}
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-4 col-sm-6">
+                    <div class="col-md-6 col-sm-6">
                         <label class="form-label mb-1">Location</label>
                         {{ item.location_id(class="form-select location-select", **{"data-selected": item.location_id.data}) }}
                     </div>
-                    <div class="col-md-4 col-sm-6">
+                    <div class="col-md-6 col-sm-6">
                         <label class="form-label mb-1">GL Code</label>
                         {{ item.gl_code(class="form-control gl-code-select") }}
                     </div>
@@ -205,8 +215,18 @@
                 <input type="hidden" name="items-${index}-position" class="item-position" value="">
             </div>
             <div class="col-auto unit-col"><select name="items-${index}-unit" id="items-${index}-unit" class="form-control unit-select" data-selected=""></select></div>
-            <div class="col quantity-col"><input type="text" name="items-${index}-quantity" id="items-${index}-quantity" class="form-control quantity" inputmode="text" data-numeric-input="1"></div>
-            <div class="col cost-col"><input type="text" name="items-${index}-cost" id="items-${index}-cost" class="form-control cost" inputmode="text" data-numeric-input="1"></div>
+            <div class="col quantity-col">
+                <label class="form-label mb-1 d-md-none" for="items-${index}-quantity">Qty</label>
+                <input type="text" name="items-${index}-quantity" id="items-${index}-quantity" class="form-control quantity" placeholder="Qty" inputmode="text" data-numeric-input="1">
+            </div>
+            <div class="col cost-col">
+                <label class="form-label mb-1 d-md-none" for="items-${index}-cost">Cost</label>
+                <input type="text" name="items-${index}-cost" id="items-${index}-cost" class="form-control cost" placeholder="Cost" inputmode="text" data-numeric-input="1">
+            </div>
+            <div class="col deposit-col">
+                <label class="form-label mb-1 d-md-none" for="items-${index}-container_deposit">Deposit</label>
+                <input type="text" name="items-${index}-container_deposit" id="items-${index}-container_deposit" class="form-control deposit" placeholder="Deposit" inputmode="text" data-numeric-input="1">
+            </div>
             <div class="col line-total-col"><span class="line-total">0.00</span></div>
             <div class="col-auto">
                 <div class="d-flex flex-column gap-1 move-button-stack">
@@ -215,20 +235,14 @@
                 </div>
             </div>
             <div class="col-auto"><button type="button" class="btn btn-danger remove-item">Remove</button></div>
-            <div class="col-auto"><button type="button" class="btn btn-outline-secondary btn-sm toggle-optional collapsed" aria-expanded="false">More</button></div>
+            <div class="col-auto"><button type="button" class="btn btn-outline-secondary btn-sm toggle-optional collapsed" aria-expanded="false">Details</button></div>
             <div class="col-12 optional-panel">
                 <div class="row g-2 align-items-end">
-                    <div class="col-md-4 col-sm-6">
-                        <div class="d-flex gap-2 align-items-center">
-                            <button type="button" class="btn btn-outline-secondary btn-sm toggle-deposit" data-active="0">Add container deposit</button>
-                            <div class="flex-grow-1 deposit-col d-none"><input type="text" name="items-${index}-container_deposit" id="items-${index}-container_deposit" class="form-control deposit" inputmode="text" data-numeric-input="1" data-initial-enabled="0" disabled></div>
-                        </div>
-                    </div>
-                    <div class="col-md-4 col-sm-6">
+                    <div class="col-md-6 col-sm-6">
                         <label class="form-label mb-1">Location</label>
                         <select name="items-${index}-location_id" id="items-${index}-location_id" class="form-select location-select">${locationOptions}</select>
                     </div>
-                    <div class="col-md-4 col-sm-6">
+                    <div class="col-md-6 col-sm-6">
                         <label class="form-label mb-1">GL Code</label>
                         <select name="items-${index}-gl_code" id="items-${index}-gl_code" class="form-control gl-code-select">${glCodeOptions}</select>
                     </div>
@@ -284,41 +298,10 @@
             const depositInput = row.querySelector('.deposit');
             if (depositInput && !depositInput.dataset.touched) {
                 const depositValue = Number.isFinite(parseFloat(d.deposit)) ? parseFloat(d.deposit) : 0;
-                depositInput.value = depositValue.toFixed(2);
+                depositInput.value = depositValue > 0 ? depositValue.toFixed(2) : '';
             }
             updateTotals();
         });
-    }
-
-    function setDepositVisibility(row, enabled) {
-        const depositCol = row.querySelector('.deposit-col');
-        const depositInput = row.querySelector('.deposit');
-        const toggleBtn = row.querySelector('.toggle-deposit');
-        if (enabled) {
-            depositCol?.classList.remove('d-none');
-            if (depositInput) {
-                depositInput.disabled = false;
-            }
-            if (toggleBtn) {
-                toggleBtn.dataset.active = '1';
-                toggleBtn.textContent = 'Remove container deposit';
-            }
-        } else {
-            depositCol?.classList.add('d-none');
-            if (depositInput) {
-                depositInput.disabled = true;
-            }
-            if (toggleBtn) {
-                toggleBtn.dataset.active = '0';
-                toggleBtn.textContent = 'Add container deposit';
-            }
-        }
-    }
-
-    function initDeposit(row) {
-        const depositInput = row.querySelector('.deposit');
-        const initialEnabled = depositInput && depositInput.dataset.initialEnabled === '1';
-        setDepositVisibility(row, initialEnabled);
     }
 
     function setOptionalPanelState(row, expanded) {
@@ -339,11 +322,6 @@
     }
 
     function shouldExpandOptional(row) {
-        const depositToggle = row.querySelector('.toggle-deposit');
-        const depositInput = row.querySelector('.deposit');
-        const depositActive = (depositToggle && depositToggle.dataset.active === '1') ||
-            (depositInput && !depositInput.disabled && depositInput.value && depositInput.value !== '0' && depositInput.value !== '0.00');
-
         const locationSelect = row.querySelector('.location-select');
         const hasLocation = locationSelect && locationSelect.value && locationSelect.value !== '0';
 
@@ -351,7 +329,7 @@
         const defaultGl = glSelect ? glSelect.dataset.defaultValue : null;
         const glDiffers = glSelect && glSelect.value && defaultGl && glSelect.value !== defaultGl;
 
-        return Boolean(depositActive || hasLocation || glDiffers);
+        return Boolean(hasLocation || glDiffers);
     }
 
     function fetchUnits(selectEl, selectedUnitId=null, { skipCostRefresh = false } = {}) {
@@ -409,7 +387,7 @@
             const qty = parseNumber(row.querySelector('.quantity').value, 0);
             const price = parseNumber(row.querySelector('.cost').value, 0);
             const depositInput = row.querySelector('.deposit');
-            const deposit = depositInput && !depositInput.disabled ? parseNumber(depositInput.value, 0) : 0;
+            const deposit = depositInput ? parseNumber(depositInput.value, 0) : 0;
             const lineTotal = qty * (price + deposit);
             row.querySelector('.line-total').textContent = lineTotal.toFixed(2);
             total += lineTotal;
@@ -428,7 +406,6 @@
         if (window.NumericInput) {
             window.NumericInput.enableWithin(row);
         }
-        initDeposit(row);
         const glSelect = row.querySelector('.gl-code-select');
         if (glSelect) {
             glSelect.value = '0';
@@ -438,6 +415,10 @@
             locationSelect.value = '0';
         }
         setOptionalPanelState(row, false);
+        const itemSelect = row.querySelector('.item-select');
+        if (itemSelect) {
+            itemSelect.focus();
+        }
         itemIndex++;
         updatePositions();
     });
@@ -460,16 +441,6 @@
             if (row && next) {
                 row.parentElement.insertBefore(next, row);
                 updatePositions();
-            }
-        } else if (e.target && e.target.classList.contains('toggle-deposit')) {
-            const row = e.target.closest('.item-row');
-            if (row) {
-                const isActive = e.target.dataset.active === '1';
-                setDepositVisibility(row, !isActive);
-                if (!isActive) {
-                    setOptionalPanelState(row, true);
-                }
-                updateTotals();
             }
         } else if (e.target && e.target.classList.contains('toggle-optional')) {
             const row = e.target.closest('.item-row');
@@ -578,7 +549,6 @@
         if (glSelect && !glSelect.value) {
             glSelect.value = '0';
         }
-        initDeposit(row);
         setOptionalPanelState(row, shouldExpandOptional(row));
     });
     document.getElementById('gst').addEventListener('input', updateTotals);

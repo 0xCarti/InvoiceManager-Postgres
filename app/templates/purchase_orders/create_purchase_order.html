@@ -42,8 +42,14 @@
             {{ form.delivery_charge(class="form-control narrow-field") }}
         </div>
         <div class="page-header-stack mb-2">
-            <h4 class="mb-0">Items</h4>
-            <button id="quick-add-item" type="button" class="btn btn-outline-secondary purchase-order-quick-add">Create New Item</button>
+            <div>
+                <h4 class="mb-0">Items</h4>
+                <p class="mb-0 small text-muted">Name search keeps you in item entry. Barcode scans jump to Qty, then back to the next scan row.</p>
+            </div>
+            <div class="mobile-inline-actions">
+                <button type="button" class="btn btn-secondary purchase-order-quick-add" data-role="purchase-order-add-item">Add Item</button>
+                <button id="quick-add-item" type="button" class="btn btn-outline-secondary purchase-order-quick-add">Create New Item</button>
+            </div>
         </div>
         <div id="items" class="purchase-order-items-list" data-next-index="{{ form.items|length }}">
         {% for item in form.items %}
@@ -86,7 +92,7 @@
         {% endfor %}
         </div>
         <div class="mobile-toolbar mt-3">
-            <button id="add-item" type="button" class="btn btn-secondary">Add Item</button>
+            <button type="button" class="btn btn-secondary" data-role="purchase-order-add-item">Add Item</button>
             <button type="submit" class="btn btn-primary">Submit</button>
         </div>
     </form>
@@ -104,7 +110,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     initPurchaseOrderForm({
         container: document.getElementById('items'),
-        addRowButton: document.getElementById('add-item'),
+        addRowButtons: Array.from(document.querySelectorAll('[data-role="purchase-order-add-item"]')),
         quickAddButton: document.getElementById('quick-add-item'),
         newItemModal: document.getElementById('newItemModal'),
         saveNewItemButton: document.getElementById('save-new-item'),

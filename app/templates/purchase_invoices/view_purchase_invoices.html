@@ -205,6 +205,9 @@
                     {% for itm in items %}
                     <option value="{{ itm.id }}" {% if itm.id in selected_item_ids %}selected{% endif %}>{{ itm.name }}</option>
                     {% endfor %}
+                    {% for itm in extra_item_options %}
+                    <option value="{{ itm.id }}" {% if itm.id in selected_item_ids %}selected{% endif %}>{{ itm.name }}{% if itm.archived %} (Archived){% endif %}</option>
+                    {% endfor %}
                 </select>
                 <div class="form-text">Use Ctrl (Windows) or Command (macOS) to select multiple items.</div>
             </div>

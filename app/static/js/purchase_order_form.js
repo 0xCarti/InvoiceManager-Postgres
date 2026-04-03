@@ -12,7 +12,9 @@
             return;
         }
 
-        const addRowButton = config.addRowButton || null;
+        const addRowButtons = Array.from(
+            config.addRowButtons || (config.addRowButton ? [config.addRowButton] : [])
+        ).filter(Boolean);
         const quickAddButton = config.quickAddButton || null;
         const saveNewItemButton = config.saveNewItemButton || null;
         const newItemModalEl = config.newItemModal || null;
@@ -918,7 +920,7 @@
                 fetchUnits(options.itemId, unitSelect, options.unitId || null);
             }
 
-            if (!options.itemId) {
+            if (!options.itemId && options.focusSearch !== false) {
                 const searchInput = row.querySelector(".item-search");
                 if (searchInput) {
                     searchInput.focus();
@@ -926,6 +928,189 @@
             }
 
             return row;
+        }
+
+        function getRows() {
+            return Array.from(container.querySelectorAll(".item-row"));
+        }
+
+        function getLastRow() {
+            const rows = getRows();
+            return rows.length ? rows[rows.length - 1] : null;
+        }
+
+        function focusSearchInput(row, { select = false } = {}) {
+            if (!row) {
+                return;
+            }
+            const searchInput = row.querySelector(".item-search");
+            if (!searchInput) {
+                return;
+            }
+            searchInput.focus();
+            if (select && typeof searchInput.select === "function") {
+                searchInput.select();
+            }
+        }
+
+        function focusQuantityInput(row, { select = false } = {}) {
+            if (!row) {
+                return;
+            }
+            const quantityInput = row.querySelector(".quantity");
+            if (!quantityInput) {
+                return;
+            }
+            quantityInput.focus();
+            if (select && typeof quantityInput.select === "function") {
+                quantityInput.select();
+            }
+        }
+
+        function rowHasData(row) {
+            if (!row) {
+                return false;
+            }
+            const hiddenField = row.querySelector(".item-id-field");
+            const searchInput = row.querySelector(".item-search");
+            const quantityInput = row.querySelector(".quantity");
+            const unitSelect = row.querySelector(".unit-select");
+            const costField = row.querySelector(".item-cost-field");
+            return Boolean(
+                (hiddenField && hiddenField.value) ||
+                    (searchInput && searchInput.value.trim()) ||
+                    (quantityInput && quantityInput.value.trim()) ||
+                    (unitSelect && unitSelect.value) ||
+                    (costField && costField.value)
+            );
+        }
+
+        function rowIsBlank(row) {
+            return !rowHasData(row);
+        }
+
+        function ensureTrailingBlankRow() {
+            const lastRow = getLastRow();
+            if (!lastRow || !rowIsBlank(lastRow)) {
+                return addRow({ focusSearch: false });
+            }
+            return lastRow;
+        }
+
+        function focusReadyRow() {
+            const lastRow = getLastRow();
+            if (lastRow && rowIsBlank(lastRow)) {
+                focusSearchInput(lastRow, { select: true });
+                return lastRow;
+            }
+            return addRow({ focusSearch: true });
+        }
+
+        function findNextSelectedRow(currentRow) {
+            let row = currentRow ? currentRow.nextElementSibling : null;
+            while (row) {
+                const hiddenField = row.querySelector(".item-id-field");
+                if (hiddenField && hiddenField.value) {
+                    return row;
+                }
+                row = row.nextElementSibling;
+            }
+            return null;
+        }
+
+        function getSelectionMode(optionLike) {
+            if (!optionLike) {
+                return "manual";
+            }
+            const matchedOn = optionLike.dataset
+                ? optionLike.dataset.matchedOn || "name"
+                : "name";
+            const exactMatch = optionLike.dataset
+                ? optionLike.dataset.exactMatch === "1"
+                : false;
+            if (
+                exactMatch &&
+                matchedOn &&
+                matchedOn !== "name"
+            ) {
+                return "scan";
+            }
+            return "manual";
+        }
+
+        function buildItemSelectionPayload(optionLike) {
+            return {
+                itemId: optionLike && optionLike.dataset ? optionLike.dataset.itemId || "" : "",
+                itemName:
+                    optionLike && optionLike.dataset
+                        ? optionLike.dataset.itemName || ""
+                        : "",
+                glCode:
+                    optionLike && optionLike.dataset
+                        ? optionLike.dataset.glCode || ""
+                        : "",
+            };
+        }
+
+        function buildSelectionDatasetFromItem(item) {
+            return {
+                itemId: item && item.id ? String(item.id) : "",
+                itemName: item && item.name ? item.name : "",
+                glCode: item && item.gl_code ? item.gl_code : "",
+                matchedOn: item && item.matched_on ? item.matched_on : "name",
+                exactMatch: item && item.exact_match ? "1" : "0",
+            };
+        }
+
+        function requestSearchResults(term) {
+            return fetch(`/items/search?term=${encodeURIComponent(term)}`).then(
+                (response) => {
+                    if (!response.ok) {
+                        throw new Error("Search failed");
+                    }
+                    return response.json();
+                }
+            );
+        }
+
+        function applyItemSelectionToRow(row, itemData, options = {}) {
+            if (!row) {
+                return;
+            }
+            const entryMode = options.entryMode || "manual";
+
+            const itemId = itemData && itemData.itemId ? String(itemData.itemId) : "";
+            const itemName = itemData && itemData.itemName ? itemData.itemName : "";
+            const glCode = itemData && itemData.glCode ? itemData.glCode : "";
+            const hiddenField = row.querySelector(".item-id-field");
+            const searchInput = row.querySelector(".item-search");
+            const unitSelect = row.querySelector(".unit-select");
+            const suggestionList = row.querySelector(".suggestion-list");
+
+            if (hiddenField) {
+                hiddenField.value = itemId;
+            }
+            if (searchInput) {
+                searchInput.value = itemName;
+            }
+            row.dataset.entryMode = entryMode;
+            updateRowGlCode(row, glCode);
+            setManageButtonState(row, Boolean(itemId));
+            clearSuggestions(suggestionList);
+
+            if (itemId) {
+                fetchUnits(itemId, unitSelect, itemData.unitId || null);
+            } else {
+                clearUnits(unitSelect);
+            }
+
+            const trailingBlankRow = ensureTrailingBlankRow();
+
+            if (entryMode === "scan") {
+                focusQuantityInput(row, { select: true });
+            } else if (options.focusNextSearch !== false) {
+                focusSearchInput(trailingBlankRow, { select: true });
+            }
         }
 
         function updatePositions() {
@@ -1035,13 +1220,7 @@
                 return;
             }
 
-            fetch(`/items/search?term=${encodeURIComponent(term)}`)
-                .then((response) => {
-                    if (!response.ok) {
-                        throw new Error("Search failed");
-                    }
-                    return response.json();
-                })
+            requestSearchResults(term)
                 .then((items) => {
                     if (input.value.trim() !== term) {
                         return;
@@ -1062,6 +1241,8 @@
                         option.dataset.itemId = item.id;
                         option.dataset.itemName = item.name;
                         option.dataset.glCode = item.gl_code || "";
+                        option.dataset.matchedOn = item.matched_on || "name";
+                        option.dataset.exactMatch = item.exact_match ? "1" : "0";
                         suggestionList.appendChild(option);
                     });
 
@@ -1088,6 +1269,7 @@
             if (costField) {
                 costField.value = "";
             }
+            delete row.dataset.entryMode;
             setManageButtonState(row, false);
             updateRowGlCode(row, "");
             clearUnits(unitSelect);
@@ -1114,26 +1296,9 @@
                 return;
             }
 
-            const hiddenField = row.querySelector(".item-id-field");
-            const searchInput = row.querySelector(".item-search");
-            const unitSelect = row.querySelector(".unit-select");
-            const suggestionList = row.querySelector(".suggestion-list");
-
-            if (hiddenField) {
-                hiddenField.value = option.dataset.itemId || "";
-            }
-            if (searchInput) {
-                searchInput.value = option.dataset.itemName || "";
-            }
-            updateRowGlCode(row, option.dataset.glCode || "");
-            setManageButtonState(row, true);
-            clearSuggestions(suggestionList);
-            fetchUnits(option.dataset.itemId, unitSelect);
-
-            const quantityInput = row.querySelector(".quantity");
-            if (quantityInput) {
-                quantityInput.focus();
-            }
+            applyItemSelectionToRow(row, buildItemSelectionPayload(option), {
+                entryMode: "manual",
+            });
         }
 
         function handleSearchKeydown(event) {
@@ -1151,7 +1316,36 @@
                 const firstOption = suggestionList.querySelector(".suggestion-option");
                 if (!suggestionList.classList.contains("d-none") && firstOption) {
                     event.preventDefault();
-                    handleSuggestionSelection(firstOption);
+                    applyItemSelectionToRow(
+                        row,
+                        buildItemSelectionPayload(firstOption),
+                        {
+                            entryMode: getSelectionMode(firstOption),
+                        }
+                    );
+                } else if (input.value.trim()) {
+                    event.preventDefault();
+                    const term = input.value.trim();
+                    requestSearchResults(term)
+                        .then((items) => {
+                            if (input.value.trim() !== term || !items.length) {
+                                return;
+                            }
+                            const firstItem = items[0];
+                            const selectionLike = {
+                                dataset: buildSelectionDatasetFromItem(firstItem),
+                            };
+                            applyItemSelectionToRow(
+                                row,
+                                buildItemSelectionPayload(selectionLike),
+                                {
+                                    entryMode: getSelectionMode(selectionLike),
+                                }
+                            );
+                        })
+                        .catch(() => {
+                            /* Ignore failed instant lookup on Enter */
+                        });
                 }
             } else if (event.key === "Escape") {
                 suggestionList.classList.add("d-none");
@@ -1159,30 +1353,46 @@
         }
 
         function handleQuantityKeydown(event) {
-            if (event.key !== "Tab" || event.shiftKey) {
+            if (
+                !(
+                    (event.key === "Tab" && !event.shiftKey) ||
+                    event.key === "Enter"
+                )
+            ) {
                 return;
             }
             const currentRow = event.target.closest(".item-row");
             if (!currentRow) {
                 return;
             }
-            const nextRow = currentRow.nextElementSibling;
-            if (!nextRow) {
+            const hiddenField = currentRow.querySelector(".item-id-field");
+            if (!hiddenField || !hiddenField.value || !event.target.value.trim()) {
                 return;
             }
-            const nextQuantity = nextRow.querySelector(".quantity");
-            if (nextQuantity) {
-                event.preventDefault();
-                nextQuantity.focus();
+            event.preventDefault();
+
+            if (currentRow.dataset.entryMode === "scan") {
+                const nextRow = ensureTrailingBlankRow();
+                focusSearchInput(nextRow, { select: true });
+                return;
             }
+
+            const nextSelectedRow = findNextSelectedRow(currentRow);
+            if (nextSelectedRow) {
+                focusQuantityInput(nextSelectedRow, { select: true });
+                return;
+            }
+
+            const nextRow = ensureTrailingBlankRow();
+            focusSearchInput(nextRow, { select: true });
         }
 
-        if (addRowButton) {
-            addRowButton.addEventListener("click", (event) => {
+        addRowButtons.forEach((button) => {
+            button.addEventListener("click", (event) => {
                 event.preventDefault();
-                addRow();
+                focusReadyRow();
             });
-        }
+        });
 
         if (baseUnitSelect) {
             baseUnitSelect.addEventListener("change", () => {
@@ -1692,17 +1902,16 @@
                         if (!data || !data.id) {
                             return;
                         }
-                        const row = addRow({
-                            itemId: data.id,
-                            itemName: data.name,
-                            glCode: data.gl_code || "",
-                        });
-                        const unitSelect = row.querySelector(".unit-select");
-                        fetchUnits(data.id, unitSelect);
-                        const quantityInput = row.querySelector(".quantity");
-                        if (quantityInput) {
-                            quantityInput.focus();
-                        }
+                        const row = focusReadyRow();
+                        applyItemSelectionToRow(
+                            row,
+                            {
+                                itemId: data.id,
+                                itemName: data.name,
+                                glCode: data.gl_code || "",
+                            },
+                            { focusQuantity: true }
+                        );
 
                         if (nameInput) {
                             nameInput.value = "";
@@ -1763,6 +1972,7 @@
                 if (row) {
                     row.remove();
                     updatePositions();
+                    ensureTrailingBlankRow();
                 }
             } else if (target.classList.contains("suggestion-option")) {
                 handleSuggestionSelection(target);
@@ -1785,6 +1995,7 @@
             }
         });
 
+        ensureTrailingBlankRow();
         updatePositions();
 
         return {

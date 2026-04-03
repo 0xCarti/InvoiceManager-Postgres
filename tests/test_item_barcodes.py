@@ -144,3 +144,82 @@ def test_item_search_matches_barcode_alias(client, app):
         payload = response.get_json()
         assert payload
         assert payload[0]["name"] == "Searchable Barcode Item"
+
+
+def test_item_search_excludes_archived_items(client, app):
+    email = f"barcode_archived_{uuid4().hex[:8]}@example.com"
+    _create_user(app, email)
+
+    with app.app_context():
+        active_item = Item(name="Active Search Item", base_unit="each")
+        archived_item = Item(
+            name="Archived Search Item",
+            base_unit="each",
+            archived=True,
+            upc="777777777777",
+        )
+        db.session.add_all([active_item, archived_item])
+        db.session.commit()
+        db.session.add(
+            ItemUnit(
+                item_id=active_item.id,
+                name="each",
+                factor=1,
+                receiving_default=True,
+                transfer_default=True,
+            )
+        )
+        db.session.add(
+            ItemUnit(
+                item_id=archived_item.id,
+                name="each",
+                factor=1,
+                receiving_default=True,
+                transfer_default=True,
+            )
+        )
+        db.session.add(ItemBarcode(item_id=archived_item.id, code="888888888888"))
+        db.session.commit()
+        active_item_id = active_item.id
+
+    with client:
+        login(client, email, "pass")
+
+        response = client.get("/items/search?term=Search Item")
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload
+        assert payload[0]["id"] == active_item_id
+        assert payload[0]["name"] == "Active Search Item"
+        assert payload[0]["gl_code"] == ""
+
+        response = client.get("/items/search?term=777777777777")
+        assert response.status_code == 200
+        assert response.get_json() == []
+
+        response = client.get("/items/search?term=888888888888")
+        assert response.status_code == 200
+        assert response.get_json() == []
+
+
+def test_item_search_reports_barcode_match_metadata(client, app):
+    email = f"barcode_meta_{uuid4().hex[:8]}@example.com"
+    _create_user(app, email)
+
+    with app.app_context():
+        item = Item(name="Metadata Barcode Item", base_unit="each")
+        db.session.add(item)
+        db.session.commit()
+        db.session.add(
+            ItemBarcode(item_id=item.id, code="999999999999")
+        )
+        db.session.commit()
+
+    with client:
+        login(client, email, "pass")
+        response = client.get("/items/search?term=999999999999")
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload
+        assert payload[0]["matched_on"] == "barcode"
+        assert payload[0]["exact_match"] is True

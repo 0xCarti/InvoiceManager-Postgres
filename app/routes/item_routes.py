@@ -1088,7 +1088,11 @@ def search_items():
     if not search_term:
         return jsonify([])
     items = (
-        Item.query.options(selectinload(Item.purchase_gl_code))
+        Item.query.options(
+            selectinload(Item.purchase_gl_code),
+            selectinload(Item.barcode_aliases),
+        )
+        .filter(Item.archived.is_(False))
         .filter(
             or_(
                 build_text_match_predicate(Item.name, search_term, "contains"),
@@ -1105,6 +1109,21 @@ def search_items():
             "id": item.id,
             "name": item.name,
             "gl_code": item.purchase_gl_code.code if item.purchase_gl_code else "",
+            "matched_on": (
+                "upc"
+                if item.upc == search_term
+                else "barcode"
+                if any(alias.code == search_term for alias in item.barcode_aliases)
+                else "name"
+            ),
+            "exact_match": bool(
+                item.upc == search_term
+                or any(alias.code == search_term for alias in item.barcode_aliases)
+                or (
+                    isinstance(item.name, str)
+                    and item.name.strip().casefold() == search_term.strip().casefold()
+                )
+            ),
         }
         for item in items
     ]

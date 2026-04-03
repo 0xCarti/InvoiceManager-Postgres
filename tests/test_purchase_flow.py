@@ -1699,6 +1699,45 @@ def test_view_purchase_invoices_item_filters(client, app):
         selected = extract_selected_options(page, "item_id")
         assert selected == [str(beta_id)]
 
+
+def test_view_purchase_invoices_item_options_exclude_archived_items(client, app):
+    with app.app_context():
+        user = User(
+            email="purchase_filter_archived@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        active_item = Item(name="Active Filter Item", base_unit="each")
+        archived_item = Item(
+            name="Archived Filter Item",
+            base_unit="each",
+            archived=True,
+        )
+        db.session.add_all([user, active_item, archived_item])
+        db.session.commit()
+        user_email = user.email
+        archived_item_id = archived_item.id
+
+    with client:
+        login(client, user_email, "pass")
+
+        resp = client.get("/purchase_invoices")
+        assert resp.status_code == 200
+        page = resp.get_data(as_text=True)
+        assert "Active Filter Item" in page
+        assert "Archived Filter Item" not in page
+
+        resp = client.get(
+            "/purchase_invoices",
+            query_string=[("item_id", str(archived_item_id))],
+        )
+        assert resp.status_code == 200
+        page = resp.get_data(as_text=True)
+        assert "Archived Filter Item (Archived)" in page
+        selected = extract_selected_options(page, "item_id")
+        assert selected == [str(archived_item_id)]
+
+
 def test_view_purchase_invoices_amount_filters(client, app):
     with app.app_context():
         password = generate_password_hash("pass")

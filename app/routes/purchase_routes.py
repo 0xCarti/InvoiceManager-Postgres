@@ -1777,8 +1777,13 @@ def view_purchase_invoices():
         seen_item_ids.add(parsed_id)
         selected_item_ids.append(parsed_id)
 
-    items = Item.query.order_by(Item.name).all()
-    item_lookup = {item.id: item for item in items}
+    items = Item.query.filter_by(archived=False).order_by(Item.name).all()
+    selected_item_records = (
+        Item.query.filter(Item.id.in_(selected_item_ids)).all()
+        if selected_item_ids
+        else []
+    )
+    item_lookup = {item.id: item for item in selected_item_records}
     selected_items = [
         item_lookup[item_id]
         for item_id in selected_item_ids
@@ -1786,6 +1791,10 @@ def view_purchase_invoices():
     ]
     selected_item_ids = [item.id for item in selected_items]
     selected_item_names = [item.name for item in selected_items]
+    active_item_ids = {item.id for item in items}
+    extra_item_options = [
+        item for item in selected_items if item.id not in active_item_ids
+    ]
 
     query = PurchaseInvoice.query.options(
         selectinload(PurchaseInvoice.purchase_order).selectinload(PurchaseOrder.vendor),
@@ -1885,6 +1894,7 @@ def view_purchase_invoices():
         active_vendor=active_vendor,
         active_location=active_location,
         items=items,
+        extra_item_options=extra_item_options,
         selected_items=selected_items,
         selected_item_ids=selected_item_ids,
         selected_item_names=selected_item_names,
