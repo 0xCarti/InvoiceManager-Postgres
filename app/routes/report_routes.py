@@ -952,7 +952,8 @@ def customer_invoice_report():
     """Form to select vendor invoice report parameters."""
     form = VendorInvoiceReportForm()
     form.customer.choices = [
-        (c.id, f"{c.first_name} {c.last_name}") for c in Customer.query.all()
+        (c.id, f"{c.first_name} {c.last_name}")
+        for c in Customer.query.order_by(Customer.last_name, Customer.first_name).all()
     ]
 
     if form.validate_on_submit():
@@ -980,16 +981,23 @@ def customer_invoice_report_results():
     if payment_status not in {"all", "paid", "unpaid"}:
         payment_status = "all"
 
-    # Convert comma-separated IDs to list of ints
-    id_list = [int(cid) for cid in customer_ids.split(",") if cid.isdigit()]
-    customers = Customer.query.filter(Customer.id.in_(id_list)).all()
+    # Convert comma-separated IDs to list of ints.
+    id_list = [int(cid) for cid in (customer_ids or "").split(",") if cid.isdigit()]
+    customers = (
+        Customer.query.filter(Customer.id.in_(id_list))
+        .order_by(Customer.last_name, Customer.first_name)
+        .all()
+    )
     try:
         start_date = datetime.fromisoformat(start).date()
         end_date = datetime.fromisoformat(end).date()
     except (TypeError, ValueError):
         abort(400)
 
-    invoice_query = Invoice.query.filter(
+    invoice_query = Invoice.query.options(
+        selectinload(Invoice.customer),
+        selectinload(Invoice.products),
+    ).filter(
         Invoice.customer_id.in_(id_list),
         Invoice.date_created >= datetime.combine(start_date, datetime.min.time()),
         Invoice.date_created <= datetime.combine(end_date, datetime.max.time()),
@@ -1016,8 +1024,26 @@ def customer_invoice_report_results():
             pst_total += _coerce_float(item.line_pst) or 0.0
 
         enriched_invoices.append(
-            {"invoice": invoice, "total": subtotal + gst_total + pst_total}
+            {
+                "invoice": invoice,
+                "customer_name": (
+                    f"{invoice.customer.first_name} {invoice.customer.last_name}"
+                    if invoice.customer is not None
+                    else "Unknown Customer"
+                ),
+                "total": subtotal + gst_total + pst_total,
+            }
         )
+
+    enriched_invoices.sort(
+        key=lambda entry: (
+            (entry["customer_name"] or "").casefold(),
+            entry["invoice"].date_created,
+            entry["invoice"].id,
+        )
+    )
+
+    show_customer_grouping = len(customers) > 1
 
     return render_template(
         "report_vendor_invoice_results.html",
@@ -1026,6 +1052,7 @@ def customer_invoice_report_results():
         start=start_date,
         end=end_date,
         payment_status=payment_status,
+        show_customer_grouping=show_customer_grouping,
     )
 
 

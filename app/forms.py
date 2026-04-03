@@ -1202,8 +1202,7 @@ class VendorInvoiceReportForm(FlaskForm):
         "Customer(s)",
         coerce=int,
         validators=[Optional()],
-        option_widget=CheckboxInput(),
-        widget=ListWidget(prefix_label=False),
+        render_kw={"size": 12},
     )
     start_date = DateField("Start Date", validators=[DataRequired()])
     end_date = DateField("End Date", validators=[DataRequired()])

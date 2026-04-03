@@ -742,6 +742,9 @@ def test_vendor_and_sales_reports(client, app):
     login(client, "report@example.com", "pass")
     resp = client.get("/reports/vendor-invoices")
     assert resp.status_code == 200
+    assert b"Hold Ctrl to select multiple customers" in resp.data
+    assert b"<select" in resp.data
+    assert b"multiple" in resp.data
     resp = client.post(
         "/reports/vendor-invoices",
         data={
@@ -793,6 +796,61 @@ def test_vendor_and_sales_reports(client, app):
     assert resp.status_code == 200
     assert b"Widget" in resp.data
     assert b"Gadget" not in resp.data
+
+
+def test_vendor_invoice_report_groups_results_by_customer_for_multi_select(client, app):
+    first_customer_id = setup_invoice(app)
+    login(client, "report@example.com", "pass")
+
+    with app.app_context():
+        user = User.query.filter_by(email="report@example.com").first()
+        second_customer = Customer(first_name="Alice", last_name="Zephyr")
+        db.session.add(second_customer)
+        db.session.flush()
+
+        second_invoice = Invoice(
+            id="INVREP003",
+            user_id=user.id,
+            customer_id=second_customer.id,
+            date_created=date(2023, 3, 1),
+            is_paid=True,
+            paid_at=date(2023, 3, 2),
+        )
+        db.session.add(second_invoice)
+        db.session.flush()
+
+        db.session.add(
+            InvoiceProduct(
+                invoice_id=second_invoice.id,
+                quantity=1,
+                product_id=None,
+                product_name="Grouped Row",
+                unit_price=15.0,
+                line_subtotal=15.0,
+                line_gst=0.0,
+                line_pst=0.0,
+            )
+        )
+        db.session.commit()
+        second_customer_id = second_customer.id
+
+    response = client.get(
+        "/reports/vendor-invoices/results",
+        query_string={
+            "customer_ids": f"{first_customer_id},{second_customer_id}",
+            "start": "2023-01-01",
+            "end": "2023-12-31",
+            "payment_status": "all",
+        },
+    )
+
+    assert response.status_code == 200
+    assert b"Customer</th>" in response.data
+    assert b"Jane Doe" in response.data
+    assert b"Alice Zephyr" in response.data
+    assert b"INVREP001" in response.data
+    assert b"INVREP003" in response.data
+    assert b'<tr class="table-secondary">' in response.data
 
 
 def test_vendor_invoice_report_uses_line_subtotals_not_live_product_price(client, app):

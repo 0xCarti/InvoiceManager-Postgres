@@ -30,6 +30,7 @@
     <table class="table table-bordered mt-4">
         <thead>
             <tr>
+                <th>Customer</th>
                 <th>Invoice ID</th>
                 <th>Date</th>
                 <th>Payment Status</th>
@@ -37,9 +38,17 @@
             </tr>
         </thead>
         <tbody>
+            {% set group = namespace(current_customer=None) %}
             {% for invoice in invoices %}
             {% set ns.grand_total = ns.grand_total + invoice.total %}
+            {% if show_customer_grouping and group.current_customer != invoice.customer_name %}
+            {% set group.current_customer = invoice.customer_name %}
+            <tr class="table-secondary">
+                <th colspan="5">{{ invoice.customer_name }}</th>
+            </tr>
+            {% endif %}
             <tr>
+                <td>{{ invoice.customer_name }}</td>
                 <td>{{ invoice.invoice.id }}</td>
                 <td>{{ invoice.invoice.date_created|format_datetime('%Y-%m-%d') }}</td>
                 <td>{{ 'Paid' if invoice.invoice.is_paid else 'Unpaid' }}</td>
@@ -49,7 +58,7 @@
         </tbody>
         <tfoot>
             <tr>
-                <th colspan="3" class="text-right">Total:</th>
+                <th colspan="4" class="text-right">Total:</th>
                 <th>${{ "%.2f"|format(ns.grand_total) }}</th>
             </tr>
         </tfoot>
