@@ -7,49 +7,21 @@
             <h2 class="mb-1">Permission Groups</h2>
             <p class="text-muted mb-0">Create reusable access bundles and assign them to users.</p>
         </div>
-        {% if can_access_endpoint('admin.permission_catalog') %}
-        <a href="{{ url_for('admin.permission_catalog') }}" class="btn btn-outline-secondary">Permission Catalog</a>
-        {% endif %}
-    </div>
-
-    {% if can_manage_groups %}
-    <div class="card mb-3">
-        <div class="card-body">
-            <h3 class="h6 mb-3">Create Permission Group</h3>
-            <form method="post" class="vstack gap-3" data-permission-group-form>
-                {{ create_form.hidden_tag() }}
-                <div>
-                    {{ create_form.name.label(class_='form-label') }}
-                    {{ create_form.name(class_='form-control' + (' is-invalid' if create_form.name.errors else '')) }}
-                    {% for error in create_form.name.errors %}
-                    <div class="invalid-feedback d-block">{{ error }}</div>
-                    {% endfor %}
-                </div>
-                <div>
-                    {{ create_form.description.label(class_='form-label') }}
-                    {{ create_form.description(class_='form-control' + (' is-invalid' if create_form.description.errors else ''), rows='3') }}
-                    {% for error in create_form.description.errors %}
-                    <div class="invalid-feedback d-block">{{ error }}</div>
-                    {% endfor %}
-                </div>
-                <div>
-                    {% with permission_group_form=create_form, permission_categories=create_permission_categories, permissions_locked_message=None if can_manage_permissions else 'You can create the group here, but you need permission to assign permissions before selecting any access.', can_manage_permissions=can_manage_permissions %}
-                    {% include 'admin/_permission_group_permission_fields.html' %}
-                    {% endwith %}
-                </div>
-                <div class="d-flex justify-content-end">
-                    <button type="submit" name="{{ create_form.submit.name }}" value="1" class="btn btn-primary">Create Group</button>
-                </div>
-            </form>
+        <div class="d-flex flex-wrap gap-2">
+            {% if can_access_endpoint('admin.permission_catalog') %}
+            <a href="{{ url_for('admin.permission_catalog') }}" class="btn btn-outline-secondary">Permission Catalog</a>
+            {% endif %}
+            {% if can_access_endpoint('admin.create_permission_group') %}
+            <a href="{{ url_for('admin.create_permission_group') }}" class="btn btn-primary">Create Group</a>
+            {% endif %}
         </div>
     </div>
-    {% endif %}
 
     <div class="row g-3">
         {% for group in groups %}
-        <div class="col-12 col-lg-6">
+        <div class="col-12 col-xl-6">
             <div class="card h-100">
-                <div class="card-body">
+                <div class="card-body d-flex flex-column">
                     <div class="d-flex justify-content-between align-items-start gap-3 mb-2">
                         <div>
                             <h3 class="h5 mb-1">{{ group.name }}</h3>
@@ -57,30 +29,48 @@
                             <span class="badge text-bg-secondary">System</span>
                             {% endif %}
                         </div>
-                        <a href="{{ url_for('admin.edit_permission_group', group_id=group.id) }}" class="btn btn-sm btn-outline-primary">{{ 'Edit' if (can_manage_groups or can_manage_permissions) and not group.is_system else 'View' }}</a>
+                        <div class="d-flex flex-wrap justify-content-end gap-2">
+                            <a href="{{ url_for('admin.edit_permission_group', group_id=group.id) }}" class="btn btn-sm btn-outline-primary">
+                                {{ 'Edit' if (can_manage_groups or can_manage_permissions) and not group.is_system else 'View' }}
+                            </a>
+                            {% if can_manage_groups and not group.is_system %}
+                            <form action="{{ url_for('admin.delete_permission_group', group_id=group.id) }}" method="post">
+                                {{ delete_form.hidden_tag() }}
+                                <button type="submit" class="btn btn-sm btn-outline-danger" data-confirm-message="Delete this permission group?">Delete</button>
+                            </form>
+                            {% endif %}
+                        </div>
                     </div>
+
                     <p class="text-muted small mb-3">{{ group.description or 'No description' }}</p>
-                    <div class="small text-muted mb-2">{{ group.permissions|length }} permissions | {{ group.users|length }} users</div>
+
+                    <div class="d-flex flex-wrap gap-2 small text-muted mb-3">
+                        <span>{{ group.permissions|length }} permissions</span>
+                        <span>{{ group.users|length }} users</span>
+                    </div>
+
                     {% if group.permissions %}
-                    <div>
-                        {% for permission in group.permissions[:8] %}
-                        <span class="badge text-bg-light border text-dark me-1 mb-1">{{ permission.label }}</span>
+                    <div class="d-flex flex-wrap gap-2 mt-auto">
+                        {% for permission in group.permissions[:10] %}
+                        <span class="badge text-bg-light border text-dark">{{ permission.label }}</span>
                         {% endfor %}
-                        {% if group.permissions|length > 8 %}
-                        <span class="small text-muted">+{{ group.permissions|length - 8 }} more</span>
+                        {% if group.permissions|length > 10 %}
+                        <span class="small text-muted align-self-center">+{{ group.permissions|length - 10 }} more</span>
                         {% endif %}
                     </div>
                     {% else %}
-                    <span class="text-muted small">No permissions assigned.</span>
+                    <span class="text-muted small mt-auto">No permissions assigned.</span>
                     {% endif %}
                 </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body text-muted">No permission groups have been created yet.</div>
             </div>
         </div>
         {% endfor %}
     </div>
 </div>
-{% endblock %}
-
-{% block scripts %}
-<script src="{{ url_for('static', filename='js/permission_group_form.js') }}"></script>
 {% endblock %}

@@ -9,72 +9,69 @@
 {% if permissions_locked_message %}
 <div class="alert alert-secondary mb-3">{{ permissions_locked_message }}</div>
 {% elif can_manage_permissions %}
-<div class="alert alert-light border mb-3">
-    Use a category checkbox to select or clear every permission in that section. You can still choose only individual child permissions when needed.
+<div class="d-flex flex-wrap gap-2 align-items-center mb-3 small text-muted">
+    <span>Use the category checkbox to select or clear a whole section.</span>
+    <span>Child permissions can still be chosen one at a time.</span>
 </div>
 {% endif %}
 
-{% for category in permission_categories %}
-<section class="border rounded p-3 mb-3" data-permission-category-section="{{ category.key }}">
-    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-start gap-3 mb-3">
-        <div>
-            {% if can_manage_permissions and not permissions_locked_message %}
-            <div class="form-check mb-1">
-                <input
-                    class="form-check-input"
-                    type="checkbox"
-                    id="{{ category.toggle_id }}"
-                    data-permission-category-toggle="{{ category.key }}">
-                <label class="form-check-label fw-semibold" for="{{ category.toggle_id }}">
-                    {{ category.label }}
-                </label>
+<div class="vstack gap-3">
+    {% for category in permission_categories %}
+    <section class="border rounded p-3" data-permission-category-section="{{ category.key }}">
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+            <div>
+                {% if can_manage_permissions and not permissions_locked_message %}
+                <div class="form-check">
+                    <input
+                        class="form-check-input"
+                        type="checkbox"
+                        id="{{ category.toggle_id }}"
+                        data-permission-category-toggle="{{ category.key }}">
+                    <label class="form-check-label fw-semibold" for="{{ category.toggle_id }}">
+                        {{ category.label }}
+                    </label>
+                </div>
+                {% else %}
+                <h4 class="h6 mb-0">{{ category.label }}</h4>
+                {% endif %}
             </div>
-            <div class="small text-muted">Toggle the whole category or pick child permissions individually.</div>
-            {% else %}
-            <h4 class="h6 mb-1">{{ category.label }}</h4>
-            <div class="small text-muted">Review the permissions currently assigned in this category.</div>
-            {% endif %}
+            <span class="badge text-bg-light border">
+                <span data-permission-selected-count="{{ category.key }}">{{ category.selected_count }}</span>/{{ category.permission_count }} selected
+            </span>
         </div>
-        <span class="badge text-bg-light border">
-            <span data-permission-selected-count="{{ category.key }}">{{ category.selected_count }}</span>/{{ category.permission_count }} selected
-        </span>
-    </div>
 
-    {% if can_manage_permissions and not permissions_locked_message %}
-    <div class="row g-2">
-        {% for permission in category.permissions %}
-        <div class="col-12 col-xl-6">
-            <div class="form-check border rounded p-3 h-100">
-                <input
-                    class="form-check-input"
-                    type="checkbox"
-                    id="{{ permission.input_id }}"
-                    name="{{ permission_group_form.permissions.name }}"
-                    value="{{ permission.code }}"
-                    data-permission-item="{{ category.key }}"
-                    {% if permission.selected %}checked{% endif %}>
-                <label class="form-check-label d-block ms-1" for="{{ permission.input_id }}">
-                    <span class="fw-semibold d-block">{{ permission.label }}</span>
-                    <span class="small text-muted d-block">{{ permission.description }}</span>
-                    <code class="small">{{ permission.code }}</code>
-                </label>
-            </div>
-        </div>
-        {% endfor %}
-    </div>
-    {% else %}
-        {% set selected_permissions = category.permissions | selectattr('selected') | list %}
-        {% if selected_permissions %}
-            {% for permission in selected_permissions %}
-            <div class="border rounded p-2 mb-2">
-                <div class="fw-semibold">{{ permission.label }}</div>
-                <div class="small text-muted">{{ permission.description }}</div>
-                <code class="small">{{ permission.code }}</code>
+        {% if can_manage_permissions and not permissions_locked_message %}
+        <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-2">
+            {% for permission in category.permissions %}
+            <div class="col">
+                <div class="form-check small m-0">
+                    <input
+                        class="form-check-input"
+                        type="checkbox"
+                        id="{{ permission.input_id }}"
+                        name="{{ permission_group_form.permissions.name }}"
+                        value="{{ permission.code }}"
+                        data-permission-item="{{ category.key }}"
+                        {% if permission.selected %}checked{% endif %}>
+                    <label class="form-check-label" for="{{ permission.input_id }}">
+                        {{ permission.label }}
+                    </label>
+                </div>
             </div>
             {% endfor %}
+        </div>
         {% else %}
-        <div class="text-muted small">No permissions assigned in this category.</div>
+            {% set selected_permissions = category.permissions | selectattr('selected') | list %}
+            {% if selected_permissions %}
+            <div class="d-flex flex-wrap gap-2">
+                {% for permission in selected_permissions %}
+                <span class="badge text-bg-light border text-dark">{{ permission.label }}</span>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="text-muted small">No permissions assigned in this category.</div>
+            {% endif %}
         {% endif %}
-    {% endif %}
-</section>
-{% endfor %}
+    </section>
+    {% endfor %}
+</div>

@@ -93,7 +93,7 @@ def test_permission_group_create_form_assigns_permissions(client, app):
     with client:
         login(client, admin_email, admin_pass)
         response = client.post(
-            "/controlpanel/permission-groups",
+            "/controlpanel/permission-groups/create",
             data={
                 "create-name": "Receiving Team",
                 "create-description": "Can work with purchase receiving only.",
@@ -122,14 +122,29 @@ def test_permission_group_forms_render_grouped_permission_checkboxes(client):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
 
+    with client.application.app_context():
+        list_group = PermissionGroup(
+            name="List Actions Group",
+            description="Used to verify list actions.",
+        )
+        db.session.add(list_group)
+        db.session.commit()
+
     with client:
         login(client, admin_email, admin_pass)
 
-        create_page = client.get("/controlpanel/permission-groups")
+        list_page = client.get("/controlpanel/permission-groups")
+        assert list_page.status_code == 200
+        assert b"Create Group" in list_page.data
+        assert b'form method="post" class="vstack gap-3" data-permission-group-form' not in list_page.data
+        assert b"Delete" in list_page.data
+
+        create_page = client.get("/controlpanel/permission-groups/create")
         assert create_page.status_code == 200
         assert b"Create Permission Group" in create_page.data
         assert b'data-permission-category-toggle="transfers"' in create_page.data
         assert b"View Transfers" in create_page.data
+        assert b"dashboard.view" not in create_page.data
 
         with client.application.app_context():
             group = PermissionGroup(

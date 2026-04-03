@@ -802,10 +802,10 @@ def delete_user(user_id):
     return redirect(url_for("admin.users"))
 
 
-@admin.route("/controlpanel/permission-groups", methods=["GET", "POST"])
+@admin.route("/controlpanel/permission-groups", methods=["GET"])
 @login_required
 def permission_groups():
-    """List and create permission groups."""
+    """List permission groups."""
     groups = (
         PermissionGroup.query.options(
             selectinload(PermissionGroup.permissions),
@@ -814,14 +814,30 @@ def permission_groups():
         .order_by(PermissionGroup.is_system.desc(), PermissionGroup.name)
         .all()
     )
-    create_form = PermissionGroupForm(prefix="create")
     can_manage_groups = current_user.has_permission("permission_groups.manage")
+    can_manage_permissions = current_user.has_permission("permissions.manage")
+    delete_form = DeleteForm()
+
+    return render_template(
+        "admin/permission_groups.html",
+        groups=groups,
+        can_manage_groups=can_manage_groups,
+        can_manage_permissions=can_manage_permissions,
+        delete_form=delete_form,
+    )
+
+
+@admin.route("/controlpanel/permission-groups/create", methods=["GET", "POST"])
+@login_required
+def create_permission_group():
+    """Create a permission group."""
+    if not current_user.has_permission("permission_groups.manage"):
+        abort(403)
+
+    create_form = PermissionGroupForm(prefix="create")
     can_manage_permissions = current_user.has_permission("permissions.manage")
 
     if request.method == "POST" and create_form.submit.name in request.form:
-        if not can_manage_groups:
-            abort(403)
-
         posted_permission_codes = {
             code for code in request.form.getlist(create_form.permissions.name) if code
         }
@@ -854,22 +870,24 @@ def permission_groups():
             db.session.commit()
             log_activity(f"Created permission group {group.name}")
             flash("Permission group created.", "success")
-            return redirect(url_for("admin.permission_groups"))
+            return redirect(url_for("admin.edit_permission_group", group_id=group.id))
 
     selected_codes = {
         code for code in (create_form.permissions.data or []) if code
     }
+    if request.method == "POST" and can_manage_permissions:
+        selected_codes = {
+            code for code in request.form.getlist(create_form.permissions.name) if code
+        }
     create_permission_categories = _selected_permission_categories(
         selected_codes,
         input_prefix=create_form.permissions.id,
     )
 
     return render_template(
-        "admin/permission_groups.html",
-        groups=groups,
+        "admin/create_permission_group.html",
         create_form=create_form,
         create_permission_categories=create_permission_categories,
-        can_manage_groups=can_manage_groups,
         can_manage_permissions=can_manage_permissions,
     )
 

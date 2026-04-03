@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Create Permission Group</h2>
+            <p class="text-muted mb-0">Build a reusable permission bundle and then assign it to users.</p>
+        </div>
+        <a href="{{ url_for('admin.permission_groups') }}" class="btn btn-outline-secondary">Back to Groups</a>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <form method="post" class="vstack gap-3" data-permission-group-form>
+                {{ create_form.hidden_tag() }}
+                <div class="row g-3">
+                    <div class="col-12 col-lg-5">
+                        {{ create_form.name.label(class_='form-label') }}
+                        {{ create_form.name(class_='form-control' + (' is-invalid' if create_form.name.errors else '')) }}
+                        {% for error in create_form.name.errors %}
+                        <div class="invalid-feedback d-block">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="col-12 col-lg-7">
+                        {{ create_form.description.label(class_='form-label') }}
+                        {{ create_form.description(class_='form-control' + (' is-invalid' if create_form.description.errors else ''), rows='3') }}
+                        {% for error in create_form.description.errors %}
+                        <div class="invalid-feedback d-block">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                {% with permission_group_form=create_form, permission_categories=create_permission_categories, permissions_locked_message=None if can_manage_permissions else 'You can create the group name and description here, but you need permission assignment access before selecting permissions.', can_manage_permissions=can_manage_permissions %}
+                {% include 'admin/_permission_group_permission_fields.html' %}
+                {% endwith %}
+
+                <div class="d-flex justify-content-end gap-2">
+                    <a href="{{ url_for('admin.permission_groups') }}" class="btn btn-outline-secondary">Cancel</a>
+                    <button type="submit" name="{{ create_form.submit.name }}" value="1" class="btn btn-primary">Create Group</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/permission_group_form.js') }}"></script>
+{% endblock %}
