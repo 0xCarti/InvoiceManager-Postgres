@@ -42,7 +42,6 @@ from app.forms import (
     LoginForm,
     NotificationForm,
     PasswordResetRequestForm,
-    PermissionAssignmentForm,
     PermissionGroupForm,
     RestoreBackupForm,
     SetPasswordForm,
@@ -143,7 +142,17 @@ def _super_admin_count() -> int:
     return User.query.filter_by(is_admin=True).count()
 
 
-def _selected_permission_categories(selected_codes: set[str] | None = None):
+def _permission_input_id(input_prefix: str, value: str) -> str:
+    normalized_prefix = re.sub(r"[^a-zA-Z0-9_-]+", "-", input_prefix or "permissions")
+    normalized_value = re.sub(r"[^a-zA-Z0-9_-]+", "-", value or "")
+    return f"{normalized_prefix}-{normalized_value}".strip("-")
+
+
+def _selected_permission_categories(
+    selected_codes: set[str] | None = None,
+    *,
+    input_prefix: str = "permissions",
+):
     selected_codes = selected_codes or set()
     categories = []
     for category in get_permission_categories():
@@ -155,6 +164,7 @@ def _selected_permission_categories(selected_codes: set[str] | None = None):
                     "label": definition.label,
                     "description": definition.description,
                     "selected": definition.code in selected_codes,
+                    "input_id": _permission_input_id(input_prefix, definition.code),
                 }
             )
         categories.append(
@@ -162,9 +172,27 @@ def _selected_permission_categories(selected_codes: set[str] | None = None):
                 "key": category["key"],
                 "label": category["label"],
                 "permissions": permissions,
+                "selected_count": sum(
+                    1 for permission in permissions if permission["selected"]
+                ),
+                "permission_count": len(permissions),
+                "toggle_id": _permission_input_id(
+                    f"{input_prefix}-category", category["key"]
+                ),
             }
         )
     return categories
+
+
+def _load_permissions_by_codes(codes: list[str] | set[str] | None) -> list[Permission]:
+    selected_codes = sorted({code for code in (codes or []) if code})
+    if not selected_codes:
+        return []
+    return (
+        Permission.query.filter(Permission.code.in_(selected_codes))
+        .order_by(Permission.category, Permission.code)
+        .all()
+    )
 
 
 def _assign_permission_groups_to_user(user: User, group_ids: list[int] | None) -> None:
@@ -787,29 +815,62 @@ def permission_groups():
         .all()
     )
     create_form = PermissionGroupForm(prefix="create")
+    can_manage_groups = current_user.has_permission("permission_groups.manage")
+    can_manage_permissions = current_user.has_permission("permissions.manage")
 
-    if create_form.submit.data and create_form.validate_on_submit():
+    if request.method == "POST" and create_form.submit.name in request.form:
+        if not can_manage_groups:
+            abort(403)
+
+        posted_permission_codes = {
+            code for code in request.form.getlist(create_form.permissions.name) if code
+        }
+        if posted_permission_codes and not can_manage_permissions:
+            abort(403)
+
+        is_valid = create_form.validate_on_submit()
         name = (create_form.name.data or "").strip()
-        existing = PermissionGroup.query.filter_by(name=name).first()
-        if existing:
-            create_form.name.errors.append("A permission group with that name already exists.")
-        else:
+
+        if not name:
+            create_form.name.errors.append("Group name is required.")
+            is_valid = False
+
+        if is_valid:
+            existing = PermissionGroup.query.filter_by(name=name).first()
+            if existing:
+                create_form.name.errors.append(
+                    "A permission group with that name already exists."
+                )
+                is_valid = False
+
+        if is_valid:
             group = PermissionGroup(
                 name=name,
                 description=(create_form.description.data or "").strip() or None,
             )
+            if can_manage_permissions:
+                group.permissions = _load_permissions_by_codes(posted_permission_codes)
             db.session.add(group)
             db.session.commit()
             log_activity(f"Created permission group {group.name}")
             flash("Permission group created.", "success")
-            return redirect(
-                url_for("admin.edit_permission_group", group_id=group.id)
-            )
+            return redirect(url_for("admin.permission_groups"))
+
+    selected_codes = {
+        code for code in (create_form.permissions.data or []) if code
+    }
+    create_permission_categories = _selected_permission_categories(
+        selected_codes,
+        input_prefix=create_form.permissions.id,
+    )
 
     return render_template(
         "admin/permission_groups.html",
         groups=groups,
         create_form=create_form,
+        create_permission_categories=create_permission_categories,
+        can_manage_groups=can_manage_groups,
+        can_manage_permissions=can_manage_permissions,
     )
 
 
@@ -832,81 +893,90 @@ def edit_permission_group(group_id):
         abort(404)
 
     group_form = PermissionGroupForm(prefix="group", obj=group)
-    permission_form = PermissionAssignmentForm(prefix="permissions")
+    can_manage_group = current_user.has_permission("permission_groups.manage")
+    can_manage_permissions = current_user.has_permission("permissions.manage")
+    can_update_group = can_manage_group or can_manage_permissions
+    existing_codes = [permission.code for permission in group.permissions]
 
     if request.method == "GET":
-        permission_form.permissions.data = [
-            permission.code for permission in group.permissions
-        ]
-    else:
-        if permission_form.permissions.data is None:
-            permission_form.permissions.data = [
-                permission.code for permission in group.permissions
-            ]
+        group_form.permissions.data = existing_codes
+        if not can_manage_group:
+            group_form.name.data = group.name
+            group_form.description.data = group.description or ""
+    elif request.method == "POST" and group_form.submit.name in request.form:
+        if not can_update_group:
+            abort(403)
+        if group.is_system:
+            flash("System permission groups cannot be edited.", "warning")
+            return redirect(url_for("admin.edit_permission_group", group_id=group.id))
 
-        if group_form.submit.name in request.form:
-            if not current_user.has_permission("permission_groups.manage"):
+        posted_permission_codes = {
+            code for code in request.form.getlist(group_form.permissions.name) if code
+        }
+        if posted_permission_codes and not can_manage_permissions:
+            abort(403)
+        if not can_manage_group:
+            if (group_form.name.data or "").strip() != group.name:
                 abort(403)
-            if group.is_system:
-                flash("System permission groups cannot be edited.", "warning")
-                return redirect(
-                    url_for("admin.edit_permission_group", group_id=group.id)
-                )
-            if group_form.validate_on_submit():
-                group.name = (group_form.name.data or "").strip()
-                group.description = (
-                    (group_form.description.data or "").strip() or None
-                )
-                db.session.commit()
-                log_activity(f"Updated permission group {group.name}")
-                flash("Permission group updated.", "success")
-                return redirect(
-                    url_for("admin.edit_permission_group", group_id=group.id)
-                )
-
-        if permission_form.submit.name in request.form:
-            if not current_user.has_permission("permissions.manage"):
+            if (group_form.description.data or "").strip() != (
+                group.description or ""
+            ):
                 abort(403)
-            if group.is_system:
-                flash(
-                    "System permission groups cannot have their permissions edited.",
-                    "warning",
-                )
-                return redirect(
-                    url_for("admin.edit_permission_group", group_id=group.id)
-                )
-            if permission_form.validate_on_submit():
-                selected_codes = sorted(
-                    {code for code in (permission_form.permissions.data or []) if code}
-                )
-                permissions = (
-                    Permission.query.filter(Permission.code.in_(selected_codes))
-                    .order_by(Permission.category, Permission.code)
-                    .all()
-                    if selected_codes
-                    else []
-                )
-                group.permissions = permissions
-                db.session.commit()
-                log_activity(f"Updated permissions for group {group.name}")
-                flash("Group permissions updated.", "success")
-                return redirect(
-                    url_for("admin.edit_permission_group", group_id=group.id)
-                )
+            group_form.name.data = group.name
+            group_form.description.data = group.description or ""
+        if not can_manage_permissions:
+            group_form.permissions.data = existing_codes
 
-    selected_codes = {
-        code for code in (permission_form.permissions.data or []) if code
-    }
-    permission_categories = _selected_permission_categories(selected_codes)
+        is_valid = group_form.validate_on_submit()
+        name = (group_form.name.data or "").strip()
+
+        if can_manage_group and not name:
+            group_form.name.errors.append("Group name is required.")
+            is_valid = False
+
+        if can_manage_group and is_valid:
+            duplicate = (
+                PermissionGroup.query.filter(
+                    PermissionGroup.name == name,
+                    PermissionGroup.id != group.id,
+                )
+                .first()
+            )
+            if duplicate:
+                group_form.name.errors.append(
+                    "A permission group with that name already exists."
+                )
+                is_valid = False
+
+        if is_valid:
+            if can_manage_group:
+                group.name = name
+                group.description = (group_form.description.data or "").strip() or None
+            if can_manage_permissions:
+                group.permissions = _load_permissions_by_codes(posted_permission_codes)
+            db.session.commit()
+            log_activity(f"Updated permission group {group.name}")
+            flash("Permission group updated.", "success")
+            return redirect(url_for("admin.edit_permission_group", group_id=group.id))
+
+    selected_codes = {code for code in (group_form.permissions.data or []) if code}
+    if request.method == "POST" and can_manage_permissions:
+        selected_codes = {
+            code for code in request.form.getlist(group_form.permissions.name) if code
+        }
+    permission_categories = _selected_permission_categories(
+        selected_codes,
+        input_prefix=group_form.permissions.id,
+    )
 
     return render_template(
         "admin/edit_permission_group.html",
         group=group,
         group_form=group_form,
-        permission_form=permission_form,
         permission_categories=permission_categories,
-        can_manage_group=current_user.has_permission("permission_groups.manage"),
-        can_manage_permissions=current_user.has_permission("permissions.manage"),
+        can_manage_group=can_manage_group,
+        can_manage_permissions=can_manage_permissions,
+        can_update_group=can_update_group,
     )
 
 

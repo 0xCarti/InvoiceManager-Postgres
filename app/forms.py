@@ -821,7 +821,22 @@ class PermissionGroupForm(FlaskForm):
     description = TextAreaField(
         "Description", validators=[Optional(), Length(max=1000)]
     )
+    permissions = SelectMultipleField(
+        "Permissions",
+        coerce=str,
+        validators=[Optional()],
+        validate_choice=False,
+    )
     submit = SubmitField("Save Group")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from app.permissions import PERMISSION_DEFINITIONS
+
+        self.permissions.choices = [
+            (definition.code, f"{definition.label} ({definition.code})")
+            for definition in PERMISSION_DEFINITIONS
+        ]
 
 
 class PermissionAssignmentForm(FlaskForm):

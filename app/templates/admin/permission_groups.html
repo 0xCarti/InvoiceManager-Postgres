@@ -2,7 +2,6 @@
 
 {% block content %}
 <div class="container mt-4">
-    {% set can_manage_groups = has_permission('permission_groups.manage') %}
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
         <div>
             <h2 class="mb-1">Permission Groups</h2>
@@ -17,18 +16,29 @@
     <div class="card mb-3">
         <div class="card-body">
             <h3 class="h6 mb-3">Create Permission Group</h3>
-            <form method="post" class="row g-3">
+            <form method="post" class="vstack gap-3" data-permission-group-form>
                 {{ create_form.hidden_tag() }}
-                <div class="col-12 col-lg-4">
+                <div>
                     {{ create_form.name.label(class_='form-label') }}
-                    {{ create_form.name(class_='form-control') }}
+                    {{ create_form.name(class_='form-control' + (' is-invalid' if create_form.name.errors else '')) }}
+                    {% for error in create_form.name.errors %}
+                    <div class="invalid-feedback d-block">{{ error }}</div>
+                    {% endfor %}
                 </div>
-                <div class="col-12 col-lg-6">
+                <div>
                     {{ create_form.description.label(class_='form-label') }}
-                    {{ create_form.description(class_='form-control', rows='2') }}
+                    {{ create_form.description(class_='form-control' + (' is-invalid' if create_form.description.errors else ''), rows='3') }}
+                    {% for error in create_form.description.errors %}
+                    <div class="invalid-feedback d-block">{{ error }}</div>
+                    {% endfor %}
                 </div>
-                <div class="col-12 col-lg-2 d-flex align-items-end">
-                    <button type="submit" class="btn btn-primary w-100">{{ create_form.submit.label.text }}</button>
+                <div>
+                    {% with permission_group_form=create_form, permission_categories=create_permission_categories, permissions_locked_message=None if can_manage_permissions else 'You can create the group here, but you need permission to assign permissions before selecting any access.', can_manage_permissions=can_manage_permissions %}
+                    {% include 'admin/_permission_group_permission_fields.html' %}
+                    {% endwith %}
+                </div>
+                <div class="d-flex justify-content-end">
+                    <button type="submit" name="{{ create_form.submit.name }}" value="1" class="btn btn-primary">Create Group</button>
                 </div>
             </form>
         </div>
@@ -47,10 +57,10 @@
                             <span class="badge text-bg-secondary">System</span>
                             {% endif %}
                         </div>
-                        <a href="{{ url_for('admin.edit_permission_group', group_id=group.id) }}" class="btn btn-sm btn-outline-primary">View</a>
+                        <a href="{{ url_for('admin.edit_permission_group', group_id=group.id) }}" class="btn btn-sm btn-outline-primary">{{ 'Edit' if (can_manage_groups or can_manage_permissions) and not group.is_system else 'View' }}</a>
                     </div>
                     <p class="text-muted small mb-3">{{ group.description or 'No description' }}</p>
-                    <div class="small text-muted mb-2">{{ group.permissions|length }} permissions · {{ group.users|length }} users</div>
+                    <div class="small text-muted mb-2">{{ group.permissions|length }} permissions | {{ group.users|length }} users</div>
                     {% if group.permissions %}
                     <div>
                         {% for permission in group.permissions[:8] %}
@@ -69,4 +79,8 @@
         {% endfor %}
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/permission_group_form.js') }}"></script>
 {% endblock %}

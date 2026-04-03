@@ -3,7 +3,7 @@ import os
 from werkzeug.security import generate_password_hash
 
 from app import db
-from app.models import PermissionGroup, User
+from app.models import Permission, PermissionGroup, User
 from app.permissions import SYSTEM_FULL_ACCESS_GROUP_KEY
 from tests.utils import login
 
@@ -84,3 +84,99 @@ def test_permission_group_pages_follow_permissions(client, app):
         login(client, "limited-perms@example.com", "pass")
         limited_response = client.get("/controlpanel/permission-groups")
         assert limited_response.status_code == 403
+
+
+def test_permission_group_create_form_assigns_permissions(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            "/controlpanel/permission-groups",
+            data={
+                "create-name": "Receiving Team",
+                "create-description": "Can work with purchase receiving only.",
+                "create-permissions": [
+                    "purchase_orders.view",
+                    "purchase_invoices.receive",
+                ],
+                "create-submit": "1",
+            },
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"Permission group created." in response.data
+
+    with app.app_context():
+        group = PermissionGroup.query.filter_by(name="Receiving Team").first()
+        assert group is not None
+        assert {permission.code for permission in group.permissions} == {
+            "purchase_orders.view",
+            "purchase_invoices.receive",
+        }
+
+
+def test_permission_group_forms_render_grouped_permission_checkboxes(client):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with client:
+        login(client, admin_email, admin_pass)
+
+        create_page = client.get("/controlpanel/permission-groups")
+        assert create_page.status_code == 200
+        assert b"Create Permission Group" in create_page.data
+        assert b'data-permission-category-toggle="transfers"' in create_page.data
+        assert b"View Transfers" in create_page.data
+
+        with client.application.app_context():
+            group = PermissionGroup(
+                name="Transfer Ops",
+                description="Transfer-specific permissions.",
+            )
+            db.session.add(group)
+            db.session.commit()
+            group_id = group.id
+
+        edit_page = client.get(f"/controlpanel/permission-groups/{group_id}")
+        assert edit_page.status_code == 200
+        assert b"Edit Permission Group" in edit_page.data
+        assert b'data-permission-category-toggle="purchase_orders"' in edit_page.data
+        assert b"Create Purchase Orders" in edit_page.data
+
+
+def test_permissions_manager_can_open_permission_group_editor(client, app):
+    with app.app_context():
+        permissions_manage = Permission.query.filter_by(
+            code="permissions.manage"
+        ).first()
+        permissions_view = Permission.query.filter_by(code="permissions.view").first()
+
+        editor_group = PermissionGroup(name="Permission Editors")
+        editor_group.permissions = [permissions_manage, permissions_view]
+
+        target_group = PermissionGroup(
+            name="Warehouse Access",
+            description="Warehouse-specific permissions.",
+        )
+
+        editor = User(
+            email="permissions-editor@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        editor.permission_groups = [editor_group]
+
+        db.session.add_all([editor_group, target_group, editor])
+        db.session.commit()
+        target_group_id = target_group.id
+
+    with client:
+        login(client, "permissions-editor@example.com", "pass")
+        response = client.get(f"/controlpanel/permission-groups/{target_group_id}")
+
+    assert response.status_code == 200
+    assert b"Save Changes" in response.data
+    assert b"You can review the group details here" in response.data
