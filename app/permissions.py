@@ -6,15 +6,6 @@ from typing import Iterable
 from flask import current_app
 
 
-PERMISSION_BACKFILL_SETTING = "PERMISSIONS_BACKFILL_DONE"
-SYSTEM_FULL_ACCESS_GROUP_KEY = "legacy_full_app_access"
-SYSTEM_FULL_ACCESS_GROUP_NAME = "Full App Access"
-SYSTEM_FULL_ACCESS_GROUP_DESCRIPTION = (
-    "System-managed legacy access group that preserves the app's historical "
-    "non-admin access during the permission-system migration."
-)
-
-
 @dataclass(frozen=True)
 class PermissionDefinition:
     code: str
@@ -512,29 +503,8 @@ def get_default_landing_endpoint(user) -> str:
     return "auth.profile"
 
 
-def get_legacy_full_access_codes() -> set[str]:
-    excluded_prefixes = (
-        "users.",
-        "permission_groups.",
-        "permissions.",
-        "backups.",
-        "settings.",
-        "imports.",
-        "activity_logs.",
-        "system_info.",
-        "terminal_sales_mappings.",
-        "sales_imports.",
-        "vendor_item_aliases.",
-    )
-    return {
-        definition.code
-        for definition in PERMISSION_DEFINITIONS
-        if not definition.code.startswith(excluded_prefixes)
-    }
-
-
 def sync_permission_data(session) -> None:
-    from app.models import Permission, PermissionGroup, Setting, User
+    from app.models import Permission, PermissionGroup, Setting
 
     permissions_by_code = {
         permission.code: permission for permission in Permission.query.all()
@@ -568,40 +538,20 @@ def sync_permission_data(session) -> None:
     if changed:
         session.flush()
 
-    system_group = PermissionGroup.query.filter_by(
-        key=SYSTEM_FULL_ACCESS_GROUP_KEY
+    legacy_group = PermissionGroup.query.filter_by(
+        key="legacy_full_app_access"
     ).first()
-    if system_group is None:
-        system_group = PermissionGroup(
-            key=SYSTEM_FULL_ACCESS_GROUP_KEY,
-            name=SYSTEM_FULL_ACCESS_GROUP_NAME,
-            description=SYSTEM_FULL_ACCESS_GROUP_DESCRIPTION,
-            is_system=True,
-        )
-        session.add(system_group)
-        session.flush()
+    if legacy_group is not None:
+        legacy_group.users = []
+        legacy_group.permissions = []
+        session.delete(legacy_group)
         changed = True
 
-    legacy_permissions = (
-        Permission.query.filter(Permission.code.in_(get_legacy_full_access_codes()))
-        .order_by(Permission.code)
-        .all()
-    )
-    if {permission.code for permission in system_group.permissions} != {
-        permission.code for permission in legacy_permissions
-    }:
-        system_group.permissions = legacy_permissions
-        changed = True
-
-    backfill_setting = Setting.query.filter_by(
-        name=PERMISSION_BACKFILL_SETTING
+    legacy_backfill_setting = Setting.query.filter_by(
+        name="PERMISSIONS_BACKFILL_DONE"
     ).first()
-    if backfill_setting is None:
-        for user in User.query.filter_by(is_admin=False).all():
-            if system_group not in user.permission_groups:
-                user.permission_groups.append(system_group)
-                changed = True
-        session.add(Setting(name=PERMISSION_BACKFILL_SETTING, value="1"))
+    if legacy_backfill_setting is not None:
+        session.delete(legacy_backfill_setting)
         changed = True
 
     if changed:

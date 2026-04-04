@@ -3,12 +3,12 @@ import os
 from werkzeug.security import generate_password_hash
 
 from app import db
-from app.models import Permission, PermissionGroup, User
-from app.permissions import SYSTEM_FULL_ACCESS_GROUP_KEY
+from app.models import Permission, PermissionGroup, Setting, User
+from app.permissions import sync_permission_data
 from tests.utils import login
 
 
-def test_new_user_receives_default_full_access_group(app):
+def test_new_user_does_not_receive_default_permission_group(app):
     with app.app_context():
         user = User(
             email="defaultgroup@example.com",
@@ -19,10 +19,36 @@ def test_new_user_receives_default_full_access_group(app):
         db.session.commit()
 
         db.session.refresh(user)
-        assert any(
-            group.key == SYSTEM_FULL_ACCESS_GROUP_KEY
-            for group in user.permission_groups
+        assert user.permission_groups == []
+
+
+def test_permission_sync_removes_legacy_full_access_group(app):
+    with app.app_context():
+        user = User(
+            email="legacygroup@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
         )
+        legacy_group = PermissionGroup(
+            key="legacy_full_app_access",
+            name="Full App Access",
+            description="Legacy system group.",
+            is_system=True,
+        )
+        legacy_flag = Setting(name="PERMISSIONS_BACKFILL_DONE", value="1")
+
+        user.permission_groups = [legacy_group]
+        db.session.add_all([user, legacy_group, legacy_flag])
+        db.session.commit()
+
+        sync_permission_data(db.session)
+        db.session.expire_all()
+
+        reloaded_user = User.query.filter_by(email="legacygroup@example.com").first()
+        assert reloaded_user is not None
+        assert reloaded_user.permission_groups == []
+        assert PermissionGroup.query.filter_by(key="legacy_full_app_access").first() is None
+        assert Setting.query.filter_by(name="PERMISSIONS_BACKFILL_DONE").first() is None
 
 
 def test_user_without_permission_groups_is_redirected_to_profile_and_blocked_from_restricted_routes(

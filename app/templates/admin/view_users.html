@@ -32,7 +32,7 @@
                 <div class="col-12 col-lg-5">
                     {{ invite_form.group_ids.label(class_='form-label') }}
                     {{ invite_form.group_ids(class_='form-select', multiple=true) }}
-                    <div class="form-text">Leave blank to use the default Full App Access group.</div>
+                    <div class="form-text">Leave blank to invite the user with no permission groups until you assign access.</div>
                 </div>
                 <div class="col-12 col-lg-2 d-flex align-items-end">
                     <button type="submit" class="btn btn-primary w-100">{{ invite_form.submit.label.text }}</button>

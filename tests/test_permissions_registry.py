@@ -4,7 +4,6 @@ from flask import Flask
 
 from app.permissions import (
     get_default_landing_endpoint,
-    get_legacy_full_access_codes,
     get_permission_categories,
     user_can_access_endpoint,
 )
@@ -32,15 +31,6 @@ def test_super_admin_bypasses_endpoint_permission_checks():
 
     assert user_can_access_endpoint(user, "admin.settings")
     assert user_can_access_endpoint(user, "admin.sales_import_detail", "POST")
-
-
-def test_legacy_full_access_excludes_control_panel_permissions():
-    legacy_codes = get_legacy_full_access_codes()
-
-    assert "transfers.view" in legacy_codes
-    assert "reports.customer_invoices" in legacy_codes
-    assert "users.manage" not in legacy_codes
-    assert "sales_imports.manage" not in legacy_codes
 
 
 def test_default_landing_endpoint_prefers_first_accessible_route():

@@ -4,9 +4,9 @@ from typing import Optional
 
 from flask import current_app, has_app_context
 from flask_login import UserMixin
-from sqlalchemy import event as sqlalchemy_event, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy.orm import Session, relationship
+from sqlalchemy.orm import relationship
 
 from app import db
 
@@ -263,27 +263,6 @@ class UserFilterPreference(db.Model):
             "user_id", "scope", name="uq_user_filter_preference_scope"
         ),
     )
-
-
-@sqlalchemy_event.listens_for(Session, "before_flush")
-def assign_default_permission_group(session, flush_context, instances):
-    from app.permissions import SYSTEM_FULL_ACCESS_GROUP_KEY
-
-    full_access_group = None
-    for obj in session.new:
-        if not isinstance(obj, User):
-            continue
-        if obj.is_super_admin or obj.permission_groups:
-            continue
-        if full_access_group is None:
-            full_access_group = (
-                session.query(PermissionGroup)
-                .filter_by(key=SYSTEM_FULL_ACCESS_GROUP_KEY)
-                .first()
-            )
-        if full_access_group is not None:
-            obj.permission_groups.append(full_access_group)
-            obj.invalidate_permission_cache()
 
 class Location(db.Model):
     id = db.Column(db.Integer, primary_key=True)
