@@ -703,6 +703,10 @@ class MenuAssignment(db.Model):
 
 
 class Invoice(db.Model):
+    STATUS_PENDING = "pending"
+    STATUS_DELIVERED = "delivered"
+    STATUS_PAID = "paid"
+
     id = db.Column(
         db.String(32), primary_key=True
     )  # Adjust length based on your requirements
@@ -715,12 +719,24 @@ class Invoice(db.Model):
     date_created = db.Column(
         db.DateTime, nullable=False, default=datetime.utcnow, index=True
     )
+    status = db.Column(
+        db.String(32),
+        nullable=False,
+        default=STATUS_PENDING,
+        server_default=STATUS_PENDING,
+    )
+    delivered_at = db.Column(db.DateTime, nullable=True)
     is_paid = db.Column(
         db.Boolean, nullable=False, default=False, server_default="0"
     )
     paid_at = db.Column(db.DateTime, nullable=True)
 
     __table_args__ = (
+        db.CheckConstraint(
+            "status IN ('pending', 'delivered', 'paid')",
+            name="ck_invoice_status",
+        ),
+        db.Index("ix_invoice_status", "status"),
         db.Index("ix_invoice_user_id", "user_id"),
     )
 
@@ -738,6 +754,38 @@ class Invoice(db.Model):
         return sum(
             p.line_subtotal + p.line_gst + p.line_pst for p in self.products
         )
+
+    @property
+    def invoice_status(self) -> str:
+        if self.status == self.STATUS_PAID or self.is_paid:
+            return self.STATUS_PAID
+        if self.status == self.STATUS_DELIVERED:
+            return self.STATUS_DELIVERED
+        return self.STATUS_PENDING
+
+    @property
+    def invoice_status_label(self) -> str:
+        return self.invoice_status.title()
+
+    @property
+    def invoice_status_badge_class(self) -> str:
+        return {
+            self.STATUS_PENDING: "text-bg-warning",
+            self.STATUS_DELIVERED: "text-bg-info",
+            self.STATUS_PAID: "text-bg-success",
+        }.get(self.invoice_status, "text-bg-warning")
+
+    @property
+    def payment_status_label(self) -> str:
+        return "Paid" if self.is_paid else "Unpaid"
+
+    @property
+    def can_mark_delivered(self) -> bool:
+        return self.invoice_status == self.STATUS_PENDING
+
+    @property
+    def can_mark_paid(self) -> bool:
+        return self.invoice_status == self.STATUS_DELIVERED
 
 
 class InvoiceProduct(db.Model):

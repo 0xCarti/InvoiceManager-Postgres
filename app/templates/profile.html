@@ -335,8 +335,8 @@
                                     </td>
                                     <td>{{ inv.date_created.strftime('%Y-%m-%d') if inv.date_created else '-' }}</td>
                                     <td>
-                                        <span class="badge text-bg-{{ 'success' if inv.is_paid else 'secondary' }}">
-                                            {{ 'Paid' if inv.is_paid else 'Unpaid' }}
+                                        <span class="badge {{ inv.invoice_status_badge_class }}">
+                                            {{ inv.invoice_status_label }}
                                         </span>
                                     </td>
                                     <td>${{ '%.2f'|format(inv.total) }}</td>

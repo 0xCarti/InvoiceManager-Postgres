@@ -92,13 +92,13 @@
             </button>
             <ul class="dropdown-menu" aria-labelledby="bulkInvoiceActionBtn">
                 <li>
-                    <button type="button" class="dropdown-item js-bulk-invoice-action" data-action="paid">
-                        Mark selected as Paid
+                    <button type="button" class="dropdown-item js-bulk-invoice-action" data-action="delivered">
+                        Mark selected as Delivered
                     </button>
                 </li>
                 <li>
-                    <button type="button" class="dropdown-item js-bulk-invoice-action" data-action="unpaid">
-                        Mark selected as Unpaid
+                    <button type="button" class="dropdown-item js-bulk-invoice-action" data-action="paid">
+                        Mark selected as Paid
                     </button>
                 </li>
             </ul>
@@ -112,7 +112,7 @@
                 {'id': 'toggle-invoice-number', 'target': 'col-invoice-number', 'label': 'Invoice Number', 'checked': True},
                 {'id': 'toggle-invoice-date', 'target': 'col-invoice-date', 'label': 'Date', 'checked': True},
                 {'id': 'toggle-invoice-customer', 'target': 'col-invoice-customer', 'label': 'Customer Name', 'checked': True},
-                {'id': 'toggle-invoice-payment-status', 'target': 'col-invoice-payment-status', 'label': 'Payment Status', 'checked': True},
+                {'id': 'toggle-invoice-payment-status', 'target': 'col-invoice-payment-status', 'label': 'Status', 'checked': True},
                 {'id': 'toggle-invoice-actions', 'target': 'col-invoice-actions', 'label': 'Actions', 'checked': True},
             ]
         ) }}
@@ -134,7 +134,7 @@
     <form id="bulkInvoiceActionForm">
         {{ delete_form.hidden_tag() }}
         <input type="hidden" id="selectedInvoiceIdsInput" name="invoice_ids" value="">
-        <input type="hidden" id="bulkInvoiceActionInput" name="bulk_action" value="">
+        <input type="hidden" id="bulkInvoiceActionInput" name="status" value="">
     </form>
     <div class="table-responsive mobile-table-wrap">
     <table class="table sortable table-mobile-card" id="invoiceTable">
@@ -146,7 +146,7 @@
                 <th scope="col" class="col-invoice-number" data-type="number">Invoice Number</th>
                 <th scope="col" class="col-invoice-date">Date</th>
                 <th scope="col" class="col-invoice-customer">Customer Name</th>
-                <th scope="col" class="col-invoice-payment-status">Payment Status</th>
+                <th scope="col" class="col-invoice-payment-status">Status</th>
                 <th scope="col" class="col-invoice-actions" data-sortable="false">Actions</th>
             </tr>
         </thead>
@@ -167,8 +167,8 @@
                 <td class="col-invoice-date">{{ invoice.date_created|format_datetime('%Y-%m-%d') }}</td>
                 <td class="col-invoice-customer">{{ invoice.customer.first_name }} {{ invoice.customer.last_name }}</td>
                 <td class="col-invoice-payment-status">
-                    <span class="badge {{ 'text-bg-success' if invoice.is_paid else 'text-bg-warning' }}">
-                        {{ 'Paid' if invoice.is_paid else 'Unpaid' }}
+                    <span class="badge {{ invoice.invoice_status_badge_class }}">
+                        {{ invoice.invoice_status_label }}
                     </span>
                 </td>
                 <td class="col-invoice-actions">
@@ -186,19 +186,25 @@
                             &hellip;
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="invoice-actions-{{ invoice.id }}">
+                            {% if invoice.can_mark_delivered %}
+                            <li>
+                                <form action="{{ url_for('invoice.mark_invoice_delivered', invoice_id=invoice.id) }}" method="post">
+                                    {{ delete_form.hidden_tag() }}
+                                    <button type="submit" class="dropdown-item">Mark Delivered</button>
+                                </form>
+                            </li>
+                            {% endif %}
+                            {% if invoice.can_mark_paid %}
                             <li>
                                 <form action="{{ url_for('invoice.mark_invoice_paid', invoice_id=invoice.id) }}" method="post">
                                     {{ delete_form.hidden_tag() }}
-                                    <button type="submit" class="dropdown-item" {% if invoice.is_paid %}disabled{% endif %}>Mark Paid</button>
+                                    <button type="submit" class="dropdown-item">Mark Paid</button>
                                 </form>
                             </li>
-                            <li>
-                                <form action="{{ url_for('invoice.mark_invoice_unpaid', invoice_id=invoice.id) }}" method="post">
-                                    {{ delete_form.hidden_tag() }}
-                                    <button type="submit" class="dropdown-item" {% if not invoice.is_paid %}disabled{% endif %}>Mark Unpaid</button>
-                                </form>
-                            </li>
+                            {% endif %}
+                            {% if invoice.can_mark_delivered or invoice.can_mark_paid %}
                             <li><hr class="dropdown-divider"></li>
+                            {% endif %}
                             <li>
                                 <form
                                     action="{{ url_for('invoice.delete_invoice', invoice_id=invoice.id) }}"
@@ -277,11 +283,12 @@
         {{ form.end_date.label }} {{ form.end_date(class="form-control") }}
     </div>
     <div class="mb-3">
-        <label for="payment_status" class="form-label">Payment Status</label>
+        <label for="payment_status" class="form-label">Status</label>
         <select id="payment_status" name="payment_status" class="form-control">
-            <option value="all" {% if request.args.get('payment_status', 'all') == 'all' %}selected{% endif %}>All</option>
-            <option value="paid" {% if request.args.get('payment_status') == 'paid' %}selected{% endif %}>Paid</option>
-            <option value="unpaid" {% if request.args.get('payment_status') == 'unpaid' %}selected{% endif %}>Unpaid</option>
+            <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
+            <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>Pending</option>
+            <option value="delivered" {% if status_filter == 'delivered' %}selected{% endif %}>Delivered</option>
+            <option value="paid" {% if status_filter == 'paid' %}selected{% endif %}>Paid</option>
         </select>
     </div>
 {% endcall %}
@@ -324,8 +331,9 @@ $(document).ready(function(){
     const deleteFormHTML = {{ delete_form.hidden_tag()|tojson }};
     const viewInvoiceUrlTemplate = {{ url_for('invoice.view_invoice', invoice_id=0)|tojson }};
     const deleteInvoiceUrlTemplate = {{ url_for('invoice.delete_invoice', invoice_id=0)|tojson }};
+    const bulkInvoiceStatusUrl = {{ url_for('invoice.bulk_invoice_payment_status')|tojson }};
+    const markDeliveredUrlTemplate = {{ url_for('invoice.mark_invoice_delivered', invoice_id=0)|tojson }};
     const markPaidUrlTemplate = {{ url_for('invoice.mark_invoice_paid', invoice_id=0)|tojson }};
-    const markUnpaidUrlTemplate = {{ url_for('invoice.mark_invoice_unpaid', invoice_id=0)|tojson }};
     const $invoiceTable = $('#invoiceTable');
     const $bulkInvoiceActionBtn = $('#bulkInvoiceActionBtn');
     const $selectAllInvoices = $('#select-all-invoices');
@@ -345,10 +353,31 @@ $(document).ready(function(){
         const tbody = $('#invoiceTable tbody');
         tbody.empty();
         invoices.forEach(function(inv){
-        const isPaid = String(inv.payment_status || '').toLowerCase() === 'paid';
-        const statusBadgeClass = isPaid ? 'text-bg-success' : 'text-bg-warning';
-        const markPaidDisabled = isPaid ? 'disabled' : '';
-        const markUnpaidDisabled = isPaid ? '' : 'disabled';
+        const invoiceStatus = String(inv.status || '').toLowerCase();
+        const statusLabel = inv.status_label || 'Pending';
+        const statusBadgeClass =
+            invoiceStatus === 'paid'
+                ? 'text-bg-success'
+                : invoiceStatus === 'delivered'
+                    ? 'text-bg-info'
+                    : 'text-bg-warning';
+        const showMarkDelivered = invoiceStatus === 'pending';
+        const showMarkPaid = invoiceStatus === 'delivered';
+        const deliveredAction = showMarkDelivered ? `
+                        <li>
+                            <form action="${invoiceUrlFromTemplate(markDeliveredUrlTemplate, inv.id)}" method="post">
+                                ${deleteFormHTML}
+                                <button type="submit" class="dropdown-item">Mark Delivered</button>
+                            </form>
+                        </li>` : '';
+        const paidAction = showMarkPaid ? `
+                        <li>
+                            <form action="${invoiceUrlFromTemplate(markPaidUrlTemplate, inv.id)}" method="post">
+                                ${deleteFormHTML}
+                                <button type="submit" class="dropdown-item">Mark Paid</button>
+                            </form>
+                        </li>` : '';
+        const dividerAction = (showMarkDelivered || showMarkPaid) ? '<li><hr class="dropdown-divider"></li>' : '';
         const row = `<tr>
             <td class="col-invoice-select">
                 <input
@@ -364,7 +393,7 @@ $(document).ready(function(){
             <td class="col-invoice-date">${inv.date}</td>
             <td class="col-invoice-customer">${inv.customer}</td>
             <td class="col-invoice-payment-status">
-                <span class="badge ${statusBadgeClass}">${inv.payment_status || 'Unpaid'}</span>
+                <span class="badge ${statusBadgeClass}">${statusLabel}</span>
             </td>
             <td class="col-invoice-actions">
                 <a href="${invoiceUrlFromTemplate(viewInvoiceUrlTemplate, inv.id)}" class="btn btn-primary mr-2">View</a>
@@ -380,19 +409,9 @@ $(document).ready(function(){
                         &hellip;
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="invoice-actions-${inv.id}">
-                        <li>
-                            <form action="${invoiceUrlFromTemplate(markPaidUrlTemplate, inv.id)}" method="post">
-                                ${deleteFormHTML}
-                                <button type="submit" class="dropdown-item" ${markPaidDisabled}>Mark Paid</button>
-                            </form>
-                        </li>
-                        <li>
-                            <form action="${invoiceUrlFromTemplate(markUnpaidUrlTemplate, inv.id)}" method="post">
-                                ${deleteFormHTML}
-                                <button type="submit" class="dropdown-item" ${markUnpaidDisabled}>Mark Unpaid</button>
-                            </form>
-                        </li>
-                        <li><hr class="dropdown-divider"></li>
+                        ${deliveredAction}
+                        ${paidAction}
+                        ${dividerAction}
                         <li>
                             <form
                                 action="${invoiceUrlFromTemplate(deleteInvoiceUrlTemplate, inv.id)}"
@@ -453,7 +472,7 @@ $(document).ready(function(){
         }
 
         const isMarkPaid = action === 'paid';
-        const actionVerb = isMarkPaid ? 'mark as paid' : 'mark as unpaid';
+        const actionVerb = isMarkPaid ? 'mark as paid' : 'mark as delivered';
         if (!window.confirm(`Are you sure you want to ${actionVerb} ${selectedInvoiceIds.length} selected invoice(s)?`)) {
             return;
         }
@@ -462,27 +481,32 @@ $(document).ready(function(){
         $bulkInvoiceActionInput.val(action);
         $selectedInvoiceIdsInput.val(selectedInvoiceIds.join(','));
 
-        const actionUrlTemplate = isMarkPaid ? markPaidUrlTemplate : markUnpaidUrlTemplate;
-        const requests = selectedInvoiceIds.map(function (invoiceId) {
-            const formData = bulkActionFormEl ? new FormData(bulkActionFormEl) : new FormData();
-            formData.append('selected_invoice_ids', invoiceId);
-
-            return fetch(invoiceUrlFromTemplate(actionUrlTemplate, invoiceId), {
-                method: 'POST',
-                body: formData,
-                credentials: 'same-origin'
-            }).then(function (response) {
-                if (!response.ok) {
-                    throw new Error(`Bulk invoice action failed for invoice ${invoiceId}`);
-                }
-            });
-        });
+        const formData = bulkActionFormEl ? new FormData(bulkActionFormEl) : new FormData();
+        formData.set('invoice_ids', selectedInvoiceIds.join(','));
+        formData.set('selected_ids', selectedInvoiceIds.join(','));
+        formData.set('payment_status', action);
+        formData.set('status', action);
 
         try {
-            await Promise.all(requests);
+            const response = await fetch(bulkInvoiceStatusUrl, {
+                method: 'POST',
+                body: formData,
+                credentials: 'same-origin',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            });
+
+            const payload = await response.json().catch(function () {
+                return {};
+            });
+            if (!response.ok || payload.success === false) {
+                throw new Error(payload.message || 'Unable to update one or more selected invoices.');
+            }
+
             window.location.reload();
         } catch (error) {
-            window.alert('Unable to update one or more selected invoices. Please try again.');
+            window.alert(error.message || 'Unable to update one or more selected invoices. Please try again.');
         } finally {
             updateBulkInvoiceSelectionState();
         }

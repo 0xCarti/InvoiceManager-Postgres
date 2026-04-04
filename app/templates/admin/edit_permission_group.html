@@ -65,6 +65,22 @@
                             <div class="invalid-feedback d-block">{{ error }}</div>
                             {% endfor %}
                         </div>
+                        {% if can_manage_permissions %}
+                        <div>
+                            {{ group_form.inherited_group_ids.label(class_='form-label') }}
+                            {% if group_form.inherited_group_ids.choices %}
+                            {{ group_form.inherited_group_ids(class_='form-select' + (' is-invalid' if group_form.inherited_group_ids.errors else ''), multiple=True, size='8') }}
+                            <div class="form-text">
+                                Selected groups copy all of their current permissions into this group when you save. Existing permissions on this group stay selected too.
+                            </div>
+                            {% else %}
+                            <div class="form-text">No other permission groups are available to copy from.</div>
+                            {% endif %}
+                            {% for error in group_form.inherited_group_ids.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
                         <div>
                             {% with permission_group_form=group_form, permission_categories=permission_categories, permissions_locked_message=None if can_manage_permissions else 'You can edit the group details, but you do not have permission to change which permissions are assigned.', can_manage_permissions=can_manage_permissions %}
                             {% include 'admin/_permission_group_permission_fields.html' %}

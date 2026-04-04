@@ -215,6 +215,37 @@ def _parse_invoice_filter_dates(start_date_str, end_date_str):
     return start_date, end_date
 
 
+def _normalize_invoice_status_filter(raw_status):
+    normalized = str(raw_status or "all").strip().lower()
+    if normalized in {
+        "all",
+        "unpaid",
+        Invoice.STATUS_PENDING,
+        Invoice.STATUS_DELIVERED,
+        Invoice.STATUS_PAID,
+    }:
+        return normalized
+    return "all"
+
+
+def _apply_invoice_status_filter(query, status_filter):
+    if status_filter == Invoice.STATUS_PENDING:
+        return query.filter(
+            Invoice.is_paid.is_(False),
+            Invoice.status == Invoice.STATUS_PENDING,
+        )
+    if status_filter == Invoice.STATUS_DELIVERED:
+        return query.filter(
+            Invoice.is_paid.is_(False),
+            Invoice.status == Invoice.STATUS_DELIVERED,
+        )
+    if status_filter == Invoice.STATUS_PAID:
+        return query.filter(Invoice.is_paid.is_(True))
+    if status_filter == "unpaid":
+        return query.filter(Invoice.is_paid.is_(False))
+    return query
+
+
 def _create_invoice_from_form(form):
     customer = db.session.get(Customer, form.customer.data)
     if customer is None:
@@ -236,7 +267,13 @@ def _create_invoice_from_form(form):
     invoice_id = f"{customer.first_name[0]}{customer.last_name[0]}{customer.id}{today}{count:02}"
 
     invoice = Invoice(
-        id=invoice_id, customer_id=customer.id, user_id=current_user.id
+        id=invoice_id,
+        customer_id=customer.id,
+        user_id=current_user.id,
+        status=Invoice.STATUS_PENDING,
+        delivered_at=None,
+        is_paid=False,
+        paid_at=None,
     )
     db.session.add(invoice)
 
@@ -414,16 +451,53 @@ def delete_invoice(invoice_id):
     return redirect(url_for("invoice.view_invoices"))
 
 
-def _set_invoice_payment_status(invoice_id, *, is_paid):
-    updated_invoices, missing_invoice_ids = _apply_invoice_payment_status(
-        [invoice_id], is_paid=is_paid
+def _format_invoice_status_label(status):
+    return {
+        Invoice.STATUS_PENDING: "pending",
+        Invoice.STATUS_DELIVERED: "delivered",
+        Invoice.STATUS_PAID: "paid",
+    }.get(status, status)
+
+
+def _invoice_status_transition_error(invoice_record, target_status):
+    if (
+        target_status == Invoice.STATUS_PAID
+        and invoice_record.invoice_status == Invoice.STATUS_PENDING
+    ):
+        return (
+            f"Invoice {invoice_record.id} must be marked delivered before it can be "
+            "marked paid."
+        )
+    return (
+        f"Invoice {invoice_record.id} cannot be marked "
+        f"{_format_invoice_status_label(target_status)} from its current status."
+    )
+
+
+def _set_invoice_status(invoice_id, *, target_status):
+    updated_invoices, missing_invoice_ids, invalid_invoices = _apply_invoice_status(
+        [invoice_id], target_status=target_status
     )
     if missing_invoice_ids:
         abort(404)
+    if invalid_invoices:
+        flash(
+            _invoice_status_transition_error(
+                invalid_invoices[0], target_status
+            ),
+            "danger",
+        )
+        return redirect(
+            request.referrer
+            or url_for("invoice.view_invoice", invoice_id=invalid_invoices[0].id)
+        )
 
     invoice_record = updated_invoices[0]
-    status = "paid" if is_paid else "unpaid"
-    flash(f"Invoice {invoice_record.id} marked as {status}.", "success")
+    flash(
+        f"Invoice {invoice_record.id} marked as "
+        f"{invoice_record.invoice_status_label.lower()}.",
+        "success",
+    )
 
     return redirect(
         request.referrer
@@ -457,24 +531,62 @@ def _normalize_invoice_ids(raw_invoice_ids):
     return normalized
 
 
-def _parse_is_paid(raw_status):
+def _parse_invoice_status_action(raw_status):
     if isinstance(raw_status, bool):
-        return raw_status
+        return Invoice.STATUS_PAID if raw_status else Invoice.STATUS_DELIVERED
     if raw_status is None:
         return None
 
     normalized = str(raw_status).strip().lower()
-    if normalized in {"true", "1", "paid"}:
-        return True
-    if normalized in {"false", "0", "unpaid"}:
-        return False
+    if normalized in {"true", "1", Invoice.STATUS_PAID}:
+        return Invoice.STATUS_PAID
+    if normalized in {"false", "0", "unpaid", Invoice.STATUS_DELIVERED}:
+        return Invoice.STATUS_DELIVERED
+    if normalized == Invoice.STATUS_PENDING:
+        return Invoice.STATUS_PENDING
     return None
 
 
-def _apply_invoice_payment_status(invoice_ids, *, is_paid):
+def _can_transition_invoice_status(invoice_record, target_status):
+    current_status = invoice_record.invoice_status
+    if target_status == Invoice.STATUS_PAID:
+        return current_status in {Invoice.STATUS_DELIVERED, Invoice.STATUS_PAID}
+    if target_status == Invoice.STATUS_DELIVERED:
+        return current_status in {
+            Invoice.STATUS_PENDING,
+            Invoice.STATUS_DELIVERED,
+            Invoice.STATUS_PAID,
+        }
+    if target_status == Invoice.STATUS_PENDING:
+        return current_status in {Invoice.STATUS_PENDING, Invoice.STATUS_DELIVERED}
+    return False
+
+
+def _update_invoice_status(invoice_record, *, target_status, changed_at):
+    if target_status == Invoice.STATUS_PENDING:
+        invoice_record.status = Invoice.STATUS_PENDING
+        invoice_record.delivered_at = None
+        invoice_record.is_paid = False
+        invoice_record.paid_at = None
+        return
+
+    if target_status == Invoice.STATUS_DELIVERED:
+        invoice_record.status = Invoice.STATUS_DELIVERED
+        invoice_record.delivered_at = invoice_record.delivered_at or changed_at
+        invoice_record.is_paid = False
+        invoice_record.paid_at = None
+        return
+
+    invoice_record.status = Invoice.STATUS_PAID
+    invoice_record.delivered_at = invoice_record.delivered_at or changed_at
+    invoice_record.is_paid = True
+    invoice_record.paid_at = changed_at
+
+
+def _apply_invoice_status(invoice_ids, *, target_status):
     normalized_invoice_ids = _normalize_invoice_ids(invoice_ids)
     if not normalized_invoice_ids:
-        return [], []
+        return [], [], []
 
     invoices = Invoice.query.filter(Invoice.id.in_(normalized_invoice_ids)).all()
     invoices_by_id = {invoice.id: invoice for invoice in invoices}
@@ -484,38 +596,63 @@ def _apply_invoice_payment_status(invoice_ids, *, is_paid):
         if invoice_id not in invoices_by_id
     ]
     if missing_invoice_ids:
-        return [], missing_invoice_ids
+        return [], missing_invoice_ids, []
 
-    paid_at = datetime.utcnow() if is_paid else None
-    for invoice in invoices:
-        invoice.is_paid = is_paid
-        invoice.paid_at = paid_at
+    ordered_invoices = [
+        invoices_by_id[invoice_id] for invoice_id in normalized_invoice_ids
+    ]
+    invalid_invoices = [
+        invoice_record
+        for invoice_record in ordered_invoices
+        if not _can_transition_invoice_status(invoice_record, target_status)
+    ]
+    if invalid_invoices:
+        return [], [], invalid_invoices
+
+    changed_at = datetime.utcnow()
+    for invoice_record in ordered_invoices:
+        if invoice_record.invoice_status == target_status:
+            continue
+        _update_invoice_status(
+            invoice_record,
+            target_status=target_status,
+            changed_at=changed_at,
+        )
 
     db.session.commit()
-    status = "paid" if is_paid else "unpaid"
-    log_activity(f"Marked {len(invoices)} invoice(s) as {status}")
+    log_activity(
+        f"Marked {len(ordered_invoices)} invoice(s) as "
+        f"{_format_invoice_status_label(target_status)}"
+    )
 
-    return [invoices_by_id[invoice_id] for invoice_id in normalized_invoice_ids], []
+    return ordered_invoices, [], []
+
+
+@invoice.route("/invoice/<invoice_id>/mark-delivered", methods=["POST"])
+@login_required
+def mark_invoice_delivered(invoice_id):
+    """Mark an invoice as delivered."""
+    return _set_invoice_status(invoice_id, target_status=Invoice.STATUS_DELIVERED)
 
 
 @invoice.route("/invoice/<invoice_id>/mark-paid", methods=["POST"])
 @login_required
 def mark_invoice_paid(invoice_id):
     """Mark an invoice as paid and stamp payment time."""
-    return _set_invoice_payment_status(invoice_id, is_paid=True)
+    return _set_invoice_status(invoice_id, target_status=Invoice.STATUS_PAID)
 
 
 @invoice.route("/invoice/<invoice_id>/mark-unpaid", methods=["POST"])
 @login_required
 def mark_invoice_unpaid(invoice_id):
-    """Mark an invoice as unpaid and clear payment time."""
-    return _set_invoice_payment_status(invoice_id, is_paid=False)
+    """Legacy alias that reopens a paid invoice as delivered."""
+    return _set_invoice_status(invoice_id, target_status=Invoice.STATUS_DELIVERED)
 
 
 @invoice.route("/invoices/bulk-payment-status", methods=["POST"])
 @login_required
 def bulk_invoice_payment_status():
-    """Bulk-update payment status for one or more invoices."""
+    """Bulk-update invoice workflow status for one or more invoices."""
     is_ajax = (
         request.headers.get("X-Requested-With") == "XMLHttpRequest"
         or request.is_json
@@ -525,24 +662,29 @@ def bulk_invoice_payment_status():
     if request.is_json:
         form = BulkInvoicePaymentForm(meta={"csrf": False})
         raw_invoice_ids = payload.get("invoice_ids", payload.get("selected_ids"))
-        raw_status = payload.get("is_paid", payload.get("payment_status"))
+        raw_status = payload.get(
+            "status",
+            payload.get("payment_status", payload.get("is_paid")),
+        )
     else:
         form = BulkInvoicePaymentForm()
         raw_invoice_ids = (
             request.form.getlist("invoice_ids")
             or request.form.get("invoice_ids")
         )
-        raw_status = request.form.get("is_paid")
+        raw_status = request.form.get("status", request.form.get("is_paid"))
 
     normalized_invoice_ids = _normalize_invoice_ids(raw_invoice_ids)
     if normalized_invoice_ids:
         form.selected_ids.data = ",".join(normalized_invoice_ids)
 
-    parsed_status = _parse_is_paid(raw_status)
-    if parsed_status is True:
+    parsed_status = _parse_invoice_status_action(raw_status)
+    if parsed_status == Invoice.STATUS_PAID:
         form.payment_status.data = "paid"
-    elif parsed_status is False:
-        form.payment_status.data = "unpaid"
+    elif parsed_status == Invoice.STATUS_DELIVERED:
+        form.payment_status.data = "delivered"
+    elif parsed_status == Invoice.STATUS_PENDING:
+        form.payment_status.data = "pending"
     elif raw_status is not None:
         form.payment_status.data = str(raw_status)
 
@@ -561,10 +703,10 @@ def bulk_invoice_payment_status():
         return redirect(request.referrer or url_for("invoice.view_invoices"))
 
     invoice_ids = _normalize_invoice_ids(form.selected_ids.data)
-    is_paid = form.payment_status.data == "paid"
+    target_status = form.payment_status.data
 
-    updated_invoices, missing_invoice_ids = _apply_invoice_payment_status(
-        invoice_ids, is_paid=is_paid
+    updated_invoices, missing_invoice_ids, invalid_invoices = _apply_invoice_status(
+        invoice_ids, target_status=target_status
     )
     if missing_invoice_ids:
         message = (
@@ -580,26 +722,52 @@ def bulk_invoice_payment_status():
         flash(message, "danger")
         return redirect(request.referrer or url_for("invoice.view_invoices"))
 
-    status = "paid" if is_paid else "unpaid"
+    if invalid_invoices:
+        message = (
+            "Pending invoices must be marked delivered before they can be marked "
+            "paid."
+            if target_status == Invoice.STATUS_PAID
+            else "One or more selected invoices could not be moved to that status."
+        )
+        if is_ajax:
+            return {
+                "success": False,
+                "message": message,
+                "invalid_invoice_ids": [invoice.id for invoice in invalid_invoices],
+            }, 400
+        flash(message, "danger")
+        return redirect(request.referrer or url_for("invoice.view_invoices"))
+
     if is_ajax:
         return {
             "success": True,
             "count": len(updated_invoices),
-            "status": status,
+            "status": target_status,
             "updated": [
                 {
                     "id": invoice.id,
+                    "status": invoice.invoice_status,
+                    "status_label": invoice.invoice_status_label,
+                    "delivered_at": (
+                        invoice.delivered_at.isoformat()
+                        if invoice.delivered_at
+                        else None
+                    ),
                     "is_paid": invoice.is_paid,
                     "paid_at": (
                         invoice.paid_at.isoformat() if invoice.paid_at else None
                     ),
-                    "payment_status": "Paid" if invoice.is_paid else "Unpaid",
+                    "payment_status": invoice.payment_status_label,
                 }
                 for invoice in updated_invoices
             ],
         }
 
-    flash(f"Marked {len(updated_invoices)} invoice(s) as {status}.", "success")
+    flash(
+        f"Marked {len(updated_invoices)} invoice(s) as "
+        f"{_format_invoice_status_label(target_status)}.",
+        "success",
+    )
     return redirect(request.referrer or url_for("invoice.view_invoices"))
 
 
@@ -647,6 +815,7 @@ def view_invoice(invoice_id):
         total=total,
         GST=GST,
         retail_pop_price=current_app.config.get("RETAIL_POP_PRICE", "0.00"),
+        delete_form=DeleteForm(),
     )
 
 
@@ -674,9 +843,9 @@ def filter_invoices_api():
     user_id = request.args.get("user_id", type=int)
     start_date_str = request.args.get("start_date")
     end_date_str = request.args.get("end_date")
-    payment_status = request.args.get("payment_status", "all").lower()
-    if payment_status not in {"all", "paid", "unpaid"}:
-        payment_status = "all"
+    status_filter = _normalize_invoice_status_filter(
+        request.args.get("status", request.args.get("payment_status", "all"))
+    )
 
     try:
         start_date, end_date = _parse_invoice_filter_dates(
@@ -702,10 +871,7 @@ def filter_invoices_api():
             Invoice.date_created
             <= datetime.combine(end_date, datetime.max.time())
         )
-    if payment_status == "paid":
-        query = query.filter(Invoice.is_paid.is_(True))
-    elif payment_status == "unpaid":
-        query = query.filter(Invoice.is_paid.is_(False))
+    query = _apply_invoice_status_filter(query, status_filter)
 
     invoices = query.order_by(Invoice.date_created.desc()).paginate(
         page=page, per_page=per_page
@@ -715,7 +881,9 @@ def filter_invoices_api():
             "id": inv.id,
             "date": inv.date_created.strftime("%Y-%m-%d"),
             "customer": f"{inv.customer.first_name} {inv.customer.last_name}",
-            "payment_status": "Paid" if inv.is_paid else "Unpaid",
+            "status": inv.invoice_status,
+            "status_label": inv.invoice_status_label,
+            "payment_status": inv.payment_status_label,
         }
         for inv in invoices.items
     ]
@@ -753,6 +921,8 @@ def create_invoice_api():
                 "id": invoice.id,
                 "date": invoice.date_created.strftime("%Y-%m-%d"),
                 "customer": f"{customer.first_name} {customer.last_name}",
+                "status": invoice.invoice_status,
+                "status_label": invoice.invoice_status_label,
             }
         }
     return {"errors": form.errors}, 400
@@ -771,36 +941,28 @@ def view_invoices():
     ]
 
     user_id = request.args.get("user_id", type=int)
+    invoice_id = normalize_request_text_filter(request.args.get("invoice_id"))
+    customer_id = request.args.get("customer_id", type=int)
+    start_date_str = request.args.get("start_date")
+    end_date_str = request.args.get("end_date")
+    status_filter = _normalize_invoice_status_filter(
+        request.args.get("status", request.args.get("payment_status", "all"))
+    )
+    try:
+        start_date, end_date = _parse_invoice_filter_dates(
+            start_date_str, end_date_str
+        )
+    except InvoiceFilterError as exc:
+        flash(str(exc), "danger")
+        return redirect(url_for("invoice.view_invoices"))
 
-    # Determine filter values from form submission or query params
-    if form.validate_on_submit():
-        invoice_id = form.invoice_id.data
-        customer_id = form.customer_id.data
-        start_date = form.start_date.data
-        end_date = form.end_date.data
-        payment_status = request.form.get("payment_status", "all").lower()
-    else:
-        invoice_id = normalize_request_text_filter(request.args.get("invoice_id"))
-        customer_id = request.args.get("customer_id", type=int)
-        start_date_str = request.args.get("start_date")
-        end_date_str = request.args.get("end_date")
-        payment_status = request.args.get("payment_status", "all").lower()
-        try:
-            start_date, end_date = _parse_invoice_filter_dates(
-                start_date_str, end_date_str
-            )
-        except InvoiceFilterError as exc:
-            flash(str(exc), "danger")
-            return redirect(url_for("invoice.view_invoices"))
-        form.invoice_id.data = invoice_id
-        if customer_id is not None:
-            form.customer_id.data = customer_id
-        if start_date:
-            form.start_date.data = start_date
-        if end_date:
-            form.end_date.data = end_date
-    if payment_status not in {"all", "paid", "unpaid"}:
-        payment_status = "all"
+    form.invoice_id.data = invoice_id
+    if customer_id is not None:
+        form.customer_id.data = customer_id
+    if start_date:
+        form.start_date.data = start_date
+    if end_date:
+        form.end_date.data = end_date
 
     query = Invoice.query
     if user_id:
@@ -819,10 +981,7 @@ def view_invoices():
             Invoice.date_created
             <= datetime.combine(end_date, datetime.max.time())
         )
-    if payment_status == "paid":
-        query = query.filter(Invoice.is_paid.is_(True))
-    elif payment_status == "unpaid":
-        query = query.filter(Invoice.is_paid.is_(False))
+    query = _apply_invoice_status_filter(query, status_filter)
     invoices = query.order_by(Invoice.date_created.desc()).paginate(
         page=page, per_page=per_page
     )
@@ -848,7 +1007,8 @@ def view_invoices():
                 "customer_id": customer_id,
                 "start_date": start_date.isoformat() if start_date else None,
                 "end_date": end_date.isoformat() if end_date else None,
-                "payment_status": payment_status,
+                "payment_status": status_filter,
             },
         ),
+        status_filter=status_filter,
     )

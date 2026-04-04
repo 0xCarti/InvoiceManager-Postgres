@@ -14,11 +14,35 @@
     </div>
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
         <h1 class="mb-0">Invoice - {{ invoice.customer.first_name }} {{ invoice.customer.last_name }}</h1>
+        <div class="d-flex flex-wrap gap-2">
+            {% if invoice.can_mark_delivered %}
+            <form action="{{ url_for('invoice.mark_invoice_delivered', invoice_id=invoice.id) }}" method="post">
+                {{ delete_form.hidden_tag() }}
+                <button type="submit" class="btn btn-outline-primary btn-sm">Mark Delivered</button>
+            </form>
+            {% endif %}
+            {% if invoice.can_mark_paid %}
+            <form action="{{ url_for('invoice.mark_invoice_paid', invoice_id=invoice.id) }}" method="post">
+                {{ delete_form.hidden_tag() }}
+                <button type="submit" class="btn btn-primary btn-sm">Mark Paid</button>
+            </form>
+            {% endif %}
+        </div>
     </div>
     <div class="row">
         <div class="col">
             <p><strong>Invoice Number:</strong> {{ invoice.id }}</p>
             <p><strong>Date Created:</strong> {{ invoice.date_created|format_datetime('%Y-%m-%d') }}</p>
+            <p>
+                <strong>Status:</strong>
+                <span class="badge {{ invoice.invoice_status_badge_class }}">{{ invoice.invoice_status_label }}</span>
+            </p>
+            {% if invoice.delivered_at %}
+            <p><strong>Delivered At:</strong> {{ invoice.delivered_at|format_datetime('%Y-%m-%d %H:%M') }}</p>
+            {% endif %}
+            {% if invoice.paid_at %}
+            <p><strong>Paid At:</strong> {{ invoice.paid_at|format_datetime('%Y-%m-%d %H:%M') }}</p>
+            {% endif %}
             <h2>Products:</h2>
             <div class="table-responsive">
             <table class="table">

@@ -144,6 +144,57 @@ def test_permission_group_create_form_assigns_permissions(client, app):
         }
 
 
+def test_permission_group_create_form_can_copy_permissions_from_existing_groups(
+    client, app
+):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        purchase_view = Permission.query.filter_by(
+            code="purchase_orders.view"
+        ).first()
+        purchase_receive = Permission.query.filter_by(
+            code="purchase_invoices.receive"
+        ).first()
+        transfer_view = Permission.query.filter_by(code="transfers.view").first()
+
+        base_group = PermissionGroup(
+            name="Receiving Base",
+            description="Starter permissions for receiving.",
+        )
+        base_group.permissions = [purchase_view, purchase_receive]
+        db.session.add(base_group)
+        db.session.commit()
+        base_group_id = base_group.id
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            "/controlpanel/permission-groups/create",
+            data={
+                "create-name": "Receiving Supervisors",
+                "create-description": "Base receiving plus transfer visibility.",
+                "create-inherited_group_ids": [str(base_group_id)],
+                "create-permissions": ["transfers.view"],
+                "create-submit": "1",
+            },
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"Permission group created." in response.data
+
+    with app.app_context():
+        group = PermissionGroup.query.filter_by(name="Receiving Supervisors").first()
+        assert group is not None
+        assert {permission.code for permission in group.permissions} == {
+            "purchase_orders.view",
+            "purchase_invoices.receive",
+            "transfers.view",
+        }
+
+
 def test_permission_group_forms_render_grouped_permission_checkboxes(client):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
@@ -168,6 +219,8 @@ def test_permission_group_forms_render_grouped_permission_checkboxes(client):
         create_page = client.get("/controlpanel/permission-groups/create")
         assert create_page.status_code == 200
         assert b"Create Permission Group" in create_page.data
+        assert b"Copy Permissions From Existing Groups" in create_page.data
+        assert b"List Actions Group" in create_page.data
         assert b'data-permission-category-toggle="transfers"' in create_page.data
         assert b"View Transfers" in create_page.data
         assert b"dashboard.view" not in create_page.data
@@ -184,6 +237,7 @@ def test_permission_group_forms_render_grouped_permission_checkboxes(client):
         edit_page = client.get(f"/controlpanel/permission-groups/{group_id}")
         assert edit_page.status_code == 200
         assert b"Edit Permission Group" in edit_page.data
+        assert b"Copy Permissions From Existing Groups" in edit_page.data
         assert b'data-permission-category-toggle="purchase_orders"' in edit_page.data
         assert b"Create Purchase Orders" in edit_page.data
 

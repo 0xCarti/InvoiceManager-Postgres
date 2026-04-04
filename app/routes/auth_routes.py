@@ -195,6 +195,50 @@ def _load_permissions_by_codes(codes: list[str] | set[str] | None) -> list[Permi
     )
 
 
+def _load_permission_groups_by_ids(
+    group_ids: list[int] | set[int] | tuple[int, ...] | None,
+    *,
+    exclude_group_id: int | None = None,
+) -> list[PermissionGroup]:
+    selected_ids = sorted(
+        {
+            int(group_id)
+            for group_id in (group_ids or [])
+            if group_id not in (None, "", 0)
+        }
+    )
+    if exclude_group_id is not None:
+        selected_ids = [
+            group_id for group_id in selected_ids if group_id != int(exclude_group_id)
+        ]
+    if not selected_ids:
+        return []
+    return (
+        PermissionGroup.query.options(selectinload(PermissionGroup.permissions))
+        .filter(PermissionGroup.id.in_(selected_ids))
+        .order_by(PermissionGroup.is_system.desc(), PermissionGroup.name)
+        .all()
+    )
+
+
+def _resolve_permission_group_codes(
+    explicit_codes: list[str] | set[str] | None,
+    inherited_group_ids: list[int] | set[int] | tuple[int, ...] | None,
+    *,
+    exclude_group_id: int | None = None,
+) -> tuple[set[str], list[PermissionGroup]]:
+    selected_codes = {code for code in (explicit_codes or []) if code}
+    inherited_groups = _load_permission_groups_by_ids(
+        inherited_group_ids,
+        exclude_group_id=exclude_group_id,
+    )
+    for group in inherited_groups:
+        selected_codes.update(
+            permission.code for permission in group.permissions if permission.code
+        )
+    return selected_codes, inherited_groups
+
+
 def _assign_permission_groups_to_user(user: User, group_ids: list[int] | None) -> None:
     selected_ids = sorted({int(group_id) for group_id in (group_ids or [])})
     groups = (
@@ -841,7 +885,10 @@ def create_permission_group():
         posted_permission_codes = {
             code for code in request.form.getlist(create_form.permissions.name) if code
         }
+        inherited_group_ids = request.form.getlist(create_form.inherited_group_ids.name)
         if posted_permission_codes and not can_manage_permissions:
+            abort(403)
+        if inherited_group_ids and not can_manage_permissions:
             abort(403)
 
         is_valid = create_form.validate_on_submit()
@@ -865,7 +912,11 @@ def create_permission_group():
                 description=(create_form.description.data or "").strip() or None,
             )
             if can_manage_permissions:
-                group.permissions = _load_permissions_by_codes(posted_permission_codes)
+                effective_codes, _ = _resolve_permission_group_codes(
+                    posted_permission_codes,
+                    create_form.inherited_group_ids.data,
+                )
+                group.permissions = _load_permissions_by_codes(effective_codes)
             db.session.add(group)
             db.session.commit()
             log_activity(f"Created permission group {group.name}")
@@ -876,9 +927,10 @@ def create_permission_group():
         code for code in (create_form.permissions.data or []) if code
     }
     if request.method == "POST" and can_manage_permissions:
-        selected_codes = {
-            code for code in request.form.getlist(create_form.permissions.name) if code
-        }
+        selected_codes, _ = _resolve_permission_group_codes(
+            request.form.getlist(create_form.permissions.name),
+            request.form.getlist(create_form.inherited_group_ids.name),
+        )
     create_permission_categories = _selected_permission_categories(
         selected_codes,
         input_prefix=create_form.permissions.id,
@@ -910,7 +962,7 @@ def edit_permission_group(group_id):
     if group is None:
         abort(404)
 
-    group_form = PermissionGroupForm(prefix="group", obj=group)
+    group_form = PermissionGroupForm(prefix="group", obj=group, exclude_group_id=group.id)
     can_manage_group = current_user.has_permission("permission_groups.manage")
     can_manage_permissions = current_user.has_permission("permissions.manage")
     can_update_group = can_manage_group or can_manage_permissions
@@ -931,7 +983,10 @@ def edit_permission_group(group_id):
         posted_permission_codes = {
             code for code in request.form.getlist(group_form.permissions.name) if code
         }
+        inherited_group_ids = request.form.getlist(group_form.inherited_group_ids.name)
         if posted_permission_codes and not can_manage_permissions:
+            abort(403)
+        if inherited_group_ids and not can_manage_permissions:
             abort(403)
         if not can_manage_group:
             if (group_form.name.data or "").strip() != group.name:
@@ -971,7 +1026,12 @@ def edit_permission_group(group_id):
                 group.name = name
                 group.description = (group_form.description.data or "").strip() or None
             if can_manage_permissions:
-                group.permissions = _load_permissions_by_codes(posted_permission_codes)
+                effective_codes, _ = _resolve_permission_group_codes(
+                    posted_permission_codes,
+                    group_form.inherited_group_ids.data,
+                    exclude_group_id=group.id,
+                )
+                group.permissions = _load_permissions_by_codes(effective_codes)
             db.session.commit()
             log_activity(f"Updated permission group {group.name}")
             flash("Permission group updated.", "success")
@@ -979,9 +1039,11 @@ def edit_permission_group(group_id):
 
     selected_codes = {code for code in (group_form.permissions.data or []) if code}
     if request.method == "POST" and can_manage_permissions:
-        selected_codes = {
-            code for code in request.form.getlist(group_form.permissions.name) if code
-        }
+        selected_codes, _ = _resolve_permission_group_codes(
+            request.form.getlist(group_form.permissions.name),
+            request.form.getlist(group_form.inherited_group_ids.name),
+            exclude_group_id=group.id,
+        )
     permission_categories = _selected_permission_categories(
         selected_codes,
         input_prefix=group_form.permissions.id,

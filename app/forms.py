@@ -821,6 +821,12 @@ class PermissionGroupForm(FlaskForm):
     description = TextAreaField(
         "Description", validators=[Optional(), Length(max=1000)]
     )
+    inherited_group_ids = SelectMultipleField(
+        "Copy Permissions From Existing Groups",
+        coerce=int,
+        validators=[Optional()],
+        render_kw={"size": 8},
+    )
     permissions = SelectMultipleField(
         "Permissions",
         coerce=str,
@@ -829,10 +835,18 @@ class PermissionGroupForm(FlaskForm):
     )
     submit = SubmitField("Save Group")
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, exclude_group_id=None, **kwargs):
         super().__init__(*args, **kwargs)
         from app.permissions import PERMISSION_DEFINITIONS
 
+        group_choices = load_permission_group_choices()
+        if exclude_group_id is not None:
+            group_choices = [
+                (group_id, group_name)
+                for group_id, group_name in group_choices
+                if int(group_id) != int(exclude_group_id)
+            ]
+        self.inherited_group_ids.choices = group_choices
         self.permissions.choices = [
             (definition.code, f"{definition.label} ({definition.code})")
             for definition in PERMISSION_DEFINITIONS
@@ -1231,15 +1245,18 @@ class InvoiceForm(FlaskForm):
 
 
 class BulkInvoicePaymentForm(FlaskForm):
-    """Form used to bulk-update invoice payment status."""
+    """Form used to bulk-update invoice workflow status."""
 
     selected_ids = HiddenField(
         validators=[DataRequired(message="Select at least one invoice.")]
     )
     payment_status = SelectField(
-        "Payment Status",
-        choices=[("paid", "Paid"), ("unpaid", "Unpaid")],
-        validators=[DataRequired(message="Select a valid payment status.")],
+        "Invoice Status",
+        choices=[
+            ("delivered", "Delivered"),
+            ("paid", "Paid"),
+        ],
+        validators=[DataRequired(message="Select a valid invoice status.")],
         validate_choice=False,
     )
     submit = SubmitField("Apply")
@@ -1259,8 +1276,8 @@ class BulkInvoicePaymentForm(FlaskForm):
             return False
 
         payment_status = str(self.payment_status.data or "").strip().lower()
-        if payment_status not in {"paid", "unpaid"}:
-            self.payment_status.errors.append("Select a valid payment status.")
+        if payment_status not in {"delivered", "paid"}:
+            self.payment_status.errors.append("Select a valid invoice status.")
             return False
 
         self.selected_ids.data = ",".join(selected_ids)

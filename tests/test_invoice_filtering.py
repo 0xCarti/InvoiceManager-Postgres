@@ -82,16 +82,25 @@ def test_filter_by_date_range(client, app):
         assert b"INV3" in response.data
 
 
-def test_filter_by_payment_status(client, app):
+def test_filter_by_invoice_status(client, app):
     user_email, _, _ = setup_invoices(app)
 
     with app.app_context():
         inv1 = db.session.get(Invoice, "INV1")
         inv2 = db.session.get(Invoice, "INV2")
         inv3 = db.session.get(Invoice, "INV3")
+        inv1.status = Invoice.STATUS_PAID
         inv1.is_paid = True
+        inv1.delivered_at = datetime(2023, 1, 2)
+        inv1.paid_at = datetime(2023, 1, 3)
+        inv2.status = Invoice.STATUS_DELIVERED
         inv2.is_paid = False
-        inv3.is_paid = True
+        inv2.delivered_at = datetime(2023, 2, 2)
+        inv2.paid_at = None
+        inv3.status = Invoice.STATUS_PENDING
+        inv3.is_paid = False
+        inv3.delivered_at = None
+        inv3.paid_at = None
         db.session.commit()
 
     with client:
@@ -101,16 +110,32 @@ def test_filter_by_payment_status(client, app):
             follow_redirects=True,
         )
         assert b"INV1" in paid_response.data
-        assert b"INV3" in paid_response.data
         assert b"INV2" not in paid_response.data
+        assert b"INV3" not in paid_response.data
+
+        delivered_response = client.get(
+            "/view_invoices?payment_status=delivered",
+            follow_redirects=True,
+        )
+        assert b"INV2" in delivered_response.data
+        assert b"INV1" not in delivered_response.data
+        assert b"INV3" not in delivered_response.data
+
+        pending_response = client.get(
+            "/view_invoices?payment_status=pending",
+            follow_redirects=True,
+        )
+        assert b"INV3" in pending_response.data
+        assert b"INV1" not in pending_response.data
+        assert b"INV2" not in pending_response.data
 
         unpaid_response = client.get(
             "/view_invoices?payment_status=unpaid",
             follow_redirects=True,
         )
         assert b"INV2" in unpaid_response.data
+        assert b"INV3" in unpaid_response.data
         assert b"INV1" not in unpaid_response.data
-        assert b"INV3" not in unpaid_response.data
 
 
 def test_view_invoices_rejects_invalid_filter_dates(client, app):
