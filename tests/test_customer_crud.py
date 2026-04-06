@@ -1,8 +1,27 @@
 from werkzeug.security import generate_password_hash
 
 from app import db
-from app.models import Customer, User
+from app.models import Customer, Permission, PermissionGroup, User
 from tests.utils import login
+
+
+def _grant_customer_permissions(user: User) -> None:
+    codes = [
+        "customers.view",
+        "customers.create",
+        "customers.edit",
+        "customers.delete",
+    ]
+    group = PermissionGroup(
+        name=f"Customer Test Group {user.email}",
+        description="Test permissions for customer workflows.",
+    )
+    group.permissions = Permission.query.filter(Permission.code.in_(codes)).all()
+    db.session.add(group)
+    db.session.flush()
+    user.permission_groups.append(group)
+    user.invalidate_permission_cache()
+    db.session.commit()
 
 
 def setup_user(app):
@@ -14,6 +33,7 @@ def setup_user(app):
         )
         db.session.add(user)
         db.session.commit()
+        _grant_customer_permissions(user)
         return user.email
 
 

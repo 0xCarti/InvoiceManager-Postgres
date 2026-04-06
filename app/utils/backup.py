@@ -212,6 +212,11 @@ def validate_backup_file_compatibility(
     with backup_engine.connect() as conn:
         inspector = inspect(conn)
         existing_tables = set(inspector.get_table_names())
+        setting_columns = (
+            {column["name"] for column in inspector.get_columns("setting")}
+            if "setting" in existing_tables
+            else set()
+        )
         required_tables = set(
             current_app.config.get(
                 "RESTORE_REQUIRED_TABLES",
@@ -228,19 +233,24 @@ def validate_backup_file_compatibility(
             marker_query = db.text(
                 "SELECT value FROM setting WHERE name = :name LIMIT 1"
             )
-            marker = conn.execute(
-                marker_query,
-                {"name": "APP_SCHEMA_VERSION"},
-            ).mappings().first()
-            marker_value = "" if marker is None else (marker.get("value") or "")
-            if not marker_value.strip():
+            if {"name", "value"}.issubset(setting_columns):
+                marker = conn.execute(
+                    marker_query,
+                    {"name": "APP_SCHEMA_VERSION"},
+                ).mappings().first()
+                marker_value = "" if marker is None else (marker.get("value") or "")
+                if not marker_value.strip():
+                    warnings.append(
+                        "Backup is missing APP_SCHEMA_VERSION marker in settings."
+                    )
+                elif marker_value.strip() != BACKUP_SCHEMA_VERSION:
+                    warnings.append(
+                        "Backup APP_SCHEMA_VERSION "
+                        f"{marker_value.strip()} does not match expected {BACKUP_SCHEMA_VERSION}."
+                    )
+            else:
                 warnings.append(
-                    "Backup is missing APP_SCHEMA_VERSION marker in settings."
-                )
-            elif marker_value.strip() != BACKUP_SCHEMA_VERSION:
-                warnings.append(
-                    "Backup APP_SCHEMA_VERSION "
-                    f"{marker_value.strip()} does not match expected {BACKUP_SCHEMA_VERSION}."
+                    "Backup setting table is missing expected name/value columns."
                 )
         else:
             warnings.append("Backup is missing APP_SCHEMA_VERSION marker in settings.")
@@ -248,7 +258,7 @@ def validate_backup_file_compatibility(
         required_feature_flags = current_app.config.get(
             "RESTORE_REQUIRED_FEATURE_FLAGS", []
         )
-        if "setting" in existing_tables:
+        if "setting" in existing_tables and "name" in setting_columns:
             existing_settings = {
                 row["name"]
                 for row in conn.execute(db.text("SELECT name FROM setting")).mappings()
@@ -369,7 +379,7 @@ def _collect_foreign_key_orphan_findings(inspector, conn) -> list[str]:
             sample_rows = conn.execute(
                 db.text(
                     f"SELECT {selected_values} {from_join} {where_clause} "
-                    "ORDER BY rowid LIMIT 3"
+                    f"ORDER BY {child_alias}.rowid LIMIT 3"
                 )
             ).mappings().all()
             sample_text = ", ".join(
@@ -465,6 +475,15 @@ def _collect_unique_findings(
         unique_sets.append(("PRIMARY KEY", primary_key_columns))
         seen_constraints.add(primary_key_columns)
 
+    for column in table.columns:
+        if not getattr(column, "unique", False):
+            continue
+        columns = (column.name,)
+        if columns in seen_constraints:
+            continue
+        unique_sets.append((column.name, columns))
+        seen_constraints.add(columns)
+
     for constraint in table.constraints:
         if not isinstance(constraint, ColumnCollectionConstraint):
             continue
@@ -494,7 +513,7 @@ def _collect_unique_findings(
         missing_columns = [column for column in columns if column not in backup_columns]
         if missing_columns:
             findings.append(
-                f"Unique validation deferred for {table.name} on {constraint_name} "
+                f"Unique validation deferred for {table.name} "
                 f"({', '.join(columns)}): column absent in backup "
                 f"({', '.join(missing_columns)}); deferred to transform/default mapping."
             )
@@ -599,11 +618,7 @@ def create_backup(*, initiated_by_system: bool = False):
 
         with backup_engine.begin() as backup_conn:
             for table in db.metadata.sorted_tables:
-                table_copy = Table(
-                    table.name,
-                    backup_metadata,
-                    *[column.copy() for column in table.columns],
-                )
+                table_copy = table.to_metadata(backup_metadata)
                 table_copy.create(bind=backup_conn, checkfirst=True)
 
                 rows = db.session.execute(table.select()).mappings().all()
@@ -841,6 +856,70 @@ def _normalize_purchase_invoice_item_rows(
     return rows, {"nullified_orphans": repaired}
 
 
+def _normalize_rows_against_parent_keys(
+    *,
+    table: Table,
+    rows: list[dict],
+    backup_conn,
+    backup_metadata: MetaData,
+    available_parent_keys: dict[str, set],
+) -> tuple[list[dict], dict[str, int]]:
+    """Drop or nullify rows whose FK parents are absent from surviving parent keys."""
+
+    if not rows or not table.foreign_key_constraints:
+        return rows, {}
+
+    modifications = {"dropped_orphans": 0, "nullified_orphans": 0}
+    normalized_rows: list[dict] = []
+
+    for row in rows:
+        record = dict(row)
+        drop_row = False
+
+        for constraint in table.foreign_key_constraints:
+            if len(constraint.columns) != 1 or len(constraint.elements) != 1:
+                continue
+
+            child_column = next(iter(constraint.columns))
+            element = constraint.elements[0]
+            referred_table = element.column.table.name
+            referred_column = element.column.name
+            child_value = record.get(child_column.name)
+
+            if child_value is None:
+                continue
+
+            parent_keys = available_parent_keys.get(referred_table)
+            if parent_keys is None:
+                parent_keys = _load_table_key_set(
+                    backup_conn,
+                    backup_metadata=backup_metadata,
+                    table_name=referred_table,
+                    key_column=referred_column,
+                )
+                available_parent_keys[referred_table] = parent_keys
+
+            if child_value in parent_keys:
+                continue
+
+            can_nullify = bool(
+                child_column.nullable
+                or (constraint.ondelete or "").upper() == "SET NULL"
+            )
+            if can_nullify:
+                record[child_column.name] = None
+                modifications["nullified_orphans"] += 1
+            else:
+                modifications["dropped_orphans"] += 1
+                drop_row = True
+                break
+
+        if not drop_row:
+            normalized_rows.append(record)
+
+    return normalized_rows, {key: value for key, value in modifications.items() if value}
+
+
 RESTORE_ROW_NORMALIZERS: dict[str, list] = {
     "purchase_invoice_draft": [_normalize_purchase_invoice_draft_rows],
     "purchase_invoice_item": [_normalize_purchase_invoice_item_rows],
@@ -1055,6 +1134,7 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
     table_transform_counts: dict[str, int] = {}
     field_transform_counts: dict[str, dict[str, int]] = {}
     adapter_transform_metrics: dict[str, dict[str, int]] = {}
+    available_parent_keys: dict[str, set] = {}
     repair_orphans_enabled = bool(current_app.config.get("RESTORE_REPAIR_ORPHANS", True))
 
     with db.engine.begin() as target_conn:
@@ -1175,6 +1255,20 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
                     insert_rows.append(record)
 
                 if repair_orphans_enabled:
+                    insert_rows, generic_modifications = _normalize_rows_against_parent_keys(
+                        table=table,
+                        rows=insert_rows,
+                        backup_conn=backup_conn,
+                        backup_metadata=backup_metadata,
+                        available_parent_keys=available_parent_keys,
+                    )
+                    for action, count in (generic_modifications or {}).items():
+                        if count <= 0:
+                            continue
+                        table_report = repair_report.setdefault(table_name, {})
+                        table_report[action] = table_report.get(action, 0) + count
+                        repair_total += count
+
                     normalizers = RESTORE_ROW_NORMALIZERS.get(table_name, [])
                     for normalizer in normalizers:
                         insert_rows, modifications = normalizer(
@@ -1273,6 +1367,14 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
                 if inserted:
                     inserted_total += inserted
                     affected_tables.add(table_name)
+            if "id" in table.c:
+                available_parent_keys[table_name] = {
+                    row["id"]
+                    for row in insert_rows
+                    if row.get("id") is not None
+                }
+            elif table_name not in available_parent_keys:
+                available_parent_keys[table_name] = set()
 
         if target_conn.dialect.name == "postgresql":
             logger.info("Running post-restore PK sequence drift check for PostgreSQL")

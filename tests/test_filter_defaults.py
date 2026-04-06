@@ -4,7 +4,8 @@ from werkzeug.security import generate_password_hash
 
 from app import db
 from app.models import Item, User
-from tests.utils import login
+from tests.permission_helpers import grant_item_workflow_permissions
+from tests.utils import extract_csrf_token, login
 
 
 def setup_filter_data(app):
@@ -18,6 +19,7 @@ def setup_filter_data(app):
         archived_item = Item(name="ArchivedItem", base_unit="each", archived=True)
         db.session.add_all([user, active_item, archived_item])
         db.session.commit()
+        grant_item_workflow_permissions(user)
         return user.email
 
 
@@ -27,7 +29,13 @@ def test_saved_defaults_apply_after_relogin(client, app, save_filter_defaults):
         login(client, email, "pass")
         save_filter_defaults("item.view_items", {"archived": ["archived"]})
 
-        logout_response = client.get("/auth/logout", follow_redirects=True)
+        logout_page = client.get("/items", follow_redirects=True)
+        logout_token = extract_csrf_token(logout_page, required=False)
+        logout_response = client.post(
+            "/auth/logout",
+            data={"csrf_token": logout_token} if logout_token else {},
+            follow_redirects=True,
+        )
         assert logout_response.status_code == 200
 
         login(client, email, "pass")

@@ -2,6 +2,7 @@ from werkzeug.security import generate_password_hash
 
 from app import db
 from app.models import Item, User
+from tests.permission_helpers import grant_item_workflow_permissions
 from tests.utils import login
 
 
@@ -10,10 +11,12 @@ def setup_data(app):
         user = User(
             email="unitfilter@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         db.session.add(user)
         db.session.commit()
+        grant_item_workflow_permissions(user)
         for i in range(21):
             db.session.add(Item(name=f"A{i}", base_unit="each"))
         db.session.add(Item(name="B0", base_unit="gram"))
@@ -29,5 +32,6 @@ def test_view_items_filter_by_base_unit(client, app):
         assert resp.status_code == 200
         assert b"A0" in resp.data
         assert b"B0" not in resp.data
-        assert b"Filtering by Base Unit" in resp.data
+        assert b"Active filters:" in resp.data
+        assert b"Base Unit: Each" in resp.data
         assert b"base_unit=each" in resp.data

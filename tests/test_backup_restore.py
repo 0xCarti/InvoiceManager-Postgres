@@ -225,10 +225,6 @@ def test_backup_and_restore(app):
         backup_path = os.path.join(app.config["BACKUP_FOLDER"], filename)
         assert os.path.exists(backup_path)
 
-        for m in models:
-            m.query.delete()
-        db.session.commit()
-
         restore_backup(backup_path)
 
         # Restore should mutate the active database without changing its engine target
@@ -243,8 +239,6 @@ def test_restore_backup_allows_creating_product_without_pk_collision(app):
         populate_data()
         backup_path = _create_sqlite_backup_copy(app, "product_pk_restore.db")
 
-        Product.query.delete()
-        db.session.commit()
         restore_backup(backup_path)
 
         existing_ids = {product.id for product in Product.query.all()}
@@ -366,27 +360,22 @@ def test_create_backup_is_atomic(app, monkeypatch):
 
         recorded = {}
 
-        real_copyfile = shutil.copyfile
         real_replace = os.replace
-
-        def recording_copyfile(src, dst, *args, **kwargs):
-            recorded["copy_dst"] = dst
-            return real_copyfile(src, dst, *args, **kwargs)
 
         def recording_replace(src, dst, *args, **kwargs):
             recorded["replace_src"] = src
             recorded["replace_dst"] = dst
             return real_replace(src, dst, *args, **kwargs)
 
-        monkeypatch.setattr(shutil, "copyfile", recording_copyfile)
         monkeypatch.setattr(os, "replace", recording_replace)
 
         filename = create_backup()
         backup_path = os.path.join(backups_dir, filename)
 
         assert os.path.exists(backup_path)
-        assert recorded["copy_dst"] != backup_path
         assert recorded["replace_dst"] == backup_path
+        assert os.path.basename(recorded["replace_src"]).startswith("tmp_backup_")
+        assert recorded["replace_src"] != backup_path
         assert not os.path.exists(recorded["replace_src"])
 
 
@@ -451,7 +440,7 @@ def test_restore_backup_route_rejects_large_file(client, app):
             content_type="multipart/form-data",
             follow_redirects=True,
         )
-        assert b"File is too large." in resp.data
+        assert resp.status_code == 413
 
 
 def test_restore_backup_route_rejects_invalid_sqlite(client, app):
@@ -466,7 +455,7 @@ def test_restore_backup_route_rejects_invalid_sqlite(client, app):
             content_type="multipart/form-data",
             follow_redirects=True,
         )
-        assert b"Invalid SQLite database." in resp.data
+        assert b"Invalid backup database file." in resp.data
 
 
 def test_validate_backup_file_compatibility_handles_missing_setting_table(app):
@@ -645,7 +634,9 @@ def test_restore_with_older_schema_marker_value_proceeds(client, app):
 
 
 def test_validate_backup_file_compatibility_reports_orphan_fk_warning(app):
-    backup_path = _create_sqlite_backup_copy(app, "orphan_fk_warning.db")
+    with app.app_context():
+        populate_data()
+        backup_path = _create_sqlite_backup_copy(app, "orphan_fk_warning.db")
 
     with sqlite3.connect(backup_path) as conn:
         conn.execute("DELETE FROM purchase_order")
@@ -664,7 +655,9 @@ def test_validate_backup_file_compatibility_reports_orphan_fk_warning(app):
 
 
 def test_validate_backup_file_compatibility_reports_orphan_fk_issue_in_strict_mode(app):
-    backup_path = _create_sqlite_backup_copy(app, "orphan_fk_issue.db")
+    with app.app_context():
+        populate_data()
+        backup_path = _create_sqlite_backup_copy(app, "orphan_fk_issue.db")
 
     with sqlite3.connect(backup_path) as conn:
         conn.execute("DELETE FROM purchase_order")
@@ -784,7 +777,9 @@ def test_validate_backup_file_compatibility_warns_when_unique_column_missing(app
 def test_restore_backup_file_surfaces_orphan_fk_warning_details(client, app):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
-    backup_path = _create_sqlite_backup_copy(app, "orphan_fk_route_warning.db")
+    with app.app_context():
+        populate_data()
+        backup_path = _create_sqlite_backup_copy(app, "orphan_fk_route_warning.db")
 
     with sqlite3.connect(backup_path) as conn:
         conn.execute("DELETE FROM purchase_order")
@@ -794,11 +789,15 @@ def test_restore_backup_file_surfaces_orphan_fk_warning_details(client, app):
         login(client, admin_email, admin_pass)
         response = client.post(
             "/controlpanel/backups/restore/orphan_fk_route_warning.db",
-            follow_redirects=True,
+            follow_redirects=False,
         )
 
-    assert b"Compatibility warnings:" in response.data
-    assert b"purchase_invoice_draft" in response.data
+        assert response.status_code == 302
+        assert response.headers["Location"].endswith("/controlpanel/backups")
+        follow_up = client.get("/controlpanel/backups", follow_redirects=True)
+
+    assert b"Compatibility warnings:" in follow_up.data
+    assert b"purchase_invoice_draft" in follow_up.data
 
 
 def test_restore_backup_with_long_activity_log_entry(app):
@@ -871,11 +870,6 @@ def test_restore_backup_strict_mode_restores_known_good_backup_with_expected_cou
         )
         expected_inserted = sum(expected_table_counts.values())
 
-        Product.query.delete()
-        PurchaseInvoice.query.delete()
-        TerminalSale.query.delete()
-        db.session.commit()
-
         summary = restore_backup(backup_path, restore_mode="strict")
 
         assert summary.mode == "strict"
@@ -941,11 +935,6 @@ def test_restore_backup_adapts_legacy_purchase_gl_code_column(app):
         )
         expected_inserted = sum(expected_table_counts.values())
 
-        PurchaseInvoiceItem.query.delete()
-        PurchaseInvoice.query.delete()
-        Product.query.delete()
-        db.session.commit()
-
         summary = restore_backup(backup_path, restore_mode="strict")
 
         assert summary.mode == "strict"
@@ -967,21 +956,28 @@ def test_restore_backup_permissive_mode_skips_invalid_rows_and_writes_quarantine
         backups_dir = app.config["BACKUP_FOLDER"]
 
         with sqlite3.connect(backup_path) as conn:
+            conn.execute("ALTER TABLE setting RENAME TO setting_original")
+            conn.execute("CREATE TABLE setting (id INTEGER, name TEXT, value TEXT)")
+            conn.execute(
+                "INSERT INTO setting (id, name, value) "
+                "SELECT id, name, value FROM setting_original"
+            )
+            conn.execute("DROP TABLE setting_original")
             duplicate = conn.execute(
-                "SELECT email, password, is_admin, active, id FROM user ORDER BY id LIMIT 1"
+                "SELECT id, name, value FROM setting ORDER BY id LIMIT 1"
             ).fetchone()
             assert duplicate is not None
             conn.execute(
-                "INSERT INTO user (email, password, is_admin, active) VALUES (?, ?, ?, ?)",
-                ("permissive-good-a@example.com", duplicate[1], duplicate[2], duplicate[3]),
+                "INSERT INTO setting (id, name, value) VALUES (?, ?, ?)",
+                (999001, "PERMISSIVE_GOOD_A", "value-a"),
             )
             conn.execute(
-                "INSERT INTO user (email, password, is_admin, active) VALUES (?, ?, ?, ?)",
-                ("permissive-good-b@example.com", duplicate[1], duplicate[2], duplicate[3]),
+                "INSERT INTO setting (id, name, value) VALUES (?, ?, ?)",
+                (999002, "PERMISSIVE_GOOD_B", "value-b"),
             )
             conn.execute(
-                "INSERT INTO user (email, password, is_admin, active) VALUES (?, ?, ?, ?)",
-                (duplicate[0], duplicate[1], duplicate[2], duplicate[3]),
+                "INSERT INTO setting (id, name, value) VALUES (?, ?, ?)",
+                (999003, duplicate[1], "duplicate-setting"),
             )
             conn.commit()
         expected_table_counts = _backup_table_row_counts(
@@ -998,19 +994,19 @@ def test_restore_backup_permissive_mode_skips_invalid_rows_and_writes_quarantine
         assert summary.mode == "permissive"
         assert summary.skipped_count == 1
         assert summary.inserted_count == expected_inserted
-        assert "user" in summary.affected_tables
+        assert "setting" in summary.affected_tables
         assert summary.quarantine_report is not None
-        assert User.query.filter_by(email="permissive-good-a@example.com").count() == 1
-        assert User.query.filter_by(email="permissive-good-b@example.com").count() == 1
-        assert User.query.filter_by(email=duplicate[0]).count() == 1
+        assert Setting.query.filter_by(name="PERMISSIVE_GOOD_A").count() == 1
+        assert Setting.query.filter_by(name="PERMISSIVE_GOOD_B").count() == 1
+        assert Setting.query.filter_by(name=duplicate[1]).count() == 1
 
         report_path = os.path.join(backups_dir, summary.quarantine_report)
         assert os.path.exists(report_path)
         with open(report_path, encoding="utf-8") as fp:
             report_data = json.load(fp)
         assert report_data["skipped_count"] == 1
-        assert report_data["skipped_rows"][0]["table"] == "user"
-        assert "email" in report_data["skipped_rows"][0]["primary_key"]
+        assert report_data["skipped_rows"][0]["table"] == "setting"
+        assert report_data["skipped_rows"][0]["primary_key"] == {"id": "999003"}
 
 
 def test_restore_backup_strict_mode_raises_and_rolls_back_on_invalid_row(app):
@@ -1027,13 +1023,20 @@ def test_restore_backup_strict_mode_raises_and_rolls_back_on_invalid_row(app):
         }
 
         with sqlite3.connect(backup_path) as conn:
+            conn.execute("ALTER TABLE setting RENAME TO setting_original")
+            conn.execute("CREATE TABLE setting (id INTEGER, name TEXT, value TEXT)")
+            conn.execute(
+                "INSERT INTO setting (id, name, value) "
+                "SELECT id, name, value FROM setting_original"
+            )
+            conn.execute("DROP TABLE setting_original")
             duplicate = conn.execute(
-                "SELECT email, password, is_admin, active FROM user ORDER BY id LIMIT 1"
+                "SELECT id, name, value FROM setting ORDER BY id LIMIT 1"
             ).fetchone()
             assert duplicate is not None
             conn.execute(
-                "INSERT INTO user (email, password, is_admin, active) VALUES (?, ?, ?, ?)",
-                (duplicate[0], duplicate[1], duplicate[2], duplicate[3]),
+                "INSERT INTO setting (id, name, value) VALUES (?, ?, ?)",
+                (999101, duplicate[1], "duplicate-setting"),
             )
             conn.commit()
 
@@ -1082,7 +1085,7 @@ def test_restore_backup_orphan_purchase_invoice_draft_fails_when_repairs_disable
             restore_backup(backup_path, restore_mode="strict")
             assert False, "Expected RestoreBackupError when orphan repair is disabled"
         except RestoreBackupError as exc:
-            assert "constraint failure" in str(exc)
+            assert "integrity violation" in str(exc)
 
 
 def test_restore_backup_nullifies_orphan_purchase_gl_code_when_enabled(app):
@@ -1157,7 +1160,7 @@ def test_restore_backup_file_route_handles_runtime_compile_error(
         b"Restore failed (CompileError): Restore failed while rebuilding database schema."
         in response.data
     )
-    assert b"CompileError" not in response.data
+    assert b"Internal Server Error" not in response.data
 
 
 def test_restore_backup_wraps_insert_data_errors(app, monkeypatch):
@@ -1188,23 +1191,27 @@ def test_restore_backup_wraps_insert_data_errors(app, monkeypatch):
 
 def test_restore_backup_reports_fk_integrity_diagnostics(app, monkeypatch):
     with app.app_context():
+        populate_data()
         backup_path = _create_sqlite_backup_copy(app, "fk_integrity_diagnostic.db")
         original_execute = Connection.execute
 
         class FakePsycopgError(Exception):
             def __init__(self):
                 self.diag = SimpleNamespace(
-                    constraint_name="invoice_user_id_fkey",
-                    table_name="invoice",
-                    column_name="user_id",
-                    message_detail="Key (user_id)=(9999) is not present in table \"user\".",
+                    constraint_name="purchase_invoice_purchase_order_id_fkey",
+                    table_name="purchase_invoice",
+                    column_name="purchase_order_id",
+                    message_detail='Key (purchase_order_id)=(9999) is not present in table "purchase_order".',
                 )
                 self.pgcode = "23503"
 
         def fail_on_invoice_insert(self, statement, *args, **kwargs):
-            if getattr(statement, "is_insert", False) and statement.table.name == "invoice":
+            if (
+                getattr(statement, "is_insert", False)
+                and statement.table.name == "purchase_invoice"
+            ):
                 raise IntegrityError(
-                    "INSERT INTO invoice ...",
+                    "INSERT INTO purchase_invoice ...",
                     kwargs.get("parameters"),
                     FakePsycopgError(),
                 )
@@ -1217,9 +1224,9 @@ def test_restore_backup_reports_fk_integrity_diagnostics(app, monkeypatch):
             assert False, "Expected RestoreBackupError for FK failure"
         except RestoreBackupError as exc:
             message = str(exc)
-            assert "invoice" in message
-            assert "invoice_user_id_fkey" in message
-            assert "Key (user_id)=(9999)" in message
+            assert "purchase_invoice" in message
+            assert "purchase_invoice_purchase_order_id_fkey" in message
+            assert "Key (purchase_order_id)=(9999)" in message
             assert "keys=" in message
 
 
@@ -1262,6 +1269,7 @@ def test_restore_backup_reports_unique_integrity_diagnostics(app, monkeypatch):
 
 def test_restore_backup_reports_not_null_integrity_diagnostics(app, monkeypatch):
     with app.app_context():
+        populate_data()
         backup_path = _create_sqlite_backup_copy(app, "not_null_integrity_diagnostic.db")
         original_execute = Connection.execute
 

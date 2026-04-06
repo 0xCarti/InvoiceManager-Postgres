@@ -2,6 +2,7 @@ from werkzeug.security import generate_password_hash
 
 from app import db
 from app.models import Item, Location, LocationStandItem, User
+from tests.permission_helpers import grant_item_workflow_permissions
 from tests.utils import login
 
 
@@ -10,6 +11,7 @@ def test_item_location_report(client, app):
         user = User(
             email="locreport@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         item = Item(name="ReportItem", base_unit="each")
@@ -17,6 +19,7 @@ def test_item_location_report(client, app):
         loc2 = Location(name="Loc2")
         db.session.add_all([user, item, loc1, loc2])
         db.session.commit()
+        grant_item_workflow_permissions(user)
         db.session.add_all(
             [
                 LocationStandItem(

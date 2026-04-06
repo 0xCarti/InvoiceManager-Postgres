@@ -21,6 +21,7 @@ from app.models import (
     TerminalSale,
     User,
 )
+from tests.permission_helpers import grant_event_permissions
 from tests.utils import login
 
 
@@ -59,6 +60,7 @@ def test_closed_event_report_returns_totals_and_stand_sheet_data(app, client):
 
         db.session.add_all([user, location, product, item, secondary_item, event])
         db.session.commit()
+        grant_event_permissions(user)
 
         unit = ItemUnit(
             item_id=item.id,
@@ -232,6 +234,7 @@ def test_close_event_preserves_manual_terminal_sales(app, client):
         )
         db.session.add(user)
         db.session.commit()
+        grant_event_permissions(user)
 
         event_id = event.id
         event_location_id = event_location.id
@@ -280,6 +283,7 @@ def test_confirm_location_populates_missing_file_totals(app, client):
         )
         db.session.add_all([location, product, event, event_location, user])
         db.session.commit()
+        grant_event_permissions(user)
 
         db.session.add(
             TerminalSale(

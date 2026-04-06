@@ -2,6 +2,7 @@ from werkzeug.security import generate_password_hash
 
 from app import db
 from app.models import Item, User
+from tests.permission_helpers import grant_permissions
 from tests.utils import login
 
 
@@ -18,6 +19,13 @@ def setup_data(app):
         for i in range(2):
             db.session.add(Item(name=f"X{i}", base_unit="each", archived=True))
         db.session.commit()
+        user = User.query.filter_by(email="archived@example.com").one()
+        grant_permissions(
+            user,
+            "items.view",
+            group_name="Item Archived Filter Test Group",
+            description="Test permission for archived item filter.",
+        )
         return user.email
 
 

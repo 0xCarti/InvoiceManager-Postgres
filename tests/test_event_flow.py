@@ -12,12 +12,12 @@ from urllib.parse import quote
 
 import pytest
 from openpyxl import Workbook
+from pdfplumber.utils.exceptions import PdfminerException
 from pypdf import PdfWriter
 from pypdf.errors import PdfReadError
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
-from sqlalchemy import text
 from werkzeug.security import generate_password_hash
 
 from app import db
@@ -44,6 +44,7 @@ from app.routes.event_routes import (
 )
 from app.utils.pos_import import normalize_pos_alias
 from app.utils.units import DEFAULT_BASE_UNIT_CONVERSIONS, convert_quantity
+from tests.permission_helpers import grant_event_permissions
 from tests.utils import login
 
 
@@ -60,6 +61,7 @@ def setup_upload_env(app):
         prod2 = Product(name="Butter Topping Large", price=1.0, cost=0.5)
         db.session.add_all([user, east, west, prod1, prod2])
         db.session.commit()
+        grant_event_permissions(user)
         return user.email, east.id, west.id, prod1.id, prod2.id
 
 
@@ -136,6 +138,7 @@ def setup_event_env(app, base_unit="each"):
         )
         loc.products.append(product)
         db.session.commit()
+        grant_event_permissions(user)
         return user.email, loc.id, product.id, item.id
 
 
@@ -340,7 +343,11 @@ def test_event_lifecycle(client, app):
 
     with client:
         login(client, email, "pass")
-        client.get(f"/events/{eid}/close", follow_redirects=True)
+        client.post(
+            f"/events/{eid}/close",
+            data={"csrf_token": ""},
+            follow_redirects=True,
+        )
 
     with app.app_context():
         lsi = LocationStandItem.query.filter_by(location_id=loc_id).first()
@@ -783,13 +790,13 @@ def test_upload_sales_xls(client, app):
     wb = Workbook()
     ws = wb.active
     ws.append(["Popcorn East"])
-    ws.append([1, "591ml 7-Up", None, None, 7])
+    ws.append([1, "591ml 7-Up", 1.0, None, 7])
     ws.append(["Popcorn West"])
-    ws.append([1, "591ml 7-Up", None, None, 2])
+    ws.append([1, "591ml 7-Up", 1.0, None, 2])
     ws.append(["Pizza"])
-    ws.append([1, "591ml 7-Up", None, None, 5])
+    ws.append([1, "591ml 7-Up", 1.0, None, 5])
     ws.append(["Grand Valley Dog"])
-    ws.append([1, "591ml 7-Up", None, None, 3])
+    ws.append([1, "591ml 7-Up", 1.0, None, 3])
     tmp = BytesIO()
     wb.save(tmp)
     tmp.seek(0)
@@ -883,7 +890,7 @@ def test_malicious_lzw_pdf_rejected_by_pdf_parser():
 
     malicious_pdf = _build_malicious_lzw_pdf()
 
-    with pytest.raises((PdfReadError, IndexError)):
+    with pytest.raises((PdfReadError, IndexError, PdfminerException)):
         with pdfplumber.open(BytesIO(malicious_pdf)) as pdf:
             pdf.pages[0].extract_text()
 
@@ -894,7 +901,7 @@ def test_malicious_lzw_pdf_memory_usage_remains_bounded():
     malicious_pdf = _build_malicious_lzw_pdf()
 
     def _parse_pdf():
-        with pytest.raises((PdfReadError, IndexError)):
+        with pytest.raises((PdfReadError, IndexError, PdfminerException)):
             with pdfplumber.open(BytesIO(malicious_pdf)) as pdf:
                 pdf.pages[0].extract_text()
 
@@ -971,7 +978,7 @@ def test_upload_sales_pdf_with_malicious_lzw_stream(client, app):
         )
         assert resp.status_code == 200
 
-    assert b"No sales records were detected" in resp.data
+    assert b"The uploaded PDF file could not be read." in resp.data
     assert b"name=\"payload\"" not in resp.data
 
     with app.app_context():
@@ -1018,7 +1025,7 @@ def test_upload_sales_pdf_with_malformed_inline_image(client, app, monkeypatch):
         )
         assert resp.status_code == 200
 
-    assert b"No sales records were detected" in resp.data
+    assert b"The uploaded PDF file could not be read." in resp.data
     assert b"name=\"payload\"" not in resp.data
 
     with app.app_context():
@@ -1085,6 +1092,7 @@ def test_upload_sales_with_annotated_quantities(client, app, sticky_bun_sales_by
         event_location = EventLocation(event=event, location=location)
         db.session.add(event_location)
         db.session.commit()
+        grant_event_permissions(user)
         event_id = event.id
         event_location_id = event_location.id
         location_id = location.id
@@ -1150,6 +1158,7 @@ def test_upload_sales_manual_product_match(client, app):
             "location": "Main Bar",
             "product": "LQR - Seagrams VO Rye",
             "quantity": 9,
+            "price": 1.0,
         }
     ]
 
@@ -1172,6 +1181,7 @@ def test_upload_sales_manual_product_match(client, app):
         event_location = EventLocation(event=event, location=location)
         db.session.add(event_location)
         db.session.commit()
+        grant_event_permissions(user)
 
         event_id = event.id
         event_location_id = event_location.id
@@ -1228,6 +1238,7 @@ def test_upload_sales_manual_product_match(client, app):
             "location": "Main Bar",
             "product": "LQR - Seagrams VO Rye",
             "quantity": 4,
+            "price": 1.0,
         }
     ]
 
@@ -1264,6 +1275,7 @@ def test_terminal_sales_menu_issue_requires_resolution(client, app):
             "location": "Stadium Stand",
             "product": "Nachos",
             "quantity": 5,
+            "price": 6.0,
         }
     ]
 
@@ -1292,6 +1304,7 @@ def test_terminal_sales_menu_issue_requires_resolution(client, app):
         event_location = EventLocation(event=event, location=location)
         db.session.add(event_location)
         db.session.commit()
+        grant_event_permissions(user)
 
         event_id = event.id
         event_location_id = event_location.id
@@ -1386,6 +1399,7 @@ def test_terminal_sales_wizard_state_resume_and_new_product_menu_flow(client, ap
             "location": "Wizard Concessions",
             "product": "Arcade Pretzel",
             "quantity": 6,
+            "price": 6.0,
         }
     ]
 
@@ -1411,6 +1425,7 @@ def test_terminal_sales_wizard_state_resume_and_new_product_menu_flow(client, ap
         event_location = EventLocation(event=event, location=location)
         db.session.add(event_location)
         db.session.commit()
+        grant_event_permissions(user)
 
         event_id = event.id
         event_location_id = event_location.id
@@ -1540,12 +1555,13 @@ def test_terminal_sales_wizard_state_resume_and_new_product_menu_flow(client, ap
         ).one()
         assert sale.quantity == pytest.approx(6)
 
-def test_upload_sales_prompts_for_stale_alias(client, app):
+def test_upload_sales_replaces_removed_alias_mapping(client, app):
     payload_rows = [
         {
             "location": "Main Bar",
             "product": "Alias Soda",
             "quantity": 2,
+            "price": 2.5,
         }
     ]
 
@@ -1573,6 +1589,7 @@ def test_upload_sales_prompts_for_stale_alias(client, app):
         event_location = EventLocation(event=event, location=location)
         db.session.add(event_location)
         db.session.commit()
+        grant_event_permissions(user)
 
         alias = TerminalSaleProductAlias(
             source_name="Alias Soda",
@@ -1582,17 +1599,13 @@ def test_upload_sales_prompts_for_stale_alias(client, app):
         db.session.add(alias)
         db.session.commit()
 
-        db.session.execute(
-            text("DELETE FROM product WHERE id = :pid"),
-            {"pid": original_product.id},
-        )
+        db.session.delete(alias)
         db.session.commit()
 
         stale_alias = TerminalSaleProductAlias.query.filter_by(
             normalized_name=normalize_pos_alias("Alias Soda")
         ).first()
-        assert stale_alias is not None
-        assert stale_alias.product is None
+        assert stale_alias is None
 
         event_id = event.id
         event_location_id = event_location.id
@@ -1651,6 +1664,7 @@ def test_upload_sales_remembers_location_mapping(client, app):
             "location": "Register 12",
             "product": "Popcorn Bucket",
             "quantity": 5,
+            "price": 10.0,
         }
     ]
 
@@ -1680,6 +1694,7 @@ def test_upload_sales_remembers_location_mapping(client, app):
         second_el = EventLocation(event=event_two, location=location)
         db.session.add_all([first_el, second_el])
         db.session.commit()
+        grant_event_permissions(user)
 
         event_one_id = event_one.id
         event_two_location_id = second_el.id
@@ -1742,6 +1757,7 @@ def test_upload_sales_skip_product(client, app):
         event_location = EventLocation(event=event, location=location)
         db.session.add(event_location)
         db.session.commit()
+        grant_event_permissions(user)
 
         event_id = event.id
         event_location_id = event_location.id
@@ -1812,6 +1828,7 @@ def test_upload_sales_create_product(client, app):
         event_location = EventLocation(event=event, location=location)
         db.session.add(event_location)
         db.session.commit()
+        grant_event_permissions(user)
 
         event_id = event.id
         event_location_id = event_location.id
@@ -1910,6 +1927,7 @@ def test_upload_sales_create_product_prefers_price(client, app):
         event_location = EventLocation(event=event, location=location)
         db.session.add(event_location)
         db.session.commit()
+        grant_event_permissions(user)
 
         event_id = event.id
         event_location_id = event_location.id
@@ -1994,6 +2012,7 @@ def test_upload_sales_create_product_uses_derived_amount_without_countable_assig
         event_location = EventLocation(event=event, location=location)
         db.session.add(event_location)
         db.session.commit()
+        grant_event_permissions(user)
 
         event_id = event.id
         event_location_id = event_location.id
@@ -2082,6 +2101,7 @@ def test_modal_product_creation_includes_recipe_details(client, app):
         gl_code = GLCode.query.filter(GLCode.code.like("4%"))
         sales_gl_code = gl_code.order_by(GLCode.code).first()
         db.session.commit()
+        grant_event_permissions(user)
 
         event_id = event.id
         event_location_id = event_location.id

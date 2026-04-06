@@ -140,7 +140,13 @@ def test_mailgun_webhook_rejects_missing_attachment_payload(client, app):
 
 
 def test_mailgun_webhook_requires_sender_allowlist(client, app):
-    app.config.update({"MAILGUN_WEBHOOK_SIGNING_KEY": "secret-key"})
+    app.config.update(
+        {
+            "MAILGUN_WEBHOOK_SIGNING_KEY": "secret-key",
+            "MAILGUN_ALLOWED_SENDERS": "",
+            "MAILGUN_ALLOWED_SENDER_DOMAINS": "",
+        }
+    )
 
     response = client.post("/webhooks/mailgun/inbound", data=_payload("secret-key"))
 

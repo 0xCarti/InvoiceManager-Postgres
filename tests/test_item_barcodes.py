@@ -8,19 +8,21 @@ from tests.utils import login
 
 
 def _create_user(app, email):
-    with app.app_context():
-        user = User(
-            email=email,
-            password=generate_password_hash("pass"),
-            active=True,
-        )
-        db.session.add(user)
-        db.session.commit()
+    user = User(
+        email=email,
+        password=generate_password_hash("pass"),
+        active=True,
+        is_admin=True,
+    )
+    db.session.add(user)
+    db.session.commit()
+    return user
 
 
 def test_add_and_edit_item_barcodes(client, app):
     email = f"barcode_{uuid4().hex[:8]}@example.com"
-    _create_user(app, email)
+    with app.app_context():
+        _create_user(app, email)
 
     with client:
         login(client, email, "pass")
@@ -78,7 +80,8 @@ def test_add_and_edit_item_barcodes(client, app):
 
 def test_barcodes_must_be_unique_across_items(client, app):
     email = f"barcode_conflict_{uuid4().hex[:8]}@example.com"
-    _create_user(app, email)
+    with app.app_context():
+        _create_user(app, email)
 
     with app.app_context():
         item = Item(name="Existing Barcode Item", base_unit="each", upc="444444444444")
@@ -119,7 +122,8 @@ def test_barcodes_must_be_unique_across_items(client, app):
 
 def test_item_search_matches_barcode_alias(client, app):
     email = f"barcode_search_{uuid4().hex[:8]}@example.com"
-    _create_user(app, email)
+    with app.app_context():
+        _create_user(app, email)
 
     with app.app_context():
         item = Item(name="Searchable Barcode Item", base_unit="each")
@@ -148,7 +152,8 @@ def test_item_search_matches_barcode_alias(client, app):
 
 def test_item_search_excludes_archived_items(client, app):
     email = f"barcode_archived_{uuid4().hex[:8]}@example.com"
-    _create_user(app, email)
+    with app.app_context():
+        _create_user(app, email)
 
     with app.app_context():
         active_item = Item(name="Active Search Item", base_unit="each")
@@ -204,7 +209,8 @@ def test_item_search_excludes_archived_items(client, app):
 
 def test_item_search_reports_barcode_match_metadata(client, app):
     email = f"barcode_meta_{uuid4().hex[:8]}@example.com"
-    _create_user(app, email)
+    with app.app_context():
+        _create_user(app, email)
 
     with app.app_context():
         item = Item(name="Metadata Barcode Item", base_unit="each")

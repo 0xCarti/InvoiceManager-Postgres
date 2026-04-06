@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import platform
 import re
@@ -287,6 +288,36 @@ def _apply_restore_favorites_mode(ignore_favorites: bool) -> tuple[str, int]:
     return "cleaned", cleaned_count
 
 
+def _refresh_logged_in_user_after_restore() -> None:
+    """Reload the authenticated user after a restore rebuilds the database."""
+
+    try:
+        if not current_user.is_authenticated:
+            return
+        user_id = None
+        try:
+            get_id = getattr(current_user, "get_id", None)
+            if callable(get_id):
+                user_id = get_id()
+        except Exception:
+            user_id = None
+        if user_id is None:
+            user_id = getattr(current_user, "id", None)
+        if user_id is None:
+            return
+        try:
+            user_id = int(user_id)
+        except (TypeError, ValueError):
+            return
+        refreshed_user = db.session.get(User, user_id)
+        if refreshed_user is None:
+            return
+        logout_user()
+        login_user(refreshed_user, remember=False)
+    except Exception:
+        current_app.logger.exception("Failed to refresh logged-in user after restore")
+
+
 def _resolve_restore_mode(raw_mode: str | None) -> str:
     mode = (raw_mode or "").strip().lower()
     if mode in {"permissive", "lenient"}:
@@ -318,6 +349,42 @@ def _split_preflight_issues(issues: list[str]) -> tuple[list[str], list[str]]:
     return schema_evolution_issues, unresolved_blockers
 
 
+def _is_strict_restore_blocking_warning(warning: str) -> bool:
+    """Return whether a preflight warning should block strict-mode restore."""
+
+    warning_text = (warning or "").lower()
+    return any(
+        marker in warning_text
+        for marker in (
+            "foreign key orphan rows found",
+            "references missing parent table",
+            "column mismatch",
+            "not-null violation in",
+            "unique violation for",
+        )
+    )
+
+
+def _flash_strict_restore_blocked_warning(
+    *,
+    warning_details: str,
+    restore_mode: str,
+) -> None:
+    """Flash a user-facing message when strict restore is blocked by preflight."""
+
+    flash(f"Compatibility warnings: {warning_details}", "warning")
+    flash(
+        "Strict restore blocked by preflight data-quality findings.",
+        "danger",
+    )
+    flash(
+        "Preflight found rows that would fail strict restore. "
+        f"Selected restore mode: {restore_mode}. "
+        "Retry in permissive mode to quarantine invalid rows, or repair the backup first.",
+        "warning",
+    )
+
+
 def _flash_restore_report(
     *,
     restore_summary,
@@ -332,8 +399,28 @@ def _flash_restore_report(
         "repair_report": restore_summary.repair_report or {},
         "unresolved_blockers": unresolved_blockers,
     }
+    current_app.logger.info(
+        "Restore report payload: %s",
+        json.dumps(report_payload, sort_keys=True),
+    )
+    summary_parts = [
+        f"mode={restore_summary.mode}",
+        f"inserted={restore_summary.inserted_count}",
+        f"skipped={restore_summary.skipped_count}",
+    ]
+    table_transform_total = sum(
+        (restore_summary.table_transform_counts or {}).values()
+    )
+    if table_transform_total:
+        summary_parts.append(f"transforms={table_transform_total}")
+    if restore_summary.repaired_count:
+        summary_parts.append(f"repaired={restore_summary.repaired_count}")
+    if unresolved_blockers:
+        summary_parts.append(f"blockers={len(unresolved_blockers)}")
+    if restore_summary.quarantine_report:
+        summary_parts.append(f"quarantine={restore_summary.quarantine_report}")
     flash(
-        "Restore report: " + json.dumps(report_payload, sort_keys=True),
+        "Restore report: " + ", ".join(summary_parts),
         "info",
     )
 
@@ -382,6 +469,13 @@ def _persist_restore_preflight_diagnostic(
     }
     with open(report_path, "w", encoding="utf-8") as report_file:
         json.dump(payload, report_file, indent=2, sort_keys=True)
+    logging.getLogger().error(
+        "Restore preflight diagnostic captured stage=%s file=%s mode=%s diagnostic_id=%s",
+        stage,
+        filename,
+        restore_mode,
+        diagnostic_id,
+    )
     log_activity(
         f"Restore preflight diagnostic [{diagnostic_id}] for {filename} "
         f"(mode={restore_mode}, stage={stage}): {json.dumps(payload, sort_keys=True)}"
@@ -1133,6 +1227,12 @@ def permission_catalog():
 @login_required
 def backups():
     """List available database backups."""
+    return _render_backups_page()
+
+
+def _render_backups_page():
+    """Render the backup management page with the current backup listing."""
+
     from flask import current_app
 
     backups_dir = current_app.config["BACKUP_FOLDER"]
@@ -1168,6 +1268,8 @@ def create_backup_route():
 def restore_backup_route():
     """Restore the database from an uploaded backup."""
     form = RestoreBackupForm()
+    actor_user_id = getattr(current_user, "id", None)
+    warning_details = ""
     if form.validate_on_submit():
         file = form.file.data
         filename = secure_filename(file.filename)
@@ -1236,7 +1338,8 @@ def restore_backup_route():
                 details,
             )
             log_activity(
-                f"Restore blocked due to compatibility errors for {filename}: {details}"
+                f"Restore blocked due to compatibility errors for {filename}: {details}",
+                actor_user_id,
             )
             flash(
                 "⚠️ Incompatible backup: this backup is missing critical database "
@@ -1254,15 +1357,24 @@ def restore_backup_route():
                 warning_details,
             )
             log_activity(
-                f"Restore compatibility warnings detected for {filename}: {warning_details}"
+                f"Restore compatibility warnings detected for {filename}: {warning_details}",
+                actor_user_id,
             )
-            flash(f"Compatibility warnings: {warning_details}", "warning")
-            flash(
-                "Preflight detected data-quality risks. "
-                f"Selected restore mode: {restore_mode}. "
-                "Use permissive mode to quarantine invalid rows, or strict mode to fail on first violation.",
-                "warning",
-            )
+            strict_restore_blockers = [
+                warning
+                for warning in compatibility.warnings
+                if _is_strict_restore_blocking_warning(warning)
+            ]
+            if restore_mode == "strict" and strict_restore_blockers:
+                _flash_strict_restore_blocked_warning(
+                    warning_details=warning_details,
+                    restore_mode=restore_mode,
+                )
+                log_activity(
+                    f"Strict restore blocked for {filename}: {warning_details}",
+                    actor_user_id,
+                )
+                return redirect(url_for("admin.backups"))
         try:
             restore_summary = restore_backup(filepath, restore_mode=restore_mode)
         except RestoreBackupError as exc:
@@ -1275,7 +1387,8 @@ def restore_backup_route():
                 restore_details,
             )
             log_activity(
-                f"Restore failed for {filename} [{failure_class}]: {restore_details}"
+                f"Restore failed for {filename} [{failure_class}]: {restore_details}",
+                actor_user_id,
             )
             flash(
                 f"Restore failed ({failure_class}): {restore_details}",
@@ -1285,12 +1398,21 @@ def restore_backup_route():
         mode, changed_count = _apply_restore_favorites_mode(
             bool(form.ignore_favorites.data)
         )
-        if compatibility is not None and compatibility.warnings:
+        _refresh_logged_in_user_after_restore()
+        if warning_details:
+            flash(f"Compatibility warnings: {warning_details}", "warning")
             flash("Restored with compatibility warnings.", "warning")
+            flash(
+                "Preflight detected data-quality risks. "
+                f"Selected restore mode: {restore_mode}. "
+                "Use permissive mode to quarantine invalid rows, or strict mode to fail on first violation.",
+                "warning",
+            )
 
         if mode == "ignored":
             log_activity(
-                f"Cleared favorites for {changed_count} user(s) after restore {filename} (ignore_favorites=true)"
+                f"Cleared favorites for {changed_count} user(s) after restore {filename} (ignore_favorites=true)",
+                actor_user_id,
             )
             flash(
                 f"Backup restored from {filename}. Favorites mode: ignored backup favorites and cleared all user favorites.",
@@ -1299,7 +1421,8 @@ def restore_backup_route():
         else:
             if changed_count:
                 log_activity(
-                    f"Removed stale favorites for {changed_count} user(s) after restore {filename}"
+                    f"Removed stale favorites for {changed_count} user(s) after restore {filename}",
+                    actor_user_id,
                 )
             flash(
                 f"Backup restored from {filename}. Favorites mode: pruned invalid favorites.",
@@ -1316,7 +1439,8 @@ def restore_backup_route():
             log_activity(
                 f"Restore partial outcome for {filename}: inserted={restore_summary.inserted_count}, "
                 f"skipped={restore_summary.skipped_count}, quarantine={restore_summary.quarantine_report}, "
-                f"tables={','.join(restore_summary.affected_tables)}"
+                f"tables={','.join(restore_summary.affected_tables)}",
+                actor_user_id,
             )
         _flash_restore_report(
             restore_summary=restore_summary,
@@ -1333,7 +1457,7 @@ def restore_backup_route():
             f"skipped={restore_summary.skipped_count}, "
             f"table_transforms={sum((restore_summary.table_transform_counts or {}).values())}]"
         )
-        log_activity(restore_message)
+        log_activity(restore_message, actor_user_id)
     else:
         for error in form.file.errors:
             flash(error, "error")
@@ -1346,6 +1470,8 @@ def restore_backup_file(filename):
     """Restore the database from an existing backup file."""
     from flask import current_app
 
+    actor_user_id = getattr(current_user, "id", None)
+    warning_details = ""
     backups_dir = current_app.config["BACKUP_FOLDER"]
     try:
         filepath = safe_join(backups_dir, filename)
@@ -1413,7 +1539,8 @@ def restore_backup_file(filename):
             details,
         )
         log_activity(
-            f"Restore blocked due to compatibility errors for {fname}: {details}"
+            f"Restore blocked due to compatibility errors for {fname}: {details}",
+            actor_user_id,
         )
         flash(
             "⚠️ Incompatible backup: this backup is missing critical database "
@@ -1431,15 +1558,24 @@ def restore_backup_file(filename):
             warning_details,
         )
         log_activity(
-            f"Restore compatibility warnings detected for {fname}: {warning_details}"
+            f"Restore compatibility warnings detected for {fname}: {warning_details}",
+            actor_user_id,
         )
-        flash(f"Compatibility warnings: {warning_details}", "warning")
-        flash(
-            "Preflight detected data-quality risks. "
-            f"Selected restore mode: {restore_mode}. "
-            "Use permissive mode to quarantine invalid rows, or strict mode to fail on first violation.",
-            "warning",
-        )
+        strict_restore_blockers = [
+            warning
+            for warning in compatibility.warnings
+            if _is_strict_restore_blocking_warning(warning)
+        ]
+        if restore_mode == "strict" and strict_restore_blockers:
+            _flash_strict_restore_blocked_warning(
+                warning_details=warning_details,
+                restore_mode=restore_mode,
+            )
+            log_activity(
+                f"Strict restore blocked for {fname}: {warning_details}",
+                actor_user_id,
+            )
+            return redirect(url_for("admin.backups"))
     try:
         restore_summary = restore_backup(filepath, restore_mode=restore_mode)
     except RestoreBackupError as exc:
@@ -1452,7 +1588,8 @@ def restore_backup_file(filename):
             restore_details,
         )
         log_activity(
-            f"Restore failed for {fname} [{failure_class}]: {restore_details}"
+            f"Restore failed for {fname} [{failure_class}]: {restore_details}",
+            actor_user_id,
         )
         flash(
             f"Restore failed ({failure_class}): {restore_details}",
@@ -1466,12 +1603,21 @@ def restore_backup_file(filename):
     }
     ignore_favorites = bool(ignore_values & {"1", "true", "on", "yes"})
     mode, changed_count = _apply_restore_favorites_mode(ignore_favorites)
-    if compatibility is not None and compatibility.warnings:
+    _refresh_logged_in_user_after_restore()
+    if warning_details:
+        flash(f"Compatibility warnings: {warning_details}", "warning")
         flash("Restored with compatibility warnings.", "warning")
+        flash(
+            "Preflight detected data-quality risks. "
+            f"Selected restore mode: {restore_mode}. "
+            "Use permissive mode to quarantine invalid rows, or strict mode to fail on first violation.",
+            "warning",
+        )
 
     if mode == "ignored":
         log_activity(
-            f"Cleared favorites for {changed_count} user(s) after restore {fname} (ignore_favorites=true)"
+            f"Cleared favorites for {changed_count} user(s) after restore {fname} (ignore_favorites=true)",
+            actor_user_id,
         )
         flash(
             f"Backup restored from {fname}. Favorites mode: ignored backup favorites and cleared all user favorites.",
@@ -1480,7 +1626,8 @@ def restore_backup_file(filename):
     else:
         if changed_count:
             log_activity(
-                f"Removed stale favorites for {changed_count} user(s) after restore {fname}"
+                f"Removed stale favorites for {changed_count} user(s) after restore {fname}",
+                actor_user_id,
             )
         flash(
             f"Backup restored from {fname}. Favorites mode: pruned invalid favorites.",
@@ -1497,7 +1644,8 @@ def restore_backup_file(filename):
         log_activity(
             f"Restore partial outcome for {fname}: inserted={restore_summary.inserted_count}, "
             f"skipped={restore_summary.skipped_count}, quarantine={restore_summary.quarantine_report}, "
-            f"tables={','.join(restore_summary.affected_tables)}"
+            f"tables={','.join(restore_summary.affected_tables)}",
+            actor_user_id,
         )
     _flash_restore_report(
         restore_summary=restore_summary,
@@ -1514,7 +1662,7 @@ def restore_backup_file(filename):
         f"skipped={restore_summary.skipped_count}, "
         f"table_transforms={sum((restore_summary.table_transform_counts or {}).values())}]"
     )
-    log_activity(restore_message)
+    log_activity(restore_message, actor_user_id)
     return redirect(url_for("admin.backups"))
 
 

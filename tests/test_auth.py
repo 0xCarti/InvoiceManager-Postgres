@@ -1,4 +1,3 @@
-from flask import url_for
 from werkzeug.security import generate_password_hash
 
 from app import db
@@ -15,8 +14,6 @@ def test_login_redirect(client, app):
         )
         db.session.add(user)
         db.session.commit()
-        with app.test_request_context():
-            expected = url_for("transfer.view_transfers")
 
     response = client.post(
         "/auth/login",
@@ -24,7 +21,7 @@ def test_login_redirect(client, app):
     )
 
     assert response.status_code == 302
-    assert response.headers["Location"].endswith(expected)
+    assert response.headers["Location"].endswith("/auth/profile")
 
 
 def test_logout_requires_post(client, app):
@@ -42,8 +39,8 @@ def test_logout_requires_post(client, app):
         get_response = client.get("/auth/logout")
         assert get_response.status_code == 405
 
-        home_page = client.get("/")
-        token = extract_csrf_token(home_page)
+        profile_page = client.get("/auth/profile")
+        token = extract_csrf_token(profile_page)
         post_response = client.post(
             "/auth/logout",
             data={"csrf_token": token},

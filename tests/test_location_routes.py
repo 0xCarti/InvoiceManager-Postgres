@@ -23,6 +23,7 @@ def setup_data(app):
         user = User(
             email="loc@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         gl = (

@@ -38,6 +38,10 @@ PostgreSQL is the only supported runtime database backend.
 - ⚠️ **Connection var precedence:** `DATABASE_URL` (and `SQLALCHEMY_DATABASE_URI`) override individual `DATABASE_*` parts when set.
 - ⚠️ **Restore prerequisite:** run migrations to latest **before** restoring a backup (`python -m flask --app run.py db upgrade` or `./scripts/docker_migrate.sh`).
 
+Additional production note:
+
+- Set `SKIP_DB_CREATE_ALL=true` for host deployments that rely on Alembic migrations. The Docker image already sets this internally, and `FLASK_SKIP_CREATE_ALL` remains supported as a legacy alias.
+
 ## Installation
 
 You can perform the steps below manually or run one of the setup scripts provided in the repository. `setup.sh` works on Linux/macOS and `setup.ps1` works on Windows. Each script optionally accepts a repository URL and target directory, clones the project, installs dependencies, prepares a `.env` file, runs the database migrations, and seeds the default admin account and settings.
@@ -254,6 +258,12 @@ For production deployments using Gunicorn, use the provided configuration to ena
 
 ```bash
 gunicorn -c gunicorn.conf.py run:app
+```
+
+For a repeatable Windows release smoke check, run:
+
+```powershell
+./scripts/release_verify.ps1
 ```
 
 ## Project Architecture

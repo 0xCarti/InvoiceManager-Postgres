@@ -3,6 +3,7 @@ from werkzeug.security import generate_password_hash
 from app import db
 from app.models import ActivityLog, Location, Note, User
 from app.utils.activity import flush_activity_logs
+from tests.utils import extract_csrf_token, login
 
 
 def _create_location_with_user(app):
@@ -31,14 +32,16 @@ def test_admin_can_manage_notes(client, app):
     location_id = _create_location_with_user(app)
 
     with client:
-        with app.app_context():
-            admin = User.query.filter_by(email="admin@example.com").one()
-        with client.session_transaction() as session:
-            session["_user_id"] = str(admin.id)
-            session["_fresh"] = True
+        login(client, "admin@example.com", "adminpass")
+        notes_page = client.get(f"/notes/location/{location_id}")
+        notes_token = extract_csrf_token(notes_page)
         response = client.post(
             f"/notes/location/{location_id}",
-            data={"content": "First note", "pinned": "y"},
+            data={
+                "csrf_token": notes_token,
+                "content": "First note",
+                "pinned": "y",
+            },
             follow_redirects=True,
         )
         assert response.status_code == 200
@@ -53,7 +56,14 @@ def test_admin_can_manage_notes(client, app):
 
         update_response = client.post(
             f"/notes/location/{location_id}/edit/{note_id}",
-            data={"content": "Updated note"},
+            data={
+                "csrf_token": extract_csrf_token(
+                    client.get(
+                        f"/notes/location/{location_id}/edit/{note_id}"
+                    )
+                ),
+                "content": "Updated note",
+            },
             follow_redirects=True,
         )
         assert update_response.status_code == 200
@@ -63,28 +73,24 @@ def test_admin_can_manage_notes(client, app):
             assert refreshed.content == "Updated note"
             assert refreshed.pinned is False
 
-        with app.app_context():
-            other_user = User.query.filter_by(email="user@example.com").one()
-        with client.session_transaction() as session:
-            session.clear()
-            session["_user_id"] = str(other_user.id)
-            session["_fresh"] = True
+        login(client, "user@example.com", "pass")
+        delete_page = client.get(f"/notes/location/{location_id}")
+        delete_token = extract_csrf_token(delete_page)
 
         delete_resp = client.post(
             f"/notes/location/{location_id}/delete/{note_id}",
-            data={},
+            data={"csrf_token": delete_token},
             follow_redirects=False,
         )
         assert delete_resp.status_code == 403
 
-        with client.session_transaction() as session:
-            session.clear()
-            session["_user_id"] = str(admin.id)
-            session["_fresh"] = True
+        login(client, "admin@example.com", "adminpass")
+        delete_page = client.get(f"/notes/location/{location_id}")
+        delete_token = extract_csrf_token(delete_page)
 
         delete_resp = client.post(
             f"/notes/location/{location_id}/delete/{note_id}",
-            data={},
+            data={"csrf_token": delete_token},
             follow_redirects=True,
         )
         assert delete_resp.status_code == 200
@@ -112,14 +118,16 @@ def test_non_admin_cannot_pin_notes(client, app):
         location_id = location.id
 
     with client:
-        with app.app_context():
-            note_user = User.query.filter_by(email="noteuser@example.com").one()
-        with client.session_transaction() as session:
-            session["_user_id"] = str(note_user.id)
-            session["_fresh"] = True
+        login(client, "noteuser@example.com", "pass")
+        notes_page = client.get(f"/notes/location/{location_id}")
+        notes_token = extract_csrf_token(notes_page)
         add_resp = client.post(
             f"/notes/location/{location_id}",
-            data={"content": "Hello", "pinned": "y"},
+            data={
+                "csrf_token": notes_token,
+                "content": "Hello",
+                "pinned": "y",
+            },
             follow_redirects=True,
         )
         assert add_resp.status_code == 200
@@ -133,13 +141,22 @@ def test_non_admin_cannot_pin_notes(client, app):
 
         toggle = client.post(
             f"/notes/location/{location_id}/toggle-pin/{note_id}",
+            data={"csrf_token": notes_token},
             follow_redirects=False,
         )
         assert toggle.status_code == 403
 
+        edit_page = client.get(
+            f"/notes/location/{location_id}/edit/{note_id}"
+        )
+        edit_token = extract_csrf_token(edit_page)
         update_resp = client.post(
             f"/notes/location/{location_id}/edit/{note_id}",
-            data={"content": "Updated", "pinned": "y"},
+            data={
+                "csrf_token": edit_token,
+                "content": "Updated",
+                "pinned": "y",
+            },
             follow_redirects=True,
         )
         assert update_resp.status_code == 200

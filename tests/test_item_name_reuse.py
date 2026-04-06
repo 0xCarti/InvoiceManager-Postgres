@@ -2,16 +2,21 @@ from werkzeug.security import generate_password_hash
 
 from app import db
 from app.models import Item, ItemUnit, User
+from tests.permission_helpers import grant_item_workflow_permissions
 from tests.utils import login
 
 
 def create_user(app, email="reuse@example.com"):
     with app.app_context():
         user = User(
-            email=email, password=generate_password_hash("pass"), active=True
+            email=email,
+            password=generate_password_hash("pass"),
+            is_admin=True,
+            active=True,
         )
         db.session.add(user)
         db.session.commit()
+        grant_item_workflow_permissions(user)
         return user.id
 
 

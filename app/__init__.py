@@ -57,6 +57,33 @@ def _get_int_env(var_name: str, default: int) -> int:
     return int(value)
 
 
+def _should_auto_create_schema(args: list[str] | tuple[str, ...] | None = None) -> bool:
+    """Decide whether the app should call ``db.create_all()`` on startup.
+
+    The production and migration paths should rely on Alembic, not implicit
+    schema creation. Keep the convenience bootstrap only for direct local app
+    execution such as ``python run.py``.
+    """
+
+    args = list(args or [])
+    if _get_bool_env("SKIP_DB_CREATE_ALL", default=False) or _get_bool_env(
+        "FLASK_SKIP_CREATE_ALL", default=False
+    ):
+        return False
+
+    # Flask CLI imports the app for commands like ``flask db upgrade`` and
+    # ``flask routes``. Those commands must not create tables implicitly.
+    if _get_bool_env("FLASK_RUN_FROM_CLI", default=False):
+        return False
+
+    executable = os.path.basename(args[0]).lower() if args else ""
+    if executable in {"flask", "gunicorn"}:
+        return False
+
+    # Keep the historical convenience for direct app startup only.
+    return True
+
+
 def _redact_error_details(details: str) -> str:
     """Redact sensitive values from exception details shown in UI."""
     if not details:
@@ -327,11 +354,6 @@ def create_admin_user():
     """Ensure an admin user exists for the application."""
     from app.models import User
 
-    # Ensure all tables are created before querying. This guards against
-    # OperationalError exceptions when the database has not been
-    # initialised yet (e.g. during first run or tests).
-    db.create_all()
-
     # Check if any admin exists
     admin_exists = User.query.filter_by(is_admin=True).first()
     if not admin_exists:
@@ -427,14 +449,21 @@ def create_app(args=None):
             f"{db_driver}://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
         )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-        "pool_pre_ping": _get_bool_env("SQLALCHEMY_POOL_PRE_PING", default=True),
-        "pool_recycle": _get_int_env("SQLALCHEMY_POOL_RECYCLE", 1800),
-        "pool_timeout": _get_int_env("SQLALCHEMY_POOL_TIMEOUT", 30),
-        "pool_size": _get_int_env("SQLALCHEMY_POOL_SIZE", 5),
-        "max_overflow": _get_int_env("SQLALCHEMY_MAX_OVERFLOW", 10),
-        "pool_use_lifo": _get_bool_env("SQLALCHEMY_POOL_USE_LIFO", default=True),
-    }
+    if _get_bool_env("SQLALCHEMY_USE_NULL_POOL", default=False):
+        from sqlalchemy.pool import NullPool
+
+        app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+            "poolclass": NullPool,
+        }
+    else:
+        app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+            "pool_pre_ping": _get_bool_env("SQLALCHEMY_POOL_PRE_PING", default=True),
+            "pool_recycle": _get_int_env("SQLALCHEMY_POOL_RECYCLE", 1800),
+            "pool_timeout": _get_int_env("SQLALCHEMY_POOL_TIMEOUT", 30),
+            "pool_size": _get_int_env("SQLALCHEMY_POOL_SIZE", 5),
+            "max_overflow": _get_int_env("SQLALCHEMY_MAX_OVERFLOW", 10),
+            "pool_use_lifo": _get_bool_env("SQLALCHEMY_POOL_USE_LIFO", default=True),
+        }
     app.config["UPLOAD_FOLDER"] = os.path.join(base_dir, "uploads")
     app.config["BACKUP_FOLDER"] = os.path.join(base_dir, "backups")
     app.config["IMPORT_FILES_FOLDER"] = os.path.join(repo_dir, "import_files")
@@ -738,9 +767,7 @@ def create_app(args=None):
         ]
         return Response("\n".join(lines) + "\n", mimetype="text/plain")
 
-    should_create_all = not (
-        _get_bool_env("SKIP_DB_CREATE_ALL", default=False) or "db" in args
-    )
+    should_create_all = _should_auto_create_schema(args)
 
     with app.app_context():
         # Ensure models are imported and the database schema is created on

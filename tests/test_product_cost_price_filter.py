@@ -10,6 +10,7 @@ def setup_products(app):
         user = User(
             email="costprice@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         db.session.add(user)

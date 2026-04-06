@@ -2,6 +2,7 @@ from werkzeug.security import generate_password_hash
 
 from app import db
 from app.models import GLCode, User
+from tests.permission_helpers import grant_permissions
 from tests.utils import login
 
 def setup_data(app):
@@ -15,6 +16,13 @@ def setup_data(app):
         gl2 = GLCode(code="2000", description="Drink")
         db.session.add_all([user, gl1, gl2])
         db.session.commit()
+        user = User.query.filter_by(email="glfilter@example.com").one()
+        grant_permissions(
+            user,
+            "gl_codes.view",
+            group_name="GL Code Filter Test Group",
+            description="Test permission for GL code filters.",
+        )
         return user.email
 
 

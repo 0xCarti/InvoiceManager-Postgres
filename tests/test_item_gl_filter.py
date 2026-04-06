@@ -2,6 +2,7 @@ from werkzeug.security import generate_password_hash
 
 from app import db
 from app.models import GLCode, Item, User
+from tests.permission_helpers import grant_item_workflow_permissions
 from tests.utils import login
 
 
@@ -12,9 +13,12 @@ def setup_data(app):
             user = User(
                 email="filter@example.com",
                 password=generate_password_hash("pass"),
+                is_admin=True,
                 active=True,
             )
             db.session.add(user)
+        elif not user.is_admin:
+            user.is_admin = True
 
         gl_codes_by_code = {
             code: GLCode.query.filter_by(code=code).first()
@@ -43,6 +47,7 @@ def setup_data(app):
             )
             db.session.flush()
         db.session.commit()
+        grant_item_workflow_permissions(user)
 
         if not Item.query.filter_by(name="A0").first():
             sales_gl_food = GLCode.query.filter_by(code="1000").first()
@@ -95,7 +100,8 @@ def test_view_items_filter_by_gl_code(client, app):
         assert resp.status_code == 200
         assert b"A0" in resp.data
         assert b"B0" not in resp.data
-        assert b"Filtering by Inventory GL Code" in resp.data
+        assert b"Active filters:" in resp.data
+        assert b"Inventory GL Code:" in resp.data
         assert gl_code.encode() in resp.data
 
 
@@ -109,7 +115,8 @@ def test_view_items_filter_by_multiple_gl_codes(client, app):
         assert resp.status_code == 200
         assert b"A0" in resp.data
         assert b"B0" in resp.data
-        assert b"Filtering by Inventory GL Code" in resp.data
+        assert b"Active filters:" in resp.data
+        assert b"Inventory GL Code:" in resp.data
 
 
 def test_view_items_filter_by_purchase_gl_code(client, app):
@@ -123,5 +130,6 @@ def test_view_items_filter_by_purchase_gl_code(client, app):
         assert resp.status_code == 200
         assert b"A0" in resp.data
         assert b"B0" not in resp.data
-        assert b"Filtering by Purchase GL Code" in resp.data
+        assert b"Active filters:" in resp.data
+        assert b"Purchase GL Code:" in resp.data
         assert purchase_gl_code.encode() in resp.data

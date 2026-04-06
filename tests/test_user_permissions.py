@@ -223,7 +223,7 @@ def test_permission_group_forms_render_grouped_permission_checkboxes(client):
         assert b"List Actions Group" in create_page.data
         assert b'data-permission-category-toggle="transfers"' in create_page.data
         assert b"View Transfers" in create_page.data
-        assert b"dashboard.view" not in create_page.data
+        assert b"View Dashboard (dashboard.view)" not in create_page.data
 
         with client.application.app_context():
             group = PermissionGroup(

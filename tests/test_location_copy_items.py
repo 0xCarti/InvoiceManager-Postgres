@@ -12,6 +12,7 @@ from app.models import (
     ProductRecipeItem,
     User,
 )
+from tests.permission_helpers import grant_item_workflow_permissions
 from tests.utils import login
 
 
@@ -20,6 +21,7 @@ def setup_data(app):
         user = User(
             email="copy@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         gl = GLCode.query.first()
@@ -30,6 +32,7 @@ def setup_data(app):
         )
         db.session.add_all([user, item])
         db.session.commit()
+        grant_item_workflow_permissions(user)
         unit = ItemUnit(
             item_id=item.id,
             name="gram",
@@ -63,6 +66,7 @@ def setup_multi_product_data(app):
         user = User(
             email="copy2@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         gl = GLCode.query.first()
@@ -73,6 +77,7 @@ def setup_multi_product_data(app):
         )
         db.session.add_all([user, item])
         db.session.commit()
+        grant_item_workflow_permissions(user)
         unit = ItemUnit(
             item_id=item.id,
             name="gram",

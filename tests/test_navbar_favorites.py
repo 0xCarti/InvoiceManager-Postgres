@@ -112,13 +112,13 @@ def test_favorite_toggle_requires_post_and_updates_state(client, app):
 
     with client:
         login(client, admin_email, admin_pass)
-        get_response = client.get("/favorite/transfer.view_transfers")
+        get_response = client.get("/auth/favorite/transfer.view_transfers")
         assert get_response.status_code == 405
 
         home = client.get("/")
         token = extract_csrf_token(home)
         post_response = client.post(
-            "/favorite/transfer.view_transfers",
+            "/auth/favorite/transfer.view_transfers",
             data={"csrf_token": token, "next": "/"},
             follow_redirects=False,
         )

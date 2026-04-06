@@ -2,6 +2,7 @@ from werkzeug.security import generate_password_hash
 
 from app import db
 from app.models import Item, User
+from tests.permission_helpers import grant_item_workflow_permissions
 from tests.utils import login
 
 
@@ -10,6 +11,7 @@ def setup_items(app):
         user = User(
             email="costfilter@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         db.session.add(user)
@@ -21,6 +23,7 @@ def setup_items(app):
             ]
         )
         db.session.commit()
+        grant_item_workflow_permissions(user)
         return user.email
 
 

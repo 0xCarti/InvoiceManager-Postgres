@@ -38,12 +38,16 @@ def test_restore_backup_file_compatible_metadata_flashes_success(
         login(client, admin_email, admin_pass)
         response = client.post(
             "/controlpanel/backups/restore/compatible.db",
-            follow_redirects=True,
+            follow_redirects=False,
         )
 
-    assert response.status_code == 200
-    assert b"Backup restored from compatible.db" in response.data
-    assert b"Incompatible backup" not in response.data
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/controlpanel/backups")
+    follow_up = client.get("/controlpanel/backups", follow_redirects=True)
+
+    assert follow_up.status_code == 200
+    assert b"Backup restored from compatible.db" in follow_up.data
+    assert b"Incompatible backup" not in follow_up.data
 
 
 def test_restore_backup_file_incompatible_metadata_shows_failure_flash(
@@ -63,12 +67,60 @@ def test_restore_backup_file_incompatible_metadata_shows_failure_flash(
         login(client, admin_email, admin_pass)
         response = client.post(
             "/controlpanel/backups/restore/incompatible.db",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/controlpanel/backups")
+    follow_up = client.get("/controlpanel/backups", follow_redirects=True)
+
+    assert follow_up.status_code == 200
+    assert b"Incompatible backup" in follow_up.data
+    assert b"Backup restored from incompatible.db" not in follow_up.data
+
+
+def test_restore_backup_file_strict_mode_blocks_on_preflight_data_quality_warnings(
+    client, app, monkeypatch
+):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    _create_sqlite_backup(app, "strict_blocked.db")
+    restore_called = {"value": False}
+
+    monkeypatch.setattr(
+        "app.routes.auth_routes.validate_backup_file_compatibility",
+        lambda *_args, **_kwargs: RestoreCompatibilityResult(
+            compatible=True,
+            issues=[],
+            warnings=[
+                "Foreign key orphan rows found for purchase_invoice_draft.purchase_invoice_draft_purchase_order_id_fkey -> purchase_order (1 row(s)). Sample key values: {'purchase_order_id': 1}.",
+            ],
+        ),
+    )
+
+    def _restore_should_not_run(*_args, **_kwargs):
+        restore_called["value"] = True
+        raise AssertionError("restore_backup should not run when strict mode is preflight-blocked")
+
+    monkeypatch.setattr(
+        "app.routes.auth_routes.restore_backup",
+        _restore_should_not_run,
+    )
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            "/controlpanel/backups/restore/strict_blocked.db",
             follow_redirects=True,
         )
 
     assert response.status_code == 200
-    assert b"Incompatible backup" in response.data
-    assert b"Backup restored from incompatible.db" not in response.data
+    assert b"Compatibility warnings:" in response.data
+    assert b"Strict restore blocked by preflight data-quality findings." in response.data
+    assert b"purchase_invoice_draft" in response.data
+    assert b"Backup restored from strict_blocked.db" not in response.data
+    assert restore_called["value"] is False
 
 
 def test_restore_backup_file_prunes_invalid_favorites(client, app, monkeypatch):
@@ -95,11 +147,15 @@ def test_restore_backup_file_prunes_invalid_favorites(client, app, monkeypatch):
         login(client, admin_email, admin_pass)
         response = client.post(
             "/controlpanel/backups/restore/invalid_favorites.db",
-            follow_redirects=True,
+            follow_redirects=False,
         )
 
-    assert response.status_code == 200
-    assert b"Favorites mode: pruned invalid favorites." in response.data
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/controlpanel/backups")
+    follow_up = client.get("/controlpanel/backups", follow_redirects=True)
+
+    assert follow_up.status_code == 200
+    assert b"Favorites mode: pruned invalid favorites." in follow_up.data
 
     with app.app_context():
         flush_activity_logs()
@@ -132,13 +188,17 @@ def test_restore_backup_file_ignore_favorites_clears_all(client, app, monkeypatc
         login(client, admin_email, admin_pass)
         response = client.post(
             "/controlpanel/backups/restore/ignore_favorites.db?ignore_favorites=1",
-            follow_redirects=True,
+            follow_redirects=False,
         )
 
-    assert response.status_code == 200
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/controlpanel/backups")
+    follow_up = client.get("/controlpanel/backups", follow_redirects=True)
+
+    assert follow_up.status_code == 200
     assert (
         b"Favorites mode: ignored backup favorites and cleared all user favorites."
-        in response.data
+        in follow_up.data
     )
 
     with app.app_context():

@@ -38,6 +38,7 @@ def test_location_specific_gl_override(client, app):
         user = User(
             email="buyer@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         vendor = Vendor(first_name="Vend", last_name="Or")

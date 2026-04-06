@@ -40,6 +40,7 @@ RUN sed -i 's/\r$//' /app/entrypoint.sh \
 ARG PORT=5000
 ENV PORT=${PORT}
 ENV FLASK_APP=run.py
+ENV SKIP_DB_CREATE_ALL=1
 ENV FLASK_SKIP_CREATE_ALL=1
 
 EXPOSE ${PORT}

@@ -10,9 +10,35 @@ from app.models import (
     LocationStandItem,
     Product,
     ProductRecipeItem,
+    Permission,
+    PermissionGroup,
     User,
 )
 from tests.utils import login
+
+
+def _grant_event_permissions(user: User) -> None:
+    codes = [
+        "events.view",
+        "events.create",
+        "events.edit",
+        "events.delete",
+        "events.manage_locations",
+        "events.manage_sales",
+        "events.confirm_locations",
+        "events.close",
+        "events.reports",
+    ]
+    group = PermissionGroup(
+        name=f"Event Test Group {user.email}",
+        description="Test permissions for event workflows.",
+    )
+    group.permissions = Permission.query.filter(Permission.code.in_(codes)).all()
+    db.session.add(group)
+    db.session.flush()
+    user.permission_groups.append(group)
+    user.invalidate_permission_cache()
+    db.session.commit()
 
 
 def test_count_sheet_shows_location_items_without_products(client, app):
@@ -26,6 +52,7 @@ def test_count_sheet_shows_location_items_without_products(client, app):
         item = Item(name="Widget", base_unit="each")
         db.session.add_all([user, loc, item])
         db.session.commit()
+        _grant_event_permissions(user)
         iu = ItemUnit(
             item_id=item.id,
             name="each",
@@ -102,6 +129,7 @@ def test_close_event_removes_zero_count_items(client, app):
         loc.products.append(product)
         db.session.add_all([iu, pri, lsi])
         db.session.commit()
+        _grant_event_permissions(user)
         loc_id = loc.id
         item_id = item.id
 
@@ -144,7 +172,7 @@ def test_close_event_removes_zero_count_items(client, app):
             ).first()
             el.confirmed = True
             db.session.commit()
-        client.get(f"/events/{eid}/close", follow_redirects=True)
+        client.post(f"/events/{eid}/close", follow_redirects=True)
 
     with app.app_context():
         lsi = LocationStandItem.query.filter_by(
@@ -176,6 +204,7 @@ def test_close_event_removes_unentered_items(client, app):
         )
         db.session.add_all([iu, lsi])
         db.session.commit()
+        _grant_event_permissions(user)
         loc_id = loc.id
         item_id = item.id
 
@@ -210,7 +239,7 @@ def test_close_event_removes_unentered_items(client, app):
             ).first()
             el.confirmed = True
             db.session.commit()
-        client.get(f"/events/{eid}/close", follow_redirects=True)
+        client.post(f"/events/{eid}/close", follow_redirects=True)
 
     with app.app_context():
         lsi = LocationStandItem.query.filter_by(
@@ -230,6 +259,7 @@ def test_close_event_requires_confirmed_locations(client, app):
         item = Item(name="ConfirmItem", base_unit="each")
         db.session.add_all([user, loc, item])
         db.session.commit()
+        _grant_event_permissions(user)
         loc_id = loc.id
 
     with client:
@@ -256,7 +286,7 @@ def test_close_event_requires_confirmed_locations(client, app):
             data={"location_id": loc_id},
             follow_redirects=True,
         )
-        response = client.get(f"/events/{eid}/close", follow_redirects=True)
+        response = client.post(f"/events/{eid}/close", follow_redirects=True)
         assert (
             b"All locations must be confirmed before closing the event." in response.data
         )
@@ -289,6 +319,7 @@ def test_count_sheet_redirects_to_event_view(client, app):
         )
         db.session.add_all([iu, lsi])
         db.session.commit()
+        _grant_event_permissions(user)
         loc_id = loc.id
         item_id = item.id
 

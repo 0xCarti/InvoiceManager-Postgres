@@ -10,7 +10,10 @@ from tests.utils import login
 def create_user(app, email="import@example.com"):
     with app.app_context():
         user = User(
-            email=email, password=generate_password_hash("pass"), active=True
+            email=email,
+            password=generate_password_hash("pass"),
+            active=True,
+            is_admin=True,
         )
         db.session.add(user)
         db.session.commit()

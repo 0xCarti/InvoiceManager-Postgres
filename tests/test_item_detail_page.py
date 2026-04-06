@@ -19,12 +19,18 @@ from app.models import (
     User,
     Vendor,
 )
+from tests.permission_helpers import grant_item_workflow_permissions
 from tests.utils import login
 
 
 def setup_history(app):
     with app.app_context():
-        user = User(email="hist@example.com", password=generate_password_hash("pass"), active=True)
+        user = User(
+            email="hist@example.com",
+            password=generate_password_hash("pass"),
+            is_admin=True,
+            active=True,
+        )
         customer = Customer(first_name="Cust", last_name="Omer")
         vendor = Vendor(first_name="Vend", last_name="Or")
         item = Item(name="Widget", base_unit="each", cost=10)
@@ -35,6 +41,7 @@ def setup_history(app):
         pri = ProductRecipeItem(product=product, item=item, quantity=1)
         db.session.add_all([user, customer, vendor, item, unit, loc1, loc2, product, pri])
         db.session.commit()
+        grant_item_workflow_permissions(user)
         po = PurchaseOrder(vendor_id=vendor.id, user_id=user.id, vendor_name="Vend Or", order_date=date.today(), expected_date=date.today(), delivery_charge=0, received=True)
         db.session.add(po)
         db.session.commit()

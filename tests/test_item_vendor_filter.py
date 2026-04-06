@@ -10,6 +10,7 @@ from app.models import (
     User,
     Vendor,
 )
+from tests.permission_helpers import grant_item_workflow_permissions
 from tests.utils import login
 
 
@@ -18,6 +19,7 @@ def setup_data(app):
         user = User(
             email="vendorfilter@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         vendor1 = Vendor(first_name="Sup", last_name="One")
@@ -26,6 +28,7 @@ def setup_data(app):
         item2 = Item(name="B0", base_unit="each")
         db.session.add_all([user, vendor1, vendor2, item1, item2])
         db.session.commit()
+        grant_item_workflow_permissions(user)
 
         po1 = PurchaseOrder(
             vendor_id=vendor1.id,
@@ -62,7 +65,8 @@ def test_view_items_filter_by_vendor(client, app):
         assert resp.status_code == 200
         assert b"A0" in resp.data
         assert b"B0" not in resp.data
-        assert b"Filtering by Vendor" in resp.data
+        assert b"Active filters:" in resp.data
+        assert b"Vendor:" in resp.data
 
 
 def test_view_items_filter_by_multiple_vendors(client, app):
@@ -73,5 +77,6 @@ def test_view_items_filter_by_multiple_vendors(client, app):
         assert resp.status_code == 200
         assert b"A0" in resp.data
         assert b"B0" in resp.data
-        assert b"Filtering by Vendor" in resp.data
+        assert b"Active filters:" in resp.data
+        assert b"Vendor:" in resp.data
 

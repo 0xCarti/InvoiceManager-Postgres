@@ -11,6 +11,7 @@ def setup_data(app):
             email="gl@example.com",
             password=generate_password_hash("pass"),
             active=True,
+            is_admin=True,
         )
         purchase = GLCode(code="5100")
         sales = GLCode.query.filter_by(code="4000").first()

@@ -12,6 +12,8 @@ from app.models import (
     ProductRecipeItem,
     User,
 )
+from tests.permission_helpers import grant_event_permissions
+from tests.utils import extract_csrf_token
 from tests.utils import login
 
 
@@ -55,14 +57,18 @@ def test_inventory_report_variance(client, app):
         loc.products.append(product)
         db.session.add_all([iu, pri, lsi])
         db.session.commit()
+        grant_event_permissions(user)
         loc_id = loc.id
         item_id = item.id
 
     with client:
         login(client, "inv@example.com", "pass")
+        create_page = client.get("/events/create")
+        create_token = extract_csrf_token(create_page)
         client.post(
             "/events/create",
             data={
+                "csrf_token": create_token,
                 "name": "InvEvent",
                 "start_date": "2023-01-01",
                 "end_date": "2023-01-02",
@@ -77,14 +83,24 @@ def test_inventory_report_variance(client, app):
 
     with client:
         login(client, "inv@example.com", "pass")
+        add_location_page = client.get(f"/events/{eid}")
+        add_location_token = extract_csrf_token(add_location_page)
         client.post(
             f"/events/{eid}/add_location",
-            data={"location_id": loc_id},
+            data={
+                "csrf_token": add_location_token,
+                "location_id": loc_id,
+            },
             follow_redirects=True,
         )
+        count_sheet_page = client.get(
+            f"/events/{eid}/count_sheet/{loc_id}"
+        )
+        count_sheet_token = extract_csrf_token(count_sheet_page)
         client.post(
             f"/events/{eid}/count_sheet/{loc_id}",
             data={
+                "csrf_token": count_sheet_token,
                 f"recv_{item_id}": 0,
                 f"trans_{item_id}": 4,
                 f"base_{item_id}": 0,
@@ -134,14 +150,18 @@ def test_inventory_close_updates_counts(client, app):
         loc.products.append(product)
         db.session.add_all([recv_unit, trans_unit, pri, lsi])
         db.session.commit()
+        grant_event_permissions(user)
         loc_id = loc.id
         item_id = item.id
 
     with client:
         login(client, "close@example.com", "pass")
+        create_page = client.get("/events/create")
+        create_token = extract_csrf_token(create_page)
         client.post(
             "/events/create",
             data={
+                "csrf_token": create_token,
                 "name": "CloseEvent",
                 "start_date": "2023-02-01",
                 "end_date": "2023-02-02",
@@ -156,21 +176,49 @@ def test_inventory_close_updates_counts(client, app):
 
     with client:
         login(client, "close@example.com", "pass")
+        add_location_page = client.get(f"/events/{eid}")
+        add_location_token = extract_csrf_token(add_location_page)
         client.post(
             f"/events/{eid}/add_location",
-            data={"location_id": loc_id},
+            data={
+                "csrf_token": add_location_token,
+                "location_id": loc_id,
+            },
             follow_redirects=True,
         )
+        with app.app_context():
+            event_location_id = db.session.get(Event, eid).locations[0].id
+        count_sheet_page = client.get(
+            f"/events/{eid}/count_sheet/{loc_id}"
+        )
+        count_sheet_token = extract_csrf_token(count_sheet_page)
         client.post(
             f"/events/{eid}/count_sheet/{loc_id}",
             data={
+                "csrf_token": count_sheet_token,
                 f"recv_{item_id}": 0,
                 f"trans_{item_id}": 7,
                 f"base_{item_id}": 0,
             },
             follow_redirects=True,
         )
-        client.get(f"/events/{eid}/close", follow_redirects=True)
+        confirm_page = client.get(
+            f"/events/{eid}/locations/{event_location_id}/confirm"
+        )
+        confirm_token = extract_csrf_token(confirm_page)
+        client.post(
+            f"/events/{eid}/locations/{event_location_id}/confirm",
+            data={"csrf_token": confirm_token},
+            follow_redirects=True,
+        )
+
+        close_page = client.get(f"/events/{eid}")
+        close_token = extract_csrf_token(close_page)
+        client.post(
+            f"/events/{eid}/close",
+            data={"csrf_token": close_token},
+            follow_redirects=True,
+        )
 
     with app.app_context():
         lsi = LocationStandItem.query.filter_by(

@@ -20,6 +20,7 @@ def setup_sales(app):
         user = User(
             email=f"sales-{uuid4().hex}@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         customer = Customer(first_name="Jane", last_name="Doe")
@@ -35,6 +36,7 @@ def setup_sales_without_customer(app):
         user = User(
             email=f"salesnocustomer-{uuid4().hex}@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         product = Product(name=product_name, price=10.0, cost=5.0, quantity=5)
@@ -48,6 +50,7 @@ def setup_sales_without_product(app):
         user = User(
             email=f"salesnocatalog-{uuid4().hex}@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         customer = Customer(first_name="Service", last_name="Customer")

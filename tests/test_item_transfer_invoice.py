@@ -14,16 +14,21 @@ from app.models import (
     TransferItem,
     User,
 )
+from tests.permission_helpers import grant_item_workflow_permissions
 from tests.utils import login
 
 
 def create_user(app, email="user@example.com"):
     with app.app_context():
         user = User(
-            email=email, password=generate_password_hash("pass"), active=True
+            email=email,
+            password=generate_password_hash("pass"),
+            is_admin=True,
+            active=True,
         )
         db.session.add(user)
         db.session.commit()
+        grant_item_workflow_permissions(user)
         return user.id
 
 
@@ -129,7 +134,11 @@ def test_transfer_flow(client, app):
         resp = client.get(f"/transfers/complete/{tid}")
         assert resp.status_code == 200
         assert b"Confirm Transfer Completion" in resp.data
-        resp = client.post(f"/transfers/complete/{tid}", follow_redirects=True)
+        resp = client.post(
+            f"/transfers/complete/{tid}",
+            data={"submit": "1"},
+            follow_redirects=True,
+        )
         assert resp.status_code == 200
 
     with app.app_context():
@@ -143,7 +152,9 @@ def test_transfer_flow(client, app):
         assert resp.status_code == 200
         assert b"Confirm Transfer Incomplete" in resp.data
         resp = client.post(
-            f"/transfers/uncomplete/{tid}", follow_redirects=True
+            f"/transfers/uncomplete/{tid}",
+            data={"submit": "1"},
+            follow_redirects=True,
         )
         assert resp.status_code == 200
 
@@ -298,7 +309,11 @@ def test_transfer_expected_counts_updated(client, app):
         resp = client.get(f"/transfers/complete/{tid}")
         assert resp.status_code == 200
         assert b"Confirm Transfer Completion" in resp.data
-        resp = client.post(f"/transfers/complete/{tid}", follow_redirects=True)
+        resp = client.post(
+            f"/transfers/complete/{tid}",
+            data={"submit": "1"},
+            follow_redirects=True,
+        )
         assert resp.status_code == 200
 
     with app.app_context():
@@ -315,6 +330,12 @@ def test_transfer_expected_counts_updated(client, app):
         login(client, "expected@example.com", "pass")
         resp = client.get(
             f"/transfers/uncomplete/{tid}", follow_redirects=True
+        )
+        assert resp.status_code == 200
+        resp = client.post(
+            f"/transfers/uncomplete/{tid}",
+            data={"submit": "1"},
+            follow_redirects=True,
         )
         assert resp.status_code == 200
 
@@ -404,7 +425,11 @@ def test_stand_sheet_shows_expected_counts(client, app):
         login(client, "stand@example.com", "pass")
         resp_confirm = client.get(f"/transfers/complete/{tid}")
         assert b"Confirm Transfer Completion" in resp_confirm.data
-        client.post(f"/transfers/complete/{tid}", follow_redirects=True)
+        client.post(
+            f"/transfers/complete/{tid}",
+            data={"submit": "1"},
+            follow_redirects=True,
+        )
         resp1 = client.get(f"/locations/{loc1_id}/stand_sheet")
         resp2 = client.get(f"/locations/{loc2_id}/stand_sheet")
         assert b"-5" in resp1.data

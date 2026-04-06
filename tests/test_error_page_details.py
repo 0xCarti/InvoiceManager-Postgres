@@ -149,4 +149,5 @@ def test_unhandled_exception_handles_pending_rollback_when_rollback_fails(
     monkeypatch.setattr(db.session, "rollback", original_rollback)
 
     assert response.status_code == 500
-    assert "Do not share this publicly" in body
+    assert "An internal error occurred. Reference token:" in body
+    assert "Do not share this publicly" not in body

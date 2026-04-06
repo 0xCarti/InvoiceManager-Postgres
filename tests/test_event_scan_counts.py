@@ -16,6 +16,7 @@ from app.models import (
     LocationStandItem,
     User,
 )
+from tests.permission_helpers import grant_permissions
 from tests.utils import login
 
 
@@ -32,6 +33,13 @@ def _setup_event(app, *, event_type="inventory", closed=False):
         item = Item(name=f"Scannable Item {uuid4().hex[:6]}", base_unit="each", upc=upc)
         db.session.add_all([user, location, item])
         db.session.commit()
+        user = User.query.filter_by(email=email).one()
+        grant_permissions(
+            user,
+            "events.manage_sales",
+            group_name=f"Event Scan Test Group {email}",
+            description="Test permission for event scan counts.",
+        )
 
         unit = ItemUnit(
             item_id=item.id,

@@ -12,6 +12,7 @@ def setup_invoices(app):
         user = User(
             email="inv@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         c1 = Customer(first_name="Alpha", last_name="One")
@@ -241,6 +242,7 @@ def test_invoice_customer_filter_lists_all_customers_on_later_pages(client, app)
         user = User(
             email="invoicefilterchoices@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         db.session.add(user)

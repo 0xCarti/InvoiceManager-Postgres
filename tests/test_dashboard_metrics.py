@@ -1,3 +1,4 @@
+import os
 from datetime import date, datetime
 from itertools import count
 import re
@@ -276,7 +277,7 @@ def test_dashboard_renders_sales_series(client, app):
         _create_basic_sale(user, when=datetime.utcnow())
         db.session.commit()
 
-    login(client, "admin@example.com", "adminpass")
+    login(client, "admin@example.com", os.getenv("ADMIN_PASS", "adminpass"))
     response = client.get("/", follow_redirects=True)
     body = response.data.decode()
 
@@ -318,7 +319,7 @@ def test_dashboard_activity_interval_selected_and_serialized(
         _create_basic_sale(user, when=datetime(2024, 2, 18, 14, 30, 0))
         db.session.commit()
 
-    login(client, "admin@example.com", "adminpass")
+    login(client, "admin@example.com", os.getenv("ADMIN_PASS", "adminpass"))
     response = client.get(f"/?activity_interval={activity_interval}", follow_redirects=True)
     body = response.data.decode()
 
@@ -358,7 +359,7 @@ def test_dashboard_activity_interval_invalid_defaults_to_weekly(
         _create_basic_sale(user, when=datetime(2024, 2, 20, 10, 15, 0))
         db.session.commit()
 
-    login(client, "admin@example.com", "adminpass")
+    login(client, "admin@example.com", os.getenv("ADMIN_PASS", "adminpass"))
     response = client.get("/?activity_interval=totally-invalid", follow_redirects=True)
     body = response.data.decode()
 

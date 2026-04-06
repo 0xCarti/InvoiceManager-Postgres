@@ -10,6 +10,7 @@ def create_user(app, email="multi@example.com"):
         user = User(
             email=email, password=generate_password_hash("pass"), active=True
         )
+        user.is_admin = True
         db.session.add(user)
         db.session.commit()
         return user.id

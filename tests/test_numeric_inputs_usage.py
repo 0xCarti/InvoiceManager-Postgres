@@ -17,8 +17,7 @@ def gl_codes():
         "app/templates/items/recipe_calculator.html",
         "app/templates/events/stand_sheet.html",
         "app/templates/events/count_sheet.html",
-        "app/templates/invoices/create_invoice.html",
-        "app/templates/invoices/view_invoices.html",
+        "app/templates/invoices/_invoice_form_scripts.html",
         "app/templates/purchase_orders/receive_invoice.html",
     ],
 )
