@@ -55,6 +55,58 @@ def test_admin_invite_creates_user(client, app, monkeypatch):
     assert "message" in sent
 
 
+def test_admin_invite_invalid_email_shows_form_error_not_user_not_found(
+    client, app, monkeypatch
+):
+    class DummySMTP:
+        def __init__(self, host, port):
+            self.host = host
+            self.port = port
+
+        def starttls(self):
+            pass
+
+        def login(self, u, p):
+            pass
+
+        def send_message(self, msg):
+            raise AssertionError("Invite email should not be sent for invalid input")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            pass
+
+    monkeypatch.setattr("app.utils.email.smtplib.SMTP", DummySMTP)
+
+    with app.app_context():
+        admin = User(
+            email="admin-invalid@example.com",
+            password=generate_password_hash("adminpass"),
+            active=True,
+            is_admin=True,
+        )
+        db.session.add(admin)
+        db.session.commit()
+
+    with client:
+        login(client, "admin-invalid@example.com", "adminpass")
+        response = client.post(
+            "/controlpanel/users",
+            data={"email": "not-an-email", "submit": True},
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"Invalid email address." in response.data
+    assert b"User not found" not in response.data
+
+    with app.app_context():
+        user = User.query.filter_by(email="not-an-email").first()
+        assert user is None
+
+
 def test_login_inactive_user(client, app):
     with app.app_context():
         user = User(

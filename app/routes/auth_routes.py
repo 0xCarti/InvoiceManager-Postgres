@@ -821,37 +821,53 @@ def users():
     form = UserForm()
     invite_form = InviteUserForm()
 
-    if invite_form.submit.data and invite_form.validate_on_submit():
-        email = invite_form.email.data
-        existing = User.query.filter_by(email=email).first()
-        if existing:
-            flash("User already exists.", "danger")
-        else:
-            temp_password = generate_password_hash(os.urandom(16).hex())
-            new_user = User(
-                email=email,
-                password=temp_password,
-                active=False,
-                is_admin=False,
-            )
-            _assign_permission_groups_to_user(new_user, invite_form.group_ids.data)
-            db.session.add(new_user)
-            db.session.commit()
-            token = generate_reset_token(new_user)
-            invite_url = url_for(
-                "auth.reset_token", token=token, _external=True
-            )
-            send_email(
-                email,
-                "You are invited to InvoiceManager",
-                f"Click the link to set your password: {invite_url}",
-            )
-            log_activity(f"Invited user {email}")
-            flash("Invitation sent.", "success")
-        return redirect(url_for("admin.users"))
+    invite_submitted = request.method == "POST" and (
+        invite_form.submit.name in request.form or "email" in request.form
+    )
+    if invite_submitted:
+        if invite_form.validate_on_submit():
+            email = invite_form.email.data
+            existing = User.query.filter_by(email=email).first()
+            if existing:
+                flash("User already exists.", "danger")
+            else:
+                temp_password = generate_password_hash(os.urandom(16).hex())
+                new_user = User(
+                    email=email,
+                    password=temp_password,
+                    active=False,
+                    is_admin=False,
+                )
+                _assign_permission_groups_to_user(
+                    new_user, invite_form.group_ids.data
+                )
+                db.session.add(new_user)
+                db.session.commit()
+                token = generate_reset_token(new_user)
+                invite_url = url_for(
+                    "auth.reset_token", token=token, _external=True
+                )
+                send_email(
+                    email,
+                    "You are invited to InvoiceManager",
+                    f"Click the link to set your password: {invite_url}",
+                )
+                log_activity(f"Invited user {email}")
+                flash("Invitation sent.", "success")
+            return redirect(url_for("admin.users"))
+        return render_template(
+            "admin/view_users.html",
+            users=users,
+            form=form,
+            invite_form=invite_form,
+        )
 
-    if request.method == "POST" and form.validate_on_submit():
-        user_id = request.args.get("user_id", type=int)
+    if request.method == "POST" and request.form.get("action"):
+        if not form.validate_on_submit():
+            abort(400)
+        user_id = request.form.get("user_id", type=int)
+        if user_id is None:
+            user_id = request.args.get("user_id", type=int)
         action = request.form.get("action")
 
         user = db.session.get(User, user_id)

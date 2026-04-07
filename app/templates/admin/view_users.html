@@ -27,11 +27,17 @@
                 {{ invite_form.hidden_tag() }}
                 <div class="col-12 col-lg-5">
                     {{ invite_form.email.label(class_='form-label') }}
-                    {{ invite_form.email(class_='form-control', placeholder='Email') }}
+                    {{ invite_form.email(class_='form-control' ~ (' is-invalid' if invite_form.email.errors else ''), placeholder='Email') }}
+                    {% for error in invite_form.email.errors %}
+                    <div class="invalid-feedback d-block">{{ error }}</div>
+                    {% endfor %}
                 </div>
                 <div class="col-12 col-lg-5">
                     {{ invite_form.group_ids.label(class_='form-label') }}
-                    {{ invite_form.group_ids(class_='form-select', multiple=true) }}
+                    {{ invite_form.group_ids(class_='form-select' ~ (' is-invalid' if invite_form.group_ids.errors else ''), multiple=true) }}
+                    {% for error in invite_form.group_ids.errors %}
+                    <div class="invalid-feedback d-block">{{ error }}</div>
+                    {% endfor %}
                     <div class="form-text">Leave blank to invite the user with no permission groups until you assign access.</div>
                 </div>
                 <div class="col-12 col-lg-2 d-flex align-items-end">
@@ -84,16 +90,18 @@
                 </div>
                 <div class="vstack gap-2">
                     {% if can_manage_users %}
-                    <form action="{{ url_for('admin.users', user_id=user.id) }}" method="post">
+                    <form action="{{ url_for('admin.users') }}" method="post">
                         {{ form.hidden_tag() }}
+                        <input type="hidden" name="user_id" value="{{ user.id }}">
                         <button type="submit" name="action" value="toggle_active" class="btn btn-primary btn-sm w-100"
                                 data-confirm-message="Are you sure you want to toggle the active status?">
                             Toggle Active
                         </button>
                     </form>
                     {% if current_user.is_super_admin %}
-                    <form action="{{ url_for('admin.users', user_id=user.id) }}" method="post">
+                    <form action="{{ url_for('admin.users') }}" method="post">
                         {{ form.hidden_tag() }}
+                        <input type="hidden" name="user_id" value="{{ user.id }}">
                         <button type="submit" name="action" value="toggle_super_admin" class="btn btn-secondary btn-sm w-100"
                                 data-confirm-message="Are you sure you want to toggle super-admin access?">
                             Toggle Super Admin
@@ -154,16 +162,18 @@
                 </td>
                 <td class="col-user-actions">
                     {% if can_manage_users %}
-                    <form action="{{ url_for('admin.users', user_id=user.id) }}" method="post" class="d-inline">
+                    <form action="{{ url_for('admin.users') }}" method="post" class="d-inline">
                         {{ form.hidden_tag() }}
+                        <input type="hidden" name="user_id" value="{{ user.id }}">
                         <button type="submit" name="action" value="toggle_active" class="btn btn-sm btn-primary"
                                 data-confirm-message="Are you sure you want to toggle the active status?">
                             Toggle Active
                         </button>
                     </form>
                     {% if current_user.is_super_admin %}
-                    <form action="{{ url_for('admin.users', user_id=user.id) }}" method="post" class="d-inline">
+                    <form action="{{ url_for('admin.users') }}" method="post" class="d-inline">
                         {{ form.hidden_tag() }}
+                        <input type="hidden" name="user_id" value="{{ user.id }}">
                         <button type="submit" name="action" value="toggle_super_admin" class="btn btn-sm btn-secondary"
                                 data-confirm-message="Are you sure you want to toggle super-admin access?">
                             Toggle Super Admin
