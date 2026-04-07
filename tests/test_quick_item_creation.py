@@ -2,6 +2,7 @@ from werkzeug.security import generate_password_hash
 
 from app import db
 from app.models import GLCode, Item, ItemUnit, User, Vendor
+from tests.permission_helpers import grant_permissions
 from tests.utils import login
 
 
@@ -10,11 +11,19 @@ def test_purchase_order_page_has_quick_add(client, app):
         user = User(
             email="poquick@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         vendor = Vendor(first_name="Quick", last_name="Vendor")
         db.session.add_all([user, vendor])
         db.session.commit()
+        grant_permissions(
+            user,
+            "purchase_orders.create",
+            "items.create",
+            group_name=f"Quick Add Test Group {user.email}",
+            description="Test permissions for quick purchase-order item creation.",
+        )
     with client:
         login(client, "poquick@example.com", "pass")
         resp = client.get("/purchase_orders/create")
@@ -27,12 +36,19 @@ def test_quick_add_item_endpoint(client, app):
         user = User(
             email="apiquick@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         db.session.add(user)
         gl = GLCode.query.filter_by(code="5000").first()
         gl_id = gl.id
         db.session.commit()
+        grant_permissions(
+            user,
+            "items.create",
+            group_name=f"Quick Item API Test Group {user.email}",
+            description="Test permissions for quick item creation API.",
+        )
     with client:
         login(client, "apiquick@example.com", "pass")
         resp = client.post(

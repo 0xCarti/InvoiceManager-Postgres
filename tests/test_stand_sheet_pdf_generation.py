@@ -32,6 +32,10 @@ def test_location_stand_sheet_pdf_contains_items(app, monkeypatch):
 
     monkeypatch.setattr("app.services.pdf.CSS", FakeCSS)
     monkeypatch.setattr("app.services.pdf.HTML", FakeHTML)
+    monkeypatch.setattr(
+        "app.services.pdf._ensure_landscape_orientation",
+        lambda pdf_bytes: pdf_bytes,
+    )
 
     with app.app_context():
         location = Location(name="PDF Location")
@@ -100,6 +104,10 @@ def test_event_stand_sheet_pdf_contains_items(app, monkeypatch):
 
     monkeypatch.setattr("app.services.pdf.CSS", FakeCSS)
     monkeypatch.setattr("app.services.pdf.HTML", FakeHTML)
+    monkeypatch.setattr(
+        "app.services.pdf._ensure_landscape_orientation",
+        lambda pdf_bytes: pdf_bytes,
+    )
 
     with app.app_context():
         location = Location(name="Event PDF Location")

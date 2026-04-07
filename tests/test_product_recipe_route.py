@@ -2,6 +2,7 @@ from werkzeug.security import generate_password_hash
 
 from app import db
 from app.models import Item, ItemUnit, Product, ProductRecipeItem, User
+from tests.permission_helpers import make_super_admin
 from tests.utils import login
 
 
@@ -25,6 +26,7 @@ def setup_data(app):
         product = Product(name="Cake", price=5.0, cost=2.0)
         db.session.add_all([unit, product])
         db.session.commit()
+        make_super_admin(user)
         db.session.add(
             ProductRecipeItem(
                 product_id=product.id,

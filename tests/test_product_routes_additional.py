@@ -13,6 +13,7 @@ from app.models import (
     Invoice,
     InvoiceProduct,
 )
+from tests.permission_helpers import make_super_admin
 from tests.utils import login
 
 
@@ -26,6 +27,7 @@ def setup_data(app):
         item = Item(name="Sugar", base_unit="gram", cost=1.0)
         db.session.add_all([user, item])
         db.session.commit()
+        make_super_admin(user)
         unit = ItemUnit(
             item_id=item.id,
             name="gram",

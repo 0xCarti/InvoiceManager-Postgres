@@ -36,6 +36,7 @@ def _seed_forecasting_data(app):
             email="forecast@example.com",
             password=generate_password_hash("pass"),
             active=True,
+            is_admin=True,
         )
         vendor = Vendor(first_name="Future", last_name="Foods")
         location_main = Location(name="Main Stand")

@@ -4,6 +4,7 @@ from app import db, create_admin_user
 from werkzeug.security import generate_password_hash
 from app.models import ActivityLog, GLCode, Product, User
 from app.utils.activity import flush_activity_logs
+from tests.utils import login
 
 
 def login_admin(client, app):
@@ -21,10 +22,12 @@ def login_admin(client, app):
             )
             db.session.add(admin)
             db.session.commit()
-        admin_id = admin.id
-    with client.session_transaction() as session:
-        session['_user_id'] = str(admin_id)
-        session['_fresh'] = True
+        else:
+            admin.active = True
+            admin.is_admin = True
+            admin.password = generate_password_hash('adminpass')
+            db.session.commit()
+    login(client, 'admin@example.com', 'adminpass')
 
 
 @pytest.fixture
@@ -148,23 +151,31 @@ def test_product_create_and_list_surfaces_show_both_price_labels(client, app):
 
 def test_search_products_requires_login_and_ignores_blank_query(client, app):
     with app.app_context():
+        user = User(
+            email="search@example.com",
+            password=generate_password_hash("searchpass"),
+            active=True,
+            is_admin=True,
+        )
         db.session.add(
             Product(name="Searchable Product", price=12.0, invoice_sale_price=15.0)
         )
+        db.session.add(user)
         db.session.commit()
 
     anonymous = client.get("/search_products?query=Searchable")
     assert anonymous.status_code == 302
     assert "/auth/login" in anonymous.headers["Location"]
 
-    login_admin(client, app)
+    with client:
+        login(client, "search@example.com", "searchpass")
 
-    blank = client.get("/search_products?query=")
-    assert blank.status_code == 200
-    assert blank.get_json() == []
+        blank = client.get("/search_products?query=")
+        assert blank.status_code == 200
+        assert blank.get_json() == []
 
-    filled = client.get("/search_products?query=Searchable")
-    assert filled.status_code == 200
-    payload = filled.get_json()
-    assert len(payload) == 1
-    assert payload[0]["name"] == "Searchable Product"
+        filled = client.get("/search_products?query=Searchable")
+        assert filled.status_code == 200
+        payload = filled.get_json()
+        assert len(payload) == 1
+        assert payload[0]["name"] == "Searchable Product"

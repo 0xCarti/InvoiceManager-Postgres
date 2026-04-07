@@ -322,7 +322,7 @@ def _iter_form_item_indexes(form_data) -> list[str]:
     indexes: list[str] = []
     seen_indexes: set[str] = set()
     for key in form_data.keys():
-        match = re.match(r"^items-(\d+)-item$", str(key))
+        match = re.match(r"^items-(\d+)-", str(key))
         if not match:
             continue
         index = match.group(1)
@@ -1048,10 +1048,20 @@ def create_purchase_order():
         form.order_date.data = datetime.date.today()
     if request.method == "GET" and form.expected_date.data is None:
         form.expected_date.data = datetime.date.today() + datetime.timedelta(days=1)
-    if form.validate_on_submit():
+    item_entries = []
+    has_incomplete_rows = False
+    form_submitted = request.method == "POST"
+    form_is_valid = form.validate() if form_submitted else False
+    if form_submitted:
         item_entries, has_incomplete_rows = _collect_purchase_order_item_entries(
             request.form
         )
+        if has_incomplete_rows and not form_is_valid:
+            flash(
+                "Each populated purchase-order row must include a selected item and quantity.",
+                "error",
+            )
+    if form_submitted and form_is_valid:
         if has_incomplete_rows:
             flash(
                 "Each populated purchase-order row must include a selected item and quantity.",
@@ -1304,10 +1314,20 @@ def edit_purchase_order(po_id):
     if po.vendor_id and po.vendor_id not in {choice[0] for choice in form.vendor.choices}:
         archived_vendor_label = po.vendor_name or f"Archived Vendor #{po.vendor_id}"
         form.vendor.choices.append((po.vendor_id, archived_vendor_label))
-    if form.validate_on_submit():
+    item_entries = []
+    has_incomplete_rows = False
+    form_submitted = request.method == "POST"
+    form_is_valid = form.validate() if form_submitted else False
+    if form_submitted:
         item_entries, has_incomplete_rows = _collect_purchase_order_item_entries(
             request.form
         )
+        if has_incomplete_rows and not form_is_valid:
+            flash(
+                "Each populated purchase-order row must include a selected item and quantity.",
+                "error",
+            )
+    if form_submitted and form_is_valid:
         if has_incomplete_rows:
             flash(
                 "Each populated purchase-order row must include a selected item and quantity.",
@@ -1604,6 +1624,8 @@ def receive_invoice(po_id):
         # commit so item cost changes persist reliably.
         db.session.flush()
         starting_item_costs = {}
+        starting_item_quantities = {}
+        aggregated_inventory_updates = {}
         for entry in item_entries:
             item_id = entry["item_id"]
             if item_id in starting_item_costs:
@@ -1611,6 +1633,12 @@ def receive_invoice(po_id):
             item_obj = db.session.get(Item, item_id)
             starting_item_costs[item_id] = (
                 item_obj.cost if item_obj and item_obj.cost else 0.0
+            )
+            starting_item_quantities[item_id] = (
+                db.session.query(db.func.sum(LocationStandItem.expected_count))
+                .filter(LocationStandItem.item_id == item_id)
+                .scalar()
+                or 0.0
             )
 
         for order_index, entry in enumerate(item_entries):
@@ -1623,6 +1651,22 @@ def receive_invoice(po_id):
             quantity = entry["quantity"]
             cost = entry["cost"]
             container_deposit = entry.get("container_deposit", 0.0)
+            factor = unit_obj.factor if unit_obj and unit_obj.factor else 1
+            new_qty = quantity * factor
+            cost_per_unit = cost / factor if factor else cost
+
+            if item_obj:
+                inventory_update = aggregated_inventory_updates.setdefault(
+                    item_obj.id,
+                    {
+                        "quantity": 0.0,
+                        "cost_total": 0.0,
+                        "last_cost_per_unit": cost_per_unit,
+                    },
+                )
+                inventory_update["quantity"] += new_qty
+                inventory_update["cost_total"] += cost_per_unit * new_qty
+                inventory_update["last_cost_per_unit"] = cost_per_unit
 
             db.session.add(
                 PurchaseInvoiceItem(
@@ -1642,33 +1686,6 @@ def receive_invoice(po_id):
             )
 
             if item_obj:
-                factor = unit_obj.factor if unit_obj and unit_obj.factor else 1
-                prev_qty = (
-                    db.session.query(
-                        db.func.sum(LocationStandItem.expected_count)
-                    )
-                    .filter(LocationStandItem.item_id == item_obj.id)
-                    .scalar()
-                    or 0
-                )
-                new_qty = quantity * factor
-                total_qty = prev_qty + new_qty
-
-                # Cost per base unit for the newly received stock
-                cost_per_unit = cost / factor if factor else cost
-                prev_total_cost = prev_qty * prev_cost
-                new_total_cost = cost_per_unit * new_qty
-                if total_qty > 0:
-                    weighted_cost = (prev_total_cost + new_total_cost) / total_qty
-                else:
-                    weighted_cost = cost_per_unit
-
-                item_obj.quantity = total_qty
-                item_obj.cost = weighted_cost
-
-                # Explicitly mark the item as dirty so cost updates persist
-                db.session.add(item_obj)
-
                 line_location_id = entry["location_id"] or invoice.location_id
                 record = LocationStandItem.query.filter_by(
                     location_id=line_location_id, item_id=item_obj.id
@@ -1695,10 +1712,24 @@ def receive_invoice(po_id):
                     item_obj.container_deposit = base_deposit
                     db.session.add(item_obj)
 
-                # Ensure the in-memory changes are sent to the database so
-                # subsequent iterations or queries within this request see
-                # the updated cost and quantity values immediately.
-                db.session.flush()
+        for item_id, inventory_update in aggregated_inventory_updates.items():
+            item_obj = db.session.get(Item, item_id)
+            if not item_obj:
+                continue
+            prev_qty = starting_item_quantities.get(item_id, 0.0)
+            prev_cost = starting_item_costs.get(item_id, 0.0)
+            total_qty = prev_qty + inventory_update["quantity"]
+            prev_total_cost = prev_qty * prev_cost
+            if total_qty > 0:
+                weighted_cost = (
+                    prev_total_cost + inventory_update["cost_total"]
+                ) / total_qty
+            else:
+                weighted_cost = inventory_update["last_cost_per_unit"]
+
+            item_obj.quantity = total_qty
+            item_obj.cost = weighted_cost
+            db.session.add(item_obj)
         po.received = True
         db.session.add(po)
         if draft:

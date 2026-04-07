@@ -2,13 +2,17 @@ from datetime import date
 from secrets import token_urlsafe
 
 from app import db
+from werkzeug.security import generate_password_hash
 from app.models import (
     Event,
     EventLocation,
     Location,
     Product,
     TerminalSalesResolutionState,
+    User,
 )
+from tests.permission_helpers import make_super_admin
+from tests.utils import login
 from app.routes.event_routes import (
     _TERMINAL_SALES_STATE_KEY,
     _should_store_terminal_summary,
@@ -40,44 +44,39 @@ def test_stale_terminal_sales_state_is_rejected_after_reset(client, app):
     event_id = _create_event(app)
 
     with app.app_context():
-        from app.models import User
-
-        user = User(email="test@example.com", password="", active=True)
-        db.session.add(user)
-        db.session.commit()
+        user = User.query.filter_by(email="admin@example.com").one()
         user_id = user.id
 
-    with client.session_transaction() as sess:
-        sess["_user_id"] = str(user_id)
-        sess["_fresh"] = True
+    with client:
+        login(client, "admin@example.com", "adminpass")
 
-    with app.test_request_context():
-        serializer = _terminal_sales_serializer()
-        token_id = token_urlsafe(16)
-        state_token = serializer.dumps({"event_id": event_id, "token_id": token_id})
+        with app.test_request_context():
+            serializer = _terminal_sales_serializer()
+            token_id = token_urlsafe(16)
+            state_token = serializer.dumps({"event_id": event_id, "token_id": token_id})
 
-    with client.session_transaction() as sess:
-        store = dict(sess.get(_TERMINAL_SALES_STATE_KEY, {}))
-        store[str(event_id)] = token_id
-        sess[_TERMINAL_SALES_STATE_KEY] = store
+        with client.session_transaction() as sess:
+            store = dict(sess.get(_TERMINAL_SALES_STATE_KEY, {}))
+            store[str(event_id)] = token_id
+            sess[_TERMINAL_SALES_STATE_KEY] = store
 
-    # Simulate clicking "Start Over", which should clear the stored token.
-    client.get(f"/events/{event_id}/sales/upload")
+        # Simulate clicking "Start Over", which should clear the stored token.
+        client.get(f"/events/{event_id}/sales/upload")
 
-    with client.session_transaction() as sess:
-        store_after_reset = sess.get(_TERMINAL_SALES_STATE_KEY, {})
-        assert str(event_id) not in store_after_reset
+        with client.session_transaction() as sess:
+            store_after_reset = sess.get(_TERMINAL_SALES_STATE_KEY, {})
+            assert str(event_id) not in store_after_reset
 
-    stale_post = client.post(
-        f"/events/{event_id}/sales/upload",
-        data={
-            "step": "resolve",
-            "state_token": state_token,
-            "payload": "{}",
-            "mapping_filename": "terminal.xls",
-        },
-        follow_redirects=True,
-    )
+        stale_post = client.post(
+            f"/events/{event_id}/sales/upload",
+            data={
+                "step": "resolve",
+                "state_token": state_token,
+                "payload": "{}",
+                "mapping_filename": "terminal.xls",
+            },
+            follow_redirects=True,
+        )
 
     page = stale_post.get_data(as_text=True)
     assert "resolution session is no longer valid" in page
@@ -107,13 +106,11 @@ def test_large_queue_assign_to_menu_preserves_state(client, app):
     event_id = _create_event(app)
 
     with app.app_context():
-        from app.models import User
-
         event_location = EventLocation.query.filter_by(event_id=event_id).first()
         assert event_location is not None
-        user = User(email="queue@example.com", password="", active=True)
+        user = User.query.filter_by(email="admin@example.com").one()
         product = Product(name="Menu Popcorn", price=5.0)
-        db.session.add_all([user, product])
+        db.session.add(product)
         db.session.commit()
 
         user_id = user.id
@@ -166,40 +163,41 @@ def test_large_queue_assign_to_menu_preserves_state(client, app):
         )
         db.session.commit()
 
-    with client.session_transaction() as sess:
-        sess["_user_id"] = str(user_id)
-        sess["_fresh"] = True
-        state_store = dict(sess.get(_TERMINAL_SALES_STATE_KEY, {}))
-        state_store[str(event_id)] = {"token_id": token_id}
-        sess[_TERMINAL_SALES_STATE_KEY] = state_store
+    with client:
+        login(client, "admin@example.com", "adminpass")
 
-    with app.test_request_context():
-        serializer = _terminal_sales_serializer()
-        state_token = serializer.dumps({"event_id": event_id, "token_id": token_id})
+        with app.test_request_context():
+            serializer = _terminal_sales_serializer()
+            state_token = serializer.dumps({"event_id": event_id, "token_id": token_id})
 
-    response = client.post(
-        f"/events/{event_id}/sales/upload",
-        data={
-            "step": "resolve",
-            "state_token": state_token,
-            "payload": "{}",
-            "mapping_filename": "terminal.xls",
-            "action": f"menu:{product_id}:add",
-        },
-    )
+        with client.session_transaction() as sess:
+            state_store = dict(sess.get(_TERMINAL_SALES_STATE_KEY, {}))
+            state_store[str(event_id)] = {"token_id": token_id}
+            sess[_TERMINAL_SALES_STATE_KEY] = state_store
 
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
-    assert "session is no longer valid" not in page
+        response = client.post(
+            f"/events/{event_id}/sales/upload",
+            data={
+                "step": "resolve",
+                "state_token": state_token,
+                "payload": "{}",
+                "mapping_filename": "terminal.xls",
+                "action": f"menu:{product_id}:add",
+            },
+        )
 
-    with app.app_context():
-        stored_state = TerminalSalesResolutionState.query.filter_by(
-            event_id=event_id, user_id=user_id, token_id=token_id
-        ).one()
-        assert len(stored_state.payload.get("queue", [])) == 120
-        first_issue = stored_state.payload["queue"][0]["menu_issues"][0]
-        assert first_issue.get("resolution") == "add"
+        assert response.status_code == 200
+        page = response.get_data(as_text=True)
+        assert "session is no longer valid" not in page
 
-    with client.session_transaction() as sess:
-        persisted = sess.get(_TERMINAL_SALES_STATE_KEY, {})
-        assert persisted[str(event_id)]["token_id"] == token_id
+        with app.app_context():
+            stored_state = TerminalSalesResolutionState.query.filter_by(
+                event_id=event_id, user_id=user_id, token_id=token_id
+            ).one()
+            assert len(stored_state.payload.get("queue", [])) == 120
+            first_issue = stored_state.payload["queue"][0]["menu_issues"][0]
+            assert first_issue.get("resolution") == "add"
+
+        with client.session_transaction() as sess:
+            persisted = sess.get(_TERMINAL_SALES_STATE_KEY, {})
+            assert persisted[str(event_id)]["token_id"] == token_id

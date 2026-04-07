@@ -98,8 +98,8 @@ def test_view_items_filter_by_gl_code(client, app):
         login(client, email, "pass")
         resp = client.get(f"/items?gl_code_id={gl1_id}")
         assert resp.status_code == 200
-        assert b"A0" in resp.data
-        assert b"B0" not in resp.data
+        assert b'<td class="col-name">A0</td>' in resp.data
+        assert b'<td class="col-name">B0</td>' not in resp.data
         assert b"Active filters:" in resp.data
         assert b"Inventory GL Code:" in resp.data
         assert gl_code.encode() in resp.data
@@ -113,8 +113,8 @@ def test_view_items_filter_by_multiple_gl_codes(client, app):
         login(client, email, "pass")
         resp = client.get(f"/items?gl_code_id={gl1_id}&gl_code_id={gl2_id}")
         assert resp.status_code == 200
-        assert b"A0" in resp.data
-        assert b"B0" in resp.data
+        assert b'<td class="col-name">A0</td>' in resp.data
+        assert b'<td class="col-name">B0</td>' in resp.data
         assert b"Active filters:" in resp.data
         assert b"Inventory GL Code:" in resp.data
 
@@ -128,8 +128,8 @@ def test_view_items_filter_by_purchase_gl_code(client, app):
         login(client, email, "pass")
         resp = client.get(f"/items?purchase_gl_code_id={purchase_gl_id}")
         assert resp.status_code == 200
-        assert b"A0" in resp.data
-        assert b"B0" not in resp.data
+        assert b'<td class="col-name">A0</td>' in resp.data
+        assert b'<td class="col-name">B0</td>' not in resp.data
         assert b"Active filters:" in resp.data
         assert b"Purchase GL Code:" in resp.data
         assert purchase_gl_code.encode() in resp.data

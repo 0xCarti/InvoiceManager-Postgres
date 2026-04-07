@@ -10,6 +10,7 @@ from app.models import (
     ProductRecipeItem,
     User,
 )
+from tests.permission_helpers import make_super_admin
 from tests.utils import login
 
 
@@ -44,6 +45,7 @@ def setup_data(app):
         product = Product(name="Cake", price=5.0, cost=2.0, quantity=10)
         db.session.add_all([user, customer, product])
         db.session.commit()
+        make_super_admin(user)
         db.session.add_all(
             [
                 ProductRecipeItem(

@@ -2,6 +2,7 @@ from werkzeug.security import generate_password_hash
 
 from app import db
 from app.models import Product, User
+from tests.permission_helpers import make_super_admin
 from tests.utils import login
 
 
@@ -16,6 +17,7 @@ def test_food_cost_percentage_display(client, app):
         product = Product(name="Sandwich", price=10.0, cost=4.0)
         db.session.add_all([user, product])
         db.session.commit()
+        make_super_admin(user)
     with client:
         login(client, "foodcost@example.com", "pass")
         resp = client.get("/products")

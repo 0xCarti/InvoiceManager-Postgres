@@ -76,6 +76,7 @@ def test_add_location(client, app):
             email="loc@example.com",
             password=generate_password_hash("pass"),
             active=True,
+            is_admin=True,
         )
         db.session.add(user)
         db.session.commit()

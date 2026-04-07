@@ -1,6 +1,7 @@
 from werkzeug.security import generate_password_hash
 
 from app.models import User, Vendor
+from tests.permission_helpers import make_super_admin
 from tests.utils import extract_csrf_token, login
 
 
@@ -18,6 +19,7 @@ def test_continue_import_blocked_when_duplicate_blockers_remain(client, app):
 
         db.session.add(user)
         db.session.commit()
+        make_super_admin(user)
 
     with client:
         login(client, "blockers@example.com", "pass")
@@ -52,6 +54,7 @@ def test_continue_import_returns_blocked_rows_payload_for_json(client, app):
 
         db.session.add(user)
         db.session.commit()
+        make_super_admin(user)
 
     with client:
         login(client, "json-blockers@example.com", "pass")
@@ -110,6 +113,7 @@ def test_duplicate_blocker_decision_persists_before_continue(client, app):
 
         db.session.add(user)
         db.session.commit()
+        make_super_admin(user)
 
     with client:
         login(client, "resolve-blockers@example.com", "pass")
@@ -166,6 +170,7 @@ def test_non_blocking_duplicate_warnings_do_not_block_continue(client, app):
 
         db.session.add_all([user, vendor])
         db.session.commit()
+        make_super_admin(user)
         vendor_id = vendor.id
 
     with client:
@@ -201,6 +206,7 @@ def test_resolve_page_groups_blocking_and_non_blocking_messages(client, app):
 
         db.session.add_all([user, vendor])
         db.session.commit()
+        make_super_admin(user)
         vendor_id = vendor.id
 
     with client:

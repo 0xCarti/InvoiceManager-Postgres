@@ -17,6 +17,7 @@ from app.models import (
     TerminalSalesResolutionState,
     User,
 )
+from tests.permission_helpers import make_super_admin
 from tests.utils import login
 
 
@@ -47,11 +48,6 @@ def test_upload_get_without_state_token_resets_wizard(client, app):
     ]
 
     with app.app_context():
-        user = User(
-            email="terminal-reset@example.com",
-            password=generate_password_hash("pass"),
-            active=True,
-        )
         location = Location(name="Stadium Stand")
         allowed_product = Product(name="Soft Pretzel", price=4.0, cost=1.5)
         menu = Menu(name="Stadium Menu")
@@ -64,10 +60,11 @@ def test_upload_get_without_state_token_resets_wizard(client, app):
             end_date=date(2026, 7, 1),
             event_type="inventory",
         )
-        db.session.add_all([user, location, allowed_product, menu, event])
+        db.session.add_all([location, allowed_product, menu, event])
         event_location = EventLocation(event=event, location=location)
         db.session.add(event_location)
         db.session.commit()
+        user = User.query.filter_by(email="admin@example.com").one()
 
         event_id = event.id
         event_location_id = event_location.id
@@ -76,7 +73,7 @@ def test_upload_get_without_state_token_resets_wizard(client, app):
     payload = json.dumps({"rows": payload_rows, "filename": "terminal_sales.xlsx"})
 
     with client:
-        login(client, "terminal-reset@example.com", "pass")
+        login(client, "admin@example.com", "adminpass")
         map_response = client.post(
             f"/events/{event_id}/sales/upload",
             data={

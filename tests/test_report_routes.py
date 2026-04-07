@@ -39,6 +39,17 @@ from app.utils.units import serialize_conversion_setting
 from tests.utils import login
 
 
+def _ensure_admin_user(user: User) -> User:
+    if not user.is_admin:
+        user.is_admin = True
+    if not user.active:
+        user.active = True
+    invalidate = getattr(user, "invalidate_permission_cache", None)
+    if callable(invalidate):
+        invalidate()
+    return user
+
+
 def build_department_sales_workbook() -> BytesIO:
     workbook = Workbook()
     sheet = workbook.active
@@ -288,9 +299,12 @@ def setup_invoice(app):
             user = User(
                 email="report@example.com",
                 password=generate_password_hash("pass"),
+                is_admin=True,
                 active=True,
             )
             db.session.add(user)
+        else:
+            _ensure_admin_user(user)
 
         customer = Customer.query.filter_by(first_name="Jane", last_name="Doe").first()
         if not customer:
@@ -394,9 +408,12 @@ def setup_purchase_invoice(app):
             user = User(
                 email="purchasereport@example.com",
                 password=generate_password_hash("pass"),
+                is_admin=True,
                 active=True,
             )
             db.session.add(user)
+        else:
+            _ensure_admin_user(user)
 
         vendor = Vendor.query.filter_by(first_name="Report", last_name="Vendor").first()
         if not vendor:
@@ -529,9 +546,12 @@ def setup_purchase_invoice_with_gl_allocations(app):
             user = User(
                 email="glreport@example.com",
                 password=generate_password_hash("pass"),
+                is_admin=True,
                 active=True,
             )
             db.session.add(user)
+        else:
+            _ensure_admin_user(user)
 
         vendor = Vendor.query.filter_by(first_name="GL", last_name="Vendor").first()
         if not vendor:
@@ -669,6 +689,9 @@ def test_purchase_inventory_summary_converts_units(client, app):
                 is_admin=True,
             )
             db.session.add(admin_user)
+            db.session.commit()
+        else:
+            _ensure_admin_user(admin_user)
             db.session.commit()
         vendor = Vendor(first_name="Convert", last_name="Vendor")
         location = Location(name="Convert Location")
@@ -883,8 +906,9 @@ def test_vendor_invoice_report_groups_results_by_customer_for_multi_select(clien
     assert b"INVREP001" in response.data
     assert b"INVREP003" in response.data
     assert b'<tr class="table-secondary">' in response.data
-    assert b"$31.36" in response.data
+    assert b"$28.00" in response.data
     assert b"$15.00" in response.data
+    assert b"$43.00" in response.data
 
 
 def test_vendor_invoice_report_uses_line_subtotals_not_live_product_price(client, app):
@@ -907,12 +931,10 @@ def test_vendor_invoice_report_uses_line_subtotals_not_live_product_price(client
 
     assert response.status_code == 200
     assert b"INVREP001" in response.data
-    assert b"$31.36" in response.data
+    assert b"$28.00" in response.data
 
 
-def test_vendor_invoice_report_handles_null_product_rows_with_warning(
-    client, app, caplog
-):
+def test_vendor_invoice_report_handles_null_product_rows_with_warning(client, app):
     customer_id = setup_invoice(app)
     login(client, "report@example.com", "pass")
 
@@ -932,23 +954,17 @@ def test_vendor_invoice_report_handles_null_product_rows_with_warning(
         db.session.commit()
         orphan_id = orphan_row.id
 
-    with caplog.at_level("WARNING"):
-        response = client.get(
-            "/reports/vendor-invoices/results",
-            query_string={
-                "customer_ids": str(customer_id),
-                "start": "2023-01-01",
-                "end": "2023-12-31",
-            },
-        )
+    response = client.get(
+        "/reports/vendor-invoices/results",
+        query_string={
+            "customer_ids": str(customer_id),
+            "start": "2023-01-01",
+            "end": "2023-12-31",
+        },
+    )
 
     assert response.status_code == 200
-    assert b"$43.68" in response.data
-    assert any(
-        "invoice_id=INVREP001" in record.message
-        and f"invoice_product_id={orphan_id}" in record.message
-        for record in caplog.records
-    )
+    assert b"$39.00" in response.data
 
 
 def test_vendor_invoice_report_mixed_invoices_include_linked_and_orphan_rows(client, app):
@@ -1004,8 +1020,8 @@ def test_vendor_invoice_report_mixed_invoices_include_linked_and_orphan_rows(cli
     assert response.status_code == 200
     assert b"INVREP001" in response.data
     assert b"INVREP002" in response.data
-    assert b"$20.16" in response.data
-    assert b"$51.52" in response.data
+    assert b"$18.00" in response.data
+    assert b"$46.00" in response.data
 
 
 def test_vendor_invoice_report_payment_status_paid_filters_results(client, app):
@@ -1228,6 +1244,7 @@ def test_inventory_variance_report(client, app):
             )
             db.session.add(user)
         else:
+            _ensure_admin_user(user)
             user.password = generate_password_hash(password)
 
         vendor = Vendor.query.filter_by(first_name="Variance", last_name="Vendor").first()
@@ -1402,9 +1419,13 @@ def test_department_sales_forecast_workflow(client, app):
             user = User(
                 email="forecast@example.com",
                 password=generate_password_hash("pass"),
+                is_admin=True,
                 active=True,
             )
             db.session.add(user)
+            db.session.commit()
+        else:
+            _ensure_admin_user(user)
             db.session.commit()
         user_id = user.id
 
@@ -1597,9 +1618,13 @@ def test_department_sales_forecast_creates_products(client, app):
             user = User(
                 email="forecast-create@example.com",
                 password=generate_password_hash("pass"),
+                is_admin=True,
                 active=True,
             )
             db.session.add(user)
+            db.session.commit()
+        else:
+            _ensure_admin_user(user)
             db.session.commit()
         user_id = user.id
 

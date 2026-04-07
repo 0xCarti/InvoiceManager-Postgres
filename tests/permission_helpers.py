@@ -36,6 +36,16 @@ IMPORT_PERMISSION_CODES = (
     "imports.view",
 )
 
+PURCHASE_PERMISSION_CODES = (
+    "purchase_orders.view",
+    "purchase_orders.create",
+    "purchase_orders.edit",
+    "purchase_orders.upload",
+    "purchase_orders.resolve_vendor_items",
+    "purchase_orders.recommendations",
+    "purchase_invoices.view",
+)
+
 
 def grant_permissions(
     user: User,
@@ -115,6 +125,15 @@ def grant_import_permissions(user: User) -> PermissionGroup:
         *IMPORT_PERMISSION_CODES,
         group_name=f"Import Test Group {user.email}",
         description="Test permissions for import workflows.",
+    )
+
+
+def grant_purchase_permissions(user: User) -> PermissionGroup:
+    return grant_permissions(
+        user,
+        *PURCHASE_PERMISSION_CODES,
+        group_name=f"Purchase Test Group {user.email}",
+        description="Test permissions for purchase workflows.",
     )
 
 

@@ -2,6 +2,7 @@ from werkzeug.security import generate_password_hash
 
 from app import db
 from app.models import Item, ItemUnit, Product, ProductRecipeItem, User
+from tests.permission_helpers import make_super_admin
 from tests.utils import login
 
 
@@ -33,6 +34,7 @@ def setup_user_and_items(app):
         db.session.add_all([iu1, iu2])
         db.session.add(user)
         db.session.commit()
+        make_super_admin(user)
         return user.email, item1.id, item2.id, iu1.id, iu2.id
 
 

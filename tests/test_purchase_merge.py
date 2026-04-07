@@ -20,9 +20,14 @@ from app.models import (
 )
 from app.services.purchase_merge import merge_purchase_orders, PurchaseMergeError
 from app.utils.activity import flush_activity_logs
+from tests.permission_helpers import grant_permissions
 from tests.utils import login
 
-sys.modules.setdefault("pypdf", types.SimpleNamespace(PdfMerger=object))
+pypdf_stub = types.ModuleType("pypdf")
+pypdf_stub.PdfReader = object
+pypdf_stub.PdfWriter = object
+pypdf_stub.PdfMerger = object
+sys.modules.setdefault("pypdf", pypdf_stub)
 
 
 def _create_user_vendor_and_items(app):
@@ -30,6 +35,7 @@ def _create_user_vendor_and_items(app):
         user = User(
             email="merge@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         vendor = Vendor(first_name="Merge", last_name="Vendor")
@@ -40,6 +46,15 @@ def _create_user_vendor_and_items(app):
         location = Location(name="Receiving Bay")
         db.session.add_all([user, vendor, item_a, item_b, unit_a, unit_b, location])
         db.session.commit()
+        grant_permissions(
+            user,
+            "purchase_orders.view",
+            "purchase_orders.create",
+            "purchase_orders.merge",
+            "purchase_invoices.receive",
+            group_name=f"Purchase Merge Test Group {user.email}",
+            description="Test permissions for purchase merge workflows.",
+        )
         return (
             user.email,
             vendor.id,

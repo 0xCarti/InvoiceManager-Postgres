@@ -14,6 +14,7 @@ from app.models import (
     TerminalSale,
     User,
 )
+from tests.permission_helpers import make_super_admin
 from tests.utils import login
 
 
@@ -32,6 +33,7 @@ def setup_data(app):
         loc2 = Location(name="LocB")
         db.session.add_all([user, customer, p1, p2, p3, loc1, loc2])
         db.session.commit()
+        make_super_admin(user)
 
         invoice = Invoice(
             id="INV001",

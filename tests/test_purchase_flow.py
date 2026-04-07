@@ -67,6 +67,7 @@ def setup_purchase(app):
         user = User(
             email="buyer@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         vendor = Vendor(first_name="Vend", last_name="Or")
@@ -95,6 +96,7 @@ def setup_purchase_with_case(app):
         user = User(
             email="casebuyer@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         vendor = Vendor(first_name="Vend", last_name="Or")
@@ -220,7 +222,12 @@ def test_receive_form_includes_department_defaults(client, app):
 def test_purchase_order_item_filter(client, app):
     with app.app_context():
         password = generate_password_hash("pass")
-        user = User(email="filter@example.com", password=password, active=True)
+        user = User(
+            email="filter@example.com",
+            password=password,
+            is_admin=True,
+            active=True,
+        )
         vendor = Vendor(first_name="Alpha", last_name="Vendor")
         widget = Item(name="Widget", base_unit="each")
         gadget = Item(name="Gadget", base_unit="each")
@@ -304,7 +311,8 @@ def test_purchase_order_item_filter(client, app):
         assert f'<option value="{gadget_id}" selected' in page_multi
         assert f'item_id={widget_id}' in page_multi
         assert f'item_id={gadget_id}' in page_multi
-        assert "Filtering by Vendor:" in page_multi
+        assert "Active filters:" in page_multi
+        assert "Vendor: Alpha Vendor" in page_multi
 
 
 def test_item_cost_visible_on_items_page(client, app):
@@ -356,6 +364,7 @@ def test_purchase_order_multiple_items(client, app):
         user = User(
             email="multi@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         vendor = Vendor(first_name="Multi", last_name="Vendor")
@@ -429,6 +438,7 @@ def test_receive_invoice_line_locations(client, app):
         user = User(
             email="locations@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         vendor = Vendor(first_name="Local", last_name="Vendor")
@@ -1571,6 +1581,11 @@ def test_invoice_retains_item_and_unit_names_after_unit_removed(client, app):
 
     # Remove the unit after the invoice is recorded
     with app.app_context():
+        for order_item in PurchaseOrderItem.query.filter_by(
+            purchase_order_id=po_id
+        ).all():
+            order_item.unit_id = None
+        db.session.flush()
         db.session.delete(db.session.get(ItemUnit, unit_id))
         db.session.commit()
 
@@ -1589,6 +1604,7 @@ def test_view_purchase_invoices_item_filters(client, app):
         user = User(
             email="filter@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         vendor = Vendor(first_name="Filter", last_name="Vendor")
@@ -1680,7 +1696,8 @@ def test_view_purchase_invoices_item_filters(client, app):
         assert "INV-C" in page
         selected = extract_selected_options(page, "item_id")
         assert set(selected) == {str(alpha_id), str(gamma_id)}
-        assert "Filtering by Items:" in page
+        assert "Active filters:" in page
+        assert "Items:" in page
         assert alpha_name in page
         assert gamma_name in page
 
@@ -1705,6 +1722,7 @@ def test_view_purchase_invoices_item_options_exclude_archived_items(client, app)
         user = User(
             email="purchase_filter_archived@example.com",
             password=generate_password_hash("pass"),
+            is_admin=True,
             active=True,
         )
         active_item = Item(name="Active Filter Item", base_unit="each")
@@ -1741,7 +1759,12 @@ def test_view_purchase_invoices_item_options_exclude_archived_items(client, app)
 def test_view_purchase_invoices_amount_filters(client, app):
     with app.app_context():
         password = generate_password_hash("pass")
-        user = User(email="filterbuyer@example.com", password=password, active=True)
+        user = User(
+            email="filterbuyer@example.com",
+            password=password,
+            is_admin=True,
+            active=True,
+        )
         vendor = Vendor(first_name="Filter", last_name="Vendor")
         location = Location(name="Filter Location")
         item = Item(name="Filter Item", base_unit="each")
@@ -1850,7 +1873,8 @@ def test_view_purchase_invoices_amount_filters(client, app):
         assert "INV-LOW" not in page_gt
         assert "INV-MID" in page_gt
         assert "INV-HIGH" in page_gt
-        assert "Filtering by Amount: Greater than" in page_gt
+        assert "Active filters:" in page_gt
+        assert "Amount: Greater than" in page_gt
 
         resp_lt = client.get(
             "/purchase_invoices",
@@ -1871,7 +1895,7 @@ def test_view_purchase_invoices_amount_filters(client, app):
         assert "INV-LOW" not in page_eq
         assert "INV-MID" in page_eq
         assert "INV-HIGH" not in page_eq
-        assert "Filtering by Amount: Equal to" in page_eq
+        assert "Amount: Equal to" in page_eq
 
         resp_bad_filter = client.get(
             "/purchase_invoices",
