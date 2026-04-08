@@ -1,5 +1,7 @@
 {% extends 'base.html' %}
 {% block content %}
+{% set can_quick_add_items = can_access_endpoint('item.quick_add_item', 'POST') %}
+{% set can_manage_item_units = can_access_endpoint('item.item_units', 'POST') %}
 <div class="container mt-4">
     <h2>Create Purchase Order</h2>
     {% if upload_state %}
@@ -48,7 +50,9 @@
             </div>
             <div class="mobile-inline-actions">
                 <button type="button" class="btn btn-secondary purchase-order-quick-add" data-role="purchase-order-add-item">Add Item</button>
+                {% if can_quick_add_items %}
                 <button id="quick-add-item" type="button" class="btn btn-outline-secondary purchase-order-quick-add">Create New Item</button>
+                {% endif %}
             </div>
         </div>
         <div id="items" class="purchase-order-items-list" data-next-index="{{ form.items|length }}">
@@ -75,7 +79,9 @@
                 <label class="form-label form-label-sm mb-1 d-md-none" for="items-{{ loop.index0 }}-unit">Unit</label>
                 <div class="d-flex flex-column gap-1">
                     <select id="items-{{ loop.index0 }}-unit" name="items-{{ loop.index0 }}-unit" class="form-control unit-select" data-selected="{{ item.unit.data or '' }}"></select>
+                    {% if can_manage_item_units %}
                     <button type="button" class="btn btn-outline-secondary btn-sm text-start manage-units-button" aria-label="Edit units of measure"{% if not item_id %} disabled{% endif %}>Edit units</button>
+                    {% endif %}
                 </div>
             </div>
             <div class="col-4 col-md-2 purchase-order-quantity-column">
@@ -97,8 +103,12 @@
         </div>
     </form>
 
+    {% if can_quick_add_items %}
     {% include 'purchase_orders/_create_item_modal.html' %}
+    {% endif %}
+    {% if can_manage_item_units %}
     {% include 'purchase_orders/_manage_units_modal.html' %}
+    {% endif %}
 </div>
 
 <script src="{{ url_for('static', filename='js/purchase_order_form.js') }}"></script>
@@ -114,6 +124,7 @@ document.addEventListener('DOMContentLoaded', function() {
         quickAddButton: document.getElementById('quick-add-item'),
         newItemModal: document.getElementById('newItemModal'),
         saveNewItemButton: document.getElementById('save-new-item'),
+        canManageUnits: {{ can_manage_item_units|tojson }},
         nextIndex: {{ form.items|length }}
     });
 });

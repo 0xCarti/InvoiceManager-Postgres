@@ -18,6 +18,7 @@
         const quickAddButton = config.quickAddButton || null;
         const saveNewItemButton = config.saveNewItemButton || null;
         const newItemModalEl = config.newItemModal || null;
+        const canManageUnits = config.canManageUnits !== false;
         const manageUnitsModalEl =
             (config && config.manageUnitsModal) ||
             document.getElementById("manageUnitsModal");
@@ -47,6 +48,9 @@
         }
 
         function setManageButtonState(row, enabled) {
+            if (!canManageUnits) {
+                return;
+            }
             if (!row) {
                 return;
             }
@@ -812,22 +816,24 @@
                 ? String(options.unitId)
                 : "";
             unitWrapper.appendChild(unitSelect);
-            const manageButton = document.createElement("button");
-            manageButton.type = "button";
-            manageButton.classList.add(
-                "btn",
-                "btn-outline-secondary",
-                "btn-sm",
-                "text-start",
-                "manage-units-button"
-            );
-            manageButton.textContent = "Edit units";
-            manageButton.setAttribute(
-                "aria-label",
-                "Edit units of measure"
-            );
-            manageButton.disabled = true;
-            unitWrapper.appendChild(manageButton);
+            if (canManageUnits) {
+                const manageButton = document.createElement("button");
+                manageButton.type = "button";
+                manageButton.classList.add(
+                    "btn",
+                    "btn-outline-secondary",
+                    "btn-sm",
+                    "text-start",
+                    "manage-units-button"
+                );
+                manageButton.textContent = "Edit units";
+                manageButton.setAttribute(
+                    "aria-label",
+                    "Edit units of measure"
+                );
+                manageButton.disabled = true;
+                unitWrapper.appendChild(manageButton);
+            }
             unitCol.appendChild(unitWrapper);
 
             const quantityCol = document.createElement("div");

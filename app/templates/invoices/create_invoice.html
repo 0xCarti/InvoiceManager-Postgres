@@ -2,11 +2,13 @@
 {% block title %}Create Invoice{% endblock %}
 
 {% block content %}
+{% set can_create_customers = can_access_endpoint('customer.create_customer_modal') %}
 <div class="container mt-5">
     <h1>Create Invoice</h1>
     {% include "invoices/_invoice_form.html" %}
 </div>
 
+{% if can_create_customers %}
 <div class="modal fade" id="createInvoiceCustomerModal" tabindex="-1" aria-labelledby="createInvoiceCustomerModalLabel" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -22,6 +24,7 @@
         </div>
     </div>
 </div>
+{% endif %}
 
 {% set invoice_form_submit_mode = 'page' %}
 {% include "invoices/_invoice_form_scripts.html" %}

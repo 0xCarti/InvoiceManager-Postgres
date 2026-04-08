@@ -1,4 +1,7 @@
 <tr id="transfer-row-{{ transfer.id }}">
+    {% set can_edit_transfers = can_access_endpoint('transfer.edit_transfer') %}
+    {% set can_complete_transfers = can_access_endpoint('transfer.complete_transfer', 'POST') %}
+    {% set can_delete_transfers = can_access_endpoint('transfer.delete_transfer', 'POST') %}
     {% set total_items = transfer.transfer_items|length %}
     {% set ns = namespace(completed_items=0) %}
     {% for transfer_item in transfer.transfer_items %}
@@ -16,7 +19,10 @@
     <td class="col-transfer-actions">
         <div class="mobile-actions mobile-card-actions">
         <a href="{{ url_for('transfer.view_transfer', transfer_id=transfer.id) }}" class="btn btn-primary btn-sm" target="_blank">View</a>
+        {% if can_edit_transfers %}
         <button type="button" class="btn btn-secondary btn-sm edit-transfer-btn" data-id="{{ transfer.id }}">Edit</button>
+        {% endif %}
+        {% if can_complete_transfers %}
         {% if transfer.completed %}
         <form method="post" action="{{ url_for('transfer.uncomplete_transfer', transfer_id=transfer.id) }}" class="d-inline">
             {{ form.hidden_tag() }}
@@ -30,10 +36,13 @@
             </button>
         </form>
         {% endif %}
+        {% endif %}
+        {% if can_delete_transfers %}
         <form action="{{ url_for('transfer.delete_transfer', transfer_id=transfer.id) }}" method="post" class="d-inline">
             {{ form.hidden_tag() }}
             <input type="submit" value="Delete" class="btn btn-danger btn-sm" data-confirm-message="Are you sure?">
         </form>
+        {% endif %}
         </div>
     </td>
 </tr>

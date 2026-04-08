@@ -3,10 +3,16 @@
 {% block content %}
 <div class="container mt-4">
     <h2>Database Backups</h2>
+    {% if not can_create_backups and not can_restore_backups and not can_download_backups %}
+    <div class="alert alert-info">You have read-only backup access. Create, restore, and download actions are hidden.</div>
+    {% endif %}
+
+    {% if can_create_backups %}
     <form action="{{ url_for('admin.create_backup_route') }}" method="post" class="mb-3">
         {{ create_form.hidden_tag() }}
         {{ create_form.submit(class='btn btn-primary') }}
     </form>
+    {% endif %}
 
     <h4>Restore Backup</h4>
     <div class="alert alert-info" role="alert">
@@ -18,6 +24,7 @@
         If a backup was created by a different release, create a fresh backup from the current version before restoring.
     </div>
 
+    {% if can_restore_backups %}
     <form action="{{ url_for('admin.restore_backup_route') }}" method="post" enctype="multipart/form-data" class="mb-4">
         {{ restore_form.hidden_tag() }}
         <div class="form-group">
@@ -34,6 +41,9 @@
         </div>
         {{ restore_form.submit(class='btn btn-danger') }}
     </form>
+    {% else %}
+    <div class="alert alert-secondary">You can review available backups, but you do not have permission to restore them.</div>
+    {% endif %}
 
     <h4>Available Backups</h4>
     <ul class="list-group">
@@ -41,6 +51,7 @@
         <li class="list-group-item d-flex justify-content-between align-items-center">
             {{ b }}
             <div>
+                {% if can_restore_backups %}
                 <form action="{{ url_for('admin.restore_backup_file', filename=b) }}" method="post" class="d-inline">
                     {{ restore_form.csrf_token }}
                     <input type="hidden" name="ignore_favorites" value="0">
@@ -55,7 +66,13 @@
                     </div>
                     <button type="submit" class="btn btn-sm btn-danger">Restore</button>
                 </form>
+                {% endif %}
+                {% if can_download_backups %}
                 <a href="{{ url_for('admin.download_backup', filename=b) }}" class="btn btn-sm btn-secondary ms-1">Download</a>
+                {% endif %}
+                {% if not can_restore_backups and not can_download_backups %}
+                <span class="text-muted small">Read only</span>
+                {% endif %}
             </div>
         </li>
         {% else %}

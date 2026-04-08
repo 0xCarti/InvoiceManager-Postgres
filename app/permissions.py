@@ -326,6 +326,90 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
 
 
 ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] = {
+    ("notes.entity_notes", "GET"): requirement(
+        any_of=(
+            "locations.view",
+            "locations.manage_items",
+            "items.view",
+            "products.edit",
+            "vendors.edit",
+            "customers.edit",
+            "transfers.view",
+            "purchase_orders.edit",
+            "purchase_invoices.view",
+            "invoices.view",
+        )
+    ),
+    ("notes.entity_notes", "POST"): requirement(
+        any_of=(
+            "locations.view",
+            "locations.manage_items",
+            "items.view",
+            "products.edit",
+            "vendors.edit",
+            "customers.edit",
+            "transfers.view",
+            "purchase_orders.edit",
+            "purchase_invoices.view",
+            "invoices.view",
+        )
+    ),
+    ("notes.edit_note", "GET"): requirement(
+        any_of=(
+            "locations.view",
+            "locations.manage_items",
+            "items.view",
+            "products.edit",
+            "vendors.edit",
+            "customers.edit",
+            "transfers.view",
+            "purchase_orders.edit",
+            "purchase_invoices.view",
+            "invoices.view",
+        )
+    ),
+    ("notes.edit_note", "POST"): requirement(
+        any_of=(
+            "locations.view",
+            "locations.manage_items",
+            "items.view",
+            "products.edit",
+            "vendors.edit",
+            "customers.edit",
+            "transfers.view",
+            "purchase_orders.edit",
+            "purchase_invoices.view",
+            "invoices.view",
+        )
+    ),
+    ("notes.delete_note", "POST"): requirement(
+        any_of=(
+            "locations.view",
+            "locations.manage_items",
+            "items.view",
+            "products.edit",
+            "vendors.edit",
+            "customers.edit",
+            "transfers.view",
+            "purchase_orders.edit",
+            "purchase_invoices.view",
+            "invoices.view",
+        )
+    ),
+    ("notes.toggle_pin", "POST"): requirement(
+        any_of=(
+            "locations.view",
+            "locations.manage_items",
+            "items.view",
+            "products.edit",
+            "vendors.edit",
+            "customers.edit",
+            "transfers.view",
+            "purchase_orders.edit",
+            "purchase_invoices.view",
+            "invoices.view",
+        )
+    ),
     ("item.bulk_update_items", "GET"): requirement(any_of=("items.bulk_update",)),
     ("item.bulk_update_items", "POST"): requirement(any_of=("items.bulk_update",)),
     ("item.item_locations", "GET"): requirement(any_of=("items.view", "locations.manage_items")),
@@ -409,6 +493,16 @@ ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] =
 DEFAULT_LANDING_ENDPOINTS: tuple[str, ...] = (
     "transfer.view_transfers",
     "main.home",
+    "admin.users",
+    "admin.settings",
+    "admin.permission_groups",
+    "admin.permission_catalog",
+    "admin.sales_imports",
+    "admin.vendor_item_aliases",
+    "admin.terminal_sales_mappings",
+    "admin.backups",
+    "admin.system_info",
+    "admin.activity_logs",
     "invoice.view_invoices",
     "purchase.view_purchase_orders",
     "item.view_items",

@@ -4,12 +4,15 @@ import sqlite3
 import io
 import json
 
+from app import db
 from app.models import ActivityLog, User
 from app.utils.backup import RestoreCompatibilityResult, RestoreSummary
+from tests.permission_helpers import grant_permissions
 from tests.utils import login
 from app.utils.activity import flush_activity_logs
 from app.utils.backup import create_backup
 from sqlalchemy.exc import OperationalError
+from werkzeug.security import generate_password_hash
 
 
 def _create_sqlite_backup(app, filename):
@@ -246,6 +249,60 @@ def test_admin_backups_renders_when_menu_endpoint_missing(client, app):
     assert response.status_code == 200
     assert b"Database Backups" in response.data
     assert b"BuildError" not in response.data
+
+
+def test_backup_page_hides_manage_actions_for_view_only_users(client, app):
+    backup_filename = "view_only_backup.db"
+    _create_sqlite_backup(app, backup_filename)
+
+    with app.app_context():
+        user = User(
+            email="backup-viewer@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add(user)
+        db.session.commit()
+        grant_permissions(
+            user,
+            "backups.view",
+            group_name="Backup View Only",
+            description="Can only view the backup page.",
+        )
+
+    with client:
+        login(client, "backup-viewer@example.com", "pass")
+        response = client.get("/controlpanel/backups", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert b"You have read-only backup access." in response.data
+    assert backup_filename.encode() in response.data
+    assert b"Create Backup" not in response.data
+    assert b'class="form-control-file"' not in response.data
+    assert b'btn btn-sm btn-danger">Restore<' not in response.data
+    assert b'btn btn-sm btn-secondary ms-1">Download<' not in response.data
+
+
+def test_backup_page_lists_only_database_files(client, app):
+    backup_filename = "listed_backup.db"
+    _create_sqlite_backup(app, backup_filename)
+    diagnostic_path = os.path.join(
+        app.config["BACKUP_FOLDER"], "restore_preflight_diag_deadbeef.json"
+    )
+    with open(diagnostic_path, "w", encoding="utf-8") as handle:
+        handle.write("{}")
+
+    with client:
+        login(
+            client,
+            os.getenv("ADMIN_EMAIL", "admin@example.com"),
+            os.getenv("ADMIN_PASS", "adminpass"),
+        )
+        response = client.get("/controlpanel/backups", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert backup_filename.encode() in response.data
+    assert b"restore_preflight_diag_deadbeef.json" not in response.data
 
 
 def test_restore_backup_file_permissive_mode_shows_partial_restore_message(

@@ -2,11 +2,13 @@ import json
 import re
 from datetime import date
 from html import unescape
+from io import BytesIO
 
 import pytest
 from werkzeug.security import generate_password_hash
 
 from app import db
+from app.forms import TerminalSalesUploadForm
 from app.models import (
     Event,
     EventLocation,
@@ -182,6 +184,20 @@ def test_upload_get_without_state_token_resets_wizard(client, app):
                 ).count()
             )
             assert remaining_states == 0
+
+
+def test_terminal_sales_upload_form_accepts_xlsx(app):
+    with app.test_request_context(
+        "/events/1/sales/upload",
+        method="POST",
+        data={
+            "program": "idealpos",
+            "file": (BytesIO(b"not really an xlsx, just the extension matters here"), "sales.xlsx"),
+        },
+    ):
+        form = TerminalSalesUploadForm(meta={"csrf": False})
+        assert form.validate() is True
+        assert not form.errors
 import math
 
 import pytest

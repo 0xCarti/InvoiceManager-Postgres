@@ -1,9 +1,11 @@
 <form id="invoiceForm" method="post">
     {{ form.hidden_tag() }}
+    {% set can_create_customers = can_access_endpoint('customer.create_customer_modal') %}
     <div class="form-group">
         <label for="customerSelect">Select Customer:</label>
         <div class="d-flex flex-column flex-sm-row gap-2 align-items-sm-start">
             {{ form.customer(class="form-control", id="customerSelect") }}
+            {% if can_create_customers %}
             <button
                 type="button"
                 class="btn btn-outline-secondary flex-shrink-0"
@@ -12,6 +14,7 @@
             >
                 Create Customer
             </button>
+            {% endif %}
         </div>
     </div>
     {{ form.products(id="products") }}

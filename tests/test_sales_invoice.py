@@ -89,7 +89,7 @@ def test_create_invoice_handles_integrity_error_with_rollback_and_friendly_messa
 
     def failing_commit():
         commit_calls["count"] += 1
-        if commit_calls["count"] == 2:
+        if commit_calls["count"] == 1:
             raise IntegrityError(
                 "INSERT INTO invoice_product ...",
                 {"invoice_id": "generated"},

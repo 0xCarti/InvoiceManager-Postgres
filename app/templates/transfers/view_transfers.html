@@ -2,6 +2,8 @@
 {% from 'macros/column_visibility.html' import column_visibility_dropdown %}
 
 {% block content %}
+{% set can_create_transfers = can_access_endpoint('transfer.add_transfer') %}
+{% set can_view_transfer_reports = can_access_endpoint('transfer.generate_report') or can_access_endpoint('transfer.view_report') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-toolbar,
@@ -45,9 +47,11 @@
             <h2 class="mb-1">Transfers</h2>
             <p class="text-muted mb-0">Track transfers between locations</p>
         </div>
+        {% if can_create_transfers %}
         <div>
             <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addTransferModal">Add New Transfer</button>
         </div>
+        {% endif %}
     </div>
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3 mobile-toolbar">
         <button id="new-transfer-alert" type="button" class="btn btn-warning" data-action="reload"
@@ -63,15 +67,21 @@
                 <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#searchModal">Search/Filter</button></li>
             </ul>
         </div>
+        {% if can_view_transfer_reports %}
         <div class="dropdown">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                 Reports
             </button>
             <ul class="dropdown-menu dropdown-menu-end">
+                {% if can_access_endpoint('transfer.generate_report') %}
                 <li><a class="dropdown-item" href="{{ url_for('transfer.generate_report') }}">Generate Report</a></li>
+                {% endif %}
+                {% if can_access_endpoint('transfer.view_report') %}
                 <li><a class="dropdown-item" href="{{ url_for('transfer.view_report') }}">View Last Report</a></li>
+                {% endif %}
             </ul>
         </div>
+        {% endif %}
         <div>
             {{ column_visibility_dropdown(
                 table_id='transfer-table',

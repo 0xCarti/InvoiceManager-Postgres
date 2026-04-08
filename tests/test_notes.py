@@ -3,6 +3,7 @@ from werkzeug.security import generate_password_hash
 from app import db
 from app.models import ActivityLog, Location, Note, User
 from app.utils.activity import flush_activity_logs
+from tests.permission_helpers import grant_permissions
 from tests.utils import extract_csrf_token, login
 
 
@@ -25,6 +26,12 @@ def _create_location_with_user(app):
         )
         db.session.add_all([location, other_user])
         db.session.commit()
+        grant_permissions(
+            other_user,
+            "locations.view",
+            group_name="Location Notes Viewer",
+            description="Can view locations for note tests.",
+        )
         return location.id
 
 
@@ -115,6 +122,12 @@ def test_non_admin_cannot_pin_notes(client, app):
         )
         db.session.add_all([location, user])
         db.session.commit()
+        grant_permissions(
+            user,
+            "locations.view",
+            group_name="Secondary Location Viewer",
+            description="Can view locations for note tests.",
+        )
         location_id = location.id
 
     with client:
@@ -165,3 +178,21 @@ def test_non_admin_cannot_pin_notes(client, app):
             refreshed = db.session.get(Note, note_id)
             assert refreshed.content == "Updated"
             assert refreshed.pinned is False
+
+
+def test_note_routes_require_access_to_underlying_entity(client, app):
+    with app.app_context():
+        location = Location(name="Restricted Notes Location")
+        user = User(
+            email="restricted-note-user@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add_all([location, user])
+        db.session.commit()
+        location_id = location.id
+
+    with client:
+        login(client, "restricted-note-user@example.com", "pass")
+        response = client.get(f"/notes/location/{location_id}", follow_redirects=False)
+        assert response.status_code == 403

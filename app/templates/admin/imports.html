@@ -3,14 +3,21 @@
 {% block content %}
 <div class="container mt-4">
     <h2>Data Imports</h2>
+    {% if not can_run_imports %}
+    <div class="alert alert-info">You can download example files here, but import uploads are hidden because you do not have permission to run imports.</div>
+    {% endif %}
     {% for key,label in labels.items() %}
     <form action="{{ url_for('admin.import_data', data_type=key) }}" method="post" enctype="multipart/form-data" class="mb-3">
         {{ forms[key].hidden_tag() }}
+        {% if can_run_imports %}
         <div class="mb-2">
             {{ forms[key].file(class="form-control") }}
         </div>
+        {% endif %}
         <a href="{{ url_for('admin.download_example', data_type=key) }}" class="btn btn-secondary me-2">Download Example</a>
+        {% if can_run_imports %}
         <button type="submit" class="btn btn-primary">{{ label }}</button>
+        {% endif %}
     </form>
     {% endfor %}
 </div>

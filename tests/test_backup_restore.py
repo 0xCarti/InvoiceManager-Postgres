@@ -44,6 +44,7 @@ from app.utils.activity import flush_activity_logs
 from app.utils.backup import (
     BACKUP_SCHEMA_VERSION,
     RestoreBackupError,
+    RestoreCompatibilityResult,
     _backup_loop,
     check_and_fix_pk_sequences,
     create_backup,
@@ -456,6 +457,82 @@ def test_restore_backup_route_rejects_invalid_sqlite(client, app):
             follow_redirects=True,
         )
         assert b"Invalid backup database file." in resp.data
+
+
+def test_restore_backup_upload_does_not_overwrite_existing_backup_file(
+    client, app, monkeypatch
+):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        backups_dir = app.config["BACKUP_FOLDER"]
+        os.makedirs(backups_dir, exist_ok=True)
+        existing_path = os.path.join(backups_dir, "existing.db")
+        with open(existing_path, "wb") as handle:
+            handle.write(b"original-backup")
+
+    monkeypatch.setattr(
+        "app.routes.auth_routes.validate_backup_file_compatibility",
+        lambda *_args, **_kwargs: RestoreCompatibilityResult(
+            compatible=False, issues=["missing marker"], warnings=[]
+        ),
+    )
+
+    with client:
+        login(client, admin_email, admin_pass)
+        resp = client.post(
+            "/controlpanel/backups/restore",
+            data={"file": (BytesIO(b"SQLite format 3\x00replacement"), "existing.db")},
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+
+    assert b"Incompatible backup" in resp.data
+
+    with app.app_context():
+        with open(existing_path, "rb") as handle:
+            assert handle.read() == b"original-backup"
+        assert not any(
+            name.startswith("restore-upload-") and name.endswith("-existing.db")
+            for name in os.listdir(backups_dir)
+        )
+
+
+def test_restore_backup_upload_cleans_up_incompatible_uploaded_file(
+    client, app, monkeypatch
+):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        backups_dir = app.config["BACKUP_FOLDER"]
+        os.makedirs(backups_dir, exist_ok=True)
+
+    monkeypatch.setattr(
+        "app.routes.auth_routes.validate_backup_file_compatibility",
+        lambda *_args, **_kwargs: RestoreCompatibilityResult(
+            compatible=False, issues=["missing marker"], warnings=[]
+        ),
+    )
+
+    with client:
+        login(client, admin_email, admin_pass)
+        resp = client.post(
+            "/controlpanel/backups/restore",
+            data={"file": (BytesIO(b"SQLite format 3\x00broken"), "bad-compat.db")},
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+
+    assert b"Incompatible backup" in resp.data
+
+    with app.app_context():
+        assert "bad-compat.db" not in os.listdir(backups_dir)
+        assert not any(
+            name.startswith("restore-upload-") and name.endswith("-bad-compat.db")
+            for name in os.listdir(backups_dir)
+        )
 
 
 def test_validate_backup_file_compatibility_handles_missing_setting_table(app):

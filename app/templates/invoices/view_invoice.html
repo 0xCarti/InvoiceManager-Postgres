@@ -5,6 +5,7 @@
 {% block title %}Invoice Details{% endblock %}
 
 {% block content %}
+{% set can_manage_invoice_status = can_access_endpoint('invoice.mark_invoice_delivered', 'POST') %}
 <div class="container mt-5">
     <div class="row justify-content-center">
         <div class="col-md-6">
@@ -15,6 +16,7 @@
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
         <h1 class="mb-0">Invoice - {{ invoice.customer.first_name }} {{ invoice.customer.last_name }}</h1>
         <div class="d-flex flex-wrap gap-2">
+            {% if can_manage_invoice_status %}
             {% if invoice.can_mark_delivered %}
             <form action="{{ url_for('invoice.mark_invoice_delivered', invoice_id=invoice.id) }}" method="post">
                 {{ delete_form.hidden_tag() }}
@@ -26,6 +28,7 @@
                 {{ delete_form.hidden_tag() }}
                 <button type="submit" class="btn btn-primary btn-sm">Mark Paid</button>
             </form>
+            {% endif %}
             {% endif %}
         </div>
     </div>

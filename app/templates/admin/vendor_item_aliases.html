@@ -4,18 +4,28 @@
     <div class="col-12">
         <h1 class="h4 mb-3">Vendor Item Aliases</h1>
         <p class="text-muted">Link vendor SKUs and descriptions to inventory items so future purchase-order imports map automatically.</p>
+        {% if not can_manage_vendor_item_aliases %}
+        <div class="alert alert-info">You have view-only access to vendor item aliases. Create, edit, and delete actions are hidden.</div>
+        {% endif %}
     </div>
 </div>
 <div class="row">
     <div class="col-lg-5">
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <span>{{ 'Edit Alias' if editing_alias else 'Add Alias' }}</span>
-                {% if editing_alias %}
+                <span>
+                    {% if can_manage_vendor_item_aliases %}
+                        {{ 'Edit Alias' if editing_alias else 'Add Alias' }}
+                    {% else %}
+                        {{ 'Alias Details' if editing_alias else 'Alias Details' }}
+                    {% endif %}
+                </span>
+                {% if editing_alias and can_manage_vendor_item_aliases %}
                 <a href="{{ url_for('admin.vendor_item_aliases') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
                 {% endif %}
             </div>
             <div class="card-body">
+                {% if can_manage_vendor_item_aliases %}
                 <form method="post">
                     {{ form.hidden_tag() }}
                     <div class="mb-3">
@@ -52,6 +62,32 @@
                     </div>
                     <button type="submit" class="btn btn-primary">{{ 'Update Alias' if editing_alias else 'Add Alias' }}</button>
                 </form>
+                {% elif editing_alias %}
+                <dl class="row mb-0">
+                    <dt class="col-sm-4">Vendor</dt>
+                    <dd class="col-sm-8">{{ editing_alias.vendor.first_name }} {{ editing_alias.vendor.last_name }}</dd>
+                    <dt class="col-sm-4">SKU</dt>
+                    <dd class="col-sm-8">{{ editing_alias.vendor_sku or 'No SKU' }}</dd>
+                    <dt class="col-sm-4">Description</dt>
+                    <dd class="col-sm-8">{{ editing_alias.vendor_description or 'No vendor description' }}</dd>
+                    <dt class="col-sm-4">Pack/Size</dt>
+                    <dd class="col-sm-8">{{ editing_alias.pack_size or '-' }}</dd>
+                    <dt class="col-sm-4">Item</dt>
+                    <dd class="col-sm-8">{{ editing_alias.item.name if editing_alias.item else 'Unmapped item' }}</dd>
+                    <dt class="col-sm-4">Unit</dt>
+                    <dd class="col-sm-8">{{ editing_alias.item_unit.name if editing_alias.item_unit else 'Receiving default' }}</dd>
+                    <dt class="col-sm-4">Default Cost</dt>
+                    <dd class="col-sm-8">
+                        {% if editing_alias.default_cost is not none %}
+                            ${{ '%.2f'|format(editing_alias.default_cost) }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </dd>
+                </dl>
+                {% else %}
+                <p class="mb-0 text-muted">Select an alias from the list to review its details.</p>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -94,11 +130,15 @@
                                 </dd>
                             </dl>
                             <div class="vstack gap-2">
-                                <a class="btn btn-sm btn-outline-primary w-100" href="{{ url_for('admin.vendor_item_aliases', alias_id=alias.id) }}">Edit</a>
+                                <a class="btn btn-sm btn-outline-primary w-100" href="{{ url_for('admin.vendor_item_aliases', alias_id=alias.id) }}">
+                                    {{ 'Edit' if can_manage_vendor_item_aliases else 'View' }}
+                                </a>
+                                {% if can_manage_vendor_item_aliases %}
                                 <form method="post" action="{{ url_for('admin.delete_vendor_item_alias', alias_id=alias.id) }}">
                                     {{ delete_form.hidden_tag() }}
                                     <button type="submit" class="btn btn-sm btn-danger w-100" data-confirm-message="Delete this alias?">Delete</button>
                                 </form>
+                                {% endif %}
                             </div>
                         </div>
                     </div>
@@ -136,11 +176,15 @@
                                 </td>
                                 <td class="text-end">
                                     <div class="d-flex gap-2 justify-content-end">
-                                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.vendor_item_aliases', alias_id=alias.id) }}">Edit</a>
+                                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.vendor_item_aliases', alias_id=alias.id) }}">
+                                            {{ 'Edit' if can_manage_vendor_item_aliases else 'View' }}
+                                        </a>
+                                        {% if can_manage_vendor_item_aliases %}
                                         <form method="post" action="{{ url_for('admin.delete_vendor_item_alias', alias_id=alias.id) }}">
                                             {{ delete_form.hidden_tag() }}
                                             <button type="submit" class="btn btn-sm btn-danger" data-confirm-message="Delete this alias?">Delete</button>
                                         </form>
+                                        {% endif %}
                                     </div>
                                 </td>
                             </tr>

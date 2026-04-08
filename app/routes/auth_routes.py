@@ -23,6 +23,7 @@ from flask import (
     url_for,
 )
 from flask_login import current_user, login_required, login_user, logout_user
+from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import selectinload
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
@@ -493,6 +494,31 @@ def _reset_token_password_fingerprint(user: User) -> str:
     return hashlib.sha256((user.password or "").encode("utf-8")).hexdigest()
 
 
+def _normalize_email(value: str | None) -> str:
+    return (value or "").strip().lower()
+
+
+def _find_user_by_email(email: str | None) -> User | None:
+    normalized_email = _normalize_email(email)
+    if not normalized_email:
+        return None
+    return User.query.filter(func.lower(User.email) == normalized_email).first()
+
+
+def _find_permission_group_by_name(
+    name: str | None, *, exclude_group_id: int | None = None
+) -> PermissionGroup | None:
+    normalized_name = (name or "").strip().casefold()
+    if not normalized_name:
+        return None
+    query = PermissionGroup.query.filter(
+        func.lower(PermissionGroup.name) == normalized_name
+    )
+    if exclude_group_id is not None:
+        query = query.filter(PermissionGroup.id != exclude_group_id)
+    return query.first()
+
+
 def generate_reset_token(user: User) -> str:
     return _serializer().dumps(
         {
@@ -523,10 +549,10 @@ def login():
     """Authenticate a user and start their session."""
     form = LoginForm()
     if form.validate_on_submit():
-        email = form.email.data
+        email = _normalize_email(form.email.data)
         password = form.password.data
 
-        user = User.query.filter_by(email=email).first()
+        user = _find_user_by_email(email)
 
         if not user or not check_password_hash(user.password, password):
             flash("Please check your login details and try again.")
@@ -575,7 +601,7 @@ def reset_request():
     """Request a password reset email."""
     form = PasswordResetRequestForm()
     if form.validate_on_submit():
-        user = User.query.filter_by(email=form.email.data).first()
+        user = _find_user_by_email(form.email.data)
         if user:
             token = generate_reset_token(user)
             reset_url = url_for("auth.reset_token", token=token, _external=True)
@@ -603,6 +629,8 @@ def reset_token(token):
     form = SetPasswordForm()
     if form.validate_on_submit():
         user.password = generate_password_hash(form.new_password.data)
+        if not user.active and user.last_login_at is None:
+            user.active = True
         db.session.commit()
         flash("Password updated.", "success")
         return redirect(url_for("auth.login"))
@@ -826,8 +854,8 @@ def users():
     )
     if invite_submitted:
         if invite_form.validate_on_submit():
-            email = invite_form.email.data
-            existing = User.query.filter_by(email=email).first()
+            email = _normalize_email(invite_form.email.data)
+            existing = _find_user_by_email(email)
             if existing:
                 flash("User already exists.", "danger")
             else:
@@ -874,6 +902,8 @@ def users():
         if user:
             if action == "toggle_active":
                 user.active = not user.active
+                if not user.active:
+                    user.last_active_at = None
                 log_activity(f"Toggled active for user {user_id}")
             elif action == "toggle_super_admin":
                 if not current_user.is_super_admin:
@@ -1009,7 +1039,7 @@ def create_permission_group():
             is_valid = False
 
         if is_valid:
-            existing = PermissionGroup.query.filter_by(name=name).first()
+            existing = _find_permission_group_by_name(name)
             if existing:
                 create_form.name.errors.append(
                     "A permission group with that name already exists."
@@ -1118,12 +1148,8 @@ def edit_permission_group(group_id):
             is_valid = False
 
         if can_manage_group and is_valid:
-            duplicate = (
-                PermissionGroup.query.filter(
-                    PermissionGroup.name == name,
-                    PermissionGroup.id != group.id,
-                )
-                .first()
+            duplicate = _find_permission_group_by_name(
+                name, exclude_group_id=group.id
             )
             if duplicate:
                 group_form.name.errors.append(
@@ -1253,7 +1279,12 @@ def _render_backups_page():
 
     backups_dir = current_app.config["BACKUP_FOLDER"]
     os.makedirs(backups_dir, exist_ok=True)
-    files = sorted(os.listdir(backups_dir))
+    files = sorted(
+        filename
+        for filename in os.listdir(backups_dir)
+        if filename.lower().endswith(".db")
+        and os.path.isfile(os.path.join(backups_dir, filename))
+    )
     create_form = CreateBackupForm()
     restore_form = RestoreBackupForm()
     restore_form.restore_mode.data = _resolve_restore_mode(
@@ -1264,6 +1295,9 @@ def _render_backups_page():
         backups=files,
         create_form=create_form,
         restore_form=restore_form,
+        can_create_backups=current_user.has_permission("backups.create"),
+        can_restore_backups=current_user.has_permission("backups.restore"),
+        can_download_backups=current_user.has_permission("backups.download"),
     )
 
 
@@ -1286,6 +1320,14 @@ def restore_backup_route():
     form = RestoreBackupForm()
     actor_user_id = getattr(current_user, "id", None)
     warning_details = ""
+    uploaded_path = None
+
+    def _cleanup_uploaded_file():
+        nonlocal uploaded_path
+        if uploaded_path and os.path.exists(uploaded_path):
+            os.remove(uploaded_path)
+        uploaded_path = None
+
     if form.validate_on_submit():
         file = form.file.data
         filename = secure_filename(file.filename)
@@ -1303,7 +1345,9 @@ def restore_backup_route():
 
         backups_dir = current_app.config["BACKUP_FOLDER"]
         os.makedirs(backups_dir, exist_ok=True)
-        filepath = os.path.join(backups_dir, filename)
+        uploaded_name = f"restore-upload-{uuid.uuid4().hex}-{filename}"
+        filepath = os.path.join(backups_dir, uploaded_name)
+        uploaded_path = filepath
         file.save(filepath)
         unresolved_blockers: list[str] = []
         restore_mode = _resolve_restore_mode(form.restore_mode.data)
@@ -1311,7 +1355,7 @@ def restore_backup_route():
             compatibility = validate_backup_file_compatibility(filepath)
         except SQLAlchemyError as exc:
             if _is_invalid_backup_sqlalchemy_error(exc):
-                os.remove(filepath)
+                _cleanup_uploaded_file()
                 flash("Invalid backup database file.", "error")
                 return redirect(url_for("admin.backups"))
             compatibility = None
@@ -1363,6 +1407,7 @@ def restore_backup_route():
                 "danger",
             )
             flash(f"Compatibility errors: {details}", "danger")
+            _cleanup_uploaded_file()
             return redirect(url_for("admin.backups"))
 
         if compatibility is not None and compatibility.warnings:
@@ -1390,6 +1435,7 @@ def restore_backup_route():
                     f"Strict restore blocked for {filename}: {warning_details}",
                     actor_user_id,
                 )
+                _cleanup_uploaded_file()
                 return redirect(url_for("admin.backups"))
         try:
             restore_summary = restore_backup(filepath, restore_mode=restore_mode)
@@ -1410,7 +1456,9 @@ def restore_backup_route():
                 f"Restore failed ({failure_class}): {restore_details}",
                 "danger",
             )
+            _cleanup_uploaded_file()
             return redirect(url_for("admin.backups"))
+        _cleanup_uploaded_file()
         mode, changed_count = _apply_restore_favorites_mode(
             bool(form.ignore_favorites.data)
         )
@@ -1777,7 +1825,12 @@ def import_page():
         "vendors": "Import Vendors",
         "users": "Import Users",
     }
-    return render_template("admin/imports.html", forms=forms, labels=labels)
+    return render_template(
+        "admin/imports.html",
+        forms=forms,
+        labels=labels,
+        can_run_imports=current_user.has_permission("imports.run"),
+    )
 
 
 @admin.route(
@@ -1956,6 +2009,7 @@ def settings():
         purchase_import_vendors=enabled_import_vendors,
         retail_pop_price=retail_pop_price_decimal,
     )
+    can_manage_settings = current_user.has_permission("settings.manage")
     if form.validate_on_submit():
         conversion_updates = {}
         has_conversion_error = False
@@ -1971,7 +2025,11 @@ def settings():
             conversion_updates.setdefault(unit, unit)
 
         if has_conversion_error:
-            return render_template("admin/settings.html", form=form)
+            return render_template(
+                "admin/settings.html",
+                form=form,
+                can_manage_settings=can_manage_settings,
+            )
 
         enabled_import_vendors = [
             label
@@ -1982,7 +2040,11 @@ def settings():
             form.enable_sysco_imports.errors.append(
                 "Select at least one vendor to enable for imports."
             )
-            return render_template("admin/settings.html", form=form)
+            return render_template(
+                "admin/settings.html",
+                form=form,
+                can_manage_settings=can_manage_settings,
+            )
 
         receive_location_updates = {}
         for department, _, field_name in PURCHASE_RECEIVE_DEPARTMENT_CONFIG:
@@ -2039,7 +2101,11 @@ def settings():
         flash("Settings updated.", "success")
         return redirect(url_for("admin.settings"))
 
-    return render_template("admin/settings.html", form=form)
+    return render_template(
+        "admin/settings.html",
+        form=form,
+        can_manage_settings=can_manage_settings,
+    )
 
 
 @admin.route("/controlpanel/terminal-sales-mappings", methods=["GET", "POST"])
@@ -2152,6 +2218,9 @@ def terminal_sales_mappings():
         location_form=location_form,
         product_aliases=product_aliases,
         location_aliases=location_aliases,
+        can_manage_terminal_sales_mappings=current_user.has_permission(
+            "terminal_sales_mappings.manage"
+        ),
     )
 
 
@@ -3484,6 +3553,9 @@ def vendor_item_aliases(alias_id: int | None = None):
         delete_form=delete_form,
         aliases=aliases,
         editing_alias=alias_obj,
+        can_manage_vendor_item_aliases=current_user.has_permission(
+            "vendor_item_aliases.manage"
+        ),
     )
 
 

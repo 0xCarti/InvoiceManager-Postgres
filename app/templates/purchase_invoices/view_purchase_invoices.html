@@ -1,6 +1,12 @@
 {% extends 'base.html' %}
 {% from 'macros/filter_modal.html' import filter_modal %}
 {% block content %}
+{% set can_view_received_invoice_report = can_access_endpoint('report.received_invoice_report') %}
+{% set can_view_purchase_inventory_summary = can_access_endpoint('report.purchase_inventory_summary') %}
+{% set can_view_inventory_variance_report = can_access_endpoint('report.inventory_variance_report') %}
+{% set can_view_invoice_gl_report = can_access_endpoint('report.invoice_gl_code_report') %}
+{% set can_reverse_purchase_invoices = can_access_endpoint('purchase.reverse_purchase_invoice', 'POST') %}
+{% set has_purchase_invoice_reports = can_view_received_invoice_report or can_view_purchase_inventory_summary or can_view_inventory_variance_report %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-toolbar,
@@ -54,16 +60,24 @@
                 <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</button></li>
             </ul>
         </div>
+        {% if has_purchase_invoice_reports %}
         <div class="dropdown">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                 Reports
             </button>
             <ul class="dropdown-menu dropdown-menu-end">
+                {% if can_view_received_invoice_report %}
                 <li><a class="dropdown-item" href="{{ url_for('report.received_invoice_report') }}">Received Invoice Report</a></li>
+                {% endif %}
+                {% if can_view_purchase_inventory_summary %}
                 <li><a class="dropdown-item" href="{{ url_for('report.purchase_inventory_summary') }}">Purchase Inventory Summary</a></li>
+                {% endif %}
+                {% if can_view_inventory_variance_report %}
                 <li><a class="dropdown-item" href="{{ url_for('report.inventory_variance_report') }}">Inventory Variance Report</a></li>
+                {% endif %}
             </ul>
         </div>
+        {% endif %}
         <div>
             <div class="dropdown d-inline-block mb-3 me-2" data-column-visibility data-table-id="purchase-invoices-table" data-storage-key="purchaseInvoiceTableColumnVisibility">
                 <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="purchaseInvoiceColumnSelector"
@@ -339,12 +353,16 @@
                 <td class="col-invoice-actions">
                     <div class="mobile-actions mobile-card-actions">
                         <a href="{{ url_for('purchase.view_purchase_invoice', invoice_id=inv.id) }}" class="btn btn-sm btn-primary">View</a>
+                        {% if can_view_invoice_gl_report %}
                         <a href="{{ url_for('report.invoice_gl_code_report', invoice_id=inv.id) }}" class="btn btn-sm btn-outline-primary">Invoice GL Code Report</a>
+                        {% endif %}
                         <a href="{{ url_for('notes.entity_notes', entity_type='purchase_invoice', entity_id=inv.id) }}" class="btn btn-sm btn-outline-secondary">Notes</a>
+                        {% if can_reverse_purchase_invoices %}
                         <form method="post" action="{{ url_for('purchase.reverse_purchase_invoice', invoice_id=inv.id) }}" class="d-inline">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-sm btn-danger">Reverse</button>
                         </form>
+                        {% endif %}
                     </div>
                 </td>
             </tr>

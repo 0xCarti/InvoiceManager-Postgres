@@ -7,6 +7,9 @@
             Remove saved product or location mappings that were created while importing terminal sales files.
             Deleting a mapping prevents it from being suggested automatically during future imports.
         </p>
+        {% if not can_manage_terminal_sales_mappings %}
+        <div class="alert alert-info">You have view-only access to terminal sales mappings. Delete actions are hidden.</div>
+        {% endif %}
     </div>
 </div>
 <div class="row">
@@ -26,7 +29,9 @@
                         <table class="table table-sm table-striped align-middle mb-3">
                             <thead>
                                 <tr>
+                                    {% if can_manage_terminal_sales_mappings %}
                                     <th scope="col" class="text-center" style="width: 3rem;">Select</th>
+                                    {% endif %}
                                     <th scope="col">Terminal Product Name</th>
                                     <th scope="col">Mapped Product</th>
                                     <th scope="col">Saved On</th>
@@ -35,6 +40,7 @@
                             <tbody>
                                 {% for alias in product_aliases %}
                                 <tr>
+                                    {% if can_manage_terminal_sales_mappings %}
                                     <td class="text-center">
                                         <input class="form-check-input" type="checkbox"
                                                name="{{ product_form.selected_ids.name }}"
@@ -42,6 +48,7 @@
                                                value="{{ alias.id }}"
                                                {% if alias.id in (product_form.selected_ids.data or []) %}checked{% endif %}>
                                     </td>
+                                    {% endif %}
                                     <td class="text-wrap">{{ alias.source_name }}</td>
                                     <td class="text-wrap">{{ alias.product.name if alias.product else 'Unknown product' }}</td>
                                     <td>
@@ -56,6 +63,7 @@
                             </tbody>
                         </table>
                     </div>
+                    {% if can_manage_terminal_sales_mappings %}
                     <div class="d-flex flex-wrap gap-2">
                         <button type="submit" name="{{ product_form.delete_selected.name }}" value="y" class="btn btn-danger">Delete Selected</button>
                         <button type="submit" name="{{ product_form.delete_all.name }}" value="y" class="btn btn-outline-danger"
@@ -63,6 +71,7 @@
                             Delete All
                         </button>
                     </div>
+                    {% endif %}
                 </form>
                 {% else %}
                 <p class="mb-0 text-muted">There are no saved product mappings.</p>
@@ -86,7 +95,9 @@
                         <table class="table table-sm table-striped align-middle mb-3">
                             <thead>
                                 <tr>
+                                    {% if can_manage_terminal_sales_mappings %}
                                     <th scope="col" class="text-center" style="width: 3rem;">Select</th>
+                                    {% endif %}
                                     <th scope="col">Terminal Location Name</th>
                                     <th scope="col">Mapped Location</th>
                                     <th scope="col">Saved On</th>
@@ -95,6 +106,7 @@
                             <tbody>
                                 {% for alias in location_aliases %}
                                 <tr>
+                                    {% if can_manage_terminal_sales_mappings %}
                                     <td class="text-center">
                                         <input class="form-check-input" type="checkbox"
                                                name="{{ location_form.selected_ids.name }}"
@@ -102,6 +114,7 @@
                                                value="{{ alias.id }}"
                                                {% if alias.id in (location_form.selected_ids.data or []) %}checked{% endif %}>
                                     </td>
+                                    {% endif %}
                                     <td class="text-wrap">{{ alias.source_name }}</td>
                                     <td class="text-wrap">{{ alias.location.name if alias.location else 'Unknown location' }}</td>
                                     <td>
@@ -116,6 +129,7 @@
                             </tbody>
                         </table>
                     </div>
+                    {% if can_manage_terminal_sales_mappings %}
                     <div class="d-flex flex-wrap gap-2">
                         <button type="submit" name="{{ location_form.delete_selected.name }}" value="y" class="btn btn-danger">Delete Selected</button>
                         <button type="submit" name="{{ location_form.delete_all.name }}" value="y" class="btn btn-outline-danger"
@@ -123,6 +137,7 @@
                             Delete All
                         </button>
                     </div>
+                    {% endif %}
                 </form>
                 {% else %}
                 <p class="mb-0 text-muted">There are no saved location mappings.</p>

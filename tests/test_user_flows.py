@@ -107,6 +107,61 @@ def test_admin_invite_invalid_email_shows_form_error_not_user_not_found(
         assert user is None
 
 
+def test_admin_invite_treats_email_as_case_insensitive(
+    client, app, monkeypatch
+):
+    class DummySMTP:
+        def __init__(self, host, port):
+            self.host = host
+            self.port = port
+
+        def starttls(self):
+            pass
+
+        def login(self, u, p):
+            pass
+
+        def send_message(self, msg):
+            raise AssertionError("Duplicate invite should not send an email")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            pass
+
+    monkeypatch.setattr("app.utils.email.smtplib.SMTP", DummySMTP)
+
+    with app.app_context():
+        admin = User(
+            email="admin-case@example.com",
+            password=generate_password_hash("adminpass"),
+            active=True,
+            is_admin=True,
+        )
+        existing = User(
+            email="Demo@Example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add_all([admin, existing])
+        db.session.commit()
+
+    with client:
+        login(client, "admin-case@example.com", "adminpass")
+        response = client.post(
+            "/controlpanel/users",
+            data={"email": "demo@example.com", "submit": True},
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"User already exists." in response.data
+
+    with app.app_context():
+        assert User.query.filter_by(email="demo@example.com").first() is None
+
+
 def test_login_inactive_user(client, app):
     with app.app_context():
         user = User(

@@ -12,8 +12,11 @@ from app.models import (
     PosSalesImportRow,
     Product,
     ProductRecipeItem,
+    User,
 )
+from tests.permission_helpers import grant_permissions
 from tests.utils import login
+from werkzeug.security import generate_password_hash
 
 
 def _create_price_review_import(
@@ -89,6 +92,52 @@ def _create_price_review_import(
             "product_id": product.id,
             "item_id": item.id,
             "location_id": location.id,
+        }
+
+
+def _create_unresolved_sales_import(app, *, message_id: str):
+    with app.app_context():
+        location = Location(name=f"Unresolved Stand {message_id}")
+        product = Product(name=f"Unresolved Product {message_id}", price=4.0, cost=1.0)
+        db.session.add_all([location, product])
+        db.session.flush()
+
+        sales_import = PosSalesImport(
+            source_provider="mailgun",
+            message_id=message_id,
+            attachment_filename="sales.xls",
+            attachment_sha256=(message_id[-1] or "u") * 64,
+            status="pending",
+        )
+        db.session.add(sales_import)
+        db.session.flush()
+
+        import_location = PosSalesImportLocation(
+            import_id=sales_import.id,
+            source_location_name=location.name,
+            normalized_location_name=location.name.lower().replace(" ", "_"),
+            location_id=location.id,
+            parse_index=0,
+        )
+        db.session.add(import_location)
+        db.session.flush()
+
+        row = PosSalesImportRow(
+            import_id=sales_import.id,
+            location_import_id=import_location.id,
+            source_product_name=product.name,
+            normalized_product_name=product.name.lower().replace(" ", "_"),
+            product_id=None,
+            quantity=2.0,
+            parse_index=0,
+        )
+        db.session.add(row)
+        db.session.commit()
+
+        return {
+            "import_id": sales_import.id,
+            "location_import_id": import_location.id,
+            "row_id": row.id,
         }
 
 
@@ -311,6 +360,114 @@ def test_sales_import_detail_hides_price_review_when_file_and_app_prices_align(
         assert b"Price Used" not in detail_response.data
         assert b"Mapped Location" not in detail_response.data
         assert b"Validation Errors" not in detail_response.data
+
+
+def test_sales_import_list_hides_manage_actions_for_view_only_users(client, app):
+    view_import = _create_price_review_import(
+        app,
+        message_id="msg-view-only-list",
+        product_price=5.0,
+        file_price=5.0,
+    )
+
+    with app.app_context():
+        user = User(
+            email="sales-viewer@example.com",
+            password=generate_password_hash("viewpass"),
+            active=True,
+            is_admin=False,
+        )
+        db.session.add(user)
+        db.session.commit()
+        grant_permissions(
+            user,
+            "sales_imports.view",
+            group_name="Sales Import View Only",
+            description="View-only access to sales imports.",
+        )
+
+    with client:
+        login(client, "sales-viewer@example.com", "viewpass")
+        list_response = client.get("/controlpanel/sales-imports", follow_redirects=True)
+        assert list_response.status_code == 200
+        assert b"Approve" not in list_response.data
+        assert b"Actions" not in list_response.data
+
+
+def test_sales_import_detail_hides_manage_actions_for_view_only_users(
+    client, app
+):
+    view_import = _create_unresolved_sales_import(
+        app, message_id="msg-view-only-detail"
+    )
+
+    with app.app_context():
+        user = User(
+            email="sales-view-only-detail@example.com",
+            password=generate_password_hash("detailpass"),
+            active=True,
+            is_admin=False,
+        )
+        db.session.add(user)
+        db.session.commit()
+        grant_permissions(
+            user,
+            "sales_imports.view",
+            group_name="Sales Import Detail View Only",
+            description="View-only access to a sales import detail page.",
+        )
+
+    with client:
+        login(client, "sales-view-only-detail@example.com", "detailpass")
+        detail_response = client.get(
+            f"/controlpanel/sales-imports/{view_import['import_id']}",
+            follow_redirects=True,
+        )
+        assert detail_response.status_code == 200
+        assert b"Approve Import" not in detail_response.data
+        assert b"Undo Approved Import" not in detail_response.data
+        assert b"Refresh Auto-Mapping" not in detail_response.data
+        assert b"Delete Import" not in detail_response.data
+        assert b"Create + Map" not in detail_response.data
+        assert b"Save Mapping" not in detail_response.data
+        assert b"Skip Row" not in detail_response.data
+        assert b"View only" in detail_response.data
+
+
+def test_sales_import_detail_hides_create_and_map_without_product_create_permission(
+    client, app
+):
+    manage_import = _create_unresolved_sales_import(
+        app, message_id="msg-manage-no-product-create"
+    )
+
+    with app.app_context():
+        user = User(
+            email="sales-manager-no-create@example.com",
+            password=generate_password_hash("managepass"),
+            active=True,
+            is_admin=False,
+        )
+        db.session.add(user)
+        db.session.commit()
+        grant_permissions(
+            user,
+            "sales_imports.manage",
+            group_name="Sales Import Manager No Product Create",
+            description="Can resolve import mappings but not create products.",
+        )
+
+    with client:
+        login(client, "sales-manager-no-create@example.com", "managepass")
+        detail_response = client.get(
+            f"/controlpanel/sales-imports/{manage_import['import_id']}",
+            follow_redirects=True,
+        )
+        assert detail_response.status_code == 200
+        assert b"Approve Import" in detail_response.data
+        assert b"Save Mapping" in detail_response.data
+        assert b"Create + Map" not in detail_response.data
+        assert b"Skip Row" in detail_response.data
 
 
 def test_sales_import_detail_sidebar_shows_issue_counts_and_sorts_locations(

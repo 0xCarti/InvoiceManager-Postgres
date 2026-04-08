@@ -7,6 +7,16 @@
 {% block title %}Home{% endblock %}
 
 {% block content %}
+{% set can_create_invoices = can_access_endpoint('invoice.create_invoice') %}
+{% set can_manage_invoice_status = can_access_endpoint('invoice.bulk_invoice_payment_status', 'POST') %}
+{% set can_delete_invoices = can_access_endpoint('invoice.delete_invoice', 'POST') %}
+{% set can_view_customer_invoice_report = can_access_endpoint('report.customer_invoice_report') %}
+{% set can_view_inventory_variance_report = can_access_endpoint('report.inventory_variance_report') %}
+{% set can_view_product_sales_report = can_access_endpoint('report.product_sales_report') %}
+{% set can_view_product_stock_usage_report = can_access_endpoint('report.product_stock_usage_report') %}
+{% set can_view_department_sales_forecast = can_access_endpoint('report.department_sales_forecast') %}
+{% set can_create_customers = can_access_endpoint('customer.create_customer_modal') %}
+{% set has_invoice_reports = can_view_customer_invoice_report or can_view_inventory_variance_report or can_view_product_sales_report or can_view_product_stock_usage_report or can_view_department_sales_forecast %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-toolbar,
@@ -50,9 +60,11 @@
             <h2 class="mb-1">Invoices</h2>
             <p class="text-muted mb-0">Search and manage customer invoices</p>
         </div>
+        {% if can_create_invoices %}
         <div>
             <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createInvoiceModal">Create Invoice</button>
         </div>
+        {% endif %}
     </div>
 
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3 mobile-toolbar">
@@ -79,6 +91,7 @@
 
         <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#filterModal">Filter</button>
 
+        {% if can_manage_invoice_status %}
         <div class="dropdown">
             <button
                 class="btn btn-outline-secondary dropdown-toggle"
@@ -103,6 +116,7 @@
                 </li>
             </ul>
         </div>
+        {% endif %}
 
         {{ column_visibility_dropdown(
             table_id='invoiceTable',
@@ -117,25 +131,39 @@
             ]
         ) }}
 
+        {% if has_invoice_reports %}
         <div class="dropdown">
             <button class="btn btn-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                 Reports
             </button>
             <ul class="dropdown-menu dropdown-menu-end">
+                {% if can_view_customer_invoice_report %}
                 <li><a class="dropdown-item" href="{{ url_for('report.customer_invoice_report') }}">Customer Invoice Report</a></li>
+                {% endif %}
+                {% if can_view_inventory_variance_report %}
                 <li><a class="dropdown-item" href="{{ url_for('report.inventory_variance_report') }}">Inventory Variance Report</a></li>
+                {% endif %}
+                {% if can_view_product_sales_report %}
                 <li><a class="dropdown-item" href="{{ url_for('report.product_sales_report') }}">Revenue Report</a></li>
+                {% endif %}
+                {% if can_view_product_stock_usage_report %}
                 <li><a class="dropdown-item" href="{{ url_for('report.product_stock_usage_report') }}">Stock Usage Report</a></li>
+                {% endif %}
+                {% if can_view_department_sales_forecast %}
                 <li><a class="dropdown-item" href="{{ url_for('report.department_sales_forecast') }}">Department Sales Forecast</a></li>
+                {% endif %}
             </ul>
         </div>
+        {% endif %}
     </div>
 
+    {% if can_manage_invoice_status %}
     <form id="bulkInvoiceActionForm">
         {{ delete_form.hidden_tag() }}
         <input type="hidden" id="selectedInvoiceIdsInput" name="invoice_ids" value="">
         <input type="hidden" id="bulkInvoiceActionInput" name="status" value="">
     </form>
+    {% endif %}
     <div class="table-responsive mobile-table-wrap">
     <table class="table sortable table-mobile-card" id="invoiceTable">
         <thead>
@@ -174,6 +202,8 @@
                 <td class="col-invoice-actions">
                     <div class="mobile-actions mobile-card-actions">
                     <a href="{{ url_for('invoice.view_invoice', invoice_id=invoice.id) }}" class="btn btn-primary btn-sm">View</a>
+                    {% set can_show_invoice_action_menu = (can_manage_invoice_status and (invoice.can_mark_delivered or invoice.can_mark_paid)) or can_delete_invoices %}
+                    {% if can_show_invoice_action_menu %}
                     <div class="dropdown d-inline">
                         <button
                             class="btn btn-outline-secondary dropdown-toggle"
@@ -186,6 +216,7 @@
                             &hellip;
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="invoice-actions-{{ invoice.id }}">
+                            {% if can_manage_invoice_status %}
                             {% if invoice.can_mark_delivered %}
                             <li>
                                 <form action="{{ url_for('invoice.mark_invoice_delivered', invoice_id=invoice.id) }}" method="post">
@@ -205,6 +236,8 @@
                             {% if invoice.can_mark_delivered or invoice.can_mark_paid %}
                             <li><hr class="dropdown-divider"></li>
                             {% endif %}
+                            {% endif %}
+                            {% if can_delete_invoices %}
                             <li>
                                 <form
                                     action="{{ url_for('invoice.delete_invoice', invoice_id=invoice.id) }}"
@@ -216,8 +249,10 @@
                                     <button type="submit" class="dropdown-item text-danger">Delete</button>
                                 </form>
                             </li>
+                            {% endif %}
                         </ul>
                     </div>
+                    {% endif %}
                 </td>
             </tr>
             {% endfor %}
@@ -294,6 +329,7 @@
 {% endcall %}
 
 <!-- Create Invoice Modal -->
+{% if can_create_invoices %}
 <div class="modal fade" id="createInvoiceModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-xl">
     <div class="modal-content">
@@ -309,7 +345,9 @@
     </div>
   </div>
 </div>
+{% endif %}
 
+{% if can_create_invoices and can_create_customers %}
 <div class="modal fade" id="createInvoiceCustomerModal" tabindex="-1" aria-labelledby="createInvoiceCustomerModalLabel" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -325,9 +363,12 @@
     </div>
   </div>
 </div>
+{% endif %}
 
 <script nonce="{{ csp_nonce }}">
 $(document).ready(function(){
+    const canManageInvoiceStatus = {{ can_manage_invoice_status|tojson }};
+    const canDeleteInvoices = {{ can_delete_invoices|tojson }};
     const deleteFormHTML = {{ delete_form.hidden_tag()|tojson }};
     const viewInvoiceUrlTemplate = {{ url_for('invoice.view_invoice', invoice_id=0)|tojson }};
     const deleteInvoiceUrlTemplate = {{ url_for('invoice.delete_invoice', invoice_id=0)|tojson }};
@@ -363,21 +404,52 @@ $(document).ready(function(){
                     : 'text-bg-warning';
         const showMarkDelivered = invoiceStatus === 'pending';
         const showMarkPaid = invoiceStatus === 'delivered';
-        const deliveredAction = showMarkDelivered ? `
+        const deliveredAction = canManageInvoiceStatus && showMarkDelivered ? `
                         <li>
                             <form action="${invoiceUrlFromTemplate(markDeliveredUrlTemplate, inv.id)}" method="post">
                                 ${deleteFormHTML}
                                 <button type="submit" class="dropdown-item">Mark Delivered</button>
                             </form>
                         </li>` : '';
-        const paidAction = showMarkPaid ? `
+        const paidAction = canManageInvoiceStatus && showMarkPaid ? `
                         <li>
                             <form action="${invoiceUrlFromTemplate(markPaidUrlTemplate, inv.id)}" method="post">
                                 ${deleteFormHTML}
                                 <button type="submit" class="dropdown-item">Mark Paid</button>
                             </form>
                         </li>` : '';
-        const dividerAction = (showMarkDelivered || showMarkPaid) ? '<li><hr class="dropdown-divider"></li>' : '';
+        const deleteAction = canDeleteInvoices ? `
+                        <li>
+                            <form
+                                action="${invoiceUrlFromTemplate(deleteInvoiceUrlTemplate, inv.id)}"
+                                method="post"
+                                class="js-confirm-delete-invoice"
+                                data-invoice-id="${inv.id}"
+                            >
+                                ${deleteFormHTML}
+                                <button type="submit" class="dropdown-item text-danger">Delete</button>
+                            </form>
+                        </li>` : '';
+        const dividerAction = (deliveredAction || paidAction) && deleteAction ? '<li><hr class="dropdown-divider"></li>' : '';
+        const actionMenu = (deliveredAction || paidAction || deleteAction) ? `
+                <div class="dropdown d-inline">
+                    <button
+                        class="btn btn-outline-secondary dropdown-toggle"
+                        type="button"
+                        id="invoice-actions-${inv.id}"
+                        data-bs-toggle="dropdown"
+                        aria-expanded="false"
+                        aria-label="Invoice actions"
+                    >
+                        &hellip;
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="invoice-actions-${inv.id}">
+                        ${deliveredAction}
+                        ${paidAction}
+                        ${dividerAction}
+                        ${deleteAction}
+                    </ul>
+                </div>` : '';
         const row = `<tr>
             <td class="col-invoice-select">
                 <input
@@ -397,34 +469,7 @@ $(document).ready(function(){
             </td>
             <td class="col-invoice-actions">
                 <a href="${invoiceUrlFromTemplate(viewInvoiceUrlTemplate, inv.id)}" class="btn btn-primary mr-2">View</a>
-                <div class="dropdown d-inline">
-                    <button
-                        class="btn btn-outline-secondary dropdown-toggle"
-                        type="button"
-                        id="invoice-actions-${inv.id}"
-                        data-bs-toggle="dropdown"
-                        aria-expanded="false"
-                        aria-label="Invoice actions"
-                    >
-                        &hellip;
-                    </button>
-                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="invoice-actions-${inv.id}">
-                        ${deliveredAction}
-                        ${paidAction}
-                        ${dividerAction}
-                        <li>
-                            <form
-                                action="${invoiceUrlFromTemplate(deleteInvoiceUrlTemplate, inv.id)}"
-                                method="post"
-                                class="js-confirm-delete-invoice"
-                                data-invoice-id="${inv.id}"
-                            >
-                                ${deleteFormHTML}
-                                <button type="submit" class="dropdown-item text-danger">Delete</button>
-                            </form>
-                        </li>
-                    </ul>
-                </div>
+                ${actionMenu}
             </td>
             </tr>`;
             tbody.append(row);
@@ -541,6 +586,8 @@ $(document).ready(function(){
 
 });
 </script>
+{% if can_create_invoices %}
 {% set invoice_form_submit_mode = 'ajax' %}
 {% include "invoices/_invoice_form_scripts.html" %}
+{% endif %}
 {% endblock %}

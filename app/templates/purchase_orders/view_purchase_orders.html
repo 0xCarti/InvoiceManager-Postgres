@@ -1,6 +1,16 @@
 {% extends 'base.html' %}
 {% from 'macros/filter_modal.html' import filter_modal %}
 {% block content %}
+{% set can_create_purchase_orders = can_access_endpoint('purchase.create_purchase_order') %}
+{% set can_upload_purchase_orders = can_access_endpoint('purchase.upload_purchase_order', 'POST') %}
+{% set can_view_purchase_recommendations = can_access_endpoint('purchase.purchase_order_recommendations') %}
+{% set can_merge_purchase_orders = can_access_endpoint('purchase.merge_purchase_orders_route', 'POST') %}
+{% set can_edit_purchase_orders = can_access_endpoint('purchase.edit_purchase_order') %}
+{% set can_receive_purchase_invoices = can_access_endpoint('purchase.receive_invoice') %}
+{% set can_delete_purchase_orders = can_access_endpoint('purchase.delete_purchase_order', 'POST') %}
+{% set can_view_purchase_cost_forecast = can_access_endpoint('report.purchase_cost_forecast') %}
+{% set can_view_purchase_inventory_summary = can_access_endpoint('report.purchase_inventory_summary') %}
+{% set has_purchase_order_reports = can_view_purchase_cost_forecast or can_view_purchase_inventory_summary %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-toolbar,
@@ -47,27 +57,40 @@
     </div>
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3 mobile-toolbar">
             <div class="dropdown d-md-none">
-                <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                    More actions
-                </button>
-                <ul class="dropdown-menu">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                More actions
+            </button>
+            <ul class="dropdown-menu">
+                    {% if can_upload_purchase_orders %}
                     <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#uploadPurchaseOrderModal">Upload Purchase Order</button></li>
+                    {% endif %}
                     <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</button></li>
                 </ul>
             </div>
+            {% if can_create_purchase_orders %}
             <a class="btn btn-primary" href="{{ url_for('purchase.create_purchase_order') }}">Create Purchase Order</a>
+            {% endif %}
+            {% if can_view_purchase_recommendations %}
             <a class="btn btn-outline-primary" href="{{ url_for('purchase.purchase_order_recommendations') }}">
                 View Recommendations
             </a>
+            {% endif %}
+            {% if has_purchase_order_reports %}
             <div class="dropdown">
                 <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                     Reports
                 </button>
                 <ul class="dropdown-menu dropdown-menu-end">
+                    {% if can_view_purchase_cost_forecast %}
                     <li><a class="dropdown-item" href="{{ url_for('report.purchase_cost_forecast') }}">Forecast Purchase Costs</a></li>
+                    {% endif %}
+                    {% if can_view_purchase_inventory_summary %}
                     <li><a class="dropdown-item" href="{{ url_for('report.purchase_inventory_summary') }}">Purchase Inventory Summary</a></li>
+                    {% endif %}
                 </ul>
             </div>
+            {% endif %}
+            {% if can_merge_purchase_orders %}
             <span class="d-inline-block" tabindex="0" id="merge-button-tooltip-wrapper" data-bs-toggle="tooltip" data-bs-placement="top">
                 <button type="button" class="btn btn-primary" id="merge-selected-btn" data-bs-toggle="modal"
                     data-bs-target="#mergeConfirmModal" disabled>Merge selected</button>
@@ -78,6 +101,7 @@
                     Require matching expected date
                 </label>
             </div>
+            {% endif %}
         <div class="ms-md-auto d-flex flex-wrap align-items-center gap-2">
             <div class="dropdown d-inline-block mb-3 me-2" data-column-visibility data-table-id="purchase-orders-table" data-storage-key="purchaseOrderTableColumnVisibility">
                 <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="purchaseOrderColumnSelector"
@@ -152,9 +176,11 @@
                     </div>
                 </div>
             </div>
+            {% if can_upload_purchase_orders %}
             <button type="button" class="btn btn-outline-secondary d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#uploadPurchaseOrderModal">
                 Upload Purchase Order
             </button>
+            {% endif %}
             <button type="button" class="btn btn-outline-secondary d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#filterModal">
                 Filters
             </button>
@@ -319,12 +345,18 @@
                     <div class="mobile-actions mobile-card-actions">
                         <a href="{{ url_for('notes.entity_notes', entity_type='purchase_order', entity_id=order.id) }}" class="btn btn-sm btn-outline-secondary">Notes</a>
                         {% if not order.received %}
+                        {% if can_edit_purchase_orders %}
                         <a href="{{ url_for('purchase.edit_purchase_order', po_id=order.id) }}" class="btn btn-sm btn-primary">Edit</a>
+                        {% endif %}
+                        {% if can_receive_purchase_invoices %}
                         <a href="{{ url_for('purchase.receive_invoice', po_id=order.id) }}" class="btn btn-sm btn-success">Receive</a>
+                        {% endif %}
+                        {% if can_delete_purchase_orders %}
                         <form action="{{ url_for('purchase.delete_purchase_order', po_id=order.id) }}" method="post" class="d-inline">
                             {{ delete_form.hidden_tag() }}
                             <button type="submit" class="btn btn-sm btn-danger" data-confirm-message="Are you sure?">Delete</button>
                         </form>
+                        {% endif %}
                         {% else %}
                         <span class="badge text-bg-success">Received</span>
                         {% endif %}
@@ -406,6 +438,7 @@
         </div>
     </div>
 </div>
+{% if can_merge_purchase_orders %}
 <div class="modal fade" id="mergeConfirmModal" tabindex="-1" aria-labelledby="mergeConfirmModalLabel" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -443,6 +476,7 @@
         </div>
     </div>
 </div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
@@ -470,10 +504,28 @@ document.addEventListener('DOMContentLoaded', function() {
     const selectedList = document.getElementById('merge-selected-list');
     const mergeForm = document.getElementById('merge-modal-form');
     const confirmMergeBtn = document.getElementById('confirm-merge-btn');
-    const mergeTooltip = new bootstrap.Tooltip(mergeButtonWrapper, {
-        trigger: 'hover focus',
-        title: ''
-    });
+    const canMergePurchaseOrders = Boolean(
+        mergeButton &&
+        mergeButtonWrapper &&
+        mergeAlert &&
+        requireExpectedToggle &&
+        modalRequireExpected &&
+        sourceInput &&
+        targetSelect &&
+        vendorSummary &&
+        dateSummary &&
+        orderNumberSummary &&
+        expectedTotalSummary &&
+        selectedList &&
+        mergeForm &&
+        confirmMergeBtn
+    );
+    const mergeTooltip = canMergePurchaseOrders
+        ? new bootstrap.Tooltip(mergeButtonWrapper, {
+            trigger: 'hover focus',
+            title: ''
+        })
+        : null;
 
     const showAlert = (message) => {
         mergeAlert.textContent = message;
@@ -550,6 +602,9 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     const validateSelection = () => {
+        if (!canMergePurchaseOrders) {
+            return;
+        }
         const selected = getSelected();
         let invalidMessage = '';
         let tooltipMessage = '';
@@ -612,35 +667,37 @@ document.addEventListener('DOMContentLoaded', function() {
         modalRequireExpected.checked = requireExpectedToggle.checked;
     };
 
-    checkboxes.forEach((cb) => {
-        cb.addEventListener('change', () => {
+    if (canMergePurchaseOrders) {
+        checkboxes.forEach((cb) => {
+            cb.addEventListener('change', () => {
+                validateSelection();
+            });
+        });
+
+        targetSelect.addEventListener('change', () => {
+            updateSourceInput(getSelected());
+        });
+
+        requireExpectedToggle.addEventListener('change', () => {
             validateSelection();
         });
-    });
 
-    targetSelect.addEventListener('change', () => {
-        updateSourceInput(getSelected());
-    });
+        modalRequireExpected.addEventListener('change', () => {
+            requireExpectedToggle.checked = modalRequireExpected.checked;
+            validateSelection();
+        });
 
-    requireExpectedToggle.addEventListener('change', () => {
+        mergeForm.addEventListener('submit', (event) => {
+            if (!sourceInput.value.trim() || !targetSelect.value) {
+                event.preventDefault();
+                showAlert('Select purchase orders to merge and choose a target.');
+                return;
+            }
+            modalRequireExpected.checked = requireExpectedToggle.checked;
+        });
+
         validateSelection();
-    });
-
-    modalRequireExpected.addEventListener('change', () => {
-        requireExpectedToggle.checked = modalRequireExpected.checked;
-        validateSelection();
-    });
-
-    mergeForm.addEventListener('submit', (event) => {
-        if (!sourceInput.value.trim() || !targetSelect.value) {
-            event.preventDefault();
-            showAlert('Select purchase orders to merge and choose a target.');
-            return;
-        }
-        modalRequireExpected.checked = requireExpectedToggle.checked;
-    });
-
-    validateSelection();
+    }
 });
 </script>
 {% endblock %}

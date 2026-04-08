@@ -347,7 +347,10 @@ def load_user(user_id):
     """Retrieve a user by ID for Flask-Login."""
     from app.models import User
 
-    return db.session.get(User, int(user_id))
+    user = db.session.get(User, int(user_id))
+    if user is None or not getattr(user, "active", False):
+        return None
+    return user
 
 
 def create_admin_user():
@@ -359,7 +362,7 @@ def create_admin_user():
     if not admin_exists:
 
         # Create an admin user
-        admin_email = os.getenv("ADMIN_EMAIL")
+        admin_email = (os.getenv("ADMIN_EMAIL") or "").strip().lower()
         raw_password = os.getenv("ADMIN_PASS")
         if raw_password is None:
             raise RuntimeError("ADMIN_PASS environment variable not set")
@@ -722,6 +725,10 @@ def create_app(args=None):
 
         if not current_user.is_authenticated:
             return
+        if not getattr(current_user, "active", False):
+            logout_user()
+            flash("Your account is no longer active. Please contact an administrator.", "warning")
+            return redirect(url_for("auth.login"))
         if not user_can_access_endpoint(current_user, request.endpoint, request.method):
             return Response(status=403)
 

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+{% set can_manage_sales_imports = has_permission('sales_imports.manage') %}
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
         <h1 class="mb-1">Sales Imports</h1>
@@ -45,7 +46,9 @@
                         <th class="text-end">Issues</th>
                         <th class="text-end">Locations</th>
                         <th class="text-end">Rows (excl. totals)</th>
+                        {% if can_manage_sales_imports %}
                         <th class="text-end">Actions</th>
+                        {% endif %}
                     </tr>
                 </thead>
                 <tbody>
@@ -71,6 +74,7 @@
                         </td>
                         <td class="text-end">{{ import.locations|length }}</td>
                         <td class="text-end">{{ import.rows|length }}</td>
+                        {% if can_manage_sales_imports %}
                         <td class="text-end">
                             {% if import.can_direct_approve %}
                             <form method="post" class="d-inline">
@@ -84,6 +88,7 @@
                             <span class="text-muted">-</span>
                             {% endif %}
                         </td>
+                        {% endif %}
                     </tr>
                     {% endfor %}
                 </tbody>

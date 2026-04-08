@@ -2,10 +2,12 @@ import os
 from threading import Event
 
 from app import db
-from app.models import Setting
+from app.models import Setting, User
 from app.utils.backup import UNIT_SECONDS
 from app.utils.units import parse_conversion_setting
+from tests.permission_helpers import grant_permissions
 from tests.utils import login
+from werkzeug.security import generate_password_hash
 
 
 def test_admin_can_update_settings(client, app):
@@ -137,3 +139,29 @@ def test_auto_backup_thread_uses_real_app(client, app, monkeypatch):
 
     assert calls.get("entered_context") is True
     assert calls.get("interval") == UNIT_SECONDS["day"]
+
+
+def test_settings_view_only_user_sees_read_only_page(client, app):
+    with app.app_context():
+        user = User(
+            email="settings-viewer@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add(user)
+        db.session.commit()
+        grant_permissions(
+            user,
+            "settings.view",
+            group_name="Settings View Only",
+            description="Can review settings but not update them.",
+        )
+
+    with client:
+        login(client, "settings-viewer@example.com", "pass")
+        response = client.get("/controlpanel/settings", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert b"You have view-only access to settings." in response.data
+    assert b">Update<" not in response.data
+    assert b"disabled" in response.data

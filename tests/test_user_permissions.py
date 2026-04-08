@@ -3,8 +3,21 @@ import os
 from werkzeug.security import generate_password_hash
 
 from app import db
-from app.models import Permission, PermissionGroup, Setting, User
+from app.models import (
+    Item,
+    Location,
+    Permission,
+    PermissionGroup,
+    Product,
+    Setting,
+    TerminalSaleLocationAlias,
+    TerminalSaleProductAlias,
+    User,
+    Vendor,
+    VendorItemAlias,
+)
 from app.permissions import sync_permission_data
+from tests.permission_helpers import grant_permissions
 from tests.utils import login
 
 
@@ -144,6 +157,42 @@ def test_permission_group_create_form_assigns_permissions(client, app):
         }
 
 
+def test_permission_group_create_rejects_case_insensitive_duplicates(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        existing = PermissionGroup(
+            name="Managers",
+            description="Existing management group.",
+        )
+        db.session.add(existing)
+        db.session.commit()
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            "/controlpanel/permission-groups/create",
+            data={
+                "create-name": "managers",
+                "create-description": "Duplicate by case only.",
+                "create-submit": "1",
+            },
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert (
+        b"A permission group with that name already exists." in response.data
+    )
+
+    with app.app_context():
+        groups = PermissionGroup.query.filter(
+            PermissionGroup.name.in_(["Managers", "managers"])
+        ).all()
+        assert len(groups) == 1
+
+
 def test_permission_group_create_form_can_copy_permissions_from_existing_groups(
     client, app
 ):
@@ -275,3 +324,129 @@ def test_permissions_manager_can_open_permission_group_editor(client, app):
     assert response.status_code == 200
     assert b"Save Changes" in response.data
     assert b"You can review the group details here" in response.data
+
+
+def test_import_page_hides_upload_actions_for_view_only_users(client, app):
+    with app.app_context():
+        user = User(
+            email="imports-viewer@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add(user)
+        db.session.commit()
+        grant_permissions(
+            user,
+            "imports.view",
+            group_name="Imports View Only",
+            description="Can open the imports page but not run uploads.",
+        )
+
+    with client:
+        login(client, "imports-viewer@example.com", "pass")
+        response = client.get("/controlpanel/imports", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert b"Download Example" in response.data
+    assert (
+        b"import uploads are hidden because you do not have permission to run imports."
+        in response.data
+    )
+    assert b'btn btn-primary">Import Locations<' not in response.data
+    assert b'type="file"' not in response.data
+
+
+def test_terminal_sales_mappings_page_hides_delete_actions_for_view_only_users(
+    client, app
+):
+    with app.app_context():
+        product = Product(name="Alias Product", price=5.0, cost=1.0)
+        location = Location(name="Alias Location")
+        user = User(
+            email="terminal-mapping-viewer@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add_all([product, location, user])
+        db.session.flush()
+        db.session.add_all(
+            [
+                TerminalSaleProductAlias(
+                    source_name="Terminal Product",
+                    normalized_name="terminal_product_view_only",
+                    product_id=product.id,
+                ),
+                TerminalSaleLocationAlias(
+                    source_name="Terminal Location",
+                    normalized_name="terminal_location_view_only",
+                    location_id=location.id,
+                ),
+            ]
+        )
+        db.session.commit()
+        grant_permissions(
+            user,
+            "terminal_sales_mappings.view",
+            group_name="Terminal Mappings View Only",
+            description="Can review terminal sales mappings without deleting them.",
+        )
+
+    with client:
+        login(client, "terminal-mapping-viewer@example.com", "pass")
+        response = client.get(
+            "/controlpanel/terminal-sales-mappings", follow_redirects=True
+        )
+
+    assert response.status_code == 200
+    assert b"You have view-only access to terminal sales mappings." in response.data
+    assert b"Terminal Product" in response.data
+    assert b"Terminal Location" in response.data
+    assert b"Delete Selected" not in response.data
+    assert b"Delete All" not in response.data
+
+
+def test_vendor_item_aliases_page_hides_manage_actions_for_view_only_users(
+    client, app
+):
+    with app.app_context():
+        vendor = Vendor(first_name="Vendor", last_name="Viewer")
+        item = Item(name="Alias Item", base_unit="each", quantity=1.0)
+        user = User(
+            email="vendor-alias-viewer@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add_all([vendor, item, user])
+        db.session.flush()
+        db.session.add(
+            VendorItemAlias(
+                vendor_id=vendor.id,
+                item_id=item.id,
+                vendor_sku="SKU-1",
+                vendor_description="Vendor alias description",
+                normalized_description="vendor alias description",
+                pack_size="6x1",
+                default_cost=2.5,
+            )
+        )
+        db.session.commit()
+        grant_permissions(
+            user,
+            "vendor_item_aliases.view",
+            group_name="Vendor Alias View Only",
+            description="Can review vendor aliases without editing them.",
+        )
+
+    with client:
+        login(client, "vendor-alias-viewer@example.com", "pass")
+        response = client.get(
+            "/controlpanel/vendor-item-aliases", follow_redirects=True
+        )
+
+    assert response.status_code == 200
+    assert b"You have view-only access to vendor item aliases." in response.data
+    assert b"Vendor alias description" in response.data
+    assert b"Add Alias" not in response.data
+    assert b"Update Alias" not in response.data
+    assert b"Delete this alias?" not in response.data
+    assert b">View<" in response.data

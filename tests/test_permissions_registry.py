@@ -39,6 +39,7 @@ def test_default_landing_endpoint_prefers_first_accessible_route():
         {
             "transfer.view_transfers": SimpleNamespace(),
             "main.home": SimpleNamespace(),
+            "admin.users": SimpleNamespace(),
             "auth.profile": SimpleNamespace(),
         }
     )
@@ -48,6 +49,7 @@ def test_default_landing_endpoint_prefers_first_accessible_route():
             "transfer.view_transfers"
         )
         assert get_default_landing_endpoint(DummyUser("dashboard.view")) == "main.home"
+        assert get_default_landing_endpoint(DummyUser("users.view")) == "admin.users"
         assert get_default_landing_endpoint(DummyUser()) == "auth.profile"
 
 

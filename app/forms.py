@@ -1799,7 +1799,10 @@ class TerminalSalesUploadForm(FlaskForm):
         "Sales File",
         validators=[
             FileRequired(),
-            FileAllowed({"xls", "pdf"}, "Only .xls or .pdf files are allowed."),
+            FileAllowed(
+                {"xls", "xlsx", "pdf"},
+                "Only .xls, .xlsx, or .pdf files are allowed.",
+            ),
         ],
     )
     submit = SubmitField("Upload")

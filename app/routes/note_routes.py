@@ -11,6 +11,7 @@ from sqlalchemy.orm import joinedload
 
 from app import db
 from app.forms import CSRFOnlyForm, DeleteForm, NoteForm
+from app.permissions import user_can_access_endpoint
 from app.models import (
     Customer,
     Invoice,
@@ -32,6 +33,7 @@ notes = Blueprint("notes", __name__)
 class EntityConfig:
     model: type
     label: str
+    access_endpoint: str
     name_getter: Callable[[Any], str]
     parse_identifier: Callable[[str], Any]
     identifier_getter: Callable[[Any], str]
@@ -50,6 +52,7 @@ ENTITY_CONFIG: dict[str, EntityConfig] = {
     "location": EntityConfig(
         model=Location,
         label="Location",
+        access_endpoint="locations.location_items",
         name_getter=lambda obj: obj.name,
         parse_identifier=lambda raw: int(raw),
         identifier_getter=lambda obj: str(obj.id),
@@ -62,6 +65,7 @@ ENTITY_CONFIG: dict[str, EntityConfig] = {
     "item": EntityConfig(
         model=Item,
         label="Item",
+        access_endpoint="item.view_item",
         name_getter=lambda obj: obj.name,
         parse_identifier=lambda raw: int(raw),
         identifier_getter=lambda obj: str(obj.id),
@@ -74,6 +78,7 @@ ENTITY_CONFIG: dict[str, EntityConfig] = {
     "product": EntityConfig(
         model=Product,
         label="Product",
+        access_endpoint="product.edit_product",
         name_getter=lambda obj: obj.name,
         parse_identifier=lambda raw: int(raw),
         identifier_getter=lambda obj: str(obj.id),
@@ -86,6 +91,7 @@ ENTITY_CONFIG: dict[str, EntityConfig] = {
     "vendor": EntityConfig(
         model=Vendor,
         label="Vendor",
+        access_endpoint="vendor.edit_vendor",
         name_getter=_person_name,
         parse_identifier=lambda raw: int(raw),
         identifier_getter=lambda obj: str(obj.id),
@@ -98,6 +104,7 @@ ENTITY_CONFIG: dict[str, EntityConfig] = {
     "customer": EntityConfig(
         model=Customer,
         label="Customer",
+        access_endpoint="customer.edit_customer",
         name_getter=_person_name,
         parse_identifier=lambda raw: int(raw),
         identifier_getter=lambda obj: str(obj.id),
@@ -110,6 +117,7 @@ ENTITY_CONFIG: dict[str, EntityConfig] = {
     "transfer": EntityConfig(
         model=Transfer,
         label="Transfer",
+        access_endpoint="transfer.view_transfer",
         name_getter=lambda obj: f"Transfer #{obj.id}",
         parse_identifier=lambda raw: int(raw),
         identifier_getter=lambda obj: str(obj.id),
@@ -122,6 +130,7 @@ ENTITY_CONFIG: dict[str, EntityConfig] = {
     "purchase_order": EntityConfig(
         model=PurchaseOrder,
         label="Purchase Order",
+        access_endpoint="purchase.edit_purchase_order",
         name_getter=lambda obj: f"PO #{obj.id}",
         parse_identifier=lambda raw: int(raw),
         identifier_getter=lambda obj: str(obj.id),
@@ -134,6 +143,7 @@ ENTITY_CONFIG: dict[str, EntityConfig] = {
     "purchase_invoice": EntityConfig(
         model=PurchaseInvoice,
         label="Purchase Invoice",
+        access_endpoint="purchase.view_purchase_invoice",
         name_getter=lambda obj: obj.invoice_number or f"Invoice #{obj.id}",
         parse_identifier=lambda raw: int(raw),
         identifier_getter=lambda obj: str(obj.id),
@@ -148,6 +158,7 @@ ENTITY_CONFIG: dict[str, EntityConfig] = {
     "sales_invoice": EntityConfig(
         model=Invoice,
         label="Sales Invoice",
+        access_endpoint="invoice.view_invoice",
         name_getter=lambda obj: obj.id,
         parse_identifier=lambda raw: raw,
         identifier_getter=lambda obj: obj.id,
@@ -173,6 +184,9 @@ def _get_entity_context(entity_type: str, raw_entity_id: str) -> tuple[EntityCon
     entity = db.session.get(config.model, lookup_id)
     if entity is None:
         abort(404)
+
+    if not user_can_access_endpoint(current_user, config.access_endpoint, "GET"):
+        abort(403)
 
     identifier = config.identifier_getter(entity)
     return config, entity, identifier
