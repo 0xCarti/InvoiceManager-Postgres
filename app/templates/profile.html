@@ -177,9 +177,18 @@
                             {% if form.current_password %}
                             <div class="form-group profile-field">
                                 {{ form.current_password.label(class_='form-label mb-0') }}
-                                <div class="profile-password-input-wrap">
+                                <div class="profile-password-input-wrap" data-password-toggle-group>
                                     {{ form.current_password(class_='form-control' + (' is-invalid' if password_submitted and form.current_password.errors else ''), data_password_input='true') }}
-                                    <button type="button" class="btn btn-outline-secondary profile-password-toggle" data-password-toggle="true" aria-label="Toggle password visibility">Show</button>
+                                    <button
+                                        type="button"
+                                        class="btn btn-outline-secondary profile-password-toggle"
+                                        data-password-toggle
+                                        aria-controls="{{ form.current_password.id }}"
+                                        aria-label="Toggle current password visibility"
+                                        aria-pressed="false"
+                                    >
+                                        Show
+                                    </button>
                                 </div>
                                 {% if password_submitted and form.current_password.errors %}
                                 <div class="profile-feedback text-danger">{{ form.current_password.errors[0] }}</div>
@@ -190,9 +199,18 @@
                             {% endif %}
                             <div class="form-group profile-field">
                                 {{ form.new_password.label(class_='form-label mb-0') }}
-                                <div class="profile-password-input-wrap">
+                                <div class="profile-password-input-wrap" data-password-toggle-group>
                                     {{ form.new_password(class_='form-control' + (' is-invalid' if password_submitted and form.new_password.errors else ''), data_password_input='true') }}
-                                    <button type="button" class="btn btn-outline-secondary profile-password-toggle" data-password-toggle="true" aria-label="Toggle password visibility">Show</button>
+                                    <button
+                                        type="button"
+                                        class="btn btn-outline-secondary profile-password-toggle"
+                                        data-password-toggle
+                                        aria-controls="{{ form.new_password.id }}"
+                                        aria-label="Toggle new password visibility"
+                                        aria-pressed="false"
+                                    >
+                                        Show
+                                    </button>
                                 </div>
                                 {% if password_submitted and form.new_password.errors %}
                                 <div class="profile-feedback text-danger">{{ form.new_password.errors[0] }}</div>
@@ -202,9 +220,18 @@
                             </div>
                             <div class="form-group profile-field">
                                 {{ form.confirm_password.label(class_='form-label mb-0') }}
-                                <div class="profile-password-input-wrap">
+                                <div class="profile-password-input-wrap" data-password-toggle-group>
                                     {{ form.confirm_password(class_='form-control' + (' is-invalid' if password_submitted and form.confirm_password.errors else ''), data_password_input='true') }}
-                                    <button type="button" class="btn btn-outline-secondary profile-password-toggle" data-password-toggle="true" aria-label="Toggle password visibility">Show</button>
+                                    <button
+                                        type="button"
+                                        class="btn btn-outline-secondary profile-password-toggle"
+                                        data-password-toggle
+                                        aria-controls="{{ form.confirm_password.id }}"
+                                        aria-label="Toggle confirm password visibility"
+                                        aria-pressed="false"
+                                    >
+                                        Show
+                                    </button>
                                 </div>
                                 {% if password_submitted and form.confirm_password.errors %}
                                 <div class="profile-feedback text-danger">{{ form.confirm_password.errors[0] }}</div>
@@ -356,16 +383,8 @@
         </div>
     </div>
 </div>
-<script>
-    document.querySelectorAll('[data-password-toggle="true"]').forEach(function (toggleButton) {
-        toggleButton.addEventListener('click', function () {
-            const inputWrapper = toggleButton.closest('.profile-password-input-wrap');
-            const passwordInput = inputWrapper ? inputWrapper.querySelector('[data-password-input="true"]') : null;
-            if (!passwordInput) return;
-            const isHidden = passwordInput.type === 'password';
-            passwordInput.type = isHidden ? 'text' : 'password';
-            toggleButton.textContent = isHidden ? 'Hide' : 'Show';
-        });
-    });
-</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/password_toggle.js') }}" defer></script>
 {% endblock %}

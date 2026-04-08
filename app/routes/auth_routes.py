@@ -519,6 +519,36 @@ def _find_permission_group_by_name(
     return query.first()
 
 
+def _is_pending_invited_user(user: User | None) -> bool:
+    return bool(
+        user is not None
+        and not user.active
+        and user.last_login_at is None
+    )
+
+
+def _reset_user_invitation(
+    user: User,
+    *,
+    group_ids: list[int] | None = None,
+) -> None:
+    user.password = generate_password_hash(os.urandom(16).hex())
+    user.active = False
+    user.last_active_at = None
+    if group_ids is not None:
+        _assign_permission_groups_to_user(user, group_ids)
+
+
+def _send_user_invitation_email(user: User) -> None:
+    token = generate_reset_token(user)
+    invite_url = url_for("auth.reset_token", token=token, _external=True)
+    send_email(
+        user.email,
+        "You are invited to InvoiceManager",
+        f"Click the link to set your password: {invite_url}",
+    )
+
+
 def generate_reset_token(user: User) -> str:
     return _serializer().dumps(
         {
@@ -857,29 +887,30 @@ def users():
             email = _normalize_email(invite_form.email.data)
             existing = _find_user_by_email(email)
             if existing:
-                flash("User already exists.", "danger")
+                if _is_pending_invited_user(existing):
+                    _reset_user_invitation(
+                        existing, group_ids=invite_form.group_ids.data
+                    )
+                    db.session.commit()
+                    _send_user_invitation_email(existing)
+                    log_activity(f"Re-sent invite to user {email}")
+                    flash("Invitation re-sent.", "success")
+                else:
+                    flash(
+                        "User already exists. Use password reset if they need a new setup email.",
+                        "danger",
+                    )
             else:
-                temp_password = generate_password_hash(os.urandom(16).hex())
                 new_user = User(
                     email=email,
-                    password=temp_password,
+                    password="",
                     active=False,
                     is_admin=False,
                 )
-                _assign_permission_groups_to_user(
-                    new_user, invite_form.group_ids.data
-                )
+                _reset_user_invitation(new_user, group_ids=invite_form.group_ids.data)
                 db.session.add(new_user)
                 db.session.commit()
-                token = generate_reset_token(new_user)
-                invite_url = url_for(
-                    "auth.reset_token", token=token, _external=True
-                )
-                send_email(
-                    email,
-                    "You are invited to InvoiceManager",
-                    f"Click the link to set your password: {invite_url}",
-                )
+                _send_user_invitation_email(new_user)
                 log_activity(f"Invited user {email}")
                 flash("Invitation sent.", "success")
             return redirect(url_for("admin.users"))
@@ -901,10 +932,26 @@ def users():
         user = db.session.get(User, user_id)
         if user:
             if action == "toggle_active":
+                if _is_pending_invited_user(user):
+                    flash(
+                        "Pending invites cannot be activated manually. Re-send or delete the invite instead.",
+                        "warning",
+                    )
+                    return redirect(url_for("admin.users"))
                 user.active = not user.active
                 if not user.active:
                     user.last_active_at = None
                 log_activity(f"Toggled active for user {user_id}")
+            elif action == "resend_invite":
+                if not _is_pending_invited_user(user):
+                    flash("Only pending invites can be re-sent.", "warning")
+                    return redirect(url_for("admin.users"))
+                _reset_user_invitation(user)
+                db.session.commit()
+                _send_user_invitation_email(user)
+                log_activity(f"Re-sent invite to user {user.email}")
+                flash("Invitation re-sent.", "success")
+                return redirect(url_for("admin.users"))
             elif action == "toggle_super_admin":
                 if not current_user.is_super_admin:
                     abort(403)
@@ -972,12 +1019,19 @@ def user_access(user_id):
 @admin.route("/delete_user/<int:user_id>", methods=["POST"])
 @login_required
 def delete_user(user_id):
-    """Remove a user from the system."""
+    """Archive a user or delete an unused pending invite."""
     user_to_delete = db.session.get(User, user_id)
     if user_to_delete is None:
         abort(404)
     if user_to_delete.is_super_admin and _super_admin_count() <= 1:
         flash("At least one super admin is required.", "danger")
+        return redirect(url_for("admin.users"))
+    if _is_pending_invited_user(user_to_delete):
+        invite_email = user_to_delete.email
+        db.session.delete(user_to_delete)
+        db.session.commit()
+        log_activity(f"Deleted pending invite {invite_email}")
+        flash("Pending invite deleted.", "success")
         return redirect(url_for("admin.users"))
     user_to_delete.active = False
     db.session.commit()

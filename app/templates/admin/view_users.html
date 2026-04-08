@@ -38,7 +38,7 @@
                     {% for error in invite_form.group_ids.errors %}
                     <div class="invalid-feedback d-block">{{ error }}</div>
                     {% endfor %}
-                    <div class="form-text">Leave blank to invite the user with no permission groups until you assign access.</div>
+                    <div class="form-text">Leave blank to invite the user with no permission groups until you assign access. Sending the same email again will re-send any still-pending invite and update its groups.</div>
                 </div>
                 <div class="col-12 col-lg-2 d-flex align-items-end">
                     <button type="submit" class="btn btn-primary w-100">{{ invite_form.submit.label.text }}</button>
@@ -65,6 +65,7 @@
 
     <div class="d-md-none vstack gap-3">
         {% for user in users %}
+        {% set invite_pending = (not user.active and not user.last_login_at) %}
         <div class="card">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
@@ -72,8 +73,8 @@
                         <div class="fw-semibold text-break">{{ user.email }}</div>
                         <div class="small text-muted">User #{{ user.id }}</div>
                     </div>
-                    <span class="badge {% if user.active %}text-bg-success{% else %}text-bg-secondary{% endif %}">
-                        {{ 'Active' if user.active else 'Inactive' }}
+                    <span class="badge {% if user.active %}text-bg-success{% elif invite_pending %}text-bg-warning{% else %}text-bg-secondary{% endif %}">
+                        {{ 'Active' if user.active else 'Invited' if invite_pending else 'Inactive' }}
                     </span>
                 </div>
                 <div class="small mb-3">
@@ -90,6 +91,22 @@
                 </div>
                 <div class="vstack gap-2">
                     {% if can_manage_users %}
+                    {% if invite_pending %}
+                    <form action="{{ url_for('admin.users') }}" method="post">
+                        {{ form.hidden_tag() }}
+                        <input type="hidden" name="user_id" value="{{ user.id }}">
+                        <button type="submit" name="action" value="resend_invite" class="btn btn-primary btn-sm w-100">
+                            Re-send Invite
+                        </button>
+                    </form>
+                    <form action="{{ url_for('admin.delete_user', user_id=user.id) }}" method="post">
+                        {{ form.hidden_tag() }}
+                        <button type="submit" class="btn btn-danger btn-sm w-100"
+                                data-confirm-message="Delete this pending invite?">
+                            Delete Invite
+                        </button>
+                    </form>
+                    {% else %}
                     <form action="{{ url_for('admin.users') }}" method="post">
                         {{ form.hidden_tag() }}
                         <input type="hidden" name="user_id" value="{{ user.id }}">
@@ -116,6 +133,7 @@
                         </button>
                     </form>
                     {% endif %}
+                    {% endif %}
                     {% if can_access_endpoint('admin.user_access') %}
                     <a href="{{ url_for('admin.user_access', user_id=user.id) }}" class="btn btn-outline-primary btn-sm w-100">Access</a>
                     {% endif %}
@@ -141,11 +159,12 @@
             </thead>
             <tbody>
             {% for user in users %}
+            {% set invite_pending = (not user.active and not user.last_login_at) %}
             <tr>
                 <td class="col-user-email">{{ user.email }}</td>
                 <td class="col-user-active">
-                    <span class="badge {% if user.active %}text-bg-success{% else %}text-bg-secondary{% endif %}">
-                        {{ 'Active' if user.active else 'Inactive' }}
+                    <span class="badge {% if user.active %}text-bg-success{% elif invite_pending %}text-bg-warning{% else %}text-bg-secondary{% endif %}">
+                        {{ 'Active' if user.active else 'Invited' if invite_pending else 'Inactive' }}
                     </span>
                 </td>
                 <td class="col-user-access">
@@ -162,6 +181,22 @@
                 </td>
                 <td class="col-user-actions">
                     {% if can_manage_users %}
+                    {% if invite_pending %}
+                    <form action="{{ url_for('admin.users') }}" method="post" class="d-inline">
+                        {{ form.hidden_tag() }}
+                        <input type="hidden" name="user_id" value="{{ user.id }}">
+                        <button type="submit" name="action" value="resend_invite" class="btn btn-sm btn-primary">
+                            Re-send Invite
+                        </button>
+                    </form>
+                    <form action="{{ url_for('admin.delete_user', user_id=user.id) }}" method="post" class="d-inline">
+                        {{ form.hidden_tag() }}
+                        <button type="submit" class="btn btn-sm btn-danger"
+                                data-confirm-message="Delete this pending invite?">
+                            Delete Invite
+                        </button>
+                    </form>
+                    {% else %}
                     <form action="{{ url_for('admin.users') }}" method="post" class="d-inline">
                         {{ form.hidden_tag() }}
                         <input type="hidden" name="user_id" value="{{ user.id }}">
@@ -187,6 +222,7 @@
                             Archive
                         </button>
                     </form>
+                    {% endif %}
                     {% else %}
                     <span class="text-muted">Read only</span>
                     {% endif %}

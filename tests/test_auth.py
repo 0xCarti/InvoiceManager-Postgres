@@ -25,6 +25,15 @@ def test_login_redirect(client, app):
     assert response.headers["Location"].endswith("/auth/profile")
 
 
+def test_login_page_renders_password_toggle(client):
+    response = client.get("/auth/login")
+
+    assert response.status_code == 200
+    assert b'data-password-toggle-group' in response.data
+    assert response.data.count(b'aria-pressed="false"') >= 1
+    assert b'js/password_toggle.js' in response.data
+
+
 def test_logout_requires_post(client, app):
     with app.app_context():
         user = User(
@@ -105,6 +114,25 @@ def test_invited_user_can_sign_in_after_setting_password(client, app):
         refreshed = User.query.filter_by(email="invited@example.com").first()
         assert refreshed is not None
         assert refreshed.active is True
+
+
+def test_reset_token_page_renders_password_toggles(client, app):
+    with app.app_context():
+        user = User(
+            email="toggle-reset@example.com",
+            password=generate_password_hash("temporary"),
+            active=True,
+        )
+        db.session.add(user)
+        db.session.commit()
+        token = generate_reset_token(user)
+
+    response = client.get(f"/auth/reset/{token}")
+
+    assert response.status_code == 200
+    assert response.data.count(b'data-password-toggle-group') == 2
+    assert response.data.count(b'aria-pressed="false"') == 2
+    assert b'js/password_toggle.js' in response.data
 
 
 def test_inactive_user_is_logged_out_on_next_request(client, app):

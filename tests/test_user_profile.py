@@ -1,5 +1,4 @@
 import os
-
 from flask import url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -38,6 +37,21 @@ def test_user_can_change_password(client, app):
     with app.app_context():
         user = User.query.filter_by(email="profile@example.com").first()
         assert check_password_hash(user.password, "newpass")
+
+
+def test_profile_page_renders_password_toggles(client, app):
+    create_user(app, "profile-toggle@example.com")
+    with client:
+        login(client, "profile-toggle@example.com", "oldpass")
+        response = client.get("/auth/profile")
+
+    assert response.status_code == 200
+    assert response.data.count(b'data-password-toggle-group') == 3
+    assert response.data.count(b'data-password-input') == 3
+    assert b'Toggle current password visibility' in response.data
+    assert b'Toggle new password visibility' in response.data
+    assert b'Toggle confirm password visibility' in response.data
+    assert b'js/password_toggle.js' in response.data
 
 
 def test_admin_view_and_change_user_password(client, app):
