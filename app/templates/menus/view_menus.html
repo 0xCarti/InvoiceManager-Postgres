@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from 'macros/column_visibility.html' import column_visibility_dropdown %}
 {% block content %}
+{% set can_delete_menus = can_access_endpoint('menu.delete_menu', 'POST') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-toolbar,
@@ -142,10 +143,12 @@
                         <div class="mobile-actions mobile-card-actions">
                             <a href="{{ url_for('menu.edit_menu', menu_id=menu.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
                             <a href="{{ url_for('menu.assign_menu', menu_id=menu.id) }}" class="btn btn-sm btn-outline-primary">Assign</a>
+                            {% if can_delete_menus %}
                             <form method="post" action="{{ url_for('menu.delete_menu', menu_id=menu.id) }}" class="d-inline">
                                 {{ delete_form.hidden_tag() }}
                                 <button type="submit" class="btn btn-sm btn-outline-danger" data-confirm-message="Delete this menu?">Delete</button>
                             </form>
+                            {% endif %}
                         </div>
                     </td>
                 </tr>

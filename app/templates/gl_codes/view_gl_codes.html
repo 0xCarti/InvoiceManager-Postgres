@@ -3,6 +3,7 @@
 {% from 'macros/filter_modal.html' import filter_modal %}
 {% block title %}GL Codes{% endblock %}
 {% block content %}
+{% set can_delete_gl_codes = can_access_endpoint('glcode.delete_gl_code', 'POST') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-toolbar,
@@ -121,10 +122,12 @@
                 <td class="col-gl-actions">
                     <div class="mobile-actions">
                         <button type="button" class="btn btn-secondary btn-sm edit-gl-code" data-id="{{ code.id }}" data-code="{{ code.code }}" data-description="{{ code.description or '' }}">Edit</button>
+                        {% if can_delete_gl_codes %}
                         <form action="{{ url_for('glcode.delete_gl_code', code_id=code.id) }}" method="post" class="d-inline">
                             {{ delete_form.hidden_tag() }}
                             <button type="submit" class="btn btn-danger btn-sm" data-confirm-message="Are you sure?">Delete</button>
                         </form>
+                        {% endif %}
                     </div>
                 </td>
             </tr>
@@ -249,10 +252,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td class="col-gl-actions">
                         <div class="mobile-actions">
                         <button type="button" class="btn btn-secondary btn-sm edit-gl-code" data-id="${data.id}" data-code="${data.code}" data-description="${data.description}">Edit</button>
+                        {% if can_delete_gl_codes %}
                         <form action="/gl_codes/${data.id}/delete" method="post" class="d-inline">
                             <input type="hidden" name="csrf_token" value="${csrfToken}">
                             <button type="submit" class="btn btn-danger btn-sm" data-confirm-message="Are you sure?">Delete</button>
                         </form>
+                        {% endif %}
                         </div>
                     </td>`;
                 tbody.prepend(row);

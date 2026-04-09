@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block content %}
+{% set can_remove_location_items = can_access_endpoint('locations.delete_location_item', 'POST') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-pagination-controls {
@@ -100,7 +101,7 @@
                     <td class="text-end">
                         {% if entry.is_protected %}
                             <span class="text-muted" title="This item comes from a product recipe and cannot be removed.">Locked</span>
-                        {% else %}
+                        {% elif can_remove_location_items %}
                             <input type="hidden" name="page" value="{{ entries.page }}">
                             <input type="hidden" name="per_page" value="{{ per_page }}">
                             <button
@@ -111,6 +112,8 @@
                             >
                                 Remove
                             </button>
+                        {% else %}
+                            <span class="text-muted">View only</span>
                         {% endif %}
                     </td>
                 </tr>

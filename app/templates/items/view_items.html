@@ -2,6 +2,7 @@
 {% from 'macros/filter_modal.html' import filter_modal %}
 
 {% block content %}
+{% set can_bulk_delete_items = can_access_endpoint('item.bulk_delete_items', 'POST') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-toolbar,
@@ -53,7 +54,9 @@
         <a href="{{ url_for('item.recipe_cost_calculator') }}" class="btn btn-outline-primary" id="recipeCostCalculatorBtn">Recipe Cost Calculator</a>
         <button type="button" class="btn btn-outline-secondary" id="bulkEditItemsBtn" disabled>Bulk Edit</button>
         <a href="{{ url_for('item.import_items') }}" class="btn btn-outline-secondary">Import Items</a>
+        {% if can_bulk_delete_items %}
         <button type="submit" form="bulk-delete-form" class="btn btn-warning" data-confirm-message="Are you sure?">Delete Items</button>
+        {% endif %}
         <div class="dropdown d-md-none">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                 More actions

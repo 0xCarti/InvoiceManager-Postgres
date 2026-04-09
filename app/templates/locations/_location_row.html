@@ -15,10 +15,12 @@
             <a href="{{ url_for('locations.location_items', location_id=location.id) }}" class="btn btn-outline-secondary btn-sm">Manage Items</a>
             <a href="{{ url_for('notes.entity_notes', entity_type='location', entity_id=location.id) }}" class="btn btn-outline-secondary btn-sm">Notes</a>
             <button type="button" class="btn btn-warning btn-sm copy-location-btn" data-id="{{ location.id }}">Copy Stand Sheet</button>
+            {% if can_access_endpoint('locations.delete_location', 'POST') %}
             <form action="{{ url_for('locations.delete_location', location_id=location.id) }}" method="post" class="d-inline">
                 {{ delete_form.hidden_tag() }}
                 <button type="submit" class="btn btn-danger btn-sm">Delete</button>
             </form>
+            {% endif %}
         </div>
     </td>
 </tr>

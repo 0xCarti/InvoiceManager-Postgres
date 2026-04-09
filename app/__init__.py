@@ -9,7 +9,7 @@ from logging.handlers import RotatingFileHandler
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from flask import Flask, Response, flash, g, jsonify, redirect, render_template, request, url_for
+from flask import Flask, Response, abort, flash, g, jsonify, redirect, render_template, request, url_for
 from flask_bootstrap import Bootstrap
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -730,7 +730,7 @@ def create_app(args=None):
             flash("Your account is no longer active. Please contact an administrator.", "warning")
             return redirect(url_for("auth.login"))
         if not user_can_access_endpoint(current_user, request.endpoint, request.method):
-            return Response(status=403)
+            abort(403)
 
     @app.before_request
     def enforce_login_activity():
@@ -934,6 +934,26 @@ def create_app(args=None):
                     ),
                 ),
                 413,
+            )
+
+        @app.errorhandler(403)
+        def handle_forbidden(error):
+            """Render a consistent access-denied response."""
+            if (
+                request.headers.get("X-Requested-With") == "XMLHttpRequest"
+                or request.accept_mimetypes.best == "application/json"
+            ):
+                return jsonify({"ok": False, "error": "forbidden"}), 403
+
+            support_contact = os.getenv("SUPPORT_CONTACT_EMAIL") or os.getenv(
+                "ADMIN_EMAIL"
+            )
+            return (
+                render_template(
+                    "errors/forbidden.html",
+                    support_contact=support_contact,
+                ),
+                403,
             )
 
         @app.errorhandler(Exception)

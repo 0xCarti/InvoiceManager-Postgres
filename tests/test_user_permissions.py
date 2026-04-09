@@ -85,6 +85,7 @@ def test_user_without_permission_groups_is_redirected_to_profile_and_blocked_fro
 
         restricted_page = client.get("/purchase_orders")
         assert restricted_page.status_code == 403
+        assert b"You do not have permissions to access this page." in restricted_page.data
 
         profile_page = client.get("/auth/profile")
         assert profile_page.status_code == 200

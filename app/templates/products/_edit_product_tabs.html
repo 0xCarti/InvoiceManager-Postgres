@@ -5,6 +5,7 @@
 {% set details_panel_id = 'product-details' if is_default_tabs else tabs_id ~ '-details' %}
 {% set terminal_tab_id = 'terminal-sales-tab' if is_default_tabs else tabs_id ~ '-terminal-sales-tab' %}
 {% set terminal_panel_id = 'terminal-sales' if is_default_tabs else tabs_id ~ '-terminal-sales' %}
+{% set can_remove_terminal_sale_aliases = can_access_endpoint('product.remove_terminal_sale_alias', 'POST') %}
 <div class="product-edit-sections" data-role="product-edit-tabs">
     <ul class="nav nav-tabs mt-4" id="{{ tabs_id }}" role="tablist">
         <li class="nav-item" role="presentation">
@@ -52,12 +53,16 @@
                                 {% endif %}
                             </td>
                             <td class="text-end">
+                                {% if can_remove_terminal_sale_aliases %}
                                 <form class="d-inline" method="POST"
                                     action="{{ url_for('product.remove_terminal_sale_alias', product_id=product_id, alias_id=alias.id) }}">
                                     {{ alias_delete_form.hidden_tag() }}
                                     <button type="submit" class="btn btn-outline-danger btn-sm"
                                         data-confirm-message="Remove this mapping?">Remove</button>
                                 </form>
+                                {% else %}
+                                <span class="text-muted">View only</span>
+                                {% endif %}
                             </td>
                         </tr>
                         {% endfor %}

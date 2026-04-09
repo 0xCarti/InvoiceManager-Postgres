@@ -3,6 +3,7 @@
 {% from 'macros/filter_modal.html' import filter_modal %}
 
 {% block content %}
+{% set can_delete_locations = can_access_endpoint('locations.delete_location', 'POST') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-toolbar,
@@ -479,10 +480,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 <a href=\"/locations/${loc.id}/items\" class=\"btn btn-outline-secondary\">Manage Items</a>
                 <a href=\"${notesUrl}\" class=\"btn btn-outline-secondary\">Notes</a>
                 <button type=\"button\" class=\"btn btn-warning copy-location-btn\" data-id=\"${loc.id}\">Copy Stand Sheet</button>
+                {% if can_delete_locations %}
                 <form action=\"/locations/delete/${loc.id}\" method=\"post\" class=\"d-inline\">
                     <input type=\"hidden\" name=\"csrf_token\" value=\"${csrfToken}\">
                     <button type=\"submit\" class=\"btn btn-danger\">Delete</button>
                 </form>
+                {% endif %}
             </td>
         </tr>`;
         $('#locations-table tbody').append(row);

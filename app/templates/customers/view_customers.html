@@ -5,6 +5,7 @@
 {% block title %}View Customers{% endblock %}
 
 {% block content %}
+{% set can_delete_customers = can_access_endpoint('customer.delete_customer', 'POST') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-toolbar,
@@ -153,10 +154,12 @@
                     <div class="mobile-actions">
                         <a href="{{ url_for('customer.edit_customer', customer_id=customer.id) }}" class="btn btn-primary btn-sm">Edit</a>
                         <a href="{{ url_for('notes.entity_notes', entity_type='customer', entity_id=customer.id) }}" class="btn btn-outline-secondary btn-sm">Notes</a>
+                        {% if can_delete_customers %}
                         <form action="{{ url_for('customer.delete_customer', customer_id=customer.id) }}" method="post" class="d-inline">
                             {{ delete_form.hidden_tag() }}
                             <button type="submit" class="btn btn-danger btn-sm" data-confirm-message="Are you sure you want to delete this customer?">Delete</button>
                         </form>
+                        {% endif %}
                     </div>
                 </td>
             </tr>

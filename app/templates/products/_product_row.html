@@ -84,10 +84,12 @@
                data-product-id="{{ product.id }}">Edit</a>
             <a href="{{ url_for('notes.entity_notes', entity_type='product', entity_id=product.id) }}" class="btn btn-outline-secondary btn-sm">Notes</a>
             <a href="{{ url_for('product.copy_product', product_id=product.id) }}" class="btn btn-secondary btn-sm">Copy</a>
+            {% if can_access_endpoint('product.delete_product', 'POST') %}
             <form action="{{ url_for('product.delete_product', product_id=product.id) }}" method="post" class="d-inline-block">
                 {{ delete_form.hidden_tag() }}
                 <button type="submit" class="btn btn-danger btn-sm">Delete</button>
             </form>
+            {% endif %}
         </div>
     </td>
 </tr>
