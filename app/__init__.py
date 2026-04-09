@@ -515,6 +515,7 @@ def create_app(args=None):
     )
     app.config["POS_IMPORT_API_BASE_URL"] = os.getenv("POS_IMPORT_API_BASE_URL", "")
     app.config["POS_IMPORT_API_TOKEN"] = os.getenv("POS_IMPORT_API_TOKEN", "")
+    app.config["MENU_FEED_API_TOKEN"] = os.getenv("MENU_FEED_API_TOKEN", "")
     app.config["POS_IMPORT_API_MESSAGES_PATH"] = os.getenv(
         "POS_IMPORT_API_MESSAGES_PATH", "/messages/unseen"
     )

@@ -1489,6 +1489,7 @@ class Setting(db.Model):
 
     RECEIVE_LOCATION_SETTING = "PURCHASE_RECEIVE_LOCATION_DEFAULTS"
     PURCHASE_IMPORT_VENDORS = "PURCHASE_IMPORT_VENDORS"
+    MENU_FEED_API_TOKEN = "MENU_FEED_API_TOKEN"
     DEFAULT_PURCHASE_IMPORT_VENDORS = ["SYSCO", "PRATTS", "CENTRAL SUPPLY"]
 
     @classmethod
@@ -1569,4 +1570,24 @@ class Setting(db.Model):
             db.session.add(setting)
 
         setting.value = json.dumps(cleaned)
+        return setting
+
+    @classmethod
+    def get_menu_feed_api_token(cls) -> str:
+        """Return the configured menu-feed API token."""
+
+        setting = cls.query.filter_by(name=cls.MENU_FEED_API_TOKEN).first()
+        if setting is None or not setting.value:
+            return ""
+        return setting.value.strip()
+
+    @classmethod
+    def set_menu_feed_api_token(cls, token: str):
+        """Persist the menu-feed API token."""
+
+        setting = cls.query.filter_by(name=cls.MENU_FEED_API_TOKEN).first()
+        if setting is None:
+            setting = cls(name=cls.MENU_FEED_API_TOKEN)
+            db.session.add(setting)
+        setting.value = (token or "").strip()
         return setting

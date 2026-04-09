@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import csv
+import io
+import secrets
+
 from flask import (
     Blueprint,
+    Response,
     abort,
+    current_app,
     flash,
     jsonify,
     redirect,
@@ -21,7 +27,7 @@ from app.forms import (
     MenuForm,
     QuickProductForm,
 )
-from app.models import Location, Menu, MenuAssignment, Product
+from app.models import Location, Menu, MenuAssignment, Product, Setting
 from app.utils.activity import log_activity
 from app.utils.menu_assignments import set_location_menu, sync_menu_locations
 from app.utils.text import (
@@ -39,6 +45,85 @@ def _load_products(product_ids: list[int]) -> list[Product]:
     products = Product.query.filter(Product.id.in_(unique_ids)).all()
     by_id = {product.id: product for product in products}
     return [by_id[pid] for pid in unique_ids if pid in by_id]
+
+
+def _extract_menu_feed_token() -> str:
+    token = (request.args.get("token") or "").strip()
+    if token:
+        return token
+    token = (request.headers.get("X-API-Token") or "").strip()
+    if token:
+        return token
+    authorization = (request.headers.get("Authorization") or "").strip()
+    if authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+    return ""
+
+
+def _get_menu_feed_expected_token() -> str:
+    token = str(current_app.config.get("MENU_FEED_API_TOKEN", "") or "").strip()
+    if token:
+        return token
+    return Setting.get_menu_feed_api_token()
+
+
+def _is_menu_feed_authorized() -> bool:
+    expected_token = _get_menu_feed_expected_token()
+    provided_token = _extract_menu_feed_token()
+    if not expected_token or not provided_token:
+        return False
+    return secrets.compare_digest(provided_token, expected_token)
+
+
+def _menu_feed_products() -> list[Product]:
+    return Product.query.order_by(func.lower(Product.name), Product.id).all()
+
+
+def _menu_feed_json_rows(products: list[Product]) -> list[dict[str, object]]:
+    return [
+        {
+            "id": str(product.id),
+            "name": product.name,
+            "category": "",
+            "image_url": "",
+            "description": "",
+            "enabled": 1,
+            "price": round(float(product.price or 0.0), 2),
+        }
+        for product in products
+    ]
+
+
+def _menu_feed_csv_text(rows: list[dict[str, object]]) -> str:
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "id",
+            "name",
+            "category",
+            "image_url",
+            "description",
+            "enabled",
+            "price",
+        ],
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    for row in rows:
+        csv_row = dict(row)
+        csv_row["price"] = f"{float(csv_row.get('price', 0.0)):.2f}"
+        writer.writerow(csv_row)
+    return output.getvalue()
+
+
+def _resolve_menu_feed_format() -> str:
+    requested_format = (request.args.get("format") or "").strip().lower()
+    if requested_format in {"json", "csv"}:
+        return requested_format
+    if request.path.endswith(".csv"):
+        return "csv"
+    return "json"
 
 
 @menu.route("/menus")
@@ -218,3 +303,28 @@ def get_menu_products():
             "product_ids": [product.id for product in menu.products],
         }
     )
+
+
+@menu.route("/integrations/menu-feed")
+@menu.route("/integrations/menu-feed.json")
+@menu.route("/integrations/menu-feed.csv")
+def menu_feed():
+    if not _is_menu_feed_authorized():
+        abort(403)
+
+    rows = _menu_feed_json_rows(_menu_feed_products())
+
+    response_payload = {
+        "count": len(rows),
+        "products": rows,
+    }
+
+    if _resolve_menu_feed_format() == "csv":
+        csv_text = _menu_feed_csv_text(rows)
+        return Response(
+            csv_text,
+            mimetype="text/csv",
+            headers={"Content-Disposition": "inline; filename=menu-feed.csv"},
+        )
+
+    return jsonify(response_payload)
