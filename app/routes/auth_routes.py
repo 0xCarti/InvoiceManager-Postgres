@@ -81,6 +81,7 @@ from app.models import (
     db,
 )
 from app.utils import send_email
+from app.utils.email import SMTPConfigurationError
 from app.utils.activity import log_activity
 from app.utils.backup import (
     RestoreBackupError,
@@ -549,6 +550,68 @@ def _send_user_invitation_email(user: User) -> None:
     )
 
 
+def _deliver_user_invitation(
+    user: User,
+    *,
+    success_message: str,
+    activity_message: str,
+) -> bool:
+    try:
+        # Flush so brand-new users receive an ID before token generation.
+        db.session.flush()
+        _send_user_invitation_email(user)
+    except SMTPConfigurationError as exc:
+        db.session.rollback()
+        current_app.logger.warning(
+            "SMTP configuration missing while sending invite to %s: %s",
+            user.email,
+            exc,
+        )
+        flash(
+            "Email settings are not configured. Please update SMTP settings before sending invites.",
+            "danger",
+        )
+        return False
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Failed to send invitation email to %s",
+            user.email,
+        )
+        flash(
+            "Unable to send invitation email. Please verify SMTP settings and try again.",
+            "danger",
+        )
+        return False
+
+    db.session.commit()
+    log_activity(activity_message)
+    flash(success_message, "success")
+    return True
+
+
+def _send_password_reset_email_if_possible(user: User) -> None:
+    token = generate_reset_token(user)
+    reset_url = url_for("auth.reset_token", token=token, _external=True)
+    try:
+        send_email(
+            user.email,
+            "Password Reset",
+            f"Click the link to reset your password: {reset_url}",
+        )
+    except SMTPConfigurationError as exc:
+        current_app.logger.warning(
+            "SMTP configuration missing while sending password reset email to %s: %s",
+            user.email,
+            exc,
+        )
+    except Exception:
+        current_app.logger.exception(
+            "Failed to send password reset email to %s",
+            user.email,
+        )
+
+
 def generate_reset_token(user: User) -> str:
     return _serializer().dumps(
         {
@@ -633,13 +696,7 @@ def reset_request():
     if form.validate_on_submit():
         user = _find_user_by_email(form.email.data)
         if user:
-            token = generate_reset_token(user)
-            reset_url = url_for("auth.reset_token", token=token, _external=True)
-            send_email(
-                user.email,
-                "Password Reset",
-                f"Click the link to reset your password: {reset_url}",
-            )
+            _send_password_reset_email_if_possible(user)
         flash(
             "If an account exists for that email, a reset link has been sent.",
             "success",
@@ -891,10 +948,11 @@ def users():
                     _reset_user_invitation(
                         existing, group_ids=invite_form.group_ids.data
                     )
-                    db.session.commit()
-                    _send_user_invitation_email(existing)
-                    log_activity(f"Re-sent invite to user {email}")
-                    flash("Invitation re-sent.", "success")
+                    _deliver_user_invitation(
+                        existing,
+                        success_message="Invitation re-sent.",
+                        activity_message=f"Re-sent invite to user {email}",
+                    )
                 else:
                     flash(
                         "User already exists. Use password reset if they need a new setup email.",
@@ -909,10 +967,11 @@ def users():
                 )
                 _reset_user_invitation(new_user, group_ids=invite_form.group_ids.data)
                 db.session.add(new_user)
-                db.session.commit()
-                _send_user_invitation_email(new_user)
-                log_activity(f"Invited user {email}")
-                flash("Invitation sent.", "success")
+                _deliver_user_invitation(
+                    new_user,
+                    success_message="Invitation sent.",
+                    activity_message=f"Invited user {email}",
+                )
             return redirect(url_for("admin.users"))
         return render_template(
             "admin/view_users.html",
@@ -947,10 +1006,11 @@ def users():
                     flash("Only pending invites can be re-sent.", "warning")
                     return redirect(url_for("admin.users"))
                 _reset_user_invitation(user)
-                db.session.commit()
-                _send_user_invitation_email(user)
-                log_activity(f"Re-sent invite to user {user.email}")
-                flash("Invitation re-sent.", "success")
+                _deliver_user_invitation(
+                    user,
+                    success_message="Invitation re-sent.",
+                    activity_message=f"Re-sent invite to user {user.email}",
+                )
                 return redirect(url_for("admin.users"))
             elif action == "toggle_super_admin":
                 if not current_user.is_super_admin:

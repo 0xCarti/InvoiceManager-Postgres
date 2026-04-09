@@ -9,9 +9,10 @@ def test_admin_invite_creates_user(client, app, monkeypatch):
     sent = {}
 
     class DummySMTP:
-        def __init__(self, host, port):
+        def __init__(self, host, port, timeout=None):
             sent["host"] = host
             sent["port"] = port
+            sent["timeout"] = timeout
 
         def starttls(self):
             sent["tls"] = True
@@ -55,13 +56,68 @@ def test_admin_invite_creates_user(client, app, monkeypatch):
     assert "message" in sent
 
 
+def test_admin_invite_does_not_create_user_when_email_send_fails(
+    client, app, monkeypatch
+):
+    class DummySMTP:
+        def __init__(self, host, port, timeout=None):
+            self.host = host
+            self.port = port
+            self.timeout = timeout
+
+        def starttls(self):
+            pass
+
+        def login(self, u, p):
+            pass
+
+        def send_message(self, msg):
+            raise TimeoutError("SMTP request timed out")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            pass
+
+    monkeypatch.setattr("app.utils.email.smtplib.SMTP", DummySMTP)
+
+    with app.app_context():
+        admin = User(
+            email="admin-invite-fail@example.com",
+            password=generate_password_hash("adminpass"),
+            active=True,
+            is_admin=True,
+        )
+        db.session.add(admin)
+        db.session.commit()
+
+    with client:
+        login(client, "admin-invite-fail@example.com", "adminpass")
+        response = client.post(
+            "/controlpanel/users",
+            data={"email": "invite-fail@example.com", "submit": True},
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert (
+        b"Unable to send invitation email. Please verify SMTP settings and try again."
+        in response.data
+    )
+
+    with app.app_context():
+        assert User.query.filter_by(email="invite-fail@example.com").first() is None
+
+
 def test_admin_invite_invalid_email_shows_form_error_not_user_not_found(
     client, app, monkeypatch
 ):
     class DummySMTP:
-        def __init__(self, host, port):
+        def __init__(self, host, port, timeout=None):
             self.host = host
             self.port = port
+            self.timeout = timeout
 
         def starttls(self):
             pass
@@ -111,9 +167,10 @@ def test_admin_invite_treats_email_as_case_insensitive(
     client, app, monkeypatch
 ):
     class DummySMTP:
-        def __init__(self, host, port):
+        def __init__(self, host, port, timeout=None):
             self.host = host
             self.port = port
+            self.timeout = timeout
 
         def starttls(self):
             pass
@@ -171,9 +228,10 @@ def test_admin_can_resend_pending_invite_and_update_groups(
     sent = {}
 
     class DummySMTP:
-        def __init__(self, host, port):
+        def __init__(self, host, port, timeout=None):
             sent["host"] = host
             sent["port"] = port
+            sent["timeout"] = timeout
 
         def starttls(self):
             sent["tls"] = True

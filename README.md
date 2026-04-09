@@ -99,6 +99,7 @@ SMTP_USERNAME=mailer-user
 SMTP_PASSWORD=mailer-pass
 SMTP_SENDER=no-reply@example.com
 SMTP_USE_TLS=true
+SMTP_TIMEOUT_SECONDS=10
 
 RATELIMIT_STORAGE_URI=redis://redis:6379/0
 MAILGUN_WEBHOOK_SIGNING_KEY=mailgun-signing-key
@@ -123,7 +124,7 @@ POS_IMPORT_INGEST_MODE=webhook
 | `SQLALCHEMY_POOL_USE_LIFO` | Uses LIFO checkout behavior to let older idle connections expire naturally in containerized environments (defaults to `true`). |
 | `MAX_UPLOAD_FILE_SIZE_BYTES` | Global request-body upload cap. Oversized browser and webhook uploads are rejected before parsing (defaults to `10485760`, or 10 MB). |
 | `POS_IMPORT_MAX_ATTACHMENT_BYTES` | Per-attachment cap for POS email imports in webhook and poll mode (defaults to `MAX_UPLOAD_FILE_SIZE_BYTES`). |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_SENDER`, `SMTP_USE_TLS` | SMTP settings for password reset emails (`SMTP_PORT` defaults to `25`; set `SMTP_USE_TLS=true` to enable TLS). |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_SENDER`, `SMTP_USE_TLS`, `SMTP_TIMEOUT_SECONDS` | SMTP settings for password reset and invitation emails (`SMTP_PORT` defaults to `25`; set `SMTP_USE_TLS=true` to enable TLS; `SMTP_TIMEOUT_SECONDS` defaults to `10`). |
 | `RATELIMIT_STORAGE_URI` | URI for the rate limiting backend. Use a persistent store such as Redis in production (for example `redis://redis:6379/0`). |
 | `MAILGUN_WEBHOOK_SIGNING_KEY` | Mailgun inbound signing key used to verify webhook authenticity. |
 | `MAILGUN_ALLOWED_SENDERS`, `MAILGUN_ALLOWED_SENDER_DOMAINS` | Sender allowlists for POS imports. Configure at least one of these before enabling webhook or poll-mode ingestion. |
@@ -133,7 +134,7 @@ A persistent backing store is required for rate limiting in production. Set
 `RATELIMIT_STORAGE_URI` to a supported service so that limits are shared
 across workers.
 
-These SMTP variables enable password reset emails. Configure them in your `.env` file if you want users to reset forgotten passwords.
+These SMTP variables enable password reset and user invitation emails. Configure them in your `.env` file if you want users to receive those messages.
 
 The GST number can now be set from the application control panel after installation.
 

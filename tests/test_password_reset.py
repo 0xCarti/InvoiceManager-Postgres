@@ -10,9 +10,10 @@ def test_password_reset_flow(client, app, monkeypatch):
     sent = {}
 
     class DummySMTP:
-        def __init__(self, host, port):
+        def __init__(self, host, port, timeout=None):
             sent["host"] = host
             sent["port"] = port
+            sent["timeout"] = timeout
 
         def starttls(self):
             sent["tls"] = True
@@ -78,6 +79,53 @@ def test_password_reset_unknown_email(client):
         data={"email": "missing@example.com"},
         follow_redirects=True,
     )
+    assert (
+        b"If an account exists for that email, a reset link has been sent."
+        in response.data
+    )
+
+
+def test_password_reset_send_failure_returns_generic_success(
+    client, app, monkeypatch
+):
+    class DummySMTP:
+        def __init__(self, host, port, timeout=None):
+            self.host = host
+            self.port = port
+            self.timeout = timeout
+
+        def starttls(self):
+            pass
+
+        def login(self, u, p):
+            pass
+
+        def send_message(self, msg):
+            raise TimeoutError("SMTP request timed out")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            pass
+
+    monkeypatch.setattr("app.utils.email.smtplib.SMTP", DummySMTP)
+
+    with app.app_context():
+        user = User(
+            email="reset-failure@example.com",
+            password=generate_password_hash("old"),
+            active=True,
+        )
+        db.session.add(user)
+        db.session.commit()
+
+    response = client.post(
+        "/auth/reset",
+        data={"email": "reset-failure@example.com"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
     assert (
         b"If an account exists for that email, a reset link has been sent."
         in response.data
