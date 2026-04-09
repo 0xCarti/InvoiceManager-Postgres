@@ -25,6 +25,11 @@ from app.forms import (
 )
 from app.models import Customer, Invoice, InvoiceProduct, Product
 from app.utils.activity import log_activity
+from app.utils.filter_state import (
+    filters_to_query_args,
+    get_filter_defaults,
+    normalize_filters,
+)
 from app.utils.numeric import coerce_float
 from app.utils.pagination import build_pagination_args, get_per_page
 from app.utils.text import normalize_request_text_filter
@@ -932,6 +937,19 @@ def create_invoice_api():
 @login_required
 def view_invoices():
     """List invoices with optional filters."""
+    user_id = request.args.get("user_id", type=int)
+    scope = request.endpoint or "invoice.view_invoices"
+    default_filters = get_filter_defaults(current_user, scope)
+    active_filters = normalize_filters(
+        request.args,
+        exclude=("page", "per_page", "reset", "user_id"),
+    )
+    if default_filters and not active_filters:
+        redirect_args = filters_to_query_args(default_filters)
+        if user_id is not None:
+            redirect_args["user_id"] = str(user_id)
+        return redirect(url_for("invoice.view_invoices", **redirect_args))
+
     form = InvoiceFilterForm()
     page = request.args.get("page", 1, type=int)
     per_page = get_per_page()
@@ -940,7 +958,6 @@ def view_invoices():
         for c in Customer.query.order_by(Customer.last_name, Customer.first_name).all()
     ]
 
-    user_id = request.args.get("user_id", type=int)
     invoice_id = normalize_request_text_filter(request.args.get("invoice_id"))
     customer_id = request.args.get("customer_id", type=int)
     start_date_str = request.args.get("start_date")

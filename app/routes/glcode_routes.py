@@ -7,11 +7,16 @@ from flask import (
     request,
     url_for,
 )
-from flask_login import login_required
+from flask_login import current_user, login_required
 
 from app import db
 from app.forms import DeleteForm, GLCodeForm
 from app.models import GLCode
+from app.utils.filter_state import (
+    filters_to_query_args,
+    get_filter_defaults,
+    normalize_filters,
+)
 from app.utils.pagination import build_pagination_args, get_per_page
 from app.utils.text import build_text_match_predicate, normalize_request_text_filter
 
@@ -22,6 +27,19 @@ glcode_bp = Blueprint("glcode", __name__)
 @login_required
 def view_gl_codes():
     """List GL codes."""
+    scope = request.endpoint or "glcode.view_gl_codes"
+    default_filters = get_filter_defaults(current_user, scope)
+    active_filters = normalize_filters(
+        request.args, exclude=("page", "per_page", "reset")
+    )
+    if default_filters and not active_filters:
+        return redirect(
+            url_for(
+                "glcode.view_gl_codes",
+                **filters_to_query_args(default_filters),
+            )
+        )
+
     page = request.args.get("page", 1, type=int)
     code_query = normalize_request_text_filter(request.args.get("code_query"))
     description_query = normalize_request_text_filter(

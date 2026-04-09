@@ -8,12 +8,17 @@ from flask import (
     url_for,
     jsonify,
 )
-from flask_login import login_required
+from flask_login import current_user, login_required
 
 from app import db
 from app.forms import CustomerForm, DeleteForm
 from app.models import Customer
 from app.utils.activity import log_activity
+from app.utils.filter_state import (
+    filters_to_query_args,
+    get_filter_defaults,
+    normalize_filters,
+)
 from app.utils.pagination import build_pagination_args, get_per_page
 from app.utils.text import (
     normalize_request_text_filter,
@@ -28,6 +33,19 @@ customer = Blueprint("customer", __name__)
 @login_required
 def view_customers():
     """Display all customers."""
+    scope = request.endpoint or "customer.view_customers"
+    default_filters = get_filter_defaults(current_user, scope)
+    active_filters = normalize_filters(
+        request.args, exclude=("page", "per_page", "reset")
+    )
+    if default_filters and not active_filters:
+        return redirect(
+            url_for(
+                "customer.view_customers",
+                **filters_to_query_args(default_filters),
+            )
+        )
+
     page = request.args.get("page", 1, type=int)
     name_query = normalize_request_text_filter(request.args.get("name_query"))
     match_mode = normalize_text_match_mode(request.args.get("match_mode"))

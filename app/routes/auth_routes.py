@@ -102,6 +102,11 @@ from app.services.purchase_imports import (
     update_or_create_vendor_alias,
 )
 from app.permissions import get_default_landing_endpoint, get_permission_categories
+from app.utils.filter_state import (
+    filters_to_query_args,
+    get_filter_defaults,
+    normalize_filters,
+)
 from app.utils.numeric import coerce_float
 from app.utils.units import (
     DEFAULT_BASE_UNIT_CONVERSIONS,
@@ -1859,6 +1864,19 @@ def download_backup(filename):
 @login_required
 def activity_logs():
     """Display a log of user actions."""
+    scope = request.endpoint or "admin.activity_logs"
+    default_filters = get_filter_defaults(current_user, scope)
+    active_filters = normalize_filters(
+        request.args, exclude=("page", "per_page", "reset")
+    )
+    if default_filters and not active_filters:
+        return redirect(
+            url_for(
+                "admin.activity_logs",
+                **filters_to_query_args(default_filters),
+            )
+        )
+
     form = ActivityLogFilterForm(meta={"csrf": False})
     user_choices = [(-1, "All Users"), (-2, "System Activity")]
     user_choices.extend(

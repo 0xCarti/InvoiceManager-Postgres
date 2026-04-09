@@ -32,7 +32,8 @@
         form_action=url_for('admin.activity_logs'),
         method='get',
         reset_url=url_for('admin.activity_logs'),
-        scope=request.endpoint
+        scope=request.endpoint,
+        save_defaults=True
     ) %}
         {{ form.hidden_tag() }}
         <div class="mb-3">

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import date
+
 from werkzeug.security import generate_password_hash
 
 from app import db
-from app.models import Item, User
+from app.models import Event, Item, User
 from tests.permission_helpers import grant_item_workflow_permissions
 from tests.utils import extract_csrf_token, login
 
@@ -21,6 +23,24 @@ def setup_filter_data(app):
         db.session.commit()
         grant_item_workflow_permissions(user)
         return user.email
+
+
+def setup_event_filter_data(app):
+    with app.app_context():
+        inventory_event = Event(
+            name="Inventory Event",
+            start_date=date(2025, 1, 1),
+            end_date=date(2025, 1, 2),
+            event_type="inventory",
+        )
+        other_event = Event(
+            name="Other Event",
+            start_date=date(2025, 2, 1),
+            end_date=date(2025, 2, 2),
+            event_type="other",
+        )
+        db.session.add_all([inventory_event, other_event])
+        db.session.commit()
 
 
 def test_saved_defaults_apply_after_relogin(client, app, save_filter_defaults):
@@ -70,23 +90,46 @@ def test_reset_reverts_to_saved_defaults(client, app, save_filter_defaults):
         assert b"ActiveItem" not in final_response.data
 
 
-def test_save_defaults_button_only_shown_on_supported_filter_views(client, app):
-    email = setup_filter_data(app)
+def test_save_defaults_button_shown_on_filter_views(client):
     with client:
-        login(client, email, "pass")
+        login(client, "admin@example.com", "adminpass")
 
-        items_response = client.get("/items")
-        assert items_response.status_code == 200
-        assert b"Save as Default" in items_response.data
+        filter_views = (
+            "/items",
+            "/products",
+            "/customers",
+            "/events",
+            "/gl_codes",
+            "/view_invoices",
+            "/locations",
+            "/purchase_orders",
+            "/purchase_invoices",
+            "/spoilage",
+            "/controlpanel/activity",
+        )
+        for path in filter_views:
+            response = client.get(path)
+            assert response.status_code == 200, path
+            assert b"Save as Default" in response.data, path
 
-        products_response = client.get("/products")
-        assert products_response.status_code == 200
-        assert b"Save as Default" in products_response.data
 
-        customers_response = client.get("/customers")
-        assert customers_response.status_code == 200
-        assert b"Save as Default" not in customers_response.data
+def test_saved_event_defaults_apply_on_events_page(
+    client, app, save_filter_defaults
+):
+    setup_event_filter_data(app)
+    with client:
+        login(client, "admin@example.com", "adminpass")
+        save_filter_defaults(
+            "event.view_events",
+            {"type": ["inventory"]},
+            token_path="/events",
+        )
 
-        invoices_response = client.get("/view_invoices")
-        assert invoices_response.status_code == 200
-        assert b"Save as Default" not in invoices_response.data
+        redirect_response = client.get("/events")
+        assert redirect_response.status_code == 302
+        assert "type=inventory" in redirect_response.headers["Location"]
+
+        final_response = client.get(redirect_response.headers["Location"])
+        assert final_response.status_code == 200
+        assert b"Inventory Event" in final_response.data
+        assert b"Other Event" not in final_response.data

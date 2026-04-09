@@ -53,6 +53,11 @@ from app.services.purchase_merge import (
     PurchaseMergeError,
     merge_purchase_orders,
 )
+from app.utils.filter_state import (
+    filters_to_query_args,
+    get_filter_defaults,
+    normalize_filters,
+)
 from app.services.purchase_imports import (
     CSVImportError,
     parse_purchase_order_csv,
@@ -515,6 +520,19 @@ def check_negative_invoice_reverse(invoice_obj):
 @login_required
 def view_purchase_orders():
     """Show purchase orders with optional filters."""
+    scope = request.endpoint or "purchase.view_purchase_orders"
+    default_filters = get_filter_defaults(current_user, scope)
+    active_filters = normalize_filters(
+        request.args, exclude=("page", "per_page", "reset")
+    )
+    if default_filters and not active_filters:
+        return redirect(
+            url_for(
+                "purchase.view_purchase_orders",
+                **filters_to_query_args(default_filters),
+            )
+        )
+
     delete_form = DeleteForm()
     merge_form = PurchaseOrderMergeForm()
     page = request.args.get("page", 1, type=int)
@@ -1754,6 +1772,19 @@ def receive_invoice(po_id):
 @login_required
 def view_purchase_invoices():
     """List all received purchase invoices."""
+    scope = request.endpoint or "purchase.view_purchase_invoices"
+    default_filters = get_filter_defaults(current_user, scope)
+    active_filters = normalize_filters(
+        request.args, exclude=("page", "per_page", "reset")
+    )
+    if default_filters and not active_filters:
+        return redirect(
+            url_for(
+                "purchase.view_purchase_invoices",
+                **filters_to_query_args(default_filters),
+            )
+        )
+
     page = request.args.get("page", 1, type=int)
     per_page = get_per_page()
     invoice_number = (

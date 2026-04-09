@@ -56,6 +56,11 @@ from app.models import (
 )
 from app.services.pdf import render_stand_sheet_pdf
 from app.utils.activity import log_activity
+from app.utils.filter_state import (
+    filters_to_query_args,
+    get_filter_defaults,
+    normalize_filters,
+)
 from app.utils.numeric import coerce_float
 from app.utils.pos_import import (
     combine_terminal_sales_totals,
@@ -965,6 +970,16 @@ def _apply_event_filters(query, filters):
 @event.route("/events")
 @login_required
 def view_events():
+    scope = request.endpoint or "event.view_events"
+    default_filters = get_filter_defaults(current_user, scope)
+    active_filters = normalize_filters(
+        request.args, exclude=("page", "per_page", "reset")
+    )
+    if default_filters and not active_filters:
+        return redirect(
+            url_for("event.view_events", **filters_to_query_args(default_filters))
+        )
+
     filters = _get_event_filters(request.args)
     query = _apply_event_filters(Event.query, filters)
     events = query.all()

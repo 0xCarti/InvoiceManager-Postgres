@@ -10,7 +10,7 @@ from flask import (
     url_for,
 )
 from urllib.parse import urlsplit
-from flask_login import login_required
+from flask_login import current_user, login_required
 
 from app import db
 from sqlalchemy import func, or_
@@ -27,6 +27,11 @@ from app.forms import (
 from app.models import GLCode, Item, Location, LocationStandItem, Menu
 from app.services.pdf import render_stand_sheet_pdf
 from app.utils.activity import log_activity
+from app.utils.filter_state import (
+    filters_to_query_args,
+    get_filter_defaults,
+    normalize_filters,
+)
 from app.utils.menu_assignments import apply_menu_products, set_location_menu
 from app.utils.pagination import build_pagination_args, get_per_page
 from app.utils.units import (
@@ -738,6 +743,19 @@ def delete_location_item(location_id: int, item_id: int):
 @login_required
 def view_locations():
     """List all locations."""
+    scope = request.endpoint or "locations.view_locations"
+    default_filters = get_filter_defaults(current_user, scope)
+    active_filters = normalize_filters(
+        request.args, exclude=("page", "per_page", "reset")
+    )
+    if default_filters and not active_filters:
+        return redirect(
+            url_for(
+                "locations.view_locations",
+                **filters_to_query_args(default_filters),
+            )
+        )
+
     page = request.args.get("page", 1, type=int)
     per_page = get_per_page()
     name_query = normalize_request_text_filter(request.args.get("name_query"))

@@ -82,7 +82,8 @@
         form_action=url_for('glcode.view_gl_codes'),
         method='get',
         reset_url=url_for('glcode.view_gl_codes'),
-        scope=request.endpoint
+        scope=request.endpoint,
+        save_defaults=True
     ) %}
         <div class="mb-3">
             <label for="code_query" class="form-label">Code</label>

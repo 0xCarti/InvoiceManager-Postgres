@@ -4,8 +4,8 @@
 
 from datetime import datetime
 
-from flask import Blueprint, render_template, request
-from flask_login import login_required
+from flask import Blueprint, redirect, render_template, request, url_for
+from flask_login import current_user, login_required
 from sqlalchemy import and_, or_
 
 from app import db
@@ -18,6 +18,11 @@ from app.models import (
     Transfer,
     TransferItem,
 )
+from app.utils.filter_state import (
+    filters_to_query_args,
+    get_filter_defaults,
+    normalize_filters,
+)
 
 spoilage = Blueprint("spoilage", __name__)
 
@@ -26,6 +31,19 @@ spoilage = Blueprint("spoilage", __name__)
 @login_required
 def view_spoilage():
     """Display spoilage items with optional filtering."""
+    scope = request.endpoint or "spoilage.view_spoilage"
+    default_filters = get_filter_defaults(current_user, scope)
+    active_filters = normalize_filters(
+        request.args, exclude=("page", "per_page", "reset")
+    )
+    if default_filters and not active_filters:
+        return redirect(
+            url_for(
+                "spoilage.view_spoilage",
+                **filters_to_query_args(default_filters),
+            )
+        )
+
     form = SpoilageFilterForm(meta={"csrf": False})
     form.process(request.args)
 

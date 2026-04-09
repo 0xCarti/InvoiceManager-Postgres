@@ -54,7 +54,8 @@
     method='get',
     reset_url=url_for('spoilage.view_spoilage'),
     ajax=True,
-    scope=request.endpoint
+    scope=request.endpoint,
+    save_defaults=True
 ) %}
     <div class="row g-3">
         <div class="col-12">

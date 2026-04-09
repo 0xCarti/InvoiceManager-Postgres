@@ -196,7 +196,8 @@
         form_action=url_for('purchase.view_purchase_orders'),
         method='get',
         reset_url=url_for('purchase.view_purchase_orders'),
-        scope=request.endpoint
+        scope=request.endpoint,
+        save_defaults=True
     ) %}
         <div class="mb-3">
             <label for="vendor_id" class="form-label">Vendor</label>

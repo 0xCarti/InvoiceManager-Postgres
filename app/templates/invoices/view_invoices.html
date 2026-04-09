@@ -300,7 +300,8 @@
     form_action=url_for('invoice.view_invoices'),
     method='get',
     reset_url=(url_for('invoice.view_invoices', user_id=request.args.get('user_id')) if request.args.get('user_id') else url_for('invoice.view_invoices')),
-    scope=request.endpoint
+    scope=request.endpoint,
+    save_defaults=True
 ) %}
     {% if request.args.get('user_id') %}
     <input type="hidden" name="user_id" value="{{ request.args.get('user_id') }}">
