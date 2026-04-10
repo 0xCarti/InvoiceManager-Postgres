@@ -101,6 +101,8 @@ SMTP_SENDER=no-reply@example.com
 SMTP_USE_TLS=true
 SMTP_TIMEOUT_SECONDS=10
 
+METABASE_PORT=3000
+METABASE_SITE_URL=http://localhost:3000
 RATELIMIT_STORAGE_URI=redis://redis:6379/0
 MAILGUN_WEBHOOK_SIGNING_KEY=mailgun-signing-key
 MAILGUN_ALLOWED_SENDERS=
@@ -125,6 +127,7 @@ POS_IMPORT_INGEST_MODE=webhook
 | `MAX_UPLOAD_FILE_SIZE_BYTES` | Global request-body upload cap. Oversized browser and webhook uploads are rejected before parsing (defaults to `10485760`, or 10 MB). |
 | `POS_IMPORT_MAX_ATTACHMENT_BYTES` | Per-attachment cap for POS email imports in webhook and poll mode (defaults to `MAX_UPLOAD_FILE_SIZE_BYTES`). |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_SENDER`, `SMTP_USE_TLS`, `SMTP_TIMEOUT_SECONDS` | SMTP settings for password reset and invitation emails (`SMTP_PORT` defaults to `25`; set `SMTP_USE_TLS=true` to enable TLS; `SMTP_TIMEOUT_SECONDS` defaults to `10`). |
+| `METABASE_PORT`, `METABASE_SITE_URL` | `METABASE_PORT` controls the host port published by the Metabase Compose service. `METABASE_SITE_URL` is the browser-facing URL the dashboard's Metabase button redirects to, and it is also passed to Metabase as `MB_SITE_URL` so Metabase-generated links use the same public address. Do not set this to a Docker service/container name unless clients can actually resolve that name. |
 | `RATELIMIT_STORAGE_URI` | URI for the rate limiting backend. Use a persistent store such as Redis in production (for example `redis://redis:6379/0`). |
 | `MAILGUN_WEBHOOK_SIGNING_KEY` | Mailgun inbound signing key used to verify webhook authenticity. |
 | `MAILGUN_ALLOWED_SENDERS`, `MAILGUN_ALLOWED_SENDER_DOMAINS` | Sender allowlists for POS imports. Configure at least one of these before enabling webhook or poll-mode ingestion. |
@@ -277,9 +280,11 @@ The project includes a `Dockerfile` and `docker-compose.yml` for containerized
 runs on Linux and Windows. The image starts Gunicorn using `gunicorn.conf.py`.
 Create a `.env` file with the variables listed above (including Redis-backed
 `RATELIMIT_STORAGE_URI` for production rate limiting). The Compose stack now
-starts `postgres`, `redis`, and `web` together, and `HOST_DATABASE_PORT`
+starts `postgres`, `redis`, `metabase`, and `web` together. `HOST_DATABASE_PORT`
 controls only the host-exposed Postgres port so it can avoid local port
-conflicts without changing the app's internal `DATABASE_PORT=5432`.
+conflicts without changing the app's internal `DATABASE_PORT=5432`, and
+`METABASE_SITE_URL` controls where the dashboard's Metabase button redirects and
+what Metabase itself uses as its public site URL for generated links.
 
 For day-to-day local development, follow the canonical sequence in
 [Canonical Startup Order (Docker Compose)](#canonical-startup-order-docker-compose).
@@ -348,7 +353,7 @@ Use this order for consistent local boots. For Compose startup, keep
 
 1. **Start services needed for DB access**
    ```bash
-   docker compose up -d postgres redis
+   docker compose up -d postgres redis metabase
    ```
 2. **Run migrations against Postgres-backed `DATABASE_URL`**
    ```bash

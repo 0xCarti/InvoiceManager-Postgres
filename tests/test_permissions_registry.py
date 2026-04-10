@@ -24,6 +24,10 @@ def test_user_can_access_endpoint_requires_matching_permission():
 
     assert user_can_access_endpoint(user, "purchase.view_purchase_orders")
     assert not user_can_access_endpoint(user, "purchase.create_purchase_order")
+    assert not user_can_access_endpoint(user, "main.metabase_redirect")
+    assert user_can_access_endpoint(
+        DummyUser("reports.metabase"), "main.metabase_redirect"
+    )
 
 
 def test_super_admin_bypasses_endpoint_permission_checks():

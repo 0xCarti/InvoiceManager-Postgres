@@ -548,6 +548,7 @@ def create_app(args=None):
     app.config["POS_IMPORT_API_ACK_PATH_TEMPLATE"] = os.getenv(
         "POS_IMPORT_API_ACK_PATH_TEMPLATE", "/messages/{message_id}/ack"
     )
+    app.config["METABASE_SITE_URL"] = os.getenv("METABASE_SITE_URL", "").strip()
     app.config.setdefault(
         "RESTORE_REQUIRED_TABLES",
         ["setting", "user", "invoice", "transfer"],

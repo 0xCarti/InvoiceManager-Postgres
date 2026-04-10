@@ -4,6 +4,7 @@ from itertools import count
 import re
 
 import pytest
+from werkzeug.security import generate_password_hash
 
 from app import db
 from app.models import (
@@ -22,9 +23,21 @@ from app.models import (
     Vendor,
 )
 from app.services.dashboard_metrics import weekly_transfer_purchase_activity
+from tests.permission_helpers import grant_permissions
 from tests.utils import login
 
 _INVOICE_SEQUENCE = count(1)
+
+
+def _create_dashboard_user(email: str, password: str = "pass") -> User:
+    user = User(
+        email=email,
+        password=generate_password_hash(password),
+        active=True,
+    )
+    db.session.add(user)
+    db.session.commit()
+    return user
 
 
 def _create_basic_sale(user: User, *, when: datetime) -> Invoice:
@@ -311,6 +324,56 @@ def test_dashboard_shows_bulletin_card(client, app):
     assert "Bulletins" in body
     assert "Dashboard bulletin" in body
     assert "Check the bulletin card on the dashboard." in body
+
+
+def test_dashboard_hides_metabase_button_without_permission(client, app):
+    app.config["METABASE_SITE_URL"] = "http://metabase.localhost:3000"
+
+    with app.app_context():
+        user = _create_dashboard_user("dashboard-basic@example.com")
+        grant_permissions(
+            user,
+            "dashboard.view",
+            group_name="Dashboard Only",
+            description="Can view the dashboard without Metabase access.",
+        )
+
+    login(client, "dashboard-basic@example.com", "pass")
+
+    dashboard_response = client.get("/", follow_redirects=True)
+    redirect_response = client.get("/metabase", follow_redirects=False)
+
+    assert dashboard_response.status_code == 200
+    assert "Open Metabase" not in dashboard_response.get_data(as_text=True)
+    assert redirect_response.status_code == 403
+
+
+def test_dashboard_shows_metabase_button_and_redirects_for_permitted_user(
+    client, app
+):
+    app.config["METABASE_SITE_URL"] = "http://metabase.localhost:3000"
+
+    with app.app_context():
+        user = _create_dashboard_user("dashboard-metabase@example.com")
+        grant_permissions(
+            user,
+            "dashboard.view",
+            "reports.metabase",
+            group_name="Dashboard Metabase",
+            description="Can view the dashboard and open Metabase.",
+        )
+
+    login(client, "dashboard-metabase@example.com", "pass")
+
+    dashboard_response = client.get("/", follow_redirects=True)
+    redirect_response = client.get("/metabase", follow_redirects=False)
+    dashboard_body = dashboard_response.get_data(as_text=True)
+
+    assert dashboard_response.status_code == 200
+    assert "Open Metabase" in dashboard_body
+    assert 'href="/metabase"' in dashboard_body
+    assert redirect_response.status_code == 302
+    assert redirect_response.headers["Location"] == "http://metabase.localhost:3000"
 
 
 @pytest.mark.parametrize(

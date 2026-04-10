@@ -1,4 +1,12 @@
-from flask import Blueprint, render_template, request
+from flask import (
+    Blueprint,
+    current_app,
+    flash,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from flask_login import current_user, login_required
 
 from app.forms import ConfirmForm
@@ -30,3 +38,15 @@ def home():
         edit_form=edit_form,
         confirm_form=confirm_form,
     )
+
+
+@main.route("/metabase")
+@login_required
+def metabase_redirect():
+    """Redirect permitted users to the configured Metabase site."""
+
+    metabase_url = (current_app.config.get("METABASE_SITE_URL") or "").strip()
+    if not metabase_url:
+        flash("Metabase is not configured for this environment.", "warning")
+        return redirect(url_for("main.home"))
+    return redirect(metabase_url)

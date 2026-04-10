@@ -150,6 +150,7 @@ PERMISSION_DEFINITIONS: tuple[PermissionDefinition, ...] = (
     _perm("reports.event_terminal_sales", "reports", "Event Terminal Sales Report", "Run the event terminal sales report."),
     _perm("reports.purchase_cost_forecast", "reports", "Forecasted Stock Item Sales", "Run the purchase cost forecast report."),
     _perm("reports.department_sales_forecast", "reports", "Department Sales Forecast", "Run the department sales forecast workflow."),
+    _perm("reports.metabase", "reports", "Access Metabase", "Open the Metabase analytics workspace."),
     _perm("schedules.view_team", "schedules", "View Team Schedule", "View team schedule boards for managed departments."),
     _perm("schedules.view_self", "schedules", "View My Schedule", "View your own published schedule."),
     _perm("schedules.edit_team", "schedules", "Edit Team Schedule", "Create and edit team schedule shifts."),
@@ -207,6 +208,7 @@ PERMISSION_DEFINITIONS_BY_CODE = {
 
 ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "main.home": requirement(any_of=("dashboard.view",)),
+    "main.metabase_redirect": requirement(any_of=("reports.metabase",)),
     "transfer.view_transfers": requirement(any_of=("transfers.view",)),
     "transfer.add_transfer": requirement(any_of=("transfers.create",)),
     "transfer.ajax_add_transfer": requirement(any_of=("transfers.create",)),
