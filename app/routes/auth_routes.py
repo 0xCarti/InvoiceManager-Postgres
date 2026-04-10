@@ -1158,15 +1158,16 @@ def user_access(user_id):
         access_form.group_ids.data = [
             group.id for group in user.permission_groups
         ]
-    elif access_form.submit.data and access_form.validate_on_submit():
-        user.display_name = (
-            _normalize_display_name(access_form.display_name.data) or None
-        )
-        _assign_permission_groups_to_user(user, access_form.group_ids.data)
-        db.session.commit()
-        log_activity(f"Updated permission groups for user {user.email}")
-        flash("User access updated.", "success")
-        return redirect(url_for("admin.user_access", user_id=user.id))
+    elif request.method == "POST":
+        if access_form.validate_on_submit():
+            user.display_name = (
+                _normalize_display_name(access_form.display_name.data) or None
+            )
+            _assign_permission_groups_to_user(user, access_form.group_ids.data)
+            db.session.commit()
+            log_activity(f"Updated permission groups for user {user.email}")
+            flash("User access updated.", "success")
+            return redirect(url_for("admin.user_access", user_id=user.id))
     else:
         access_form.display_name.data = access_form.display_name.data or (
             user.display_name or ""

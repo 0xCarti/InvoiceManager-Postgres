@@ -401,6 +401,53 @@ def test_admin_can_assign_display_name_used_in_communication_user_lists(client, 
         assert user.display_name == "Casey Crew"
 
 
+def test_admin_can_assign_permission_group_to_super_admin_via_access_page(client, app):
+    with app.app_context():
+        metabase_permission = Permission.query.filter_by(code="reports.metabase").first()
+        assert metabase_permission is not None
+
+        group = PermissionGroup(
+            name="Metabase Operators",
+            description="Access to the Metabase link.",
+        )
+        group.permissions = [metabase_permission]
+
+        target_user = User(
+            email="metabase-admin@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+            is_admin=True,
+        )
+        db.session.add_all([group, target_user])
+        db.session.commit()
+        target_user_id = target_user.id
+        group_id = group.id
+
+    with client:
+        login(client, "admin@example.com", "adminpass")
+        response = client.post(
+            f"/controlpanel/users/{target_user_id}/access",
+            data={
+                "access-display_name": "Ops Admin",
+                "access-group_ids": [str(group_id)],
+            },
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"User access updated." in response.data
+    assert b"Ops Admin" in response.data
+    assert b"Metabase Operators" in response.data
+
+    with app.app_context():
+        target_user = db.session.get(User, target_user_id)
+        assert target_user is not None
+        assert target_user.display_name == "Ops Admin"
+        assert [group.name for group in target_user.permission_groups] == [
+            "Metabase Operators"
+        ]
+
+
 def test_login_inactive_user(client, app):
     with app.app_context():
         user = User(

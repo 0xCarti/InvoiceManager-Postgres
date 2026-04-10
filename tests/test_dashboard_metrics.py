@@ -300,6 +300,18 @@ def test_dashboard_renders_sales_series(client, app):
     assert "$10.00" in body
 
 
+def test_super_admin_dashboard_shows_metabase_button_when_configured(client, app):
+    app.config["METABASE_SITE_URL"] = "https://reports.example.com"
+
+    login(client, "admin@example.com", os.getenv("ADMIN_PASS", "adminpass"))
+    response = client.get("/", follow_redirects=True)
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Open Metabase" in body
+    assert "Metabase Unavailable" not in body
+
+
 def test_dashboard_shows_bulletin_card(client, app):
     with app.app_context():
         user = User.query.filter_by(email="admin@example.com").first()
@@ -345,6 +357,7 @@ def test_dashboard_hides_metabase_button_without_permission(client, app):
 
     assert dashboard_response.status_code == 200
     assert "Open Metabase" not in dashboard_response.get_data(as_text=True)
+    assert "Metabase Unavailable" not in dashboard_response.get_data(as_text=True)
     assert redirect_response.status_code == 403
 
 

@@ -70,6 +70,15 @@
             >
                 Open Metabase
             </a>
+            {% elif can_access_metabase %}
+            <button
+                type="button"
+                class="btn btn-outline-secondary"
+                disabled
+                title="Set METABASE_SITE_URL and restart the web service to enable this link."
+            >
+                Metabase Unavailable
+            </button>
             {% endif %}
         </div>
     </div>

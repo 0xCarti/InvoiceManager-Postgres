@@ -60,11 +60,14 @@
                         </div>
                         <div>
                             {{ access_form.group_ids.label(class_='form-label') }}
-                            {{ access_form.group_ids(class_='form-select', multiple=true) }}
+                            {{ access_form.group_ids(class_='form-select' + (' is-invalid' if access_form.group_ids.errors else ''), multiple=true) }}
+                            {% for error in access_form.group_ids.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                            {% endfor %}
                             <div class="form-text">Users can belong to multiple groups at once.</div>
                         </div>
                         <div class="d-flex justify-content-end">
-                            <button type="submit" class="btn btn-primary">{{ access_form.submit.label.text }}</button>
+                            {{ access_form.submit(class_='btn btn-primary') }}
                         </div>
                     </form>
                     {% else %}
