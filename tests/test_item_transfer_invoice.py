@@ -14,6 +14,7 @@ from app.models import (
     TransferItem,
     User,
 )
+from app.services.dashboard_metrics import transfer_completion_by_location
 from tests.permission_helpers import grant_item_workflow_permissions
 from tests.utils import login
 
@@ -348,6 +349,312 @@ def test_transfer_expected_counts_updated(client, app):
         ).first()
         assert l1.expected_count == 0
         assert l2.expected_count == 0
+
+
+def test_transfer_completion_by_location_only_counts_open_transfers(app):
+    user_id = create_user(app, "transferdashboard@example.com")
+    with app.app_context():
+        from_location = Location(name="Dash From")
+        to_location = Location(name="Dash To")
+        item = Item(name="Dash Item", base_unit="each")
+        db.session.add_all([from_location, to_location, item])
+        db.session.commit()
+
+        open_transfer = Transfer(
+            from_location_id=from_location.id,
+            to_location_id=to_location.id,
+            user_id=user_id,
+            from_location_name=from_location.name,
+            to_location_name=to_location.name,
+            completed=False,
+        )
+        open_transfer.transfer_items.append(
+            TransferItem(
+                item_id=item.id,
+                quantity=10,
+                completed_quantity=4,
+                item_name=item.name,
+            )
+        )
+
+        completed_transfer = Transfer(
+            from_location_id=from_location.id,
+            to_location_id=to_location.id,
+            user_id=user_id,
+            from_location_name=from_location.name,
+            to_location_name=to_location.name,
+            completed=True,
+        )
+        completed_transfer.transfer_items.append(
+            TransferItem(
+                item_id=item.id,
+                quantity=5,
+                completed_quantity=0,
+                item_name=item.name,
+            )
+        )
+
+        db.session.add_all([open_transfer, completed_transfer])
+        db.session.commit()
+
+        completion_rows = transfer_completion_by_location()
+
+        assert len(completion_rows) == 1
+        assert completion_rows[0]["location_name"] == "Dash To"
+        assert completion_rows[0]["transfer_count"] == 1
+        assert round(completion_rows[0]["completion_percent"], 1) == 40.0
+
+
+def test_ajax_edit_stale_completed_transfer_reopens_and_reverses_counts(
+    client, app
+):
+    user_id = create_user(app, "transferstale@example.com")
+    with app.app_context():
+        loc1 = Location(name="Stale From")
+        loc2 = Location(name="Stale To")
+        item = Item(name="Stale Item", base_unit="each")
+        db.session.add_all([loc1, loc2, item])
+        db.session.commit()
+        unit = ItemUnit(
+            item_id=item.id,
+            name="each",
+            factor=1,
+            receiving_default=True,
+            transfer_default=True,
+        )
+        db.session.add(unit)
+        db.session.add_all(
+            [
+                LocationStandItem(
+                    location_id=loc1.id, item_id=item.id, expected_count=0
+                ),
+                LocationStandItem(
+                    location_id=loc2.id, item_id=item.id, expected_count=0
+                ),
+            ]
+        )
+        db.session.commit()
+        loc1_id, loc2_id, item_id, unit_id = loc1.id, loc2.id, item.id, unit.id
+
+    with client:
+        login(client, "transferstale@example.com", "pass")
+        resp = client.post(
+            "/transfers/add",
+            data={
+                "from_location_id": loc1_id,
+                "to_location_id": loc2_id,
+                "items-0-item": item_id,
+                "items-0-unit": unit_id,
+                "items-0-quantity": 4,
+            },
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+
+    with app.app_context():
+        transfer = Transfer.query.filter_by(user_id=user_id).first()
+        assert transfer is not None
+        transfer_id = transfer.id
+
+    with client:
+        login(client, "transferstale@example.com", "pass")
+        confirm = client.get(f"/transfers/complete/{transfer_id}")
+        assert confirm.status_code == 200
+        resp = client.post(
+            f"/transfers/complete/{transfer_id}",
+            data={"submit": "1"},
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+
+    with app.app_context():
+        transfer = db.session.get(Transfer, transfer_id)
+        transfer_item = transfer.transfer_items[0]
+        transfer_item.completed_quantity = 0
+        transfer_item.completed_at = None
+        transfer_item.completed_by_id = None
+        transfer.completed = True
+        db.session.commit()
+
+        from_count = LocationStandItem.query.filter_by(
+            location_id=loc1_id, item_id=item_id
+        ).first()
+        to_count = LocationStandItem.query.filter_by(
+            location_id=loc2_id, item_id=item_id
+        ).first()
+        assert from_count.expected_count == -4
+        assert to_count.expected_count == 4
+
+    with client:
+        login(client, "transferstale@example.com", "pass")
+        edit_resp = client.post(
+            f"/transfers/ajax_edit/{transfer_id}",
+            data={
+                "edit-from_location_id": loc1_id,
+                "edit-to_location_id": loc2_id,
+                "edit-items-0-item": item_id,
+                "edit-items-0-unit": unit_id,
+                "edit-items-0-quantity": 7,
+            },
+        )
+        assert edit_resp.status_code == 200
+        payload = edit_resp.get_json()
+        assert payload["success"] is True
+        assert payload["reopened"] is True
+
+    with app.app_context():
+        updated_transfer = db.session.get(Transfer, transfer_id)
+        assert updated_transfer is not None
+        assert not updated_transfer.completed
+        assert len(updated_transfer.transfer_items) == 1
+        assert updated_transfer.transfer_items[0].quantity == 7
+        assert updated_transfer.transfer_items[0].completed_quantity == 0
+
+        from_count = LocationStandItem.query.filter_by(
+            location_id=loc1_id, item_id=item_id
+        ).first()
+        to_count = LocationStandItem.query.filter_by(
+            location_id=loc2_id, item_id=item_id
+        ).first()
+        assert from_count.expected_count == 0
+        assert to_count.expected_count == 0
+
+
+def test_delete_partially_completed_transfer_reverses_expected_counts(
+    client, app
+):
+    user_id = create_user(app, "transferpartial@example.com")
+    with app.app_context():
+        loc1 = Location(name="Partial From")
+        loc2 = Location(name="Partial To")
+        item1 = Item(name="Partial Item 1", base_unit="each")
+        item2 = Item(name="Partial Item 2", base_unit="each")
+        db.session.add_all([loc1, loc2, item1, item2])
+        db.session.commit()
+        unit1 = ItemUnit(
+            item_id=item1.id,
+            name="each",
+            factor=1,
+            receiving_default=True,
+            transfer_default=True,
+        )
+        unit2 = ItemUnit(
+            item_id=item2.id,
+            name="each",
+            factor=1,
+            receiving_default=True,
+            transfer_default=True,
+        )
+        db.session.add_all([unit1, unit2])
+        db.session.add_all(
+            [
+                LocationStandItem(
+                    location_id=loc1.id, item_id=item1.id, expected_count=0
+                ),
+                LocationStandItem(
+                    location_id=loc2.id, item_id=item1.id, expected_count=0
+                ),
+                LocationStandItem(
+                    location_id=loc1.id, item_id=item2.id, expected_count=0
+                ),
+                LocationStandItem(
+                    location_id=loc2.id, item_id=item2.id, expected_count=0
+                ),
+            ]
+        )
+        db.session.commit()
+        loc1_id = loc1.id
+        loc2_id = loc2.id
+        item1_id = item1.id
+        item2_id = item2.id
+        unit1_id = unit1.id
+        unit2_id = unit2.id
+
+    with client:
+        login(client, "transferpartial@example.com", "pass")
+        resp = client.post(
+            "/transfers/add",
+            data={
+                "from_location_id": loc1_id,
+                "to_location_id": loc2_id,
+                "items-0-item": item1_id,
+                "items-0-unit": unit1_id,
+                "items-0-quantity": 4,
+                "items-1-item": item2_id,
+                "items-1-unit": unit2_id,
+                "items-1-quantity": 6,
+            },
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+
+    with app.app_context():
+        transfer = Transfer.query.filter_by(user_id=user_id).first()
+        assert transfer is not None
+        transfer_id = transfer.id
+        first_item = next(
+            item for item in transfer.transfer_items if item.item_id == item1_id
+        )
+        first_item_id = first_item.id
+
+    with client:
+        login(client, "transferpartial@example.com", "pass")
+        confirm = client.get(f"/transfers/items/complete/{first_item_id}")
+        assert confirm.status_code == 200
+        resp = client.post(
+            f"/transfers/items/complete/{first_item_id}",
+            data={"submit": "1"},
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+
+    with app.app_context():
+        transfer = db.session.get(Transfer, transfer_id)
+        assert transfer is not None
+        assert not transfer.completed
+        item1_from = LocationStandItem.query.filter_by(
+            location_id=loc1_id, item_id=item1_id
+        ).first()
+        item1_to = LocationStandItem.query.filter_by(
+            location_id=loc2_id, item_id=item1_id
+        ).first()
+        item2_from = LocationStandItem.query.filter_by(
+            location_id=loc1_id, item_id=item2_id
+        ).first()
+        item2_to = LocationStandItem.query.filter_by(
+            location_id=loc2_id, item_id=item2_id
+        ).first()
+        assert item1_from.expected_count == -4
+        assert item1_to.expected_count == 4
+        assert item2_from.expected_count == 0
+        assert item2_to.expected_count == 0
+
+    with client:
+        login(client, "transferpartial@example.com", "pass")
+        resp = client.post(
+            f"/transfers/delete/{transfer_id}",
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+
+    with app.app_context():
+        assert db.session.get(Transfer, transfer_id) is None
+        item1_from = LocationStandItem.query.filter_by(
+            location_id=loc1_id, item_id=item1_id
+        ).first()
+        item1_to = LocationStandItem.query.filter_by(
+            location_id=loc2_id, item_id=item1_id
+        ).first()
+        item2_from = LocationStandItem.query.filter_by(
+            location_id=loc1_id, item_id=item2_id
+        ).first()
+        item2_to = LocationStandItem.query.filter_by(
+            location_id=loc2_id, item_id=item2_id
+        ).first()
+        assert item1_from.expected_count == 0
+        assert item1_to.expected_count == 0
+        assert item2_from.expected_count == 0
+        assert item2_to.expected_count == 0
 
 
 def test_transfer_item_form_nested_csrf_disabled(app):

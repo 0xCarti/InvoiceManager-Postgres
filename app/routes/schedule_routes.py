@@ -56,6 +56,7 @@ from app.services.schedule_service import (
     override_blocks_shift,
     record_shift_audit,
     time_off_overlaps,
+    user_can_auto_assign_department,
     user_can_manage_department,
     user_can_manage_other_user,
     user_department_ids,
@@ -74,6 +75,10 @@ def _parse_int(value, default=None):
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _parse_checkbox(value) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "y", "yes", "on"}
 
 
 def _schedule_redirect(
@@ -163,6 +168,33 @@ def _build_team_schedule_filter_users(
         ):
             scoped[user.id] = user
     return sorted(scoped.values(), key=lambda user: user.email.lower())
+
+
+def _auto_assignable_departments(
+    actor: User,
+    departments: list[Department],
+) -> list[Department]:
+    return [
+        department
+        for department in departments
+        if user_can_auto_assign_department(actor, department.id)
+    ]
+
+
+def _auto_assign_result_summary(results) -> tuple[int, int, str]:
+    assigned_count = sum(1 for result in results if result.assigned_user_id)
+    unassigned_count = len(results) - assigned_count
+    unassigned_reasons = sorted(
+        {
+            result.summary
+            for result in results
+            if not result.assigned_user_id and result.summary
+        }
+    )
+    reason_note = ""
+    if unassigned_reasons:
+        reason_note = f" {'; '.join(unassigned_reasons[:2])}"
+    return assigned_count, unassigned_count, reason_note
 
 
 def _current_seen_count_for_users(
@@ -409,6 +441,10 @@ def team_schedule():
         current_user,
         require_team_access=can_team_access or can_self_schedule,
     )
+    auto_assignable_departments = _auto_assignable_departments(
+        current_user,
+        visible_departments,
+    )
     requested_department_filter = _parse_department_filter_value(
         request.values.get("department_id") or request.values.get("shift-department_id")
     )
@@ -449,6 +485,8 @@ def team_schedule():
                 next_week=None,
                 can_team_access=can_team_access,
                 can_self_schedule=can_self_schedule,
+                can_auto_assign_selected_scope=False,
+                auto_assign_action_label="Auto Assign",
             )
     week_start = normalize_week_start(
         request.values.get("week_start") or request.values.get("shift-week_start")
@@ -457,6 +495,8 @@ def team_schedule():
     requested_user_id = _parse_int(
         request.values.get("user_id") or request.values.get("shift-user_id")
     )
+    can_auto_assign_selected_scope = False
+    auto_assign_action_label = "Auto Assign"
 
     if all_departments_mode and visible_departments:
         context = _prepare_multi_department_schedule_context(
@@ -470,6 +510,8 @@ def team_schedule():
         action_form = CSRFOnlyForm(prefix="action")
         selected_user_id = context["selected_user_id"]
         filter_users = context["assignable_users"]
+        can_auto_assign_selected_scope = bool(auto_assignable_departments)
+        auto_assign_action_label = "Auto Assign Allowed Departments"
     else:
         context = _prepare_schedule_week_context(
             selected_department,
@@ -490,9 +532,15 @@ def team_schedule():
         schedule_week = context["schedule_week"]
         shift_form = ShiftForm(prefix="shift", department_id=selected_department.id)
         action_form = CSRFOnlyForm(prefix="action")
+        can_auto_assign_selected_scope = user_can_auto_assign_department(
+            current_user,
+            selected_department.id,
+        )
 
     if request.method == "POST" and all_departments_mode:
-        abort(400)
+        action = (request.form.get("action") or "").strip()
+        if action != "auto_assign":
+            abort(400)
 
     if selected_department is None and not all_departments_mode:
         flash("No scheduling departments are available for your account.", "warning")
@@ -523,6 +571,8 @@ def team_schedule():
             next_week=None,
             can_team_access=can_team_access,
             can_self_schedule=can_self_schedule,
+            can_auto_assign_selected_scope=False,
+            auto_assign_action_label="Auto Assign",
         )
 
     if request.method == "POST":
@@ -787,26 +837,74 @@ def team_schedule():
                 )
             )
         elif action == "auto_assign":
-            if not current_user.has_permission("schedules.auto_assign"):
-                abort(403)
-            if not user_can_manage_department(current_user, selected_department.id):
+            if all_departments_mode:
+                if not auto_assignable_departments:
+                    abort(403)
+                allowed_department_ids = [
+                    department.id for department in auto_assignable_departments
+                ]
+                schedule_weeks = (
+                    DepartmentScheduleWeek.query.filter(
+                        DepartmentScheduleWeek.department_id.in_(
+                            allowed_department_ids
+                        ),
+                        DepartmentScheduleWeek.week_start == schedule_week.week_start,
+                    )
+                    .all()
+                )
+                weeks_by_department_id = {
+                    week.department_id: week for week in schedule_weeks
+                }
+                results = []
+                processed_departments: list[str] = []
+                for department in auto_assignable_departments:
+                    target_week = weeks_by_department_id.get(department.id)
+                    if target_week is None:
+                        continue
+                    processed_departments.append(department.name)
+                    results.extend(auto_assign_shifts(target_week, actor=current_user))
+                db.session.commit()
+                assigned_count, unassigned_count, reason_note = (
+                    _auto_assign_result_summary(results)
+                )
+                processed_note = ""
+                if processed_departments:
+                    processed_note = (
+                        f" Processed {len(processed_departments)} department(s)"
+                    )
+                    if len(processed_departments) <= 3:
+                        processed_note += f": {', '.join(processed_departments)}."
+                    else:
+                        processed_note += "."
+                else:
+                    processed_note = " No schedule weeks were available for your auto-assign departments."
+                flash(
+                    f"Auto-assign complete.{processed_note} {assigned_count} shifts assigned, "
+                    f"{unassigned_count} left unassigned.{reason_note}",
+                    "success" if assigned_count else "warning",
+                )
+                log_schedule_action(
+                    f"Ran auto-assign for {len(processed_departments)} departments week {schedule_week.week_start}"
+                )
+                return redirect(
+                    url_for(
+                        "schedule.team_schedule",
+                        department_id=ALL_DEPARTMENTS_VALUE,
+                        week_start=schedule_week.week_start.isoformat(),
+                        user_id=selected_user_id or None,
+                    )
+                )
+
+            if not user_can_auto_assign_department(current_user, selected_department.id):
                 abort(403)
             results = auto_assign_shifts(schedule_week, actor=current_user)
             db.session.commit()
-            assigned_count = sum(1 for result in results if result.assigned_user_id)
-            unassigned_reasons = sorted(
-                {
-                    result.summary
-                    for result in results
-                    if not result.assigned_user_id and result.summary
-                }
+            assigned_count, unassigned_count, reason_note = _auto_assign_result_summary(
+                results
             )
-            reason_note = ""
-            if unassigned_reasons:
-                reason_note = f" {'; '.join(unassigned_reasons[:2])}"
             flash(
                 f"Auto-assign complete. {assigned_count} shifts assigned, "
-                f"{len(results) - assigned_count} left unassigned.{reason_note}",
+                f"{unassigned_count} left unassigned.{reason_note}",
                 "success" if assigned_count else "warning",
             )
             log_schedule_action(
@@ -863,6 +961,8 @@ def team_schedule():
         next_week=schedule_week.week_start + timedelta(days=7),
         can_team_access=can_team_access,
         can_self_schedule=can_self_schedule,
+        can_auto_assign_selected_scope=can_auto_assign_selected_scope,
+        auto_assign_action_label=auto_assign_action_label,
     )
 
 
@@ -1528,6 +1628,7 @@ def user_settings(user_id: int):
                             user=target_user,
                             department_id=membership_form.department_id.data,
                             role=membership_role,
+                            can_auto_assign=bool(membership_form.can_auto_assign.data),
                             reports_to_user_id=_parse_int(
                                 membership_form.reports_to_user_id.data
                             ),
@@ -1555,8 +1656,11 @@ def user_settings(user_id: int):
                 flash("Role must be 50 characters or fewer.", "danger")
                 return redirect(url_for("schedule.user_settings", user_id=user_id))
             membership.role = normalized_role
+            membership.can_auto_assign = _parse_checkbox(
+                request.form.get("can_auto_assign")
+            )
             db.session.commit()
-            flash("Department membership role updated.", "success")
+            flash("Department membership updated.", "success")
             return redirect(url_for("schedule.user_settings", user_id=user_id))
         elif action == "remove_membership":
             if not current_user.has_permission("schedules.manage_setup"):

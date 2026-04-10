@@ -151,6 +151,17 @@ def user_can_manage_department(user: User, department_id: int) -> bool:
     return UserDepartmentMembership.is_management_role(membership.role)
 
 
+def user_can_auto_assign_department(user: User, department_id: int) -> bool:
+    if not user.has_permission("schedules.auto_assign"):
+        return False
+    if getattr(user, "is_super_admin", False) or user_is_schedule_gm(user):
+        return True
+    membership = get_user_membership(user, department_id)
+    if membership is None:
+        return False
+    return bool(membership.can_auto_assign)
+
+
 def user_can_manage_other_user(
     actor: User,
     target_user: User,

@@ -125,6 +125,27 @@ def _build_transfer_item_quantities(transfer_items, multiplier):
     return quantities
 
 
+def _applied_transfer_item_quantities(transfer_obj):
+    """Return the quantities already applied to expected counts."""
+
+    transfer_items = []
+    quantities = {}
+
+    for transfer_item in transfer_obj.transfer_items:
+        quantity = transfer_item.completed_quantity
+
+        # Older edits could leave a transfer marked complete while its
+        # recreated items were reset to zero completed quantity.
+        if transfer_obj.completed and quantity <= 0:
+            quantity = transfer_item.quantity
+
+        if quantity:
+            transfer_items.append(transfer_item)
+            quantities[transfer_item.id] = quantity
+
+    return transfer_items, quantities
+
+
 def _transfer_confirmation_submitted() -> bool:
     return request.method == "POST" and "submit" in request.form
 
@@ -153,6 +174,47 @@ def _sync_transfer_completed(transfer_obj):
         transfer_item.completed_quantity >= transfer_item.quantity
         for transfer_item in transfer_obj.transfer_items
     )
+
+
+def _replace_transfer_items(transfer_obj, item_entries):
+    transfer_obj.transfer_items.clear()
+
+    for entry in item_entries:
+        item = entry["item"]
+        transfer_obj.transfer_items.append(
+            TransferItem(
+                transfer=transfer_obj,
+                item_id=item.id,
+                quantity=entry["total_quantity"],
+                unit_id=entry["unit_id"],
+                unit_quantity=entry["unit_quantity"],
+                base_quantity=entry["base_quantity"],
+                item_name=item.name,
+            )
+        )
+
+
+def _apply_transfer_form_update(transfer_obj, form, item_entries):
+    applied_items, applied_quantities = _applied_transfer_item_quantities(
+        transfer_obj
+    )
+    if applied_items:
+        update_expected_counts(
+            transfer_obj,
+            multiplier=-1,
+            transfer_items=applied_items,
+            quantities=applied_quantities,
+        )
+
+    from_location = db.session.get(Location, form.from_location_id.data)
+    to_location = db.session.get(Location, form.to_location_id.data)
+    transfer_obj.from_location_id = form.from_location_id.data
+    transfer_obj.to_location_id = form.to_location_id.data
+    transfer_obj.from_location_name = from_location.name if from_location else ""
+    transfer_obj.to_location_name = to_location.name if to_location else ""
+    transfer_obj.completed = False
+    _replace_transfer_items(transfer_obj, item_entries)
+    return bool(applied_items)
 
 
 def check_negative_transfer(
@@ -487,35 +549,17 @@ def edit_transfer(transfer_id):
             )
             flash("Please add at least one item to the transfer.", "error")
         else:
-            from_location = db.session.get(
-                Location, form.from_location_id.data
+            transfer_was_reopened = _apply_transfer_form_update(
+                transfer, form, item_entries
             )
-            to_location = db.session.get(Location, form.to_location_id.data)
-            transfer.from_location_id = form.from_location_id.data
-            transfer.to_location_id = form.to_location_id.data
-            transfer.from_location_name = (
-                from_location.name if from_location else ""
-            )
-            transfer.to_location_name = to_location.name if to_location else ""
-
-            TransferItem.query.filter_by(transfer_id=transfer.id).delete()
-
-            for entry in item_entries:
-                item = entry["item"]
-                transfer.transfer_items.append(
-                    TransferItem(
-                        transfer=transfer,
-                        item_id=item.id,
-                        quantity=entry["total_quantity"],
-                        unit_id=entry["unit_id"],
-                        unit_quantity=entry["unit_quantity"],
-                        base_quantity=entry["base_quantity"],
-                        item_name=item.name,
-                    )
-                )
 
             db.session.commit()
             log_activity(f"Edited transfer {transfer.id}")
+            if transfer_was_reopened:
+                flash(
+                    "Transfer updated and reopened for reconciliation.",
+                    "info",
+                )
             flash("Transfer updated successfully!", "success")
             return redirect(url_for("transfer.view_transfers"))
     elif form.errors:
@@ -590,31 +634,9 @@ def ajax_edit_transfer(transfer_id):
                 "Add at least one item with a quantity."
             )
         else:
-            from_location = db.session.get(
-                Location, form.from_location_id.data
+            transfer_was_reopened = _apply_transfer_form_update(
+                transfer, form, item_entries
             )
-            to_location = db.session.get(Location, form.to_location_id.data)
-            transfer.from_location_id = form.from_location_id.data
-            transfer.to_location_id = form.to_location_id.data
-            transfer.from_location_name = (
-                from_location.name if from_location else ""
-            )
-            transfer.to_location_name = to_location.name if to_location else ""
-            TransferItem.query.filter_by(transfer_id=transfer.id).delete()
-
-            for entry in item_entries:
-                item = entry["item"]
-                transfer.transfer_items.append(
-                    TransferItem(
-                        transfer=transfer,
-                        item_id=item.id,
-                        quantity=entry["total_quantity"],
-                        unit_id=entry["unit_id"],
-                        unit_quantity=entry["unit_quantity"],
-                        base_quantity=entry["base_quantity"],
-                        item_name=item.name,
-                    )
-                )
             db.session.commit()
             log_activity(f"Edited transfer {transfer.id}")
             row_html = render_template(
@@ -622,7 +644,12 @@ def ajax_edit_transfer(transfer_id):
                 transfer=transfer,
                 form=TransferForm(),
             )
-            return jsonify(success=True, html=row_html, id=transfer.id)
+            return jsonify(
+                success=True,
+                html=row_html,
+                id=transfer.id,
+                reopened=transfer_was_reopened,
+            )
     return jsonify(success=False, errors=form.errors), 400
 
 
@@ -633,8 +660,16 @@ def delete_transfer(transfer_id):
     transfer = db.session.get(Transfer, transfer_id)
     if transfer is None:
         abort(404)
-    if transfer.completed:
-        update_expected_counts(transfer, multiplier=-1)
+    applied_items, applied_quantities = _applied_transfer_item_quantities(
+        transfer
+    )
+    if applied_items:
+        update_expected_counts(
+            transfer,
+            multiplier=-1,
+            transfer_items=applied_items,
+            quantities=applied_quantities,
+        )
     db.session.delete(transfer)
     db.session.commit()
     log_activity(f"Deleted transfer {transfer.id}")
@@ -785,12 +820,7 @@ def uncomplete_transfer(transfer_id):
     transfer = db.session.get(Transfer, transfer_id)
     if transfer is None:
         abort(404)
-    transfer_items = [
-        transfer_item
-        for transfer_item in transfer.transfer_items
-        if transfer_item.completed_quantity
-    ]
-    quantities = _build_transfer_item_quantities(transfer_items, multiplier=-1)
+    transfer_items, quantities = _applied_transfer_item_quantities(transfer)
     warnings = check_negative_transfer(
         transfer,
         multiplier=-1,
@@ -821,7 +851,7 @@ def uncomplete_transfer(transfer_id):
             default_message="Are you sure you want to mark this transfer incomplete?",
         )
     transfer.completed = False
-    for transfer_item in transfer_items:
+    for transfer_item in transfer.transfer_items:
         transfer_item.completed_quantity = 0.0
         transfer_item.completed_at = None
         transfer_item.completed_by_id = None

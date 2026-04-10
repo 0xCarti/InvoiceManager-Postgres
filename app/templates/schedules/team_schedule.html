@@ -79,14 +79,14 @@
                 {{ 'Published' if schedule_week.is_published else 'Draft' }}
             </span>
             {% endif %}
-            {% if can_team_access and selected_department and current_user.has_permission('schedules.auto_assign') %}
+            {% if can_team_access and can_auto_assign_selected_scope %}
             <form method="post" class="d-inline">
                 {{ action_form.hidden_tag() }}
                 <input type="hidden" name="action" value="auto_assign">
-                <input type="hidden" name="department_id" value="{{ selected_department.id }}">
+                <input type="hidden" name="department_id" value="{{ selected_department_filter_value }}">
                 <input type="hidden" name="week_start" value="{{ schedule_week.week_start.isoformat() }}">
                 <input type="hidden" name="user_id" value="{{ selected_user_filter_value }}">
-                <button type="submit" class="btn btn-sm btn-outline-primary">Auto Assign</button>
+                <button type="submit" class="btn btn-sm btn-outline-primary">{{ auto_assign_action_label }}</button>
             </form>
             {% endif %}
             {% if can_team_access and selected_department and current_user.has_permission('schedules.publish') %}

@@ -44,7 +44,7 @@ def transfer_summary() -> Dict[str, int]:
 
 
 def transfer_completion_by_location() -> List[Dict[str, Any]]:
-    """Return transfer completion ratios grouped by destination location."""
+    """Return open-transfer completion ratios grouped by destination location."""
 
     rows = (
         db.session.query(
@@ -56,6 +56,7 @@ def transfer_completion_by_location() -> List[Dict[str, Any]]:
         )
         .join(TransferItem, TransferItem.transfer_id == Transfer.id)
         .join(Location, Location.id == Transfer.to_location_id)
+        .filter(Transfer.completed.is_(False))
         .group_by(Transfer.to_location_id, Location.name)
         .order_by(Location.name.asc())
     )

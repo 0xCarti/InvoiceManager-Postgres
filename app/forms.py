@@ -2110,6 +2110,7 @@ class UserDepartmentMembershipForm(FlaskForm):
         validators=[Optional()],
         validate_choice=False,
     )
+    can_auto_assign = BooleanField("Allow auto-assign for this department")
     is_primary = BooleanField("Primary Department")
     submit = SubmitField("Add Department Membership")
 

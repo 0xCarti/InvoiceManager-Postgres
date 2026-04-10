@@ -52,8 +52,14 @@
                         <div class="col-12 col-md-3">{{ membership_form.role.label(class_='form-label') }}{{ membership_form.role(class_='form-control', list='membership-role-suggestions', placeholder='staff') }}</div>
                         <div class="col-12 col-md-5">{{ membership_form.reports_to_user_id.label(class_='form-label') }}{{ membership_form.reports_to_user_id(class_='form-select') }}</div>
                         <div class="col-12">
+                            <div class="form-check">
+                                {{ membership_form.can_auto_assign(class_='form-check-input', disabled=not can_manage_setup) }}
+                                {{ membership_form.can_auto_assign.label(class_='form-check-label') }}
+                            </div>
+                        </div>
+                        <div class="col-12">
                             <div class="form-text">
-                                Custom role labels are allowed. `manager` and `gm` unlock scheduling management permissions; other roles are descriptive.
+                                Custom role labels are allowed. `manager` and `gm` still drive scheduling management behavior. Auto-assign access is now an explicit per-department setting so IT can decide exactly where a user may run auto-schedule.
                             </div>
                         </div>
                         <div class="col-12">
@@ -67,7 +73,7 @@
 
                     <div class="table-responsive">
                         <table class="table table-sm align-middle">
-                            <thead><tr><th>Department</th><th>Role</th><th>Supervisor</th><th></th></tr></thead>
+                            <thead><tr><th>Department</th><th>Role</th><th>Auto Assign</th><th>Supervisor</th><th></th></tr></thead>
                             <tbody>
                                 {% for membership in target_user.department_memberships %}
                                 <tr>
@@ -77,6 +83,7 @@
                                             {{ action_form.hidden_tag() }}
                                             <input type="hidden" name="action" value="update_membership_role">
                                             <input type="hidden" name="membership_id" value="{{ membership.id }}">
+                                            <input type="hidden" name="can_auto_assign" value="{{ 1 if membership.can_auto_assign else 0 }}">
                                             <input
                                                 type="text"
                                                 name="role"
@@ -86,6 +93,25 @@
                                                 {% if not can_manage_setup %}disabled{% endif %}
                                             >
                                             <button type="submit" class="btn btn-sm btn-outline-secondary" {% if not can_manage_setup %}disabled{% endif %}>Save</button>
+                                        </form>
+                                    </td>
+                                    <td>
+                                        <form method="post" class="d-flex justify-content-center">
+                                            {{ action_form.hidden_tag() }}
+                                            <input type="hidden" name="action" value="update_membership_role">
+                                            <input type="hidden" name="membership_id" value="{{ membership.id }}">
+                                            <input type="hidden" name="role" value="{{ membership.role }}">
+                                            <div class="form-check">
+                                                <input
+                                                    type="checkbox"
+                                                    class="form-check-input"
+                                                    name="can_auto_assign"
+                                                    value="1"
+                                                    onchange="this.form.submit()"
+                                                    {% if membership.can_auto_assign %}checked{% endif %}
+                                                    {% if not can_manage_setup %}disabled{% endif %}
+                                                >
+                                            </div>
                                         </form>
                                     </td>
                                     <td>{{ membership.reports_to.email if membership.reports_to else '' }}</td>
@@ -99,7 +125,7 @@
                                     </td>
                                 </tr>
                                 {% else %}
-                                <tr><td colspan="4" class="text-muted">No department memberships.</td></tr>
+                                <tr><td colspan="5" class="text-muted">No department memberships.</td></tr>
                                 {% endfor %}
                             </tbody>
                         </table>

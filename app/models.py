@@ -507,6 +507,12 @@ class UserDepartmentMembership(db.Model):
         default=ROLE_STAFF,
         server_default=ROLE_STAFF,
     )
+    can_auto_assign = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False,
+        server_default="0",
+    )
     is_primary = db.Column(
         db.Boolean, nullable=False, default=False, server_default="0"
     )
@@ -564,6 +570,10 @@ class UserDepartmentMembership(db.Model):
     @classmethod
     def is_management_role(cls, value: str | None) -> bool:
         return cls.normalize_role(value) in cls.MANAGEMENT_ROLES
+
+    @classmethod
+    def default_auto_assign_access_for_role(cls, value: str | None) -> bool:
+        return cls.is_management_role(value)
 
 
 class UserPositionEligibility(db.Model):

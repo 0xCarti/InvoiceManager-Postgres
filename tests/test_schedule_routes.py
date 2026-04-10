@@ -125,6 +125,7 @@ def test_schedule_setup_and_user_settings_flow(client, app):
                 "membership-department_id": str(department_id),
                 "membership-role": "lead",
                 "membership-reports_to_user_id": "0",
+                "membership-can_auto_assign": "y",
                 "membership-is_primary": "y",
             },
             follow_redirects=True,
@@ -144,6 +145,7 @@ def test_schedule_setup_and_user_settings_flow(client, app):
                 "action": "update_membership_role",
                 "membership_id": str(membership_id),
                 "role": "assistant operations lead",
+                "can_auto_assign": "1",
             },
             follow_redirects=True,
         )
@@ -170,6 +172,7 @@ def test_schedule_setup_and_user_settings_flow(client, app):
         ).first()
         assert membership
         assert membership.role == "assistant operations lead"
+        assert membership.can_auto_assign is True
         assert UserPositionEligibility.query.filter_by(
             user_id=target_user_id, position_id=position_id
         ).first()
@@ -451,6 +454,298 @@ def test_team_schedule_supports_all_departments_and_user_filter(client, app):
         assert response.status_code == 200
         assert b"board-worker-a@example.com" in response.data
         assert b"Runner B" not in response.data
+
+
+def test_auto_assign_access_is_department_scoped_and_role_independent(client, app):
+    scheduler_id = create_user(app, "scoped-autoassign@example.com")
+    worker_a_id = create_user(app, "scoped-worker-a@example.com")
+    worker_b_id = create_user(app, "scoped-worker-b@example.com")
+
+    with app.app_context():
+        scheduler = db.session.get(User, scheduler_id)
+        grant_permissions(
+            scheduler,
+            "schedules.view_team",
+            "schedules.edit_team",
+            "schedules.auto_assign",
+            group_name="Scoped Auto Assign",
+            description="Can view schedule boards and run scoped auto-assign.",
+        )
+
+        department_a = Department(name="Scoped Auto A", active=True)
+        department_b = Department(name="Scoped Auto B", active=True)
+        db.session.add_all([department_a, department_b])
+        db.session.commit()
+
+        position_a = ShiftPosition(
+            department_id=department_a.id,
+            name="Scoped Runner A",
+            active=True,
+        )
+        position_b = ShiftPosition(
+            department_id=department_b.id,
+            name="Scoped Runner B",
+            active=True,
+        )
+        db.session.add_all([position_a, position_b])
+        db.session.commit()
+
+        db.session.add_all(
+            [
+                UserDepartmentMembership(
+                    user_id=scheduler_id,
+                    department_id=department_a.id,
+                    role="lead",
+                    can_auto_assign=True,
+                    is_primary=True,
+                ),
+                UserDepartmentMembership(
+                    user_id=scheduler_id,
+                    department_id=department_b.id,
+                    role="lead",
+                    can_auto_assign=False,
+                ),
+                UserDepartmentMembership(
+                    user_id=worker_a_id,
+                    department_id=department_a.id,
+                    role="staff",
+                    is_primary=True,
+                ),
+                UserDepartmentMembership(
+                    user_id=worker_b_id,
+                    department_id=department_b.id,
+                    role="staff",
+                    is_primary=True,
+                ),
+                UserPositionEligibility(
+                    user_id=worker_a_id,
+                    position_id=position_a.id,
+                    priority=10,
+                    active=True,
+                ),
+                UserPositionEligibility(
+                    user_id=worker_b_id,
+                    position_id=position_b.id,
+                    priority=10,
+                    active=True,
+                ),
+            ]
+        )
+        week_a = DepartmentScheduleWeek(
+            department_id=department_a.id,
+            week_start=date(2026, 4, 6),
+            is_published=False,
+            current_version=0,
+        )
+        week_b = DepartmentScheduleWeek(
+            department_id=department_b.id,
+            week_start=date(2026, 4, 6),
+            is_published=False,
+            current_version=0,
+        )
+        db.session.add_all([week_a, week_b])
+        db.session.commit()
+
+        db.session.add_all(
+            [
+                Shift(
+                    schedule_week_id=week_a.id,
+                    position_id=position_a.id,
+                    shift_date=date(2026, 4, 7),
+                    start_time=time(9, 0),
+                    end_time=time(17, 0),
+                    paid_hours=8.0,
+                    assignment_mode=Shift.ASSIGNMENT_OPEN,
+                    live_version=0,
+                ),
+                Shift(
+                    schedule_week_id=week_b.id,
+                    position_id=position_b.id,
+                    shift_date=date(2026, 4, 8),
+                    start_time=time(9, 0),
+                    end_time=time(17, 0),
+                    paid_hours=8.0,
+                    assignment_mode=Shift.ASSIGNMENT_OPEN,
+                    live_version=0,
+                ),
+            ]
+        )
+        db.session.commit()
+        department_a_id = department_a.id
+        department_b_id = department_b.id
+
+    with client:
+        login(client, "scoped-autoassign@example.com", "pass")
+        response = client.post(
+            f"/schedules?department_id={department_a_id}&week_start=2026-04-06",
+            data={
+                "action": "auto_assign",
+                "department_id": str(department_a_id),
+                "week_start": "2026-04-06",
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Auto-assign complete. 1 shifts assigned, 0 left unassigned." in response.data
+
+        forbidden_response = client.post(
+            f"/schedules?department_id={department_b_id}&week_start=2026-04-06",
+            data={
+                "action": "auto_assign",
+                "department_id": str(department_b_id),
+                "week_start": "2026-04-06",
+            },
+            follow_redirects=False,
+        )
+        assert forbidden_response.status_code == 403
+
+    with app.app_context():
+        assigned_in_a = Shift.query.filter_by(assigned_user_id=worker_a_id).count()
+        assigned_in_b = Shift.query.filter_by(assigned_user_id=worker_b_id).count()
+        assert assigned_in_a == 1
+        assert assigned_in_b == 0
+
+
+def test_all_departments_auto_assign_only_processes_allowed_departments(client, app):
+    scheduler_id = create_user(app, "bulk-autoassign@example.com")
+    worker_a_id = create_user(app, "bulk-worker-a@example.com")
+    worker_b_id = create_user(app, "bulk-worker-b@example.com")
+
+    with app.app_context():
+        scheduler = db.session.get(User, scheduler_id)
+        grant_permissions(
+            scheduler,
+            "schedules.view_team",
+            "schedules.edit_team",
+            "schedules.auto_assign",
+            group_name="Bulk Auto Assign",
+            description="Can run all-department auto-assign within scoped departments.",
+        )
+
+        department_a = Department(name="Bulk Auto A", active=True)
+        department_b = Department(name="Bulk Auto B", active=True)
+        db.session.add_all([department_a, department_b])
+        db.session.commit()
+
+        position_a = ShiftPosition(
+            department_id=department_a.id,
+            name="Bulk Runner A",
+            active=True,
+        )
+        position_b = ShiftPosition(
+            department_id=department_b.id,
+            name="Bulk Runner B",
+            active=True,
+        )
+        db.session.add_all([position_a, position_b])
+        db.session.commit()
+
+        db.session.add_all(
+            [
+                UserDepartmentMembership(
+                    user_id=scheduler_id,
+                    department_id=department_a.id,
+                    role="coordinator",
+                    can_auto_assign=True,
+                    is_primary=True,
+                ),
+                UserDepartmentMembership(
+                    user_id=scheduler_id,
+                    department_id=department_b.id,
+                    role="coordinator",
+                    can_auto_assign=False,
+                ),
+                UserDepartmentMembership(
+                    user_id=worker_a_id,
+                    department_id=department_a.id,
+                    role="staff",
+                    is_primary=True,
+                ),
+                UserDepartmentMembership(
+                    user_id=worker_b_id,
+                    department_id=department_b.id,
+                    role="staff",
+                    is_primary=True,
+                ),
+                UserPositionEligibility(
+                    user_id=worker_a_id,
+                    position_id=position_a.id,
+                    priority=10,
+                    active=True,
+                ),
+                UserPositionEligibility(
+                    user_id=worker_b_id,
+                    position_id=position_b.id,
+                    priority=10,
+                    active=True,
+                ),
+            ]
+        )
+        week_a = DepartmentScheduleWeek(
+            department_id=department_a.id,
+            week_start=date(2026, 4, 6),
+            is_published=False,
+            current_version=0,
+        )
+        week_b = DepartmentScheduleWeek(
+            department_id=department_b.id,
+            week_start=date(2026, 4, 6),
+            is_published=False,
+            current_version=0,
+        )
+        db.session.add_all([week_a, week_b])
+        db.session.commit()
+
+        db.session.add_all(
+            [
+                Shift(
+                    schedule_week_id=week_a.id,
+                    position_id=position_a.id,
+                    shift_date=date(2026, 4, 7),
+                    start_time=time(8, 0),
+                    end_time=time(16, 0),
+                    paid_hours=8.0,
+                    assignment_mode=Shift.ASSIGNMENT_OPEN,
+                    live_version=0,
+                ),
+                Shift(
+                    schedule_week_id=week_b.id,
+                    position_id=position_b.id,
+                    shift_date=date(2026, 4, 8),
+                    start_time=time(8, 0),
+                    end_time=time(16, 0),
+                    paid_hours=8.0,
+                    assignment_mode=Shift.ASSIGNMENT_OPEN,
+                    live_version=0,
+                ),
+            ]
+        )
+        db.session.commit()
+        week_a_id = week_a.id
+        week_b_id = week_b.id
+
+    with client:
+        login(client, "bulk-autoassign@example.com", "pass")
+        response = client.post(
+            "/schedules?department_id=all&week_start=2026-04-06",
+            data={
+                "action": "auto_assign",
+                "department_id": "all",
+                "week_start": "2026-04-06",
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Processed 1 department(s): Bulk Auto A." in response.data
+        assert b"1 shifts assigned, 0 left unassigned." in response.data
+
+    with app.app_context():
+        week_a_shift = Shift.query.filter_by(schedule_week_id=week_a_id).first()
+        week_b_shift = Shift.query.filter_by(schedule_week_id=week_b_id).first()
+        assert week_a_shift is not None
+        assert week_b_shift is not None
+        assert week_a_shift.assigned_user_id == worker_a_id
+        assert week_b_shift.assigned_user_id is None
 
 
 def test_time_off_request_and_review_flow(client, app):
