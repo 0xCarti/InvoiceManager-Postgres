@@ -60,7 +60,9 @@
         <div>
             <h1 class="h4 mb-1">Team Schedule</h1>
             <div class="text-muted small">
-                {% if selected_department %}
+                {% if all_departments_mode %}
+                All Departments | {{ week_label }}
+                {% elif selected_department %}
                 {{ selected_department.name }} | {{ week_label }}
                 {% else %}
                 Scheduling
@@ -69,18 +71,21 @@
         </div>
         {% if schedule_week %}
         <div class="d-flex flex-wrap gap-2">
-            {% if current_seen_count or can_team_access %}
+            {% if show_seen_status and (current_seen_count or can_team_access) %}
             <span class="badge text-bg-light border">Seen Current Version: {{ current_seen_count }}/{{ visible_users|length }}</span>
             {% endif %}
+            {% if not all_departments_mode %}
             <span class="badge {{ 'text-bg-success' if schedule_week.is_published else 'text-bg-secondary' }}">
                 {{ 'Published' if schedule_week.is_published else 'Draft' }}
             </span>
+            {% endif %}
             {% if can_team_access and selected_department and current_user.has_permission('schedules.auto_assign') %}
             <form method="post" class="d-inline">
                 {{ action_form.hidden_tag() }}
                 <input type="hidden" name="action" value="auto_assign">
                 <input type="hidden" name="department_id" value="{{ selected_department.id }}">
                 <input type="hidden" name="week_start" value="{{ schedule_week.week_start.isoformat() }}">
+                <input type="hidden" name="user_id" value="{{ selected_user_filter_value }}">
                 <button type="submit" class="btn btn-sm btn-outline-primary">Auto Assign</button>
             </form>
             {% endif %}
@@ -91,6 +96,7 @@
                     <input type="hidden" name="action" value="unpublish_week">
                     <input type="hidden" name="department_id" value="{{ selected_department.id }}">
                     <input type="hidden" name="week_start" value="{{ schedule_week.week_start.isoformat() }}">
+                    <input type="hidden" name="user_id" value="{{ selected_user_filter_value }}">
                     <button type="submit" class="btn btn-sm btn-outline-warning">Unpublish</button>
                 </form>
                 {% else %}
@@ -99,6 +105,7 @@
                     <input type="hidden" name="action" value="publish_week">
                     <input type="hidden" name="department_id" value="{{ selected_department.id }}">
                     <input type="hidden" name="week_start" value="{{ schedule_week.week_start.isoformat() }}">
+                    <input type="hidden" name="user_id" value="{{ selected_user_filter_value }}">
                     <button type="submit" class="btn btn-sm btn-success">Publish</button>
                 </form>
                 {% endif %}
@@ -109,12 +116,24 @@
 
     <div class="card mb-3">
         <div class="card-body">
-            <form method="get" class="row g-2 align-items-end">
+            <form method="get" class="row g-2 align-items-end" data-schedule-filter-form="1">
                 <div class="col-12 col-md-4 col-xl-3">
                     <label class="form-label">Department</label>
-                    <select name="department_id" class="form-select">
+                    <select name="department_id" class="form-select" data-auto-submit-filter="1">
+                        {% if departments|length > 1 %}
+                        <option value="all" {% if all_departments_mode %}selected{% endif %}>All Departments</option>
+                        {% endif %}
                         {% for department in departments %}
-                        <option value="{{ department.id }}" {% if selected_department and department.id == selected_department.id %}selected{% endif %}>{{ department.name }}</option>
+                        <option value="{{ department.id }}" {% if not all_departments_mode and selected_department and department.id == selected_department.id %}selected{% endif %}>{{ department.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-12 col-md-4 col-xl-3">
+                    <label class="form-label">User</label>
+                    <select name="user_id" class="form-select" data-auto-submit-filter="1">
+                        <option value="" {% if not selected_user_filter_value %}selected{% endif %}>All Users</option>
+                        {% for user in filter_users %}
+                        <option value="{{ user.id }}" {% if selected_user_filter_value == user.id|string %}selected{% endif %}>{{ user.email }}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -123,15 +142,15 @@
                     <input type="date" name="week_start" class="form-control" value="{{ schedule_week.week_start.isoformat() if schedule_week else '' }}">
                 </div>
                 <div class="col-12 col-md-auto d-flex gap-2">
-                    {% if previous_week and selected_department %}
-                    <a class="btn btn-outline-secondary" href="{{ url_for('schedule.team_schedule', department_id=selected_department.id, week_start=previous_week.isoformat()) }}">Previous</a>
+                    {% if previous_week %}
+                    <a class="btn btn-outline-secondary" href="{{ url_for('schedule.team_schedule', department_id=selected_department_filter_value, user_id=selected_user_filter_value or None, week_start=previous_week.isoformat()) }}">Previous</a>
                     {% endif %}
                     <button type="submit" class="btn btn-primary">Go</button>
-                    {% if next_week and selected_department %}
-                    <a class="btn btn-outline-secondary" href="{{ url_for('schedule.team_schedule', department_id=selected_department.id, week_start=next_week.isoformat()) }}">Next</a>
+                    {% if next_week %}
+                    <a class="btn btn-outline-secondary" href="{{ url_for('schedule.team_schedule', department_id=selected_department_filter_value, user_id=selected_user_filter_value or None, week_start=next_week.isoformat()) }}">Next</a>
                     {% endif %}
-                    {% if selected_department %}
-                    <a class="btn btn-outline-dark" href="{{ url_for('schedule.team_schedule', department_id=selected_department.id) }}">Current Week</a>
+                    {% if selected_department_filter_value %}
+                    <a class="btn btn-outline-dark" href="{{ url_for('schedule.team_schedule', department_id=selected_department_filter_value, user_id=selected_user_filter_value or None) }}">Current Week</a>
                     {% endif %}
                 </div>
             </form>
@@ -209,9 +228,12 @@
                                         <div>
                                             <div class="fw-semibold">{{ shift.start_time.strftime('%H:%M') }} - {{ shift.end_time.strftime('%H:%M') }}</div>
                                             <div class="small">{{ shift.position.name }}</div>
+                                            {% if show_department_names and shift.position and shift.position.department %}
+                                            <div class="small text-muted">{{ shift.position.department.name }}</div>
+                                            {% endif %}
                                             <div class="small text-muted">{{ shift.assignment_mode|replace('_', ' ')|title }}</div>
                                         </div>
-                                        {% if can_team_access %}
+                                        {% if can_team_access and selected_department %}
                                         <button
                                             type="button"
                                             class="btn btn-sm btn-outline-secondary"
@@ -236,13 +258,14 @@
                                         </button>
                                         {% endif %}
                                     </div>
-                                    {% if current_user.has_permission('schedules.delete') and not schedule_week.is_published %}
+                                    {% if selected_department and current_user.has_permission('schedules.delete') and not schedule_week.is_published %}
                                     <form method="post" class="mt-2">
                                         {{ action_form.hidden_tag() }}
                                         <input type="hidden" name="action" value="delete_shift">
                                         <input type="hidden" name="shift_id" value="{{ shift.id }}">
                                         <input type="hidden" name="department_id" value="{{ selected_department.id }}">
                                         <input type="hidden" name="week_start" value="{{ schedule_week.week_start.isoformat() }}">
+                                        <input type="hidden" name="user_id" value="{{ selected_user_filter_value }}">
                                         <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
                                     </form>
                                     {% endif %}
@@ -259,11 +282,13 @@
                             <div class="fw-semibold">{{ user.email }}</div>
                             <div class="small text-muted">
                                 {{ '%.2f'|format(user_hours.get(user.id, 0.0)) }} hrs
+                                {% if show_seen_status %}
                                 {% set receipt = receipts_by_user_id.get(user.id) %}
                                 {% if receipt %}
                                 | Seen v{{ receipt.last_seen_version or 0 }}
                                 {% else %}
                                 | Not seen
+                                {% endif %}
                                 {% endif %}
                             </div>
                         </th>
@@ -290,8 +315,12 @@
                                         <div>
                                             <div class="fw-semibold">{{ shift.start_time.strftime('%H:%M') }} - {{ shift.end_time.strftime('%H:%M') }}</div>
                                             <div class="small">{{ shift.position.name }}</div>
+                                            {% if show_department_names and shift.position and shift.position.department %}
+                                            <div class="small text-muted">{{ shift.position.department.name }}</div>
+                                            {% endif %}
                                             <div class="small text-muted">{{ '%.2f'|format(shift.paid_hours or 0.0) }} paid hrs</div>
                                         </div>
+                                        {% if selected_department %}
                                         <button
                                             type="button"
                                             class="btn btn-sm btn-outline-secondary"
@@ -315,17 +344,19 @@
                                         >
                                             Edit
                                         </button>
+                                        {% endif %}
                                     </div>
                                     {% if shift.notes %}
                                     <div class="small mt-1">{{ shift.notes }}</div>
                                     {% endif %}
-                                    {% if current_user.has_permission('schedules.delete') and not schedule_week.is_published %}
+                                    {% if selected_department and current_user.has_permission('schedules.delete') and not schedule_week.is_published %}
                                     <form method="post" class="mt-2">
                                         {{ action_form.hidden_tag() }}
                                         <input type="hidden" name="action" value="delete_shift">
                                         <input type="hidden" name="shift_id" value="{{ shift.id }}">
                                         <input type="hidden" name="department_id" value="{{ selected_department.id }}">
                                         <input type="hidden" name="week_start" value="{{ schedule_week.week_start.isoformat() }}">
+                                        <input type="hidden" name="user_id" value="{{ selected_user_filter_value }}">
                                         <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
                                     </form>
                                     {% endif %}
@@ -414,6 +445,7 @@
                     <input type="hidden" name="action" value="save_shift">
                     <input type="hidden" name="department_id" value="{{ selected_department.id }}">
                     <input type="hidden" name="week_start" value="{{ schedule_week.week_start.isoformat() }}">
+                    <input type="hidden" name="user_id" value="{{ selected_user_filter_value }}">
                     <div class="row g-3">
                         <div class="col-12 col-md-6">
                             {{ shift_form.shift_date.label(class_='form-label') }}
@@ -442,6 +474,7 @@
                         <div class="col-12 col-md-4">
                             {{ shift_form.paid_hours.label(class_='form-label') }}
                             {{ shift_form.paid_hours(class_='form-control') }}
+                            <div class="form-text">Auto-calculated from the shift times unless manual paid hours is enabled.</div>
                             <div class="form-check mt-2">
                                 {{ shift_form.paid_hours_manual(class_='form-check-input') }}
                                 {{ shift_form.paid_hours_manual.label(class_='form-check-label') }}

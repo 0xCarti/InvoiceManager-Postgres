@@ -53,6 +53,7 @@ from app.models import (
     Product,
     ShiftPosition,
     User,
+    UserDepartmentMembership,
     Vendor,
 )
 from app.utils.numeric import (
@@ -334,6 +335,26 @@ def load_schedule_position_choices(
 
 def load_active_user_choices():
     return [(user.id, user.email) for user in User.query.filter_by(active=True).order_by(User.email).all()]
+
+
+def load_schedule_membership_role_suggestions() -> list[str]:
+    defaults = list(UserDepartmentMembership.DEFAULT_ROLE_SUGGESTIONS)
+    existing_roles = [
+        UserDepartmentMembership.normalize_role(role)
+        for role, in UserDepartmentMembership.query.with_entities(
+            UserDepartmentMembership.role
+        )
+        .distinct()
+        .order_by(UserDepartmentMembership.role.asc())
+        .all()
+        if role
+    ]
+    suggestions = {
+        role
+        for role in defaults + existing_roles
+        if role
+    }
+    return sorted(suggestions)
 
 
 def load_purchase_gl_code_choices():
@@ -2056,7 +2077,7 @@ class UserScheduleProfileForm(FlaskForm):
         validators=[Optional(), NumberRange(min=0)],
     )
     desired_weekly_hours = WTFormsDecimalField(
-        "Desired Weekly Hours",
+        "Preferred Weekly Hours",
         places=2,
         validators=[Optional(), NumberRange(min=0)],
     )
@@ -2079,14 +2100,9 @@ class UserDepartmentMembershipForm(FlaskForm):
         validators=[DataRequired()],
         validate_choice=False,
     )
-    role = SelectField(
+    role = StringField(
         "Role",
-        choices=[
-            ("staff", "Staff"),
-            ("manager", "Manager"),
-            ("gm", "GM"),
-        ],
-        validators=[DataRequired()],
+        validators=[DataRequired(), Length(max=50)],
     )
     reports_to_user_id = SelectField(
         "Reports To",
@@ -2101,6 +2117,12 @@ class UserDepartmentMembershipForm(FlaskForm):
         super().__init__(*args, **kwargs)
         self.department_id.choices = load_schedule_department_choices()
         self.reports_to_user_id.choices = [(0, "No direct supervisor")] + load_active_user_choices()
+        self.role_suggestions = load_schedule_membership_role_suggestions()
+        if not self.role.raw_data and not self.role.data:
+            self.role.data = UserDepartmentMembership.ROLE_STAFF
+
+    def validate_role(self, field):
+        field.data = UserDepartmentMembership.normalize_role(field.data)
 
 
 class UserPositionEligibilityForm(FlaskForm):
@@ -2238,9 +2260,9 @@ class AvailabilityWindowForm(FlaskForm):
 class AvailabilityOverrideForm(FlaskForm):
     start_at = DateTimeLocalField("Start", validators=[DataRequired()], format="%Y-%m-%dT%H:%M")
     end_at = DateTimeLocalField("End", validators=[DataRequired()], format="%Y-%m-%dT%H:%M")
-    is_available = BooleanField("This override adds availability")
+    is_available = BooleanField("Mark this time as available")
     note = StringField("Note", validators=[Optional(), Length(max=255)])
-    submit = SubmitField("Add Override")
+    submit = SubmitField("Add Date Override")
 
     def validate_end_at(self, field):
         if self.start_at.data and field.data and field.data <= self.start_at.data:
@@ -2307,3 +2329,64 @@ class NoteForm(FlaskForm):
     )
     pinned = BooleanField("Pin note")
     submit = SubmitField("Save Note")
+
+
+class CommunicationMessageForm(FlaskForm):
+    audience = SelectField(
+        "Audience",
+        choices=[
+            ("users", "Selected users"),
+            ("department", "Department"),
+            ("all", "All scoped users"),
+        ],
+        validators=[DataRequired()],
+    )
+    recipient_user_ids = SelectMultipleField(
+        "Users",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        render_kw={"size": 8},
+    )
+    department_id = SelectField(
+        "Department",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+    )
+    subject = StringField(
+        "Subject",
+        validators=[DataRequired(), Length(max=200)],
+    )
+    body = TextAreaField(
+        "Message",
+        validators=[DataRequired(), Length(max=4000)],
+    )
+    submit = SubmitField("Send Message")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.department_id.choices = [(0, "Select a department")]
+
+    def validate(self, extra_validators=None):
+        if not super().validate(extra_validators=extra_validators):
+            return False
+        if self.audience.data == "users" and not (self.recipient_user_ids.data or []):
+            self.recipient_user_ids.errors.append("Select at least one user.")
+            return False
+        if self.audience.data == "department" and not self.department_id.data:
+            self.department_id.errors.append("Select a department.")
+            return False
+        return True
+
+
+class BulletinPostForm(CommunicationMessageForm):
+    subject = StringField(
+        "Headline",
+        validators=[DataRequired(), Length(max=200)],
+    )
+    body = TextAreaField(
+        "Bulletin",
+        validators=[DataRequired(), Length(max=4000)],
+    )
+    submit = SubmitField("Post Bulletin")

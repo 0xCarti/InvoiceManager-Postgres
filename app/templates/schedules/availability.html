@@ -7,7 +7,16 @@
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <div>
             <h1 class="h4 mb-1">Availability</h1>
-            <div class="text-muted small">Recurring weekly windows and date-specific overrides.</div>
+            <div class="text-muted small">Set the normal weekly pattern here, then use overrides for one-off exceptions.</div>
+        </div>
+    </div>
+
+    <div class="alert alert-light border mb-3">
+        <div class="fw-semibold mb-1">How this works</div>
+        <div class="small text-muted">
+            Recurring availability is the user&apos;s normal weekly pattern, such as &quot;Mondays 9:00 to 17:00&quot;.
+            Overrides are date-specific exceptions, such as vacation, an appointment, or making someone available for a special event.
+            If a user has no recurring windows yet, auto-assign treats them as generally available and only approved time off or unavailable overrides block the shift.
         </div>
     </div>
 
@@ -35,6 +44,7 @@
             <div class="card h-100">
                 <div class="card-body">
                     <h2 class="h5">Recurring Availability for {{ target_user.email }}</h2>
+                    <p class="small text-muted mb-3">Use this when someone usually works the same times each week.</p>
                     <form method="post" class="row g-2 align-items-end mb-3">
                         {{ window_form.hidden_tag() }}
                         <input type="hidden" name="action" value="add_window">
@@ -72,7 +82,7 @@
                                     </td>
                                 </tr>
                                 {% else %}
-                                <tr><td colspan="4" class="text-muted">No recurring availability set.</td></tr>
+                                <tr><td colspan="4" class="text-muted">No recurring availability set. Auto-assign will treat this user as generally available until weekly windows are added.</td></tr>
                                 {% endfor %}
                             </tbody>
                         </table>
@@ -84,7 +94,8 @@
         <div class="col-12 col-xl-6">
             <div class="card h-100">
                 <div class="card-body">
-                    <h2 class="h5">Overrides</h2>
+                    <h2 class="h5">Date-Specific Overrides</h2>
+                    <p class="small text-muted mb-3">Use overrides for one-off exceptions to the normal weekly pattern.</p>
                     <form method="post" class="row g-2 align-items-end mb-3">
                         {{ override_form.hidden_tag() }}
                         <input type="hidden" name="action" value="add_override">
@@ -97,8 +108,9 @@
                                 {{ override_form.is_available(class_='form-check-input') }}
                                 {{ override_form.is_available.label(class_='form-check-label') }}
                             </div>
+                            <div class="form-text">Leave this unchecked to block the time. Check it to add one-off availability.</div>
                         </div>
-                        <div class="col-12"><button type="submit" class="btn btn-primary">Add Override</button></div>
+                        <div class="col-12"><button type="submit" class="btn btn-primary">Add Date Override</button></div>
                     </form>
                     <div class="table-responsive">
                         <table class="table table-sm align-middle">

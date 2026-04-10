@@ -1,4 +1,13 @@
 document.addEventListener("DOMContentLoaded", () => {
+  const filterForm = document.querySelector("[data-schedule-filter-form]");
+  if (filterForm) {
+    filterForm
+      .querySelectorAll("[data-auto-submit-filter]")
+      .forEach((input) => {
+        input.addEventListener("change", () => filterForm.requestSubmit());
+      });
+  }
+
   const modal = document.getElementById("scheduleShiftModal");
   if (!modal) {
     return;
@@ -45,6 +54,34 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     input.checked = rawValue === "1" || rawValue === "true" || rawValue === true;
+  }
+
+  function parseTimeToMinutes(value) {
+    if (!value || !/^\d{2}:\d{2}$/.test(value)) {
+      return null;
+    }
+    const [hours, minutes] = value.split(":").map(Number);
+    return (hours * 60) + minutes;
+  }
+
+  function calculatePaidHours() {
+    const startMinutes = parseTimeToMinutes(inputs.startTime?.value);
+    const endMinutes = parseTimeToMinutes(inputs.endTime?.value);
+    if (startMinutes === null || endMinutes === null || endMinutes <= startMinutes) {
+      return "";
+    }
+    return ((endMinutes - startMinutes) / 60).toFixed(2);
+  }
+
+  function syncPaidHoursState() {
+    const isManual = Boolean(inputs.paidHoursManual?.checked);
+    if (inputs.paidHours) {
+      inputs.paidHours.readOnly = !isManual;
+      inputs.paidHours.classList.toggle("bg-body-secondary", !isManual);
+      if (!isManual) {
+        inputs.paidHours.value = calculatePaidHours();
+      }
+    }
   }
 
   function resetRepeatBoxes() {
@@ -111,6 +148,7 @@ document.addEventListener("DOMContentLoaded", () => {
       setDefaultRepeat(trigger.dataset.shiftDate);
     }
     updateAssignedUserState();
+    syncPaidHoursState();
   }
 
   document.querySelectorAll("[data-open-shift-modal]").forEach((trigger) => {
@@ -120,4 +158,17 @@ document.addEventListener("DOMContentLoaded", () => {
   if (inputs.assignmentMode) {
     inputs.assignmentMode.addEventListener("change", updateAssignedUserState);
   }
+  if (inputs.startTime) {
+    inputs.startTime.addEventListener("input", syncPaidHoursState);
+    inputs.startTime.addEventListener("change", syncPaidHoursState);
+  }
+  if (inputs.endTime) {
+    inputs.endTime.addEventListener("input", syncPaidHoursState);
+    inputs.endTime.addEventListener("change", syncPaidHoursState);
+  }
+  if (inputs.paidHoursManual) {
+    inputs.paidHoursManual.addEventListener("change", syncPaidHoursState);
+  }
+
+  syncPaidHoursState();
 });

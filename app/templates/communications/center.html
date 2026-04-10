@@ -1,0 +1,266 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container-fluid px-0">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <div>
+            <h1 class="h4 mb-1">Communications</h1>
+            <div class="text-muted small">Send internal messages, broadcast updates, and keep pinned bulletins visible to the right audience.</div>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-12 col-lg-5">
+            {% if can_send_direct %}
+            <div class="card mb-3">
+                <div class="card-body">
+                    <h2 class="h5">Send Message</h2>
+                    <form method="post" data-audience-form>
+                        {{ message_form.hidden_tag() }}
+                        <input type="hidden" name="action" value="send_message">
+                        <div class="mb-3">
+                            {{ message_form.audience.label(class_='form-label') }}
+                            {{ message_form.audience(class_='form-select', data_audience_select='1') }}
+                            {% for error in message_form.audience.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                            <div class="form-text">Selected users works for one person or a small group. Department and all-scoped broadcasts follow your hierarchy and permissions.</div>
+                        </div>
+                        <div class="mb-3" data-audience-users>
+                            {{ message_form.recipient_user_ids.label(class_='form-label') }}
+                            {{ message_form.recipient_user_ids(class_='form-select') }}
+                            {% for error in message_form.recipient_user_ids.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="mb-3" data-audience-department>
+                            {{ message_form.department_id.label(class_='form-label') }}
+                            {{ message_form.department_id(class_='form-select') }}
+                            {% for error in message_form.department_id.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="mb-3">
+                            {{ message_form.subject.label(class_='form-label') }}
+                            {{ message_form.subject(class_='form-control') }}
+                            {% for error in message_form.subject.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="mb-3">
+                            {{ message_form.body.label(class_='form-label') }}
+                            {{ message_form.body(class_='form-control', rows='5') }}
+                            {% for error in message_form.body.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <button type="submit" class="btn btn-primary">Send Message</button>
+                    </form>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if can_manage_bulletins %}
+            <div class="card mb-3">
+                <div class="card-body">
+                    <h2 class="h5">Post Bulletin</h2>
+                    <form method="post" data-audience-form>
+                        {{ bulletin_form.hidden_tag() }}
+                        <input type="hidden" name="action" value="post_bulletin">
+                        <div class="mb-3">
+                            {{ bulletin_form.audience.label(class_='form-label') }}
+                            {{ bulletin_form.audience(class_='form-select', data_audience_select='1') }}
+                            {% for error in bulletin_form.audience.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="mb-3" data-audience-users>
+                            {{ bulletin_form.recipient_user_ids.label(class_='form-label') }}
+                            {{ bulletin_form.recipient_user_ids(class_='form-select') }}
+                            {% for error in bulletin_form.recipient_user_ids.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="mb-3" data-audience-department>
+                            {{ bulletin_form.department_id.label(class_='form-label') }}
+                            {{ bulletin_form.department_id(class_='form-select') }}
+                            {% for error in bulletin_form.department_id.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="mb-3">
+                            {{ bulletin_form.subject.label(class_='form-label') }}
+                            {{ bulletin_form.subject(class_='form-control') }}
+                            {% for error in bulletin_form.subject.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="mb-3">
+                            {{ bulletin_form.body.label(class_='form-label') }}
+                            {{ bulletin_form.body(class_='form-control', rows='5') }}
+                            {% for error in bulletin_form.body.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                            <div class="form-text">Bulletins stay pinned on the board until they are archived.</div>
+                        </div>
+                        <button type="submit" class="btn btn-outline-primary">Post Bulletin</button>
+                    </form>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if sent_items %}
+            <div class="card">
+                <div class="card-body">
+                    <h2 class="h5">Recent Sent</h2>
+                    <div class="list-group list-group-flush">
+                        {% for item in sent_items %}
+                        <div class="list-group-item px-0">
+                            <div class="d-flex justify-content-between gap-2">
+                                <div>
+                                    <div class="fw-semibold">{{ item.subject }}</div>
+                                    <div class="small text-muted">
+                                        {% if item.kind == 'bulletin' %}Bulletin{% else %}Message{% endif %}
+                                        ·
+                                        {% if item.audience_type == 'department' and item.department %}
+                                        {{ item.department.name }}
+                                        {% elif item.audience_type == 'all' %}
+                                        All scoped users
+                                        {% else %}
+                                        {{ item.recipients|length }} selected user(s)
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="small text-muted text-nowrap">{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="col-12 col-lg-7">
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h2 class="h5 mb-0">Bulletin Board</h2>
+                        <span class="badge text-bg-secondary">{{ bulletin_receipts|length }}</span>
+                    </div>
+                    {% if bulletin_receipts %}
+                    <div class="d-flex flex-column gap-3">
+                        {% for receipt in bulletin_receipts %}
+                        <div class="border rounded p-3 {% if receipt.read_at is none %}border-primary-subtle bg-light{% endif %}">
+                            <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
+                                <div>
+                                    <div class="fw-semibold">{{ receipt.communication.subject }}</div>
+                                    <div class="small text-muted">
+                                        {{ receipt.communication.sender.email }}
+                                        {% if receipt.communication.audience_type == 'department' and receipt.communication.department %}
+                                        · {{ receipt.communication.department.name }}
+                                        {% elif receipt.communication.audience_type == 'all' %}
+                                        · All scoped users
+                                        {% else %}
+                                        · Selected users
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="small text-muted text-nowrap">{{ receipt.communication.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                            </div>
+                            <div class="mb-3" style="white-space: pre-wrap;">{{ receipt.communication.body }}</div>
+                            <div class="d-flex flex-wrap gap-2">
+                                {% if receipt.read_at is none %}
+                                <form method="post">
+                                    {{ action_form.hidden_tag() }}
+                                    <input type="hidden" name="action" value="mark_read">
+                                    <input type="hidden" name="receipt_id" value="{{ receipt.id }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-secondary">Mark Read</button>
+                                </form>
+                                {% endif %}
+                                {% if receipt.communication.id in manageable_bulletin_ids %}
+                                <form method="post">
+                                    {{ action_form.hidden_tag() }}
+                                    <input type="hidden" name="action" value="deactivate_bulletin">
+                                    <input type="hidden" name="communication_id" value="{{ receipt.communication.id }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">Archive Bulletin</button>
+                                </form>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="text-muted">No bulletins are currently pinned for you.</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h2 class="h5 mb-0">Inbox</h2>
+                        <span class="badge text-bg-secondary">{{ inbox_receipts|length }}</span>
+                    </div>
+                    {% if inbox_receipts %}
+                    <div class="d-flex flex-column gap-3">
+                        {% for receipt in inbox_receipts %}
+                        <div class="border rounded p-3 {% if receipt.read_at is none %}border-primary-subtle{% endif %}">
+                            <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
+                                <div>
+                                    <div class="fw-semibold">{{ receipt.communication.subject }}</div>
+                                    <div class="small text-muted">From {{ receipt.communication.sender.email }}</div>
+                                </div>
+                                <div class="small text-muted text-nowrap">{{ receipt.communication.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                            </div>
+                            <div class="mb-3" style="white-space: pre-wrap;">{{ receipt.communication.body }}</div>
+                            {% if receipt.read_at is none %}
+                            <form method="post">
+                                {{ action_form.hidden_tag() }}
+                                <input type="hidden" name="action" value="mark_read">
+                                <input type="hidden" name="receipt_id" value="{{ receipt.id }}">
+                                <button type="submit" class="btn btn-sm btn-outline-secondary">Mark Read</button>
+                            </form>
+                            {% else %}
+                            <div class="small text-muted">Read {{ receipt.read_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="text-muted">Your inbox is empty.</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script nonce="{{ csp_nonce }}">
+    document.addEventListener("DOMContentLoaded", () => {
+        const updateAudienceFields = (form) => {
+            const select = form.querySelector("[data-audience-select]");
+            if (!select) {
+                return;
+            }
+            const audience = select.value;
+            const usersField = form.querySelector("[data-audience-users]");
+            const departmentField = form.querySelector("[data-audience-department]");
+            if (usersField) {
+                usersField.style.display = audience === "users" ? "" : "none";
+            }
+            if (departmentField) {
+                departmentField.style.display = audience === "department" ? "" : "none";
+            }
+        };
+
+        document.querySelectorAll("[data-audience-form]").forEach((form) => {
+            const select = form.querySelector("[data-audience-select]");
+            if (!select) {
+                return;
+            }
+            updateAudienceFields(form);
+            select.addEventListener("change", () => updateAudienceFields(form));
+        });
+    });
+</script>
+{% endblock %}

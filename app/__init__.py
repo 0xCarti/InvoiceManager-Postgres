@@ -251,6 +251,7 @@ NAV_LINKS = {
     "schedule.time_off": "Time Off",
     "schedule.tradeboard": "Tradeboard",
     "schedule.setup": "Scheduling Setup",
+    "communication.center": "Communications",
     "admin.users": "Control Panel",
     "admin.backups": "Backups",
     "admin.settings": "Settings",
@@ -274,6 +275,13 @@ NAV_GROUPS = (
             ("schedule.time_off", "Time Off"),
             ("schedule.tradeboard", "Tradeboard"),
             ("schedule.setup", "Scheduling Setup"),
+        ),
+        False,
+    ),
+    (
+        "Communication",
+        (
+            ("communication.center", "Communications"),
         ),
         False,
     ),
@@ -806,6 +814,7 @@ def create_app(args=None):
             sync_permission_data(db.session)
 
         from app.routes.auth_routes import admin, auth
+        from app.routes.communication_routes import communication
         from app.routes.customer_routes import customer
         from app.routes.event_routes import event
         from app.routes.glcode_routes import glcode_bp
@@ -827,6 +836,7 @@ def create_app(args=None):
 
         app.register_blueprint(auth, url_prefix="/auth")
         app.register_blueprint(main)
+        app.register_blueprint(communication)
         app.register_blueprint(menu_bp)
         app.register_blueprint(location)
         app.register_blueprint(item)

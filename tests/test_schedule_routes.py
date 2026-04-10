@@ -123,9 +123,27 @@ def test_schedule_setup_and_user_settings_flow(client, app):
             data={
                 "action": "add_membership",
                 "membership-department_id": str(department_id),
-                "membership-role": "staff",
+                "membership-role": "lead",
                 "membership-reports_to_user_id": "0",
                 "membership-is_primary": "y",
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+
+        with app.app_context():
+            membership = UserDepartmentMembership.query.filter_by(
+                user_id=target_user_id, department_id=department_id
+            ).first()
+            assert membership is not None
+            membership_id = membership.id
+
+        response = client.post(
+            f"/schedules/users/{target_user_id}",
+            data={
+                "action": "update_membership_role",
+                "membership_id": str(membership_id),
+                "role": "assistant operations lead",
             },
             follow_redirects=True,
         )
@@ -147,9 +165,11 @@ def test_schedule_setup_and_user_settings_flow(client, app):
         target_user = db.session.get(User, target_user_id)
         assert target_user.hourly_rate == 18.5
         assert target_user.schedule_notes == "Prefers opening shifts"
-        assert UserDepartmentMembership.query.filter_by(
+        membership = UserDepartmentMembership.query.filter_by(
             user_id=target_user_id, department_id=department_id
         ).first()
+        assert membership
+        assert membership.role == "assistant operations lead"
         assert UserPositionEligibility.query.filter_by(
             user_id=target_user_id, position_id=position_id
         ).first()
@@ -241,6 +261,196 @@ def test_team_schedule_can_create_and_publish_shift(client, app):
         assert shift is not None
         assert shift.assigned_user_id == employee_id
         assert shift.live_version == week.current_version
+
+
+def test_auto_assign_uses_default_availability_and_preferred_hours_cap(client, app):
+    employee_id = create_user(app, "autoassign-worker@example.com")
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        department = Department(name="Auto Assign Ops", active=True)
+        db.session.add(department)
+        db.session.commit()
+        position = ShiftPosition(
+            department_id=department.id,
+            name="Runner",
+            active=True,
+        )
+        db.session.add(position)
+        db.session.commit()
+
+        employee = db.session.get(User, employee_id)
+        employee.desired_weekly_hours = 24.0
+        employee.max_weekly_hours = 0.0
+
+        db.session.add(
+            UserDepartmentMembership(
+                user_id=employee_id,
+                department_id=department.id,
+                role="staff",
+                is_primary=True,
+            )
+        )
+        db.session.add(
+            UserPositionEligibility(
+                user_id=employee_id,
+                position_id=position.id,
+                priority=10,
+                active=True,
+            )
+        )
+        week = DepartmentScheduleWeek(
+            department_id=department.id,
+            week_start=date(2026, 4, 6),
+            is_published=False,
+            current_version=0,
+        )
+        db.session.add(week)
+        db.session.commit()
+
+        for day in range(4):
+            db.session.add(
+                Shift(
+                    schedule_week_id=week.id,
+                    position_id=position.id,
+                    shift_date=date(2026, 4, 6 + day),
+                    start_time=time(9, 0),
+                    end_time=time(21, 0),
+                    paid_hours=12.0,
+                    assignment_mode=Shift.ASSIGNMENT_OPEN,
+                    live_version=0,
+                )
+            )
+        db.session.commit()
+        department_id = department.id
+        week_id = week.id
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            f"/schedules?department_id={department_id}&week_start=2026-04-06",
+            data={
+                "action": "auto_assign",
+                "department_id": str(department_id),
+                "week_start": "2026-04-06",
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Auto-assign complete. 2 shifts assigned, 2 left unassigned." in response.data
+
+    with app.app_context():
+        assigned_shifts = Shift.query.filter_by(assigned_user_id=employee_id).all()
+        open_shifts = Shift.query.filter_by(
+            schedule_week_id=week_id,
+            assignment_mode=Shift.ASSIGNMENT_OPEN,
+            assigned_user_id=None,
+        ).all()
+        assert len(assigned_shifts) == 2
+        assert len(open_shifts) == 2
+
+
+def test_team_schedule_supports_all_departments_and_user_filter(client, app):
+    worker_a_id = create_user(app, "board-worker-a@example.com")
+    worker_b_id = create_user(app, "board-worker-b@example.com")
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        department_a = Department(name="Board A", active=True)
+        department_b = Department(name="Board B", active=True)
+        db.session.add_all([department_a, department_b])
+        db.session.commit()
+        position_a = ShiftPosition(
+            department_id=department_a.id,
+            name="Runner A",
+            active=True,
+        )
+        position_b = ShiftPosition(
+            department_id=department_b.id,
+            name="Runner B",
+            active=True,
+        )
+        db.session.add_all([position_a, position_b])
+        db.session.commit()
+
+        db.session.add_all(
+            [
+                UserDepartmentMembership(
+                    user_id=worker_a_id,
+                    department_id=department_a.id,
+                    role="staff",
+                    is_primary=True,
+                ),
+                UserDepartmentMembership(
+                    user_id=worker_b_id,
+                    department_id=department_b.id,
+                    role="staff",
+                    is_primary=True,
+                ),
+            ]
+        )
+        week_a = DepartmentScheduleWeek(
+            department_id=department_a.id,
+            week_start=date(2026, 4, 6),
+            is_published=False,
+            current_version=0,
+        )
+        week_b = DepartmentScheduleWeek(
+            department_id=department_b.id,
+            week_start=date(2026, 4, 6),
+            is_published=False,
+            current_version=0,
+        )
+        db.session.add_all([week_a, week_b])
+        db.session.commit()
+        db.session.add_all(
+            [
+                Shift(
+                    schedule_week_id=week_a.id,
+                    position_id=position_a.id,
+                    assigned_user_id=worker_a_id,
+                    shift_date=date(2026, 4, 7),
+                    start_time=time(9, 0),
+                    end_time=time(17, 0),
+                    paid_hours=8.0,
+                    assignment_mode=Shift.ASSIGNMENT_ASSIGNED,
+                    live_version=0,
+                ),
+                Shift(
+                    schedule_week_id=week_b.id,
+                    position_id=position_b.id,
+                    assigned_user_id=worker_b_id,
+                    shift_date=date(2026, 4, 8),
+                    start_time=time(10, 0),
+                    end_time=time(18, 0),
+                    paid_hours=8.0,
+                    assignment_mode=Shift.ASSIGNMENT_ASSIGNED,
+                    live_version=0,
+                ),
+            ]
+        )
+        db.session.commit()
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.get(
+            "/schedules?department_id=all&week_start=2026-04-06",
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"All Departments | Apr 06 - 12, 2026" in response.data
+        assert b"Board A" in response.data
+        assert b"Board B" in response.data
+
+        response = client.get(
+            f"/schedules?department_id=all&user_id={worker_a_id}&week_start=2026-04-06",
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"board-worker-a@example.com" in response.data
+        assert b"Runner B" not in response.data
 
 
 def test_time_off_request_and_review_flow(client, app):

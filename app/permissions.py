@@ -52,6 +52,7 @@ PERMISSION_CATEGORY_LABELS: dict[str, str] = {
     "events": "Events",
     "reports": "Reports",
     "schedules": "Schedules",
+    "communications": "Communications",
     "users": "Users",
     "permission_groups": "Permission Groups",
     "permissions": "Permissions",
@@ -169,6 +170,10 @@ PERMISSION_DEFINITIONS: tuple[PermissionDefinition, ...] = (
     _perm("schedules.view_tradeboard", "schedules", "View Tradeboard", "View open and tradeboard shifts."),
     _perm("schedules.claim_tradeboard", "schedules", "Claim Tradeboard Shifts", "Request tradeboard and open shifts."),
     _perm("schedules.approve_tradeboard", "schedules", "Approve Tradeboard Claims", "Approve or reject tradeboard claim requests."),
+    _perm("communications.view", "communications", "View Communications", "View your inbox and the bulletin board."),
+    _perm("communications.send_direct", "communications", "Send Direct Messages", "Send messages to scoped users."),
+    _perm("communications.send_broadcast", "communications", "Send Broadcasts", "Broadcast messages to multiple users, departments, or all scoped users."),
+    _perm("communications.manage_bulletin", "communications", "Manage Bulletin Board", "Post and archive pinned bulletin board updates."),
     _perm("users.view", "users", "View Users", "View the user list and user access pages."),
     _perm("users.manage", "users", "Manage Users", "Invite users, activate users, archive users, and assign groups."),
     _perm("permission_groups.view", "permission_groups", "View Permission Groups", "View permission groups."),
@@ -362,6 +367,14 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     ),
     "schedule.user_settings": requirement(
         any_of=("schedules.manage_setup", "schedules.manage_pay_rates")
+    ),
+    "communication.center": requirement(
+        any_of=(
+            "communications.view",
+            "communications.send_direct",
+            "communications.send_broadcast",
+            "communications.manage_bulletin",
+        )
     ),
     "glcode.view_gl_codes": requirement(any_of=("gl_codes.view",)),
     "glcode.create_gl_code": requirement(any_of=("gl_codes.create",)),
@@ -592,6 +605,22 @@ ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] =
     ),
     ("schedule.user_settings", "POST"): requirement(
         any_of=("schedules.manage_setup", "schedules.manage_pay_rates")
+    ),
+    ("communication.center", "GET"): requirement(
+        any_of=(
+            "communications.view",
+            "communications.send_direct",
+            "communications.send_broadcast",
+            "communications.manage_bulletin",
+        )
+    ),
+    ("communication.center", "POST"): requirement(
+        any_of=(
+            "communications.view",
+            "communications.send_direct",
+            "communications.send_broadcast",
+            "communications.manage_bulletin",
+        )
     ),
     ("admin.user_profile", "GET"): requirement(any_of=("users.manage",)),
     ("admin.user_profile", "POST"): requirement(any_of=("users.manage",)),

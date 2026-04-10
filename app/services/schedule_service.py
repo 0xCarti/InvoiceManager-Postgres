@@ -90,7 +90,7 @@ def user_is_schedule_gm(user: User) -> bool:
     if getattr(user, "is_super_admin", False):
         return True
     return any(
-        membership.role == UserDepartmentMembership.ROLE_GM
+        UserDepartmentMembership.is_gm_role(membership.role)
         for membership in getattr(user, "department_memberships", [])
     )
 
@@ -148,10 +148,7 @@ def user_can_manage_department(user: User, department_id: int) -> bool:
     membership = get_user_membership(user, department_id)
     if membership is None:
         return False
-    return membership.role in {
-        UserDepartmentMembership.ROLE_MANAGER,
-        UserDepartmentMembership.ROLE_GM,
-    }
+    return UserDepartmentMembership.is_management_role(membership.role)
 
 
 def user_can_manage_other_user(
@@ -243,6 +240,18 @@ def availability_windows_for_day(user: User, weekday: int) -> list[RecurringAvai
     ]
 
 
+def auto_assign_hour_limit(user: User) -> float:
+    """Return the effective weekly limit auto-assign should honor."""
+
+    max_hours = float(user.max_weekly_hours or 0.0)
+    if max_hours > 0:
+        return max_hours
+    desired_hours = float(user.desired_weekly_hours or 0.0)
+    if desired_hours > 0:
+        return desired_hours
+    return 0.0
+
+
 def time_off_overlaps(
     request_obj: TimeOffRequest,
     shift_date: date,
@@ -313,7 +322,13 @@ def user_is_available_for_shift(
     ):
         return True
 
-    windows = availability_windows_for_day(user, shift_date.weekday())
+    all_windows = list(getattr(user, "recurring_availability_windows", []))
+    if not all_windows:
+        return True
+
+    windows = [
+        window for window in all_windows if window.weekday == shift_date.weekday()
+    ]
     if not windows:
         return False
     return any(
@@ -501,10 +516,16 @@ def auto_assign_shifts(
     results: list[AutoAssignResult] = []
     for shift in shifts:
         best_choice: tuple | None = None
+        had_candidates = False
+        blocked_by_availability = False
+        blocked_by_overlap = False
+        blocked_by_hours = False
         for user, eligibility in build_auto_assign_candidates(shift):
+            had_candidates = True
             if not user_is_available_for_shift(
                 user, shift.shift_date, shift.start_time, shift.end_time
             ):
+                blocked_by_availability = True
                 continue
             if find_overlapping_shift(
                 user.id,
@@ -513,14 +534,16 @@ def auto_assign_shifts(
                 shift.end_time,
                 exclude_shift_id=shift.id,
             ):
+                blocked_by_overlap = True
                 continue
             assigned_hours = assigned_hours_for_week(
                 user.id,
                 schedule_week.id,
                 exclude_shift_id=shift.id,
             )
-            max_hours = float(user.max_weekly_hours or 0.0)
-            if max_hours and assigned_hours + float(shift.paid_hours or 0.0) > max_hours:
+            hour_limit = auto_assign_hour_limit(user)
+            if hour_limit and assigned_hours + float(shift.paid_hours or 0.0) > hour_limit:
+                blocked_by_hours = True
                 continue
             desired_hours = float(user.desired_weekly_hours or 0.0)
             desired_gap = max(desired_hours - assigned_hours, 0.0)
@@ -534,11 +557,20 @@ def auto_assign_shifts(
                 best_choice = (score, user, assigned_hours, desired_gap, eligibility)
 
         if best_choice is None:
+            summary = "No eligible user matched availability and hours."
+            if not had_candidates:
+                summary = "No eligible users are configured for this position."
+            elif blocked_by_hours and not blocked_by_availability and not blocked_by_overlap:
+                summary = "Eligible users would exceed their preferred/max weekly hours."
+            elif blocked_by_availability and not blocked_by_overlap and not blocked_by_hours:
+                summary = "Eligible users exist, but none are available for this shift."
+            elif blocked_by_overlap and not blocked_by_availability and not blocked_by_hours:
+                summary = "Eligible users already have overlapping shifts."
             results.append(
                 AutoAssignResult(
                     shift_id=shift.id,
                     assigned_user_id=None,
-                    summary="No eligible user matched availability and hours.",
+                    summary=summary,
                 )
             )
             continue

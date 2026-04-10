@@ -24,6 +24,11 @@
                         <div class="col-12 col-md-4">{{ profile_form.desired_weekly_hours.label(class_='form-label') }}{{ profile_form.desired_weekly_hours(class_='form-control') }}</div>
                         <div class="col-12 col-md-4">{{ profile_form.max_weekly_hours.label(class_='form-label') }}{{ profile_form.max_weekly_hours(class_='form-control') }}</div>
                         <div class="col-12">
+                            <div class="form-text">
+                                Auto-assign aims for the preferred weekly hours. If max weekly hours is blank or 0, the preferred hours are used as the auto-assign limit.
+                            </div>
+                        </div>
+                        <div class="col-12">
                             <div class="form-check">
                                 {{ profile_form.schedule_enabled(class_='form-check-input', disabled=not can_manage_setup) }}
                                 {{ profile_form.schedule_enabled.label(class_='form-check-label') }}
@@ -44,8 +49,13 @@
                         {{ membership_form.hidden_tag() }}
                         <input type="hidden" name="action" value="add_membership">
                         <div class="col-12 col-md-4">{{ membership_form.department_id.label(class_='form-label') }}{{ membership_form.department_id(class_='form-select') }}</div>
-                        <div class="col-12 col-md-3">{{ membership_form.role.label(class_='form-label') }}{{ membership_form.role(class_='form-select') }}</div>
+                        <div class="col-12 col-md-3">{{ membership_form.role.label(class_='form-label') }}{{ membership_form.role(class_='form-control', list='membership-role-suggestions', placeholder='staff') }}</div>
                         <div class="col-12 col-md-5">{{ membership_form.reports_to_user_id.label(class_='form-label') }}{{ membership_form.reports_to_user_id(class_='form-select') }}</div>
+                        <div class="col-12">
+                            <div class="form-text">
+                                Custom role labels are allowed. `manager` and `gm` unlock scheduling management permissions; other roles are descriptive.
+                            </div>
+                        </div>
                         <div class="col-12">
                             <div class="form-check">
                                 {{ membership_form.is_primary(class_='form-check-input') }}
@@ -62,7 +72,22 @@
                                 {% for membership in target_user.department_memberships %}
                                 <tr>
                                     <td>{{ membership.department.name }}{% if membership.is_primary %}<div class="small text-muted">Primary</div>{% endif %}</td>
-                                    <td>{{ membership.role|upper }}</td>
+                                    <td>
+                                        <form method="post" class="d-flex gap-2 align-items-center">
+                                            {{ action_form.hidden_tag() }}
+                                            <input type="hidden" name="action" value="update_membership_role">
+                                            <input type="hidden" name="membership_id" value="{{ membership.id }}">
+                                            <input
+                                                type="text"
+                                                name="role"
+                                                class="form-control form-control-sm"
+                                                value="{{ membership.role }}"
+                                                list="membership-role-suggestions"
+                                                {% if not can_manage_setup %}disabled{% endif %}
+                                            >
+                                            <button type="submit" class="btn btn-sm btn-outline-secondary" {% if not can_manage_setup %}disabled{% endif %}>Save</button>
+                                        </form>
+                                    </td>
                                     <td>{{ membership.reports_to.email if membership.reports_to else '' }}</td>
                                     <td class="text-end">
                                         <form method="post">
@@ -79,6 +104,11 @@
                             </tbody>
                         </table>
                     </div>
+                    <datalist id="membership-role-suggestions">
+                        {% for role in membership_role_suggestions %}
+                        <option value="{{ role }}">{{ role|replace('_', ' ')|title }}</option>
+                        {% endfor %}
+                    </datalist>
 
                     <hr>
 

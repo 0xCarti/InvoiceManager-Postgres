@@ -293,6 +293,18 @@ class User(UserMixin, db.Model):
         back_populates="users",
         order_by="PermissionGroup.name",
     )
+    sent_communications = relationship(
+        "Communication",
+        back_populates="sender",
+        foreign_keys="Communication.sender_id",
+        order_by="Communication.created_at.desc()",
+    )
+    communication_recipients = relationship(
+        "CommunicationRecipient",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        order_by="CommunicationRecipient.created_at.desc()",
+    )
 
     @property
     def is_super_admin(self) -> bool:
@@ -481,6 +493,8 @@ class UserDepartmentMembership(db.Model):
     ROLE_STAFF = "staff"
     ROLE_MANAGER = "manager"
     ROLE_GM = "gm"
+    MANAGEMENT_ROLES = {ROLE_MANAGER, ROLE_GM}
+    DEFAULT_ROLE_SUGGESTIONS = (ROLE_STAFF, ROLE_MANAGER, ROLE_GM)
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
@@ -488,7 +502,7 @@ class UserDepartmentMembership(db.Model):
         db.Integer, db.ForeignKey("schedule_department.id"), nullable=False
     )
     role = db.Column(
-        db.String(20),
+        db.String(50),
         nullable=False,
         default=ROLE_STAFF,
         server_default=ROLE_STAFF,
@@ -537,6 +551,19 @@ class UserDepartmentMembership(db.Model):
             "reports_to_user_id",
         ),
     )
+
+    @classmethod
+    def normalize_role(cls, value: str | None) -> str:
+        normalized = " ".join(str(value or "").strip().lower().split())
+        return normalized or cls.ROLE_STAFF
+
+    @classmethod
+    def is_gm_role(cls, value: str | None) -> bool:
+        return cls.normalize_role(value) == cls.ROLE_GM
+
+    @classmethod
+    def is_management_role(cls, value: str | None) -> bool:
+        return cls.normalize_role(value) in cls.MANAGEMENT_ROLES
 
 
 class UserPositionEligibility(db.Model):
@@ -1810,6 +1837,113 @@ class Note(db.Model):
         elif not value and self.pinned:
             self.pinned = False
             self.pinned_at = None
+
+
+class Communication(db.Model):
+    __tablename__ = "communication"
+
+    KIND_MESSAGE = "message"
+    KIND_BULLETIN = "bulletin"
+
+    AUDIENCE_USERS = "users"
+    AUDIENCE_DEPARTMENT = "department"
+    AUDIENCE_ALL = "all"
+
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(
+        db.String(20),
+        nullable=False,
+        default=KIND_MESSAGE,
+        server_default=KIND_MESSAGE,
+    )
+    sender_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    department_id = db.Column(
+        db.Integer, db.ForeignKey("schedule_department.id"), nullable=True
+    )
+    audience_type = db.Column(db.String(20), nullable=False)
+    subject = db.Column(db.String(200), nullable=False)
+    body = db.Column(db.Text, nullable=False)
+    pinned = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
+    active = db.Column(
+        db.Boolean, default=True, nullable=False, server_default="1"
+    )
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    sender = relationship(
+        "User",
+        back_populates="sent_communications",
+        foreign_keys=[sender_id],
+    )
+    department = relationship("Department")
+    recipients = relationship(
+        "CommunicationRecipient",
+        back_populates="communication",
+        cascade="all, delete-orphan",
+        order_by="CommunicationRecipient.created_at.asc()",
+    )
+
+    __table_args__ = (
+        db.Index("ix_communication_kind_created", "kind", "created_at"),
+        db.Index("ix_communication_department", "department_id"),
+        db.Index("ix_communication_sender", "sender_id"),
+        db.Index("ix_communication_active_pinned", "active", "pinned"),
+    )
+
+    @property
+    def is_bulletin(self) -> bool:
+        return self.kind == self.KIND_BULLETIN
+
+
+class CommunicationRecipient(db.Model):
+    __tablename__ = "communication_recipient"
+
+    id = db.Column(db.Integer, primary_key=True)
+    communication_id = db.Column(
+        db.Integer, db.ForeignKey("communication.id"), nullable=False
+    )
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    read_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+
+    communication = relationship("Communication", back_populates="recipients")
+    user = relationship("User", back_populates="communication_recipients")
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "communication_id",
+            "user_id",
+            name="uq_communication_recipient_communication_user",
+        ),
+        db.Index("ix_communication_recipient_user", "user_id"),
+        db.Index(
+            "ix_communication_recipient_user_read",
+            "user_id",
+            "read_at",
+        ),
+    )
+
+    def mark_read(self) -> None:
+        if self.read_at is None:
+            self.read_at = datetime.utcnow()
 
 
 class Event(db.Model):
