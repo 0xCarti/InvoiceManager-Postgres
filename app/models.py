@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import date as date_cls, datetime, timedelta
 from typing import Optional
 
 from flask import current_app, has_app_context
@@ -159,6 +159,37 @@ class User(UserMixin, db.Model):
     timezone = db.Column(db.String(50))
     phone_number = db.Column(db.String(20))
     notify_transfers = db.Column(db.Boolean, default=False, nullable=False)
+    hourly_rate = db.Column(
+        db.Float, nullable=True, default=0.0, server_default="0.0"
+    )
+    desired_weekly_hours = db.Column(
+        db.Float, nullable=True, default=0.0, server_default="0.0"
+    )
+    max_weekly_hours = db.Column(
+        db.Float, nullable=True, default=0.0, server_default="0.0"
+    )
+    schedule_enabled = db.Column(
+        db.Boolean, default=True, nullable=False, server_default="1"
+    )
+    schedule_notes = db.Column(db.Text, nullable=True)
+    notify_schedule_post_email = db.Column(
+        db.Boolean, default=True, nullable=False, server_default="1"
+    )
+    notify_schedule_post_text = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
+    notify_schedule_changes_email = db.Column(
+        db.Boolean, default=True, nullable=False, server_default="1"
+    )
+    notify_schedule_changes_text = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
+    notify_tradeboard_email = db.Column(
+        db.Boolean, default=True, nullable=False, server_default="1"
+    )
+    notify_tradeboard_text = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
     items_per_page = db.Column(
         db.Integer, nullable=False, default=20, server_default="20"
     )
@@ -169,6 +200,92 @@ class User(UserMixin, db.Model):
         "UserFilterPreference",
         back_populates="user",
         cascade="all, delete-orphan",
+    )
+    department_memberships = relationship(
+        "UserDepartmentMembership",
+        back_populates="user",
+        foreign_keys="UserDepartmentMembership.user_id",
+        cascade="all, delete-orphan",
+        order_by="UserDepartmentMembership.department_id.asc()",
+    )
+    managed_department_memberships = relationship(
+        "UserDepartmentMembership",
+        back_populates="reports_to",
+        foreign_keys="UserDepartmentMembership.reports_to_user_id",
+    )
+    position_eligibilities = relationship(
+        "UserPositionEligibility",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        order_by="UserPositionEligibility.priority.desc()",
+    )
+    recurring_availability_windows = relationship(
+        "RecurringAvailabilityWindow",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        order_by=(
+            "RecurringAvailabilityWindow.weekday.asc(), "
+            "RecurringAvailabilityWindow.start_time.asc()"
+        ),
+    )
+    availability_overrides = relationship(
+        "AvailabilityOverride",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        order_by="AvailabilityOverride.start_at.asc()",
+    )
+    time_off_requests = relationship(
+        "TimeOffRequest",
+        back_populates="user",
+        foreign_keys="TimeOffRequest.user_id",
+        cascade="all, delete-orphan",
+        order_by="TimeOffRequest.created_at.desc()",
+    )
+    reviewed_time_off_requests = relationship(
+        "TimeOffRequest",
+        back_populates="reviewed_by",
+        foreign_keys="TimeOffRequest.reviewed_by_id",
+    )
+    published_schedule_weeks = relationship(
+        "DepartmentScheduleWeek",
+        back_populates="published_by",
+        foreign_keys="DepartmentScheduleWeek.published_by_id",
+    )
+    assigned_shifts = relationship(
+        "Shift",
+        back_populates="assigned_user",
+        foreign_keys="Shift.assigned_user_id",
+    )
+    created_schedule_shifts = relationship(
+        "Shift",
+        back_populates="created_by",
+        foreign_keys="Shift.created_by_id",
+    )
+    updated_schedule_shifts = relationship(
+        "Shift",
+        back_populates="updated_by",
+        foreign_keys="Shift.updated_by_id",
+    )
+    schedule_shift_audits = relationship(
+        "ShiftAudit",
+        back_populates="changed_by",
+        foreign_keys="ShiftAudit.changed_by_user_id",
+    )
+    schedule_view_receipts = relationship(
+        "ScheduleWeekViewReceipt",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    tradeboard_claims = relationship(
+        "TradeboardClaim",
+        back_populates="user",
+        foreign_keys="TradeboardClaim.user_id",
+        cascade="all, delete-orphan",
+    )
+    reviewed_tradeboard_claims = relationship(
+        "TradeboardClaim",
+        back_populates="reviewed_by",
+        foreign_keys="TradeboardClaim.reviewed_by_id",
     )
     permission_groups = relationship(
         "PermissionGroup",
@@ -262,6 +379,629 @@ class UserFilterPreference(db.Model):
         db.UniqueConstraint(
             "user_id", "scope", name="uq_user_filter_preference_scope"
         ),
+    )
+
+
+class Department(db.Model):
+    __tablename__ = "schedule_department"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    description = db.Column(db.Text, nullable=True)
+    active = db.Column(
+        db.Boolean, nullable=False, default=True, server_default="1"
+    )
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    positions = relationship(
+        "ShiftPosition",
+        back_populates="department",
+        cascade="all, delete-orphan",
+        order_by="ShiftPosition.sort_order.asc(), ShiftPosition.name.asc()",
+    )
+    memberships = relationship(
+        "UserDepartmentMembership",
+        back_populates="department",
+        cascade="all, delete-orphan",
+    )
+    schedule_weeks = relationship(
+        "DepartmentScheduleWeek",
+        back_populates="department",
+        cascade="all, delete-orphan",
+        order_by="DepartmentScheduleWeek.week_start.desc()",
+    )
+
+    __table_args__ = (db.Index("ix_schedule_department_active", "active"),)
+
+
+class ShiftPosition(db.Model):
+    __tablename__ = "schedule_shift_position"
+
+    id = db.Column(db.Integer, primary_key=True)
+    department_id = db.Column(
+        db.Integer, db.ForeignKey("schedule_department.id"), nullable=False
+    )
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    default_color = db.Column(db.String(20), nullable=True)
+    active = db.Column(
+        db.Boolean, nullable=False, default=True, server_default="1"
+    )
+    sort_order = db.Column(
+        db.Integer, nullable=False, default=0, server_default="0"
+    )
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    department = relationship("Department", back_populates="positions")
+    eligibilities = relationship(
+        "UserPositionEligibility",
+        back_populates="position",
+        cascade="all, delete-orphan",
+    )
+    shifts = relationship("Shift", back_populates="position")
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "department_id",
+            "name",
+            name="uq_schedule_shift_position_department_name",
+        ),
+        db.Index("ix_schedule_shift_position_department", "department_id"),
+        db.Index("ix_schedule_shift_position_active", "active"),
+    )
+
+
+class UserDepartmentMembership(db.Model):
+    __tablename__ = "schedule_user_department_membership"
+
+    ROLE_STAFF = "staff"
+    ROLE_MANAGER = "manager"
+    ROLE_GM = "gm"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    department_id = db.Column(
+        db.Integer, db.ForeignKey("schedule_department.id"), nullable=False
+    )
+    role = db.Column(
+        db.String(20),
+        nullable=False,
+        default=ROLE_STAFF,
+        server_default=ROLE_STAFF,
+    )
+    is_primary = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
+    reports_to_user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id"), nullable=True
+    )
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    user = relationship(
+        "User",
+        back_populates="department_memberships",
+        foreign_keys=[user_id],
+    )
+    department = relationship("Department", back_populates="memberships")
+    reports_to = relationship(
+        "User",
+        back_populates="managed_department_memberships",
+        foreign_keys=[reports_to_user_id],
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "user_id",
+            "department_id",
+            name="uq_schedule_user_department_membership_user_department",
+        ),
+        db.Index("ix_schedule_user_department_membership_department", "department_id"),
+        db.Index(
+            "ix_schedule_user_department_membership_reports_to",
+            "reports_to_user_id",
+        ),
+    )
+
+
+class UserPositionEligibility(db.Model):
+    __tablename__ = "schedule_user_position_eligibility"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    position_id = db.Column(
+        db.Integer, db.ForeignKey("schedule_shift_position.id"), nullable=False
+    )
+    priority = db.Column(
+        db.Integer, nullable=False, default=0, server_default="0"
+    )
+    active = db.Column(
+        db.Boolean, nullable=False, default=True, server_default="1"
+    )
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    user = relationship("User", back_populates="position_eligibilities")
+    position = relationship("ShiftPosition", back_populates="eligibilities")
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "user_id",
+            "position_id",
+            name="uq_schedule_user_position_eligibility_user_position",
+        ),
+        db.Index("ix_schedule_user_position_eligibility_position", "position_id"),
+    )
+
+
+class DepartmentScheduleWeek(db.Model):
+    __tablename__ = "schedule_department_week"
+
+    id = db.Column(db.Integer, primary_key=True)
+    department_id = db.Column(
+        db.Integer, db.ForeignKey("schedule_department.id"), nullable=False
+    )
+    week_start = db.Column(db.Date, nullable=False)
+    is_published = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
+    current_version = db.Column(
+        db.Integer, nullable=False, default=0, server_default="0"
+    )
+    published_at = db.Column(db.DateTime, nullable=True)
+    unpublished_at = db.Column(db.DateTime, nullable=True)
+    published_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    department = relationship("Department", back_populates="schedule_weeks")
+    published_by = relationship(
+        "User",
+        back_populates="published_schedule_weeks",
+        foreign_keys=[published_by_id],
+    )
+    shifts = relationship(
+        "Shift",
+        back_populates="schedule_week",
+        cascade="all, delete-orphan",
+        order_by="Shift.shift_date.asc(), Shift.start_time.asc(), Shift.id.asc()",
+    )
+    receipts = relationship(
+        "ScheduleWeekViewReceipt",
+        back_populates="schedule_week",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "department_id",
+            "week_start",
+            name="uq_schedule_department_week_department_week_start",
+        ),
+        db.Index("ix_schedule_department_week_published", "is_published"),
+    )
+
+    @property
+    def week_end(self) -> date_cls:
+        return self.week_start + timedelta(days=6)
+
+
+class Shift(db.Model):
+    __tablename__ = "schedule_shift"
+
+    ASSIGNMENT_ASSIGNED = "assigned"
+    ASSIGNMENT_OPEN = "open"
+    ASSIGNMENT_TRADEBOARD = "tradeboard"
+
+    id = db.Column(db.Integer, primary_key=True)
+    schedule_week_id = db.Column(
+        db.Integer, db.ForeignKey("schedule_department_week.id"), nullable=False
+    )
+    position_id = db.Column(
+        db.Integer, db.ForeignKey("schedule_shift_position.id"), nullable=False
+    )
+    assigned_user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    location_id = db.Column(db.Integer, db.ForeignKey("location.id"), nullable=True)
+    event_id = db.Column(db.Integer, db.ForeignKey("event.id"), nullable=True)
+    shift_date = db.Column(db.Date, nullable=False)
+    start_time = db.Column(db.Time, nullable=False)
+    end_time = db.Column(db.Time, nullable=False)
+    paid_hours = db.Column(
+        db.Float, nullable=False, default=0.0, server_default="0.0"
+    )
+    paid_hours_manual = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
+    notes = db.Column(db.Text, nullable=True)
+    color = db.Column(db.String(20), nullable=True)
+    assignment_mode = db.Column(
+        db.String(20),
+        nullable=False,
+        default=ASSIGNMENT_ASSIGNED,
+        server_default=ASSIGNMENT_ASSIGNED,
+    )
+    is_locked = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
+    hourly_rate_snapshot = db.Column(
+        db.Float, nullable=True, default=0.0, server_default="0.0"
+    )
+    live_version = db.Column(
+        db.Integer, nullable=False, default=0, server_default="0"
+    )
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    schedule_week = relationship("DepartmentScheduleWeek", back_populates="shifts")
+    position = relationship("ShiftPosition", back_populates="shifts")
+    assigned_user = relationship(
+        "User",
+        back_populates="assigned_shifts",
+        foreign_keys=[assigned_user_id],
+    )
+    location = relationship("Location")
+    event = relationship("Event")
+    created_by = relationship(
+        "User",
+        back_populates="created_schedule_shifts",
+        foreign_keys=[created_by_id],
+    )
+    updated_by = relationship(
+        "User",
+        back_populates="updated_schedule_shifts",
+        foreign_keys=[updated_by_id],
+    )
+    audits = relationship(
+        "ShiftAudit",
+        back_populates="shift",
+        cascade="all, delete-orphan",
+        order_by="ShiftAudit.changed_at.desc()",
+    )
+    tradeboard_claims = relationship(
+        "TradeboardClaim",
+        back_populates="shift",
+        cascade="all, delete-orphan",
+        order_by="TradeboardClaim.created_at.desc()",
+    )
+
+    __table_args__ = (
+        db.Index("ix_schedule_shift_week_date", "schedule_week_id", "shift_date"),
+        db.Index("ix_schedule_shift_assigned_user", "assigned_user_id"),
+        db.Index("ix_schedule_shift_position", "position_id"),
+        db.Index("ix_schedule_shift_assignment_mode", "assignment_mode"),
+    )
+
+    @property
+    def starts_at(self) -> datetime:
+        return datetime.combine(self.shift_date, self.start_time)
+
+    @property
+    def ends_at(self) -> datetime:
+        end_date = self.shift_date
+        if self.end_time <= self.start_time:
+            end_date = self.shift_date + timedelta(days=1)
+        return datetime.combine(end_date, self.end_time)
+
+    @property
+    def duration_hours(self) -> float:
+        return round((self.ends_at - self.starts_at).total_seconds() / 3600.0, 2)
+
+
+class ShiftAudit(db.Model):
+    __tablename__ = "schedule_shift_audit"
+
+    id = db.Column(db.Integer, primary_key=True)
+    shift_id = db.Column(
+        db.Integer, db.ForeignKey("schedule_shift.id"), nullable=False
+    )
+    action = db.Column(db.String(50), nullable=False)
+    version = db.Column(
+        db.Integer, nullable=False, default=0, server_default="0"
+    )
+    summary = db.Column(db.Text, nullable=True)
+    details = db.Column(db.JSON, nullable=True)
+    changed_by_user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id"), nullable=True
+    )
+    changed_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+
+    shift = relationship("Shift", back_populates="audits")
+    changed_by = relationship(
+        "User",
+        back_populates="schedule_shift_audits",
+        foreign_keys=[changed_by_user_id],
+    )
+
+    __table_args__ = (
+        db.Index("ix_schedule_shift_audit_shift", "shift_id"),
+        db.Index("ix_schedule_shift_audit_changed_at", "changed_at"),
+    )
+
+
+class RecurringAvailabilityWindow(db.Model):
+    __tablename__ = "schedule_recurring_availability"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    weekday = db.Column(db.Integer, nullable=False)
+    start_time = db.Column(db.Time, nullable=False)
+    end_time = db.Column(db.Time, nullable=False)
+    note = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    user = relationship("User", back_populates="recurring_availability_windows")
+
+    __table_args__ = (
+        db.Index(
+            "ix_schedule_recurring_availability_user_weekday", "user_id", "weekday"
+        ),
+    )
+
+
+class AvailabilityOverride(db.Model):
+    __tablename__ = "schedule_availability_override"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    start_at = db.Column(db.DateTime, nullable=False)
+    end_at = db.Column(db.DateTime, nullable=False)
+    is_available = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
+    note = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    user = relationship("User", back_populates="availability_overrides")
+
+    __table_args__ = (
+        db.Index("ix_schedule_availability_override_user", "user_id"),
+        db.Index("ix_schedule_availability_override_start", "start_at"),
+    )
+
+
+class TimeOffRequest(db.Model):
+    __tablename__ = "schedule_time_off_request"
+
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_DENIED = "denied"
+    STATUS_CANCELLED = "cancelled"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    start_time = db.Column(db.Time, nullable=True)
+    end_time = db.Column(db.Time, nullable=True)
+    reason = db.Column(db.Text, nullable=False)
+    manager_note = db.Column(db.Text, nullable=True)
+    status = db.Column(
+        db.String(20),
+        nullable=False,
+        default=STATUS_PENDING,
+        server_default=STATUS_PENDING,
+    )
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    user = relationship(
+        "User",
+        back_populates="time_off_requests",
+        foreign_keys=[user_id],
+    )
+    reviewed_by = relationship(
+        "User",
+        back_populates="reviewed_time_off_requests",
+        foreign_keys=[reviewed_by_id],
+    )
+
+    __table_args__ = (
+        db.Index("ix_schedule_time_off_request_user", "user_id"),
+        db.Index("ix_schedule_time_off_request_status", "status"),
+        db.Index("ix_schedule_time_off_request_start_end", "start_date", "end_date"),
+    )
+
+    @property
+    def is_full_day(self) -> bool:
+        return self.start_time is None and self.end_time is None
+
+
+class ScheduleWeekViewReceipt(db.Model):
+    __tablename__ = "schedule_week_view_receipt"
+
+    id = db.Column(db.Integer, primary_key=True)
+    schedule_week_id = db.Column(
+        db.Integer, db.ForeignKey("schedule_department_week.id"), nullable=False
+    )
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    first_seen_at = db.Column(db.DateTime, nullable=True)
+    last_seen_at = db.Column(db.DateTime, nullable=True)
+    last_seen_version = db.Column(
+        db.Integer, nullable=False, default=0, server_default="0"
+    )
+
+    schedule_week = relationship(
+        "DepartmentScheduleWeek", back_populates="receipts"
+    )
+    user = relationship("User", back_populates="schedule_view_receipts")
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "schedule_week_id",
+            "user_id",
+            name="uq_schedule_week_view_receipt_week_user",
+        ),
+        db.Index("ix_schedule_week_view_receipt_user", "user_id"),
+    )
+
+
+class TradeboardClaim(db.Model):
+    __tablename__ = "schedule_tradeboard_claim"
+
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_CANCELLED = "cancelled"
+
+    id = db.Column(db.Integer, primary_key=True)
+    shift_id = db.Column(
+        db.Integer, db.ForeignKey("schedule_shift.id"), nullable=False
+    )
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    status = db.Column(
+        db.String(20),
+        nullable=False,
+        default=STATUS_PENDING,
+        server_default=STATUS_PENDING,
+    )
+    manager_note = db.Column(db.Text, nullable=True)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    shift = relationship("Shift", back_populates="tradeboard_claims")
+    user = relationship(
+        "User",
+        back_populates="tradeboard_claims",
+        foreign_keys=[user_id],
+    )
+    reviewed_by = relationship(
+        "User",
+        back_populates="reviewed_tradeboard_claims",
+        foreign_keys=[reviewed_by_id],
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "shift_id",
+            "user_id",
+            name="uq_schedule_tradeboard_claim_shift_user",
+        ),
+        db.Index("ix_schedule_tradeboard_claim_status", "status"),
     )
 
 class Location(db.Model):

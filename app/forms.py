@@ -9,6 +9,7 @@ from flask import g
 from flask_wtf import FlaskForm
 from flask_wtf.file import FileAllowed, FileRequired
 from sqlalchemy import or_
+from sqlalchemy.orm import selectinload
 from wtforms import (
     BooleanField,
     DateField,
@@ -25,6 +26,7 @@ from wtforms import (
     StringField,
     TextAreaField,
     SubmitField,
+    TimeField,
 )
 from wtforms.validators import (
     DataRequired,
@@ -39,6 +41,7 @@ from wtforms.validators import (
 from wtforms.widgets import CheckboxInput, ListWidget, TextInput
 
 from app.models import (
+    Department,
     Event,
     EventLocation,
     GLCode,
@@ -48,6 +51,8 @@ from app.models import (
     Menu,
     PermissionGroup,
     Product,
+    ShiftPosition,
+    User,
     Vendor,
 )
 from app.utils.numeric import (
@@ -295,6 +300,40 @@ def load_permission_group_choices(include_system: bool = True):
     if not include_system:
         query = query.filter_by(is_system=False)
     return [(group.id, group.name) for group in query.all()]
+
+
+def load_schedule_department_choices(include_inactive: bool = False):
+    query = Department.query.order_by(Department.name)
+    if not include_inactive:
+        query = query.filter_by(active=True)
+    return [(department.id, department.name) for department in query.all()]
+
+
+def load_schedule_position_choices(
+    *,
+    department_id: int | None = None,
+    include_inactive: bool = False,
+):
+    query = ShiftPosition.query.options(selectinload(ShiftPosition.department)).order_by(
+        ShiftPosition.sort_order, ShiftPosition.name
+    )
+    if department_id:
+        query = query.filter_by(department_id=department_id)
+    if not include_inactive:
+        query = query.filter_by(active=True)
+    return [
+        (
+            position.id,
+            f"{position.department.name} - {position.name}"
+            if position.department
+            else position.name,
+        )
+        for position in query.all()
+    ]
+
+
+def load_active_user_choices():
+    return [(user.id, user.email) for user in User.query.filter_by(active=True).order_by(User.email).all()]
 
 
 def load_purchase_gl_code_choices():
@@ -1958,7 +1997,308 @@ class NotificationForm(FlaskForm):
         "Phone Number", validators=[Optional(), Length(max=20)]
     )
     notify_transfers = BooleanField("Send text on new transfer")
+    notify_schedule_post_email = BooleanField("Email when my schedule is posted")
+    notify_schedule_post_text = BooleanField("Text when my schedule is posted")
+    notify_schedule_changes_email = BooleanField(
+        "Email when my published shifts change"
+    )
+    notify_schedule_changes_text = BooleanField(
+        "Text when my published shifts change"
+    )
+    notify_tradeboard_email = BooleanField(
+        "Email when tradeboard/open shifts match my positions"
+    )
+    notify_tradeboard_text = BooleanField(
+        "Text when tradeboard/open shifts match my positions"
+    )
     submit = SubmitField("Update Notifications")
+
+
+class DepartmentForm(FlaskForm):
+    name = StringField("Department Name", validators=[DataRequired(), Length(max=100)])
+    description = TextAreaField("Description", validators=[Optional(), Length(max=1000)])
+    active = BooleanField("Active", default=True)
+    submit = SubmitField("Save Department")
+
+
+class ShiftPositionForm(FlaskForm):
+    department_id = SelectField(
+        "Department",
+        coerce=int,
+        validators=[DataRequired()],
+        validate_choice=False,
+    )
+    name = StringField("Position Name", validators=[DataRequired(), Length(max=100)])
+    description = TextAreaField("Description", validators=[Optional(), Length(max=1000)])
+    default_color = SelectField("Default Color", validators=[Optional()])
+    sort_order = IntegerField("Sort Order", validators=[Optional()])
+    active = BooleanField("Active", default=True)
+    submit = SubmitField("Save Position")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.department_id.choices = load_schedule_department_choices()
+        self.default_color.choices = [
+            ("", "Use Shift Color"),
+            ("text-primary", "Blue"),
+            ("text-success", "Green"),
+            ("text-danger", "Red"),
+            ("text-warning", "Orange"),
+            ("text-info", "Cyan"),
+            ("text-dark", "Black"),
+        ]
+
+
+class UserScheduleProfileForm(FlaskForm):
+    hourly_rate = WTFormsDecimalField(
+        "Hourly Rate",
+        places=2,
+        validators=[Optional(), NumberRange(min=0)],
+    )
+    desired_weekly_hours = WTFormsDecimalField(
+        "Desired Weekly Hours",
+        places=2,
+        validators=[Optional(), NumberRange(min=0)],
+    )
+    max_weekly_hours = WTFormsDecimalField(
+        "Max Weekly Hours",
+        places=2,
+        validators=[Optional(), NumberRange(min=0)],
+    )
+    schedule_enabled = BooleanField("Enable scheduling for this user", default=True)
+    schedule_notes = TextAreaField(
+        "Scheduling Notes", validators=[Optional(), Length(max=2000)]
+    )
+    submit = SubmitField("Save Scheduling Settings")
+
+
+class UserDepartmentMembershipForm(FlaskForm):
+    department_id = SelectField(
+        "Department",
+        coerce=int,
+        validators=[DataRequired()],
+        validate_choice=False,
+    )
+    role = SelectField(
+        "Role",
+        choices=[
+            ("staff", "Staff"),
+            ("manager", "Manager"),
+            ("gm", "GM"),
+        ],
+        validators=[DataRequired()],
+    )
+    reports_to_user_id = SelectField(
+        "Reports To",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+    )
+    is_primary = BooleanField("Primary Department")
+    submit = SubmitField("Add Department Membership")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.department_id.choices = load_schedule_department_choices()
+        self.reports_to_user_id.choices = [(0, "No direct supervisor")] + load_active_user_choices()
+
+
+class UserPositionEligibilityForm(FlaskForm):
+    position_id = SelectField(
+        "Position",
+        coerce=int,
+        validators=[DataRequired()],
+        validate_choice=False,
+    )
+    priority = IntegerField("Priority", validators=[Optional()])
+    active = BooleanField("Active", default=True)
+    submit = SubmitField("Add Position")
+
+    def __init__(self, *args, department_id: int | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.position_id.choices = load_schedule_position_choices(department_id=department_id)
+
+
+class ShiftForm(FlaskForm):
+    shift_id = HiddenField(validators=[Optional()])
+    schedule_week_id = HiddenField(validators=[Optional()])
+    shift_date = DateField("Date", validators=[DataRequired()])
+    assigned_user_id = SelectField(
+        "Assigned User",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+    )
+    position_id = SelectField(
+        "Position",
+        coerce=int,
+        validators=[DataRequired()],
+        validate_choice=False,
+    )
+    assignment_mode = SelectField(
+        "Shift Type",
+        choices=[
+            ("assigned", "Assigned"),
+            ("open", "Open"),
+            ("tradeboard", "Tradeboard"),
+        ],
+        validators=[DataRequired()],
+    )
+    start_time = TimeField("Start Time", validators=[DataRequired()], format="%H:%M")
+    end_time = TimeField("End Time", validators=[DataRequired()], format="%H:%M")
+    paid_hours = WTFormsDecimalField(
+        "Paid Hours",
+        places=2,
+        validators=[Optional(), NumberRange(min=0)],
+    )
+    paid_hours_manual = BooleanField("Use manual paid hours")
+    location_id = SelectField(
+        "Location",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+    )
+    event_id = SelectField(
+        "Event",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+    )
+    notes = TextAreaField("Notes", validators=[Optional(), Length(max=2000)])
+    color = SelectField("Color", validators=[Optional()])
+    is_locked = BooleanField("Lock from auto-assign")
+    repeat_days = SelectMultipleField(
+        "Repeat on",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+    )
+    submit = SubmitField("Save Shift")
+
+    def __init__(self, *args, department_id: int | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.assigned_user_id.choices = [(0, "Unassigned")] + load_active_user_choices()
+        self.position_id.choices = load_schedule_position_choices(department_id=department_id)
+        self.location_id.choices = [(0, "No location")] + [
+            (location.id, location.name)
+            for location in Location.query.filter_by(archived=False).order_by(Location.name).all()
+        ]
+        self.event_id.choices = [(0, "No event")] + [
+            (event.id, event.name)
+            for event in Event.query.order_by(Event.start_date.desc(), Event.name.asc()).all()
+        ]
+        self.color.choices = [
+            ("", "Use default"),
+            ("text-primary", "Blue"),
+            ("text-success", "Green"),
+            ("text-danger", "Red"),
+            ("text-warning", "Orange"),
+            ("text-info", "Cyan"),
+            ("text-dark", "Black"),
+        ]
+        self.repeat_days.choices = [
+            (0, "Mon"),
+            (1, "Tue"),
+            (2, "Wed"),
+            (3, "Thu"),
+            (4, "Fri"),
+            (5, "Sat"),
+            (6, "Sun"),
+        ]
+
+    def validate_end_time(self, field):
+        if self.start_time.data and field.data and field.data <= self.start_time.data:
+            raise ValidationError("End time must be after start time.")
+
+
+class AvailabilityWindowForm(FlaskForm):
+    weekday = SelectField(
+        "Weekday",
+        coerce=int,
+        choices=[
+            (0, "Monday"),
+            (1, "Tuesday"),
+            (2, "Wednesday"),
+            (3, "Thursday"),
+            (4, "Friday"),
+            (5, "Saturday"),
+            (6, "Sunday"),
+        ],
+    )
+    start_time = TimeField("Start Time", validators=[DataRequired()], format="%H:%M")
+    end_time = TimeField("End Time", validators=[DataRequired()], format="%H:%M")
+    note = StringField("Note", validators=[Optional(), Length(max=255)])
+    submit = SubmitField("Add Availability Window")
+
+    def validate_end_time(self, field):
+        if self.start_time.data and field.data and field.data <= self.start_time.data:
+            raise ValidationError("End time must be after start time.")
+
+
+class AvailabilityOverrideForm(FlaskForm):
+    start_at = DateTimeLocalField("Start", validators=[DataRequired()], format="%Y-%m-%dT%H:%M")
+    end_at = DateTimeLocalField("End", validators=[DataRequired()], format="%Y-%m-%dT%H:%M")
+    is_available = BooleanField("This override adds availability")
+    note = StringField("Note", validators=[Optional(), Length(max=255)])
+    submit = SubmitField("Add Override")
+
+    def validate_end_at(self, field):
+        if self.start_at.data and field.data and field.data <= self.start_at.data:
+            raise ValidationError("End must be after start.")
+
+
+class TimeOffRequestForm(FlaskForm):
+    start_date = DateField("Start Date", validators=[DataRequired()])
+    end_date = DateField("End Date", validators=[DataRequired()])
+    start_time = TimeField("Start Time", validators=[Optional()], format="%H:%M")
+    end_time = TimeField("End Time", validators=[Optional()], format="%H:%M")
+    reason = TextAreaField("Reason", validators=[DataRequired(), Length(max=2000)])
+    submit = SubmitField("Submit Request")
+
+    def validate_end_date(self, field):
+        if self.start_date.data and field.data and field.data < self.start_date.data:
+            raise ValidationError("End date must be on or after the start date.")
+
+    def validate_end_time(self, field):
+        if (
+            self.start_date.data
+            and self.end_date.data
+            and self.start_date.data == self.end_date.data
+            and self.start_time.data
+            and field.data
+            and field.data <= self.start_time.data
+        ):
+            raise ValidationError("End time must be after the start time.")
+
+
+class TimeOffReviewForm(FlaskForm):
+    status = SelectField(
+        "Decision",
+        choices=[
+            ("approved", "Approve"),
+            ("denied", "Deny"),
+        ],
+        validators=[DataRequired()],
+    )
+    manager_note = TextAreaField(
+        "Manager Note", validators=[Optional(), Length(max=2000)]
+    )
+    submit = SubmitField("Submit Decision")
+
+
+class TradeboardClaimReviewForm(FlaskForm):
+    status = SelectField(
+        "Decision",
+        choices=[
+            ("approved", "Approve"),
+            ("rejected", "Reject"),
+        ],
+        validators=[DataRequired()],
+    )
+    manager_note = TextAreaField(
+        "Manager Note", validators=[Optional(), Length(max=2000)]
+    )
+    submit = SubmitField("Submit Decision")
 
 
 class NoteForm(FlaskForm):

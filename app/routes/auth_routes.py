@@ -738,6 +738,12 @@ def profile():
     notif_form = NotificationForm(
         phone_number=current_user.phone_number or "",
         notify_transfers=current_user.notify_transfers,
+        notify_schedule_post_email=current_user.notify_schedule_post_email,
+        notify_schedule_post_text=current_user.notify_schedule_post_text,
+        notify_schedule_changes_email=current_user.notify_schedule_changes_email,
+        notify_schedule_changes_text=current_user.notify_schedule_changes_text,
+        notify_tradeboard_email=current_user.notify_tradeboard_email,
+        notify_tradeboard_text=current_user.notify_tradeboard_text,
     )
     status_messages = {}
     if request.args.get("password_status") == "updated":
@@ -753,7 +759,14 @@ def profile():
     password_submitted = "new_password" in request.form
     timezone_submitted = "timezone" in request.form
     notifications_submitted = (
-        "phone_number" in request.form or "notify_transfers" in request.form
+        "phone_number" in request.form
+        or "notify_transfers" in request.form
+        or "notify_schedule_post_email" in request.form
+        or "notify_schedule_post_text" in request.form
+        or "notify_schedule_changes_email" in request.form
+        or "notify_schedule_changes_text" in request.form
+        or "notify_tradeboard_email" in request.form
+        or "notify_tradeboard_text" in request.form
     )
 
     if password_submitted and form.validate_on_submit():
@@ -775,6 +788,24 @@ def profile():
         current_user.phone_number = notif_form.phone_number.data or None
         current_user.notify_transfers = (
             notif_form.notify_transfers.data or False
+        )
+        current_user.notify_schedule_post_email = (
+            notif_form.notify_schedule_post_email.data or False
+        )
+        current_user.notify_schedule_post_text = (
+            notif_form.notify_schedule_post_text.data or False
+        )
+        current_user.notify_schedule_changes_email = (
+            notif_form.notify_schedule_changes_email.data or False
+        )
+        current_user.notify_schedule_changes_text = (
+            notif_form.notify_schedule_changes_text.data or False
+        )
+        current_user.notify_tradeboard_email = (
+            notif_form.notify_tradeboard_email.data or False
+        )
+        current_user.notify_tradeboard_text = (
+            notif_form.notify_tradeboard_text.data or False
         )
         db.session.commit()
         return redirect(
@@ -837,6 +868,12 @@ def user_profile(user_id):
     notif_form = NotificationForm(
         phone_number=user.phone_number or "",
         notify_transfers=user.notify_transfers,
+        notify_schedule_post_email=user.notify_schedule_post_email,
+        notify_schedule_post_text=user.notify_schedule_post_text,
+        notify_schedule_changes_email=user.notify_schedule_changes_email,
+        notify_schedule_changes_text=user.notify_schedule_changes_text,
+        notify_tradeboard_email=user.notify_tradeboard_email,
+        notify_tradeboard_text=user.notify_tradeboard_text,
     )
     status_messages = {}
     if request.args.get("password_status") == "updated":
@@ -852,7 +889,14 @@ def user_profile(user_id):
     password_submitted = "new_password" in request.form
     timezone_submitted = "timezone" in request.form
     notifications_submitted = (
-        "phone_number" in request.form or "notify_transfers" in request.form
+        "phone_number" in request.form
+        or "notify_transfers" in request.form
+        or "notify_schedule_post_email" in request.form
+        or "notify_schedule_post_text" in request.form
+        or "notify_schedule_changes_email" in request.form
+        or "notify_schedule_changes_text" in request.form
+        or "notify_tradeboard_email" in request.form
+        or "notify_tradeboard_text" in request.form
     )
 
     if password_submitted and form.validate_on_submit():
@@ -874,6 +918,24 @@ def user_profile(user_id):
     elif notifications_submitted and notif_form.validate_on_submit():
         user.phone_number = notif_form.phone_number.data or None
         user.notify_transfers = notif_form.notify_transfers.data or False
+        user.notify_schedule_post_email = (
+            notif_form.notify_schedule_post_email.data or False
+        )
+        user.notify_schedule_post_text = (
+            notif_form.notify_schedule_post_text.data or False
+        )
+        user.notify_schedule_changes_email = (
+            notif_form.notify_schedule_changes_email.data or False
+        )
+        user.notify_schedule_changes_text = (
+            notif_form.notify_schedule_changes_text.data or False
+        )
+        user.notify_tradeboard_email = (
+            notif_form.notify_tradeboard_email.data or False
+        )
+        user.notify_tradeboard_text = (
+            notif_form.notify_tradeboard_text.data or False
+        )
         db.session.commit()
         return redirect(
             url_for(

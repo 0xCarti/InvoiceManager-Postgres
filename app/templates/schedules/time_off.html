@@ -1,0 +1,120 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container-fluid px-0">
+    {% include 'schedules/_schedule_tabs.html' %}
+
+    <div class="row g-3">
+        <div class="col-12 col-xl-5">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h1 class="h4">Request Time Off</h1>
+                    <form method="post" class="row g-2">
+                        {{ request_form.hidden_tag() }}
+                        <input type="hidden" name="action" value="submit_request">
+                        <div class="col-12 col-md-6">{{ request_form.start_date.label(class_='form-label') }}{{ request_form.start_date(class_='form-control') }}</div>
+                        <div class="col-12 col-md-6">{{ request_form.end_date.label(class_='form-label') }}{{ request_form.end_date(class_='form-control') }}</div>
+                        <div class="col-12 col-md-6">{{ request_form.start_time.label(class_='form-label') }}{{ request_form.start_time(class_='form-control') }}</div>
+                        <div class="col-12 col-md-6">{{ request_form.end_time.label(class_='form-label') }}{{ request_form.end_time(class_='form-control') }}</div>
+                        <div class="col-12">{{ request_form.reason.label(class_='form-label') }}{{ request_form.reason(class_='form-control', rows='4') }}</div>
+                        <div class="col-12"><button type="submit" class="btn btn-primary">Submit Request</button></div>
+                    </form>
+
+                    <hr>
+                    <h2 class="h5">My Requests</h2>
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Dates</th>
+                                    <th>Status</th>
+                                    <th>Reason</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for request_obj in own_requests %}
+                                <tr>
+                                    <td>{{ request_obj.start_date }} - {{ request_obj.end_date }}</td>
+                                    <td><span class="badge text-bg-{{ 'success' if request_obj.status == 'approved' else 'danger' if request_obj.status == 'denied' else 'secondary' }}">{{ request_obj.status|title }}</span></td>
+                                    <td>{{ request_obj.reason }}</td>
+                                    <td class="text-end">
+                                        {% if request_obj.status == 'pending' %}
+                                        <form method="post">
+                                            {{ action_form.hidden_tag() }}
+                                            <input type="hidden" name="action" value="cancel_request">
+                                            <input type="hidden" name="request_id" value="{{ request_obj.id }}">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger">Cancel</button>
+                                        </form>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr><td colspan="4" class="text-muted">No time-off requests yet.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-xl-7">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center gap-2">
+                        <h2 class="h5 mb-0">Team Requests</h2>
+                        {% if selected_review_request %}
+                        <span class="badge text-bg-light border">Reviewing {{ selected_review_request.user.email }}</span>
+                        {% endif %}
+                    </div>
+
+                    {% if selected_review_request %}
+                    <form method="post" class="row g-2 align-items-end border rounded p-3 mt-3 mb-3">
+                        {{ review_form.hidden_tag() }}
+                        <input type="hidden" name="action" value="review_request">
+                        <input type="hidden" name="request_id" value="{{ selected_review_request.id }}">
+                        <div class="col-12">
+                            <div class="fw-semibold">{{ selected_review_request.user.email }}</div>
+                            <div class="small text-muted">{{ selected_review_request.start_date }} - {{ selected_review_request.end_date }}</div>
+                        </div>
+                        <div class="col-12 col-md-4">{{ review_form.status.label(class_='form-label') }}{{ review_form.status(class_='form-select') }}</div>
+                        <div class="col-12 col-md-8">{{ review_form.manager_note.label(class_='form-label') }}{{ review_form.manager_note(class_='form-control', rows='2') }}</div>
+                        <div class="col-12"><button type="submit" class="btn btn-primary">Submit Decision</button></div>
+                    </form>
+                    {% endif %}
+
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle">
+                            <thead>
+                                <tr>
+                                    <th>User</th>
+                                    <th>Dates</th>
+                                    <th>Status</th>
+                                    <th>Reason</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for request_obj in team_requests %}
+                                <tr>
+                                    <td>{{ request_obj.user.email }}</td>
+                                    <td>{{ request_obj.start_date }} - {{ request_obj.end_date }}</td>
+                                    <td><span class="badge text-bg-{{ 'success' if request_obj.status == 'approved' else 'danger' if request_obj.status == 'denied' else 'secondary' }}">{{ request_obj.status|title }}</span></td>
+                                    <td>{{ request_obj.reason }}</td>
+                                    <td class="text-end">
+                                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('schedule.time_off', review_id=request_obj.id) }}">Review</a>
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr><td colspan="5" class="text-muted">No team requests in scope.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

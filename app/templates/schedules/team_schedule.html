@@ -1,0 +1,510 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style>
+    .schedule-board-table {
+        min-width: 1080px;
+    }
+
+    .schedule-board-table th,
+    .schedule-board-table td {
+        vertical-align: top;
+    }
+
+    .schedule-board-name {
+        min-width: 220px;
+        position: sticky;
+        left: 0;
+        background: var(--bs-body-bg);
+        z-index: 2;
+    }
+
+    .schedule-board-head {
+        position: sticky;
+        top: 0;
+        background: var(--bs-body-bg);
+        z-index: 1;
+    }
+
+    .schedule-day-cell {
+        min-width: 170px;
+        background: color-mix(in srgb, var(--bs-body-bg) 94%, var(--bs-primary) 6%);
+    }
+
+    .schedule-shift-card {
+        border: 1px solid var(--bs-border-color-translucent);
+        border-left-width: 4px;
+        border-radius: 0.6rem;
+        padding: 0.55rem;
+        background: var(--bs-body-bg);
+        margin-bottom: 0.5rem;
+        box-shadow: 0 0.2rem 0.5rem rgba(0, 0, 0, 0.04);
+    }
+
+    .schedule-empty-cell {
+        min-height: 3.5rem;
+    }
+
+    .schedule-mobile-day {
+        border: 1px solid var(--bs-border-color-translucent);
+        border-radius: 0.75rem;
+        padding: 0.8rem;
+        background: var(--bs-body-bg);
+    }
+</style>
+
+<div class="container-fluid px-0">
+    {% include 'schedules/_schedule_tabs.html' %}
+
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <div>
+            <h1 class="h4 mb-1">Team Schedule</h1>
+            <div class="text-muted small">
+                {% if selected_department %}
+                {{ selected_department.name }} | {{ week_label }}
+                {% else %}
+                Scheduling
+                {% endif %}
+            </div>
+        </div>
+        {% if schedule_week %}
+        <div class="d-flex flex-wrap gap-2">
+            {% if current_seen_count or can_team_access %}
+            <span class="badge text-bg-light border">Seen Current Version: {{ current_seen_count }}/{{ visible_users|length }}</span>
+            {% endif %}
+            <span class="badge {{ 'text-bg-success' if schedule_week.is_published else 'text-bg-secondary' }}">
+                {{ 'Published' if schedule_week.is_published else 'Draft' }}
+            </span>
+            {% if can_team_access and selected_department and current_user.has_permission('schedules.auto_assign') %}
+            <form method="post" class="d-inline">
+                {{ action_form.hidden_tag() }}
+                <input type="hidden" name="action" value="auto_assign">
+                <input type="hidden" name="department_id" value="{{ selected_department.id }}">
+                <input type="hidden" name="week_start" value="{{ schedule_week.week_start.isoformat() }}">
+                <button type="submit" class="btn btn-sm btn-outline-primary">Auto Assign</button>
+            </form>
+            {% endif %}
+            {% if can_team_access and selected_department and current_user.has_permission('schedules.publish') %}
+                {% if schedule_week.is_published %}
+                <form method="post" class="d-inline">
+                    {{ action_form.hidden_tag() }}
+                    <input type="hidden" name="action" value="unpublish_week">
+                    <input type="hidden" name="department_id" value="{{ selected_department.id }}">
+                    <input type="hidden" name="week_start" value="{{ schedule_week.week_start.isoformat() }}">
+                    <button type="submit" class="btn btn-sm btn-outline-warning">Unpublish</button>
+                </form>
+                {% else %}
+                <form method="post" class="d-inline">
+                    {{ action_form.hidden_tag() }}
+                    <input type="hidden" name="action" value="publish_week">
+                    <input type="hidden" name="department_id" value="{{ selected_department.id }}">
+                    <input type="hidden" name="week_start" value="{{ schedule_week.week_start.isoformat() }}">
+                    <button type="submit" class="btn btn-sm btn-success">Publish</button>
+                </form>
+                {% endif %}
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <form method="get" class="row g-2 align-items-end">
+                <div class="col-12 col-md-4 col-xl-3">
+                    <label class="form-label">Department</label>
+                    <select name="department_id" class="form-select">
+                        {% for department in departments %}
+                        <option value="{{ department.id }}" {% if selected_department and department.id == selected_department.id %}selected{% endif %}>{{ department.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-12 col-md-4 col-xl-3">
+                    <label class="form-label">Week Starting</label>
+                    <input type="date" name="week_start" class="form-control" value="{{ schedule_week.week_start.isoformat() if schedule_week else '' }}">
+                </div>
+                <div class="col-12 col-md-auto d-flex gap-2">
+                    {% if previous_week and selected_department %}
+                    <a class="btn btn-outline-secondary" href="{{ url_for('schedule.team_schedule', department_id=selected_department.id, week_start=previous_week.isoformat()) }}">Previous</a>
+                    {% endif %}
+                    <button type="submit" class="btn btn-primary">Go</button>
+                    {% if next_week and selected_department %}
+                    <a class="btn btn-outline-secondary" href="{{ url_for('schedule.team_schedule', department_id=selected_department.id, week_start=next_week.isoformat()) }}">Next</a>
+                    {% endif %}
+                    {% if selected_department %}
+                    <a class="btn btn-outline-dark" href="{{ url_for('schedule.team_schedule', department_id=selected_department.id) }}">Current Week</a>
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {% if schedule_week %}
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-md-4 col-xl-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Scheduled Labor</div>
+                    <div class="fs-4 fw-semibold">${{ '%.2f'|format(total_labor) }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-4 col-xl-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Assigned Shifts</div>
+                    <div class="fs-4 fw-semibold">{{ schedule_week.shifts|selectattr('assigned_user_id')|list|length }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-4 col-xl-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Open / Tradeboard</div>
+                    <div class="fs-4 fw-semibold">{{ open_shifts|length }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="d-none d-lg-block">
+        <div class="table-responsive">
+            <table class="table schedule-board-table align-middle">
+                <thead>
+                    <tr>
+                        <th class="schedule-board-name schedule-board-head">User / Open Shifts</th>
+                        {% for day in week_dates %}
+                        <th class="schedule-board-head text-center">
+                            {{ day.strftime('%a') }}<br>
+                            <span class="small text-muted">{{ day.strftime('%b %d') }}</span>
+                            <div class="small text-success">${{ '%.2f'|format(labor_by_day.get(day, 0.0)) }}</div>
+                        </th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <th class="schedule-board-name">
+                            <div class="fw-semibold">Open / Tradeboard</div>
+                            <div class="small text-muted">Unassigned shifts available for auto-assign or claims.</div>
+                        </th>
+                        {% for day in week_dates %}
+                        <td class="schedule-day-cell">
+                            <div class="schedule-empty-cell">
+                                {% if can_team_access and shift_form %}
+                                <button
+                                    type="button"
+                                    class="btn btn-sm btn-outline-primary mb-2"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#scheduleShiftModal"
+                                    data-open-shift-modal
+                                    data-shift-date="{{ day.isoformat() }}"
+                                    data-assignment-mode="open"
+                                >
+                                    Add Shift
+                                </button>
+                                {% endif %}
+                                {% for shift in shifts_by_row.get((-1, day), []) %}
+                                <div class="schedule-shift-card border-start border-{{ 'warning' if shift.assignment_mode == 'tradeboard' else 'secondary' }}">
+                                    <div class="d-flex justify-content-between gap-2">
+                                        <div>
+                                            <div class="fw-semibold">{{ shift.start_time.strftime('%H:%M') }} - {{ shift.end_time.strftime('%H:%M') }}</div>
+                                            <div class="small">{{ shift.position.name }}</div>
+                                            <div class="small text-muted">{{ shift.assignment_mode|replace('_', ' ')|title }}</div>
+                                        </div>
+                                        {% if can_team_access %}
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm btn-outline-secondary"
+                                            data-bs-toggle="modal"
+                                            data-bs-target="#scheduleShiftModal"
+                                            data-open-shift-modal
+                                            data-shift-id="{{ shift.id }}"
+                                            data-shift-date="{{ shift.shift_date.isoformat() }}"
+                                            data-position-id="{{ shift.position_id }}"
+                                            data-assignment-mode="{{ shift.assignment_mode }}"
+                                            data-start-time="{{ shift.start_time.strftime('%H:%M') }}"
+                                            data-end-time="{{ shift.end_time.strftime('%H:%M') }}"
+                                            data-paid-hours="{{ '%.2f'|format(shift.paid_hours or 0.0) }}"
+                                            data-paid-hours-manual="{{ 1 if shift.paid_hours_manual else 0 }}"
+                                            data-location-id="{{ shift.location_id or 0 }}"
+                                            data-event-id="{{ shift.event_id or 0 }}"
+                                            data-notes="{{ shift.notes or '' }}"
+                                            data-color="{{ shift.color or '' }}"
+                                            data-is-locked="{{ 1 if shift.is_locked else 0 }}"
+                                        >
+                                            Edit
+                                        </button>
+                                        {% endif %}
+                                    </div>
+                                    {% if current_user.has_permission('schedules.delete') and not schedule_week.is_published %}
+                                    <form method="post" class="mt-2">
+                                        {{ action_form.hidden_tag() }}
+                                        <input type="hidden" name="action" value="delete_shift">
+                                        <input type="hidden" name="shift_id" value="{{ shift.id }}">
+                                        <input type="hidden" name="department_id" value="{{ selected_department.id }}">
+                                        <input type="hidden" name="week_start" value="{{ schedule_week.week_start.isoformat() }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                    </form>
+                                    {% endif %}
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </td>
+                        {% endfor %}
+                    </tr>
+
+                    {% for user in visible_users %}
+                    <tr>
+                        <th class="schedule-board-name">
+                            <div class="fw-semibold">{{ user.email }}</div>
+                            <div class="small text-muted">
+                                {{ '%.2f'|format(user_hours.get(user.id, 0.0)) }} hrs
+                                {% set receipt = receipts_by_user_id.get(user.id) %}
+                                {% if receipt %}
+                                | Seen v{{ receipt.last_seen_version or 0 }}
+                                {% else %}
+                                | Not seen
+                                {% endif %}
+                            </div>
+                        </th>
+                        {% for day in week_dates %}
+                        <td class="schedule-day-cell">
+                            <div class="schedule-empty-cell">
+                                {% if shift_form %}
+                                <button
+                                    type="button"
+                                    class="btn btn-sm btn-outline-primary mb-2"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#scheduleShiftModal"
+                                    data-open-shift-modal
+                                    data-shift-date="{{ day.isoformat() }}"
+                                    data-assigned-user-id="{{ user.id }}"
+                                    data-assignment-mode="assigned"
+                                >
+                                    Add Shift
+                                </button>
+                                {% endif %}
+                                {% for shift in shifts_by_row.get((user.id, day), []) %}
+                                <div class="schedule-shift-card border-start border-{{ (shift.color or 'primary')|replace('text-', '') }}">
+                                    <div class="d-flex justify-content-between gap-2">
+                                        <div>
+                                            <div class="fw-semibold">{{ shift.start_time.strftime('%H:%M') }} - {{ shift.end_time.strftime('%H:%M') }}</div>
+                                            <div class="small">{{ shift.position.name }}</div>
+                                            <div class="small text-muted">{{ '%.2f'|format(shift.paid_hours or 0.0) }} paid hrs</div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm btn-outline-secondary"
+                                            data-bs-toggle="modal"
+                                            data-bs-target="#scheduleShiftModal"
+                                            data-open-shift-modal
+                                            data-shift-id="{{ shift.id }}"
+                                            data-shift-date="{{ shift.shift_date.isoformat() }}"
+                                            data-assigned-user-id="{{ shift.assigned_user_id or 0 }}"
+                                            data-position-id="{{ shift.position_id }}"
+                                            data-assignment-mode="{{ shift.assignment_mode }}"
+                                            data-start-time="{{ shift.start_time.strftime('%H:%M') }}"
+                                            data-end-time="{{ shift.end_time.strftime('%H:%M') }}"
+                                            data-paid-hours="{{ '%.2f'|format(shift.paid_hours or 0.0) }}"
+                                            data-paid-hours-manual="{{ 1 if shift.paid_hours_manual else 0 }}"
+                                            data-location-id="{{ shift.location_id or 0 }}"
+                                            data-event-id="{{ shift.event_id or 0 }}"
+                                            data-notes="{{ shift.notes or '' }}"
+                                            data-color="{{ shift.color or '' }}"
+                                            data-is-locked="{{ 1 if shift.is_locked else 0 }}"
+                                        >
+                                            Edit
+                                        </button>
+                                    </div>
+                                    {% if shift.notes %}
+                                    <div class="small mt-1">{{ shift.notes }}</div>
+                                    {% endif %}
+                                    {% if current_user.has_permission('schedules.delete') and not schedule_week.is_published %}
+                                    <form method="post" class="mt-2">
+                                        {{ action_form.hidden_tag() }}
+                                        <input type="hidden" name="action" value="delete_shift">
+                                        <input type="hidden" name="shift_id" value="{{ shift.id }}">
+                                        <input type="hidden" name="department_id" value="{{ selected_department.id }}">
+                                        <input type="hidden" name="week_start" value="{{ schedule_week.week_start.isoformat() }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                    </form>
+                                    {% endif %}
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="d-lg-none d-grid gap-3">
+        {% for user in visible_users %}
+        <div class="schedule-mobile-day">
+            <div class="fw-semibold mb-2">{{ user.email }}</div>
+            {% for day in week_dates %}
+            <div class="border rounded p-2 mb-2">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div>
+                        <div class="fw-semibold">{{ day.strftime('%A') }}</div>
+                        <div class="small text-muted">{{ day.strftime('%b %d') }}</div>
+                    </div>
+                    <button
+                        type="button"
+                        class="btn btn-sm btn-outline-primary"
+                        data-bs-toggle="modal"
+                        data-bs-target="#scheduleShiftModal"
+                        data-open-shift-modal
+                        data-shift-date="{{ day.isoformat() }}"
+                        data-assigned-user-id="{{ user.id }}"
+                        data-assignment-mode="assigned"
+                    >
+                        Add
+                    </button>
+                </div>
+                {% for shift in shifts_by_row.get((user.id, day), []) %}
+                <div class="schedule-shift-card mb-2">
+                    <div class="fw-semibold">{{ shift.start_time.strftime('%H:%M') }} - {{ shift.end_time.strftime('%H:%M') }}</div>
+                    <div class="small">{{ shift.position.name }}</div>
+                </div>
+                {% else %}
+                <div class="small text-muted">No shifts.</div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+
+{% if shift_form and schedule_week and selected_department %}
+<div
+    class="modal fade"
+    id="scheduleShiftModal"
+    tabindex="-1"
+    aria-hidden="true"
+    data-shift-id-input="{{ shift_form.shift_id.id }}"
+    data-shift-date-input="{{ shift_form.shift_date.id }}"
+    data-assigned-user-input="{{ shift_form.assigned_user_id.id }}"
+    data-position-input="{{ shift_form.position_id.id }}"
+    data-assignment-mode-input="{{ shift_form.assignment_mode.id }}"
+    data-start-time-input="{{ shift_form.start_time.id }}"
+    data-end-time-input="{{ shift_form.end_time.id }}"
+    data-paid-hours-input="{{ shift_form.paid_hours.id }}"
+    data-paid-hours-manual-input="{{ shift_form.paid_hours_manual.id }}"
+    data-location-input="{{ shift_form.location_id.id }}"
+    data-event-input="{{ shift_form.event_id.id }}"
+    data-notes-input="{{ shift_form.notes.id }}"
+    data-color-input="{{ shift_form.color.id }}"
+    data-is-locked-input="{{ shift_form.is_locked.id }}"
+>
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <form method="post">
+                <div class="modal-header">
+                    <h2 class="modal-title fs-5" id="scheduleShiftModalTitle">Add Shift</h2>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    {{ shift_form.hidden_tag() }}
+                    <input type="hidden" name="action" value="save_shift">
+                    <input type="hidden" name="department_id" value="{{ selected_department.id }}">
+                    <input type="hidden" name="week_start" value="{{ schedule_week.week_start.isoformat() }}">
+                    <div class="row g-3">
+                        <div class="col-12 col-md-6">
+                            {{ shift_form.shift_date.label(class_='form-label') }}
+                            {{ shift_form.shift_date(class_='form-control') }}
+                        </div>
+                        <div class="col-12 col-md-6">
+                            {{ shift_form.assignment_mode.label(class_='form-label') }}
+                            {{ shift_form.assignment_mode(class_='form-select', data_shift_assignment_mode='1') }}
+                        </div>
+                        <div class="col-12 col-md-6">
+                            {{ shift_form.assigned_user_id.label(class_='form-label') }}
+                            {{ shift_form.assigned_user_id(class_='form-select', data_shift_assigned_user='1') }}
+                        </div>
+                        <div class="col-12 col-md-6">
+                            {{ shift_form.position_id.label(class_='form-label') }}
+                            {{ shift_form.position_id(class_='form-select') }}
+                        </div>
+                        <div class="col-12 col-md-4">
+                            {{ shift_form.start_time.label(class_='form-label') }}
+                            {{ shift_form.start_time(class_='form-control') }}
+                        </div>
+                        <div class="col-12 col-md-4">
+                            {{ shift_form.end_time.label(class_='form-label') }}
+                            {{ shift_form.end_time(class_='form-control') }}
+                        </div>
+                        <div class="col-12 col-md-4">
+                            {{ shift_form.paid_hours.label(class_='form-label') }}
+                            {{ shift_form.paid_hours(class_='form-control') }}
+                            <div class="form-check mt-2">
+                                {{ shift_form.paid_hours_manual(class_='form-check-input') }}
+                                {{ shift_form.paid_hours_manual.label(class_='form-check-label') }}
+                            </div>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            {{ shift_form.location_id.label(class_='form-label') }}
+                            {{ shift_form.location_id(class_='form-select') }}
+                        </div>
+                        <div class="col-12 col-md-6">
+                            {{ shift_form.event_id.label(class_='form-label') }}
+                            {{ shift_form.event_id(class_='form-select') }}
+                        </div>
+                        <div class="col-12 col-md-6">
+                            {{ shift_form.color.label(class_='form-label') }}
+                            {{ shift_form.color(class_='form-select') }}
+                        </div>
+                        <div class="col-12 col-md-6 d-flex align-items-end">
+                            <div class="form-check">
+                                {{ shift_form.is_locked(class_='form-check-input') }}
+                                {{ shift_form.is_locked.label(class_='form-check-label') }}
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            {{ shift_form.notes.label(class_='form-label') }}
+                            {{ shift_form.notes(class_='form-control', rows='3') }}
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Repeat On</label>
+                            <div class="d-flex flex-wrap gap-3">
+                                {% for value, label in shift_form.repeat_days.choices %}
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="{{ shift_form.repeat_days.name }}" id="{{ shift_form.repeat_days.id }}-{{ value }}" value="{{ value }}">
+                                    <label class="form-check-label" for="{{ shift_form.repeat_days.id }}-{{ value }}">{{ label }}</label>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            <div class="form-text">Repeat is only applied when creating a new shift.</div>
+                        </div>
+                        {% if shift_form.errors %}
+                        <div class="col-12">
+                            <div class="alert alert-danger mb-0">
+                                {% for field_errors in shift_form.errors.values() %}
+                                    {% for error in field_errors %}
+                                    <div>{{ error }}</div>
+                                    {% endfor %}
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Shift</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/schedule_board.js') }}" defer></script>
+{% endblock %}

@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container-fluid px-0">
+    {% include 'schedules/_schedule_tabs.html' %}
+
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <div>
+            <h1 class="h4 mb-1">My Schedule</h1>
+            <div class="text-muted small">
+                {% if selected_department %}
+                {{ selected_department.name }} | {{ week_label }}
+                {% endif %}
+            </div>
+        </div>
+        {% if receipt %}
+        <span class="badge text-bg-light border">Seen Version {{ receipt.last_seen_version or 0 }}</span>
+        {% endif %}
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <form method="get" class="row g-2 align-items-end">
+                <div class="col-12 col-md-4">
+                    <label class="form-label">Department</label>
+                    <select name="department_id" class="form-select">
+                        {% for department in departments %}
+                        <option value="{{ department.id }}" {% if selected_department and department.id == selected_department.id %}selected{% endif %}>{{ department.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-12 col-md-4">
+                    <label class="form-label">Week Starting</label>
+                    <input type="date" name="week_start" class="form-control" value="{{ schedule_week.week_start.isoformat() if schedule_week else '' }}">
+                </div>
+                <div class="col-12 col-md-auto d-flex gap-2">
+                    {% if selected_department %}
+                    <a class="btn btn-outline-secondary" href="{{ url_for('schedule.my_schedule', department_id=selected_department.id, week_start=previous_week.isoformat()) }}">Previous</a>
+                    {% endif %}
+                    <button type="submit" class="btn btn-primary">Go</button>
+                    {% if selected_department %}
+                    <a class="btn btn-outline-secondary" href="{{ url_for('schedule.my_schedule', department_id=selected_department.id, week_start=next_week.isoformat()) }}">Next</a>
+                    <a class="btn btn-outline-dark" href="{{ url_for('schedule.my_schedule', department_id=selected_department.id) }}">Current Week</a>
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            {% if shifts %}
+            <div class="list-group list-group-flush">
+                {% for shift in shifts %}
+                <div class="list-group-item px-0">
+                    <div class="fw-semibold">{{ shift.shift_date.strftime('%A, %b %d') }}</div>
+                    <div>{{ shift.start_time.strftime('%H:%M') }} - {{ shift.end_time.strftime('%H:%M') }}</div>
+                    <div class="small text-muted">{{ shift.position.name }} | {{ '%.2f'|format(shift.paid_hours or 0.0) }} paid hrs</div>
+                    {% if shift.notes %}
+                    <div class="small mt-1">{{ shift.notes }}</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% elif selected_department %}
+            <div class="text-muted">No published shifts for this week.</div>
+            {% else %}
+            <div class="text-muted">You are not assigned to any scheduling departments.</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

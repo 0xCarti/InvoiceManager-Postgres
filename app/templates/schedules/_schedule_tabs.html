@@ -1,0 +1,24 @@
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="d-flex flex-wrap gap-2">
+            {% if can_access_endpoint('schedule.team_schedule') %}
+            <a class="btn btn-sm {{ 'btn-primary' if request.endpoint == 'schedule.team_schedule' else 'btn-outline-primary' }}" href="{{ url_for('schedule.team_schedule') }}">Team Schedule</a>
+            {% endif %}
+            {% if can_access_endpoint('schedule.my_schedule') %}
+            <a class="btn btn-sm {{ 'btn-primary' if request.endpoint == 'schedule.my_schedule' else 'btn-outline-primary' }}" href="{{ url_for('schedule.my_schedule') }}">My Schedule</a>
+            {% endif %}
+            {% if can_access_endpoint('schedule.availability') %}
+            <a class="btn btn-sm {{ 'btn-primary' if request.endpoint == 'schedule.availability' else 'btn-outline-primary' }}" href="{{ url_for('schedule.availability') }}">Availability</a>
+            {% endif %}
+            {% if can_access_endpoint('schedule.time_off') %}
+            <a class="btn btn-sm {{ 'btn-primary' if request.endpoint == 'schedule.time_off' else 'btn-outline-primary' }}" href="{{ url_for('schedule.time_off') }}">Time Off</a>
+            {% endif %}
+            {% if can_access_endpoint('schedule.tradeboard') %}
+            <a class="btn btn-sm {{ 'btn-primary' if request.endpoint == 'schedule.tradeboard' else 'btn-outline-primary' }}" href="{{ url_for('schedule.tradeboard') }}">Tradeboard</a>
+            {% endif %}
+            {% if can_access_endpoint('schedule.setup') %}
+            <a class="btn btn-sm {{ 'btn-primary' if request.endpoint == 'schedule.setup' else 'btn-outline-primary' }}" href="{{ url_for('schedule.setup') }}">Scheduling Setup</a>
+            {% endif %}
+        </div>
+    </div>
+</div>

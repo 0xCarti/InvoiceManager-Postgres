@@ -284,12 +284,38 @@
                                 {% elif status_messages.get('notifications') %}
                                 <div class="profile-feedback text-success">{{ status_messages.get('notifications')[1] }}</div>
                                 {% else %}
-                                <div class="profile-feedback text-muted">Set this to enable transfer SMS alerts.</div>
+                                <div class="profile-feedback text-muted">Set this to enable transfer and schedule SMS alerts.</div>
                                 {% endif %}
                             </div>
                             <div class="form-check mt-1">
                                 {{ notif_form.notify_transfers(class_='form-check-input') }}
                                 {{ notif_form.notify_transfers.label(class_='form-check-label') }}
+                            </div>
+                            <hr class="my-2">
+                            <div class="small text-muted">Schedule notifications</div>
+                            <div class="form-check mt-1">
+                                {{ notif_form.notify_schedule_post_email(class_='form-check-input') }}
+                                {{ notif_form.notify_schedule_post_email.label(class_='form-check-label') }}
+                            </div>
+                            <div class="form-check mt-1">
+                                {{ notif_form.notify_schedule_post_text(class_='form-check-input') }}
+                                {{ notif_form.notify_schedule_post_text.label(class_='form-check-label') }}
+                            </div>
+                            <div class="form-check mt-1">
+                                {{ notif_form.notify_schedule_changes_email(class_='form-check-input') }}
+                                {{ notif_form.notify_schedule_changes_email.label(class_='form-check-label') }}
+                            </div>
+                            <div class="form-check mt-1">
+                                {{ notif_form.notify_schedule_changes_text(class_='form-check-input') }}
+                                {{ notif_form.notify_schedule_changes_text.label(class_='form-check-label') }}
+                            </div>
+                            <div class="form-check mt-1">
+                                {{ notif_form.notify_tradeboard_email(class_='form-check-input') }}
+                                {{ notif_form.notify_tradeboard_email.label(class_='form-check-label') }}
+                            </div>
+                            <div class="form-check mt-1">
+                                {{ notif_form.notify_tradeboard_text(class_='form-check-input') }}
+                                {{ notif_form.notify_tradeboard_text.label(class_='form-check-label') }}
                             </div>
                             <div class="profile-actions">
                                 <button type="submit" class="btn btn-primary">{{ notif_form.submit.label.text }}</button>

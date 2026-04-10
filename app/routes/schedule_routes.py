@@ -1,0 +1,1364 @@
+from __future__ import annotations
+
+from collections import defaultdict
+from datetime import datetime, timedelta
+
+from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask_login import current_user, login_required
+from sqlalchemy.orm import selectinload
+
+from app import db
+from app.forms import (
+    AvailabilityOverrideForm,
+    AvailabilityWindowForm,
+    CSRFOnlyForm,
+    DepartmentForm,
+    ShiftForm,
+    ShiftPositionForm,
+    TimeOffRequestForm,
+    TimeOffReviewForm,
+    TradeboardClaimReviewForm,
+    UserDepartmentMembershipForm,
+    UserPositionEligibilityForm,
+    UserScheduleProfileForm,
+)
+from app.models import (
+    AvailabilityOverride,
+    Department,
+    DepartmentScheduleWeek,
+    RecurringAvailabilityWindow,
+    Shift,
+    ShiftPosition,
+    TimeOffRequest,
+    TradeboardClaim,
+    User,
+    UserDepartmentMembership,
+    UserPositionEligibility,
+)
+from app.services.schedule_service import (
+    apply_rate_snapshot,
+    auto_assign_shifts,
+    capture_shift_snapshot,
+    find_overlapping_shift,
+    format_week_label,
+    get_or_create_schedule_week,
+    get_visible_departments,
+    get_visible_schedule_users,
+    log_schedule_action,
+    mark_schedule_week_seen,
+    material_change_fields,
+    normalize_week_start,
+    notify_schedule_changes,
+    notify_schedule_posted,
+    notify_time_off_reviewed,
+    notify_time_off_submitted,
+    override_blocks_shift,
+    record_shift_audit,
+    time_off_overlaps,
+    user_can_manage_department,
+    user_can_manage_other_user,
+    user_department_ids,
+    user_is_schedule_gm,
+)
+
+
+schedule = Blueprint("schedule", __name__)
+
+
+def _parse_int(value, default=None):
+    try:
+        if value in (None, "", 0, "0"):
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _schedule_redirect(endpoint: str, department_id: int | None, week_start) -> str:
+    values = {"week_start": normalize_week_start(week_start).isoformat()}
+    if department_id:
+        values["department_id"] = department_id
+    return url_for(endpoint, **values)
+
+
+def _select_department(
+    departments: list[Department], requested_department_id: int | None
+):
+    if not departments:
+        return None
+    if requested_department_id:
+        for department in departments:
+            if department.id == requested_department_id:
+                return department
+    return departments[0]
+
+
+def _manager_scope_users(actor: User) -> list[User]:
+    if getattr(actor, "is_super_admin", False) or user_is_schedule_gm(actor):
+        return (
+            User.query.filter(User.active.is_(True))
+            .order_by(User.email.asc())
+            .all()
+        )
+    department_ids = sorted(user_department_ids(actor))
+    if not department_ids:
+        return []
+    memberships = (
+        UserDepartmentMembership.query.options(
+            selectinload(UserDepartmentMembership.user),
+        )
+        .filter(UserDepartmentMembership.department_id.in_(department_ids))
+        .all()
+    )
+    scoped: dict[int, User] = {}
+    for membership in memberships:
+        user = membership.user
+        if user is None or not user.active:
+            continue
+        if user_can_manage_other_user(actor, user, membership.department_id):
+            scoped[user.id] = user
+    return sorted(scoped.values(), key=lambda user: user.email.lower())
+
+
+def _can_manage_user_in_any_department(actor: User, target_user: User) -> bool:
+    if getattr(actor, "is_super_admin", False) or user_is_schedule_gm(actor):
+        return True
+    for membership in target_user.department_memberships:
+        if user_can_manage_other_user(actor, target_user, membership.department_id):
+            return True
+    return False
+
+
+def _team_schedule_access_mode() -> tuple[bool, bool]:
+    can_team = current_user.has_any_permission(
+        "schedules.view_team",
+        "schedules.edit_team",
+        "schedules.publish",
+        "schedules.view_labor",
+        "schedules.view_seen_status",
+        "schedules.auto_assign",
+        "schedules.delete",
+    )
+    can_self = current_user.has_permission("schedules.self_schedule")
+    return can_team, can_self
+
+
+def _prepare_schedule_week_context(
+    department: Department,
+    week_start,
+    *,
+    include_self_only: bool,
+):
+    schedule_week = (
+        DepartmentScheduleWeek.query.options(
+            selectinload(DepartmentScheduleWeek.shifts).selectinload(Shift.position),
+            selectinload(DepartmentScheduleWeek.shifts).selectinload(
+                Shift.assigned_user
+            ),
+            selectinload(DepartmentScheduleWeek.receipts),
+        )
+        .filter_by(
+            department_id=department.id,
+            week_start=normalize_week_start(week_start),
+        )
+        .first()
+    )
+    if schedule_week is None:
+        schedule_week = get_or_create_schedule_week(
+            department.id, normalize_week_start(week_start)
+        )
+        db.session.flush()
+
+    visible_users = get_visible_schedule_users(
+        current_user,
+        department.id,
+        include_self_only=include_self_only,
+    )
+    week_dates = [
+        schedule_week.week_start + timedelta(days=offset) for offset in range(7)
+    ]
+    shifts_by_row: dict[tuple[int, object], list[Shift]] = defaultdict(list)
+    open_shifts: list[Shift] = []
+    for shift in sorted(
+        schedule_week.shifts,
+        key=lambda value: (value.shift_date, value.start_time, value.id),
+    ):
+        if shift.assignment_mode != Shift.ASSIGNMENT_ASSIGNED or not shift.assigned_user_id:
+            open_shifts.append(shift)
+            shifts_by_row[(-1, shift.shift_date)].append(shift)
+            continue
+        shifts_by_row[(shift.assigned_user_id, shift.shift_date)].append(shift)
+
+    user_hours: dict[int, float] = defaultdict(float)
+    labor_by_day: dict[object, float] = defaultdict(float)
+    total_labor = 0.0
+    for shift in schedule_week.shifts:
+        if shift.assigned_user_id:
+            user_hours[shift.assigned_user_id] += float(shift.paid_hours or 0.0)
+        labor_cost = float(shift.paid_hours or 0.0) * float(
+            shift.hourly_rate_snapshot or 0.0
+        )
+        labor_by_day[shift.shift_date] += labor_cost
+        total_labor += labor_cost
+
+    receipts_by_user_id = {
+        receipt.user_id: receipt for receipt in schedule_week.receipts
+    }
+    current_seen_count = sum(
+        1
+        for receipt in schedule_week.receipts
+        if (receipt.last_seen_version or 0) >= (schedule_week.current_version or 0)
+    )
+    return {
+        "schedule_week": schedule_week,
+        "visible_users": visible_users,
+        "week_dates": week_dates,
+        "shifts_by_row": shifts_by_row,
+        "open_shifts": open_shifts,
+        "user_hours": user_hours,
+        "labor_by_day": labor_by_day,
+        "total_labor": total_labor,
+        "receipts_by_user_id": receipts_by_user_id,
+        "current_seen_count": current_seen_count,
+    }
+
+
+def _validate_manual_assignment(
+    assigned_user: User | None,
+    shift_date,
+    start_time,
+    end_time,
+    *,
+    exclude_shift_id: int | None = None,
+) -> list[str]:
+    errors: list[str] = []
+    if assigned_user is None:
+        return errors
+    overlapping_shift = find_overlapping_shift(
+        assigned_user.id,
+        shift_date,
+        start_time,
+        end_time,
+        exclude_shift_id=exclude_shift_id,
+    )
+    if overlapping_shift is not None:
+        errors.append("Assigned user already has an overlapping shift.")
+    for request_obj in assigned_user.time_off_requests:
+        if time_off_overlaps(request_obj, shift_date, start_time, end_time):
+            errors.append("Assigned user has approved time off during that shift.")
+            break
+    for override_obj in assigned_user.availability_overrides:
+        if override_blocks_shift(override_obj, shift_date, start_time, end_time):
+            errors.append("Assigned user has an unavailable override during that shift.")
+            break
+    return errors
+
+
+@schedule.route("/schedules", methods=["GET", "POST"])
+@login_required
+def team_schedule():
+    """Show and manage the weekly schedule board."""
+    can_team_access, can_self_schedule = _team_schedule_access_mode()
+    visible_departments = get_visible_departments(
+        current_user,
+        require_team_access=can_team_access or can_self_schedule,
+    )
+    selected_department = _select_department(
+        visible_departments,
+        _parse_int(
+            request.values.get("department_id")
+            or request.values.get("shift-department_id")
+        ),
+    )
+    if selected_department is None:
+        flash("No scheduling departments are available for your account.", "warning")
+        return render_template(
+            "schedules/team_schedule.html",
+            departments=[],
+            selected_department=None,
+            schedule_week=None,
+            shift_form=None,
+            action_form=CSRFOnlyForm(prefix="action"),
+            week_dates=[],
+            shifts_by_row={},
+            visible_users=[],
+            open_shifts=[],
+            user_hours={},
+            labor_by_day={},
+            total_labor=0.0,
+            receipts_by_user_id={},
+            current_seen_count=0,
+            week_label="",
+            previous_week=None,
+            next_week=None,
+            can_team_access=can_team_access,
+            can_self_schedule=can_self_schedule,
+        )
+
+    week_start = normalize_week_start(
+        request.values.get("week_start") or request.values.get("shift-week_start")
+    )
+    include_self_only = not can_team_access and can_self_schedule
+    context = _prepare_schedule_week_context(
+        selected_department,
+        week_start,
+        include_self_only=include_self_only,
+    )
+    schedule_week = context["schedule_week"]
+    shift_form = ShiftForm(prefix="shift", department_id=selected_department.id)
+    action_form = CSRFOnlyForm(prefix="action")
+
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip()
+        if action == "save_shift":
+            if not (can_team_access or can_self_schedule):
+                abort(403)
+            if shift_form.validate_on_submit():
+                shift_id = _parse_int(shift_form.shift_id.data)
+                existing_shift = db.session.get(Shift, shift_id) if shift_id else None
+                if (
+                    existing_shift is not None
+                    and existing_shift.schedule_week_id != schedule_week.id
+                ):
+                    abort(400)
+
+                position = db.session.get(ShiftPosition, shift_form.position_id.data)
+                if position is None or position.department_id != selected_department.id:
+                    shift_form.position_id.errors.append(
+                        "Selected position does not belong to this department."
+                    )
+                if shift_form.shift_date.data not in context["week_dates"]:
+                    shift_form.shift_date.errors.append(
+                        "Shift date must be within the selected week."
+                    )
+
+                assigned_user_id = (
+                    shift_form.assigned_user_id.data
+                    if shift_form.assigned_user_id.data not in (None, 0)
+                    else None
+                )
+                assignment_mode = shift_form.assignment_mode.data
+                if assignment_mode == Shift.ASSIGNMENT_ASSIGNED and not assigned_user_id:
+                    shift_form.assigned_user_id.errors.append(
+                        "Assigned shifts require a user."
+                    )
+
+                assigned_user = (
+                    db.session.get(User, assigned_user_id) if assigned_user_id else None
+                )
+                visible_user_ids = {user.id for user in context["visible_users"]}
+                if assigned_user is not None and assigned_user.id not in visible_user_ids:
+                    shift_form.assigned_user_id.errors.append(
+                        "Assigned user is outside your scheduling scope."
+                    )
+                if not can_team_access:
+                    if assignment_mode != Shift.ASSIGNMENT_ASSIGNED:
+                        shift_form.assignment_mode.errors.append(
+                            "Self scheduling only supports assigned shifts."
+                        )
+                    if assigned_user_id != current_user.id:
+                        shift_form.assigned_user_id.errors.append(
+                            "You can only schedule shifts for yourself."
+                        )
+                    if existing_shift and existing_shift.assigned_user_id not in (
+                        None,
+                        current_user.id,
+                    ):
+                        abort(403)
+
+                if not shift_form.errors:
+                    manual_errors = _validate_manual_assignment(
+                        assigned_user
+                        if assignment_mode == Shift.ASSIGNMENT_ASSIGNED
+                        else None,
+                        shift_form.shift_date.data,
+                        shift_form.start_time.data,
+                        shift_form.end_time.data,
+                        exclude_shift_id=existing_shift.id if existing_shift else None,
+                    )
+                    for error in manual_errors:
+                        shift_form.start_time.errors.append(error)
+
+                if not shift_form.errors:
+                    target_dates = [shift_form.shift_date.data]
+                    if existing_shift is None:
+                        repeated_dates = {
+                            schedule_week.week_start + timedelta(days=weekday)
+                            for weekday in (shift_form.repeat_days.data or [])
+                        }
+                        repeated_dates.add(shift_form.shift_date.data)
+                        target_dates = sorted(repeated_dates)
+
+                    change_records: list[tuple[dict | None, Shift]] = []
+                    touched_shifts: list[tuple[Shift, str, dict | None, dict | None]] = []
+                    if (
+                        shift_form.paid_hours_manual.data
+                        and shift_form.paid_hours.data is not None
+                    ):
+                        effective_paid_hours = float(shift_form.paid_hours.data or 0.0)
+                    else:
+                        effective_paid_hours = round(
+                            (
+                                datetime.combine(
+                                    datetime.utcnow().date(), shift_form.end_time.data
+                                )
+                                - datetime.combine(
+                                    datetime.utcnow().date(), shift_form.start_time.data
+                                )
+                            ).total_seconds()
+                            / 3600.0,
+                            2,
+                        )
+
+                    for target_date in target_dates:
+                        shift = existing_shift if existing_shift is not None else Shift(
+                            schedule_week=schedule_week,
+                            created_by=current_user,
+                        )
+                        before = capture_shift_snapshot(shift) if existing_shift else None
+                        if existing_shift is None:
+                            db.session.add(shift)
+                        shift.position = position
+                        shift.shift_date = target_date
+                        shift.start_time = shift_form.start_time.data
+                        shift.end_time = shift_form.end_time.data
+                        shift.notes = (shift_form.notes.data or "").strip() or None
+                        shift.color = (shift_form.color.data or "").strip() or None
+                        shift.location_id = _parse_int(shift_form.location_id.data)
+                        shift.event_id = _parse_int(shift_form.event_id.data)
+                        shift.assignment_mode = assignment_mode
+                        shift.is_locked = bool(shift_form.is_locked.data)
+                        shift.paid_hours_manual = bool(shift_form.paid_hours_manual.data)
+                        shift.paid_hours = round(float(effective_paid_hours or 0.0), 2)
+                        shift.updated_by = current_user
+                        if assignment_mode == Shift.ASSIGNMENT_ASSIGNED:
+                            shift.assigned_user = assigned_user
+                        else:
+                            shift.assigned_user = None
+                        apply_rate_snapshot(shift)
+                        after = capture_shift_snapshot(shift)
+                        change_records.append((before, shift))
+                        touched_shifts.append(
+                            (
+                                shift,
+                                "updated" if existing_shift else "created",
+                                before,
+                                after,
+                            )
+                        )
+                        existing_shift = None
+
+                    published_material_changes = [
+                        (before, shift)
+                        for before, shift in change_records
+                        if before is None
+                        or material_change_fields(before, capture_shift_snapshot(shift))
+                    ]
+                    if schedule_week.is_published and published_material_changes:
+                        schedule_week.current_version += 1
+                        for shift, _action, _before, _after in touched_shifts:
+                            shift.live_version = schedule_week.current_version
+
+                    for shift, action_name, before, after in touched_shifts:
+                        record_shift_audit(
+                            shift,
+                            actor=current_user,
+                            action=action_name,
+                            version=shift.live_version
+                            or schedule_week.current_version
+                            or 0,
+                            before=before,
+                            after=after,
+                            summary=(
+                                f"{'Updated' if action_name == 'updated' else 'Created'} "
+                                f"shift for {shift.shift_date}."
+                            ),
+                        )
+                    db.session.commit()
+                    if schedule_week.is_published and published_material_changes:
+                        notify_schedule_changes(
+                            schedule_week, published_material_changes
+                        )
+                    flash("Shift saved.", "success")
+                    log_schedule_action(
+                        f"Saved schedule shifts for department {selected_department.name}"
+                    )
+                    return redirect(
+                        _schedule_redirect(
+                            "schedule.team_schedule",
+                            selected_department.id,
+                            schedule_week.week_start,
+                        )
+                    )
+            flash("Unable to save shift. Please review the form.", "danger")
+        elif action == "delete_shift":
+            if not current_user.has_permission("schedules.delete"):
+                abort(403)
+            shift = db.session.get(Shift, _parse_int(request.form.get("shift_id")))
+            if shift is None or shift.schedule_week_id != schedule_week.id:
+                abort(404)
+            if schedule_week.is_published:
+                flash(
+                    "Published shifts cannot be deleted. Unpublish the week first.",
+                    "warning",
+                )
+            else:
+                if not can_team_access and shift.assigned_user_id != current_user.id:
+                    abort(403)
+                db.session.delete(shift)
+                db.session.commit()
+                flash("Shift deleted.", "success")
+                log_schedule_action(
+                    f"Deleted schedule shift {shift.id} in department {selected_department.name}"
+                )
+            return redirect(
+                _schedule_redirect(
+                    "schedule.team_schedule",
+                    selected_department.id,
+                    schedule_week.week_start,
+                )
+            )
+        elif action == "publish_week":
+            if not current_user.has_permission("schedules.publish"):
+                abort(403)
+            if not user_can_manage_department(current_user, selected_department.id):
+                abort(403)
+            if not schedule_week.is_published:
+                schedule_week.is_published = True
+                schedule_week.published_at = datetime.utcnow()
+                schedule_week.unpublished_at = None
+                schedule_week.published_by = current_user
+                schedule_week.current_version += 1
+                for shift in schedule_week.shifts:
+                    apply_rate_snapshot(shift)
+                    shift.live_version = schedule_week.current_version
+                db.session.commit()
+                notify_schedule_posted(schedule_week, schedule_week.shifts)
+                flash("Schedule week published.", "success")
+                log_schedule_action(
+                    f"Published schedule week {schedule_week.week_start} for department {selected_department.name}"
+                )
+            return redirect(
+                _schedule_redirect(
+                    "schedule.team_schedule",
+                    selected_department.id,
+                    schedule_week.week_start,
+                )
+            )
+        elif action == "unpublish_week":
+            if not current_user.has_permission("schedules.publish"):
+                abort(403)
+            if not user_can_manage_department(current_user, selected_department.id):
+                abort(403)
+            if schedule_week.is_published:
+                schedule_week.is_published = False
+                schedule_week.unpublished_at = datetime.utcnow()
+                db.session.commit()
+                flash("Schedule week unpublished.", "success")
+                log_schedule_action(
+                    f"Unpublished schedule week {schedule_week.week_start} for department {selected_department.name}"
+                )
+            return redirect(
+                _schedule_redirect(
+                    "schedule.team_schedule",
+                    selected_department.id,
+                    schedule_week.week_start,
+                )
+            )
+        elif action == "auto_assign":
+            if not current_user.has_permission("schedules.auto_assign"):
+                abort(403)
+            if not user_can_manage_department(current_user, selected_department.id):
+                abort(403)
+            results = auto_assign_shifts(schedule_week, actor=current_user)
+            db.session.commit()
+            assigned_count = sum(1 for result in results if result.assigned_user_id)
+            flash(
+                f"Auto-assign complete. {assigned_count} shifts assigned, "
+                f"{len(results) - assigned_count} left unassigned.",
+                "success" if assigned_count else "warning",
+            )
+            log_schedule_action(
+                f"Ran auto-assign for department {selected_department.name} week {schedule_week.week_start}"
+            )
+            return redirect(
+                _schedule_redirect(
+                    "schedule.team_schedule",
+                    selected_department.id,
+                    schedule_week.week_start,
+                )
+            )
+
+    if schedule_week.is_published and any(
+        membership.department_id == selected_department.id
+        for membership in current_user.department_memberships
+    ):
+        mark_schedule_week_seen(current_user, [schedule_week])
+        db.session.commit()
+
+    return render_template(
+        "schedules/team_schedule.html",
+        departments=visible_departments,
+        selected_department=selected_department,
+        schedule_week=schedule_week,
+        shift_form=shift_form,
+        action_form=action_form,
+        week_dates=context["week_dates"],
+        shifts_by_row=context["shifts_by_row"],
+        visible_users=context["visible_users"],
+        open_shifts=context["open_shifts"],
+        user_hours=context["user_hours"],
+        labor_by_day=context["labor_by_day"],
+        total_labor=context["total_labor"],
+        receipts_by_user_id=context["receipts_by_user_id"],
+        current_seen_count=context["current_seen_count"],
+        week_label=format_week_label(schedule_week.week_start),
+        previous_week=schedule_week.week_start - timedelta(days=7),
+        next_week=schedule_week.week_start + timedelta(days=7),
+        can_team_access=can_team_access,
+        can_self_schedule=can_self_schedule,
+    )
+
+
+@schedule.route("/schedules/mine", methods=["GET"])
+@login_required
+def my_schedule():
+    """Show the current user's published schedule."""
+    departments = [
+        department
+        for department in get_visible_departments(current_user)
+        if any(
+            membership.department_id == department.id
+            for membership in current_user.department_memberships
+        )
+    ]
+    selected_department = _select_department(
+        departments, _parse_int(request.args.get("department_id"))
+    )
+    week_start = normalize_week_start(request.args.get("week_start"))
+    schedule_week = None
+    shifts: list[Shift] = []
+    receipt = None
+    if selected_department is not None:
+        schedule_week = (
+            DepartmentScheduleWeek.query.options(
+                selectinload(DepartmentScheduleWeek.shifts).selectinload(Shift.position),
+                selectinload(DepartmentScheduleWeek.receipts),
+            )
+            .filter_by(
+                department_id=selected_department.id,
+                week_start=week_start,
+                is_published=True,
+            )
+            .first()
+        )
+        if schedule_week is not None:
+            mark_schedule_week_seen(current_user, [schedule_week])
+            db.session.commit()
+            receipt = next(
+                (
+                    item
+                    for item in schedule_week.receipts
+                    if item.user_id == current_user.id
+                ),
+                None,
+            )
+            shifts = [
+                shift
+                for shift in schedule_week.shifts
+                if shift.assigned_user_id == current_user.id
+            ]
+    return render_template(
+        "schedules/my_schedule.html",
+        departments=departments,
+        selected_department=selected_department,
+        schedule_week=schedule_week,
+        week_label=format_week_label(week_start),
+        previous_week=week_start - timedelta(days=7),
+        next_week=week_start + timedelta(days=7),
+        shifts=sorted(shifts, key=lambda shift: (shift.shift_date, shift.start_time)),
+        receipt=receipt,
+    )
+
+
+@schedule.route("/schedules/availability", methods=["GET", "POST"])
+@login_required
+def availability():
+    """Manage recurring availability and date-specific overrides."""
+    manageable_users = _manager_scope_users(current_user)
+    requested_user_id = _parse_int(
+        request.values.get("user_id")
+        or request.values.get("window-user_id")
+        or request.values.get("override-user_id")
+    )
+    target_user = current_user
+    if requested_user_id and requested_user_id != current_user.id:
+        requested_user = db.session.get(User, requested_user_id)
+        if requested_user is None:
+            abort(404)
+        if not current_user.has_permission("schedules.manage_team_availability"):
+            abort(403)
+        if not _can_manage_user_in_any_department(current_user, requested_user):
+            abort(403)
+        target_user = requested_user
+
+    window_form = AvailabilityWindowForm(prefix="window")
+    override_form = AvailabilityOverrideForm(prefix="override")
+    action_form = CSRFOnlyForm(prefix="availability")
+
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip()
+        if action == "add_window":
+            if target_user.id != current_user.id and not current_user.has_permission(
+                "schedules.manage_team_availability"
+            ):
+                abort(403)
+            if target_user.id == current_user.id and not current_user.has_any_permission(
+                "schedules.manage_self_availability",
+                "schedules.manage_team_availability",
+            ):
+                abort(403)
+            if window_form.validate_on_submit():
+                db.session.add(
+                    RecurringAvailabilityWindow(
+                        user=target_user,
+                        weekday=window_form.weekday.data,
+                        start_time=window_form.start_time.data,
+                        end_time=window_form.end_time.data,
+                        note=(window_form.note.data or "").strip() or None,
+                    )
+                )
+                db.session.commit()
+                flash("Availability window added.", "success")
+                return redirect(
+                    url_for("schedule.availability", user_id=target_user.id)
+                )
+        elif action == "delete_window":
+            window = db.session.get(
+                RecurringAvailabilityWindow,
+                _parse_int(request.form.get("window_id")),
+            )
+            if window is None or window.user_id != target_user.id:
+                abort(404)
+            db.session.delete(window)
+            db.session.commit()
+            flash("Availability window deleted.", "success")
+            return redirect(url_for("schedule.availability", user_id=target_user.id))
+        elif action == "add_override":
+            if override_form.validate_on_submit():
+                db.session.add(
+                    AvailabilityOverride(
+                        user=target_user,
+                        start_at=override_form.start_at.data,
+                        end_at=override_form.end_at.data,
+                        is_available=bool(override_form.is_available.data),
+                        note=(override_form.note.data or "").strip() or None,
+                    )
+                )
+                db.session.commit()
+                flash("Availability override added.", "success")
+                return redirect(url_for("schedule.availability", user_id=target_user.id))
+        elif action == "delete_override":
+            override_item = db.session.get(
+                AvailabilityOverride,
+                _parse_int(request.form.get("override_id")),
+            )
+            if override_item is None or override_item.user_id != target_user.id:
+                abort(404)
+            db.session.delete(override_item)
+            db.session.commit()
+            flash("Availability override deleted.", "success")
+            return redirect(url_for("schedule.availability", user_id=target_user.id))
+
+    windows = (
+        RecurringAvailabilityWindow.query.filter_by(user_id=target_user.id)
+        .order_by(
+            RecurringAvailabilityWindow.weekday.asc(),
+            RecurringAvailabilityWindow.start_time.asc(),
+        )
+        .all()
+    )
+    overrides = (
+        AvailabilityOverride.query.filter_by(user_id=target_user.id)
+        .order_by(AvailabilityOverride.start_at.asc())
+        .all()
+    )
+    weekday_labels = {
+        0: "Monday",
+        1: "Tuesday",
+        2: "Wednesday",
+        3: "Thursday",
+        4: "Friday",
+        5: "Saturday",
+        6: "Sunday",
+    }
+    return render_template(
+        "schedules/availability.html",
+        target_user=target_user,
+        manageable_users=manageable_users,
+        window_form=window_form,
+        override_form=override_form,
+        action_form=action_form,
+        windows=windows,
+        overrides=overrides,
+        weekday_labels=weekday_labels,
+    )
+
+
+@schedule.route("/schedules/time-off", methods=["GET", "POST"])
+@login_required
+def time_off():
+    """Submit and review time-off requests."""
+    request_form = TimeOffRequestForm(prefix="request")
+    review_form = TimeOffReviewForm(prefix="review")
+    action_form = CSRFOnlyForm(prefix="timeoff")
+    manageable_users = _manager_scope_users(current_user)
+
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip()
+        if action == "submit_request":
+            if not current_user.has_permission("schedules.request_time_off"):
+                abort(403)
+            if request_form.validate_on_submit():
+                time_off_request = TimeOffRequest(
+                    user=current_user,
+                    start_date=request_form.start_date.data,
+                    end_date=request_form.end_date.data,
+                    start_time=request_form.start_time.data,
+                    end_time=request_form.end_time.data,
+                    reason=(request_form.reason.data or "").strip(),
+                )
+                db.session.add(time_off_request)
+                db.session.commit()
+                notify_time_off_submitted(time_off_request)
+                flash("Time-off request submitted.", "success")
+                return redirect(url_for("schedule.time_off"))
+        elif action == "cancel_request":
+            request_obj = db.session.get(
+                TimeOffRequest, _parse_int(request.form.get("request_id"))
+            )
+            if request_obj is None or request_obj.user_id != current_user.id:
+                abort(404)
+            if request_obj.status != TimeOffRequest.STATUS_PENDING:
+                flash("Only pending requests can be cancelled.", "warning")
+            else:
+                request_obj.status = TimeOffRequest.STATUS_CANCELLED
+                db.session.commit()
+                flash("Time-off request cancelled.", "success")
+            return redirect(url_for("schedule.time_off"))
+        elif action == "review_request":
+            if not current_user.has_permission("schedules.approve_time_off"):
+                abort(403)
+            request_obj = db.session.get(
+                TimeOffRequest, _parse_int(request.form.get("request_id"))
+            )
+            if request_obj is None:
+                abort(404)
+            if not _can_manage_user_in_any_department(current_user, request_obj.user):
+                abort(403)
+            if review_form.validate_on_submit():
+                request_obj.status = review_form.status.data
+                request_obj.manager_note = (
+                    review_form.manager_note.data or ""
+                ).strip() or None
+                request_obj.reviewed_by = current_user
+                request_obj.reviewed_at = datetime.utcnow()
+                db.session.commit()
+                notify_time_off_reviewed(request_obj)
+                flash("Time-off request updated.", "success")
+                return redirect(url_for("schedule.time_off"))
+
+    own_requests = (
+        TimeOffRequest.query.filter_by(user_id=current_user.id)
+        .order_by(TimeOffRequest.created_at.desc())
+        .all()
+    )
+    team_requests = (
+        TimeOffRequest.query.options(selectinload(TimeOffRequest.user))
+        .order_by(
+            TimeOffRequest.status.asc(),
+            TimeOffRequest.start_date.asc(),
+            TimeOffRequest.created_at.desc(),
+        )
+        .all()
+    )
+    if not (
+        getattr(current_user, "is_super_admin", False)
+        or user_is_schedule_gm(current_user)
+    ):
+        managed_user_ids = {user.id for user in manageable_users}
+        team_requests = [
+            request_obj
+            for request_obj in team_requests
+            if request_obj.user_id in managed_user_ids
+        ]
+
+    selected_review_request = None
+    review_request_id = _parse_int(request.args.get("review_id"))
+    if review_request_id:
+        selected_review_request = next(
+            (
+                request_obj
+                for request_obj in team_requests
+                if request_obj.id == review_request_id
+            ),
+            None,
+        )
+
+    return render_template(
+        "schedules/time_off.html",
+        request_form=request_form,
+        review_form=review_form,
+        action_form=action_form,
+        own_requests=own_requests,
+        team_requests=team_requests,
+        selected_review_request=selected_review_request,
+    )
+
+
+@schedule.route("/schedules/tradeboard", methods=["GET", "POST"])
+@login_required
+def tradeboard():
+    """View and claim tradeboard/open shifts."""
+    manageable_departments = get_visible_departments(current_user)
+    selected_department = _select_department(
+        manageable_departments,
+        _parse_int(request.values.get("department_id")),
+    )
+    week_start = normalize_week_start(request.values.get("week_start"))
+    review_form = TradeboardClaimReviewForm(prefix="claimreview")
+    action_form = CSRFOnlyForm(prefix="tradeboard")
+
+    schedule_week = None
+    shifts: list[Shift] = []
+    pending_claims: list[TradeboardClaim] = []
+    if selected_department is not None:
+        schedule_week = (
+            DepartmentScheduleWeek.query.options(
+                selectinload(DepartmentScheduleWeek.shifts).selectinload(Shift.position),
+                selectinload(DepartmentScheduleWeek.shifts)
+                .selectinload(Shift.tradeboard_claims)
+                .selectinload(TradeboardClaim.user),
+            )
+            .filter_by(
+                department_id=selected_department.id,
+                week_start=week_start,
+                is_published=True,
+            )
+            .first()
+        )
+        if schedule_week is not None:
+            eligible_position_ids = {
+                eligibility.position_id
+                for eligibility in current_user.position_eligibilities
+                if eligibility.active
+                and eligibility.position.department_id == selected_department.id
+            }
+            can_manage_claims = current_user.has_permission(
+                "schedules.approve_tradeboard"
+            )
+            for shift in schedule_week.shifts:
+                if shift.assignment_mode not in (
+                    Shift.ASSIGNMENT_OPEN,
+                    Shift.ASSIGNMENT_TRADEBOARD,
+                ):
+                    continue
+                if can_manage_claims or shift.position_id in eligible_position_ids:
+                    shifts.append(shift)
+                for claim in shift.tradeboard_claims:
+                    if claim.status == TradeboardClaim.STATUS_PENDING and (
+                        can_manage_claims
+                        and _can_manage_user_in_any_department(current_user, claim.user)
+                    ):
+                        pending_claims.append(claim)
+
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip()
+        if action == "claim_shift":
+            if not current_user.has_permission("schedules.claim_tradeboard"):
+                abort(403)
+            shift = db.session.get(Shift, _parse_int(request.form.get("shift_id")))
+            if shift is None or shift.schedule_week is None or not shift.schedule_week.is_published:
+                abort(404)
+            if shift.assignment_mode not in (
+                Shift.ASSIGNMENT_OPEN,
+                Shift.ASSIGNMENT_TRADEBOARD,
+            ):
+                abort(400)
+            existing_claim = TradeboardClaim.query.filter_by(
+                shift_id=shift.id,
+                user_id=current_user.id,
+            ).first()
+            if existing_claim is None:
+                db.session.add(
+                    TradeboardClaim(
+                        shift=shift,
+                        user=current_user,
+                        status=TradeboardClaim.STATUS_PENDING,
+                    )
+                )
+            elif existing_claim.status == TradeboardClaim.STATUS_CANCELLED:
+                existing_claim.status = TradeboardClaim.STATUS_PENDING
+                existing_claim.reviewed_by = None
+                existing_claim.reviewed_at = None
+                existing_claim.manager_note = None
+            else:
+                flash("You already have a claim for that shift.", "warning")
+                return redirect(
+                    _schedule_redirect(
+                        "schedule.tradeboard",
+                        shift.schedule_week.department_id,
+                        shift.schedule_week.week_start,
+                    )
+                )
+            db.session.commit()
+            flash("Shift claim submitted.", "success")
+            return redirect(
+                _schedule_redirect(
+                    "schedule.tradeboard",
+                    shift.schedule_week.department_id,
+                    shift.schedule_week.week_start,
+                )
+            )
+        elif action == "cancel_claim":
+            claim = db.session.get(
+                TradeboardClaim, _parse_int(request.form.get("claim_id"))
+            )
+            if claim is None or claim.user_id != current_user.id:
+                abort(404)
+            if claim.status == TradeboardClaim.STATUS_PENDING:
+                claim.status = TradeboardClaim.STATUS_CANCELLED
+                db.session.commit()
+                flash("Shift claim cancelled.", "success")
+            return redirect(url_for("schedule.tradeboard"))
+        elif action == "review_claim":
+            if not current_user.has_permission("schedules.approve_tradeboard"):
+                abort(403)
+            claim = db.session.get(
+                TradeboardClaim, _parse_int(request.form.get("claim_id"))
+            )
+            if claim is None:
+                abort(404)
+            if not _can_manage_user_in_any_department(current_user, claim.user):
+                abort(403)
+            if review_form.validate_on_submit():
+                shift = claim.shift
+                claim.status = review_form.status.data
+                claim.manager_note = (
+                    review_form.manager_note.data or ""
+                ).strip() or None
+                claim.reviewed_by = current_user
+                claim.reviewed_at = datetime.utcnow()
+                change_records: list[tuple[dict | None, Shift]] = []
+                if claim.status == TradeboardClaim.STATUS_APPROVED:
+                    before = capture_shift_snapshot(shift)
+                    shift.assigned_user = claim.user
+                    shift.assignment_mode = Shift.ASSIGNMENT_ASSIGNED
+                    apply_rate_snapshot(shift)
+                    shift.updated_by = current_user
+                    shift.schedule_week.current_version += 1
+                    shift.live_version = shift.schedule_week.current_version
+                    change_records.append((before, shift))
+                    for sibling in shift.tradeboard_claims:
+                        if sibling.id != claim.id and sibling.status == TradeboardClaim.STATUS_PENDING:
+                            sibling.status = TradeboardClaim.STATUS_REJECTED
+                            sibling.reviewed_by = current_user
+                            sibling.reviewed_at = datetime.utcnow()
+                            sibling.manager_note = "Another claim was approved."
+                    record_shift_audit(
+                        shift,
+                        actor=current_user,
+                        action="tradeboard_claim_approved",
+                        version=shift.live_version,
+                        before=before,
+                        after=capture_shift_snapshot(shift),
+                        summary=f"Approved tradeboard claim for {claim.user.email}.",
+                    )
+                db.session.commit()
+                if change_records:
+                    notify_schedule_changes(shift.schedule_week, change_records)
+                flash("Tradeboard claim updated.", "success")
+                return redirect(
+                    _schedule_redirect(
+                        "schedule.tradeboard",
+                        shift.schedule_week.department_id,
+                        shift.schedule_week.week_start,
+                    )
+                )
+
+    return render_template(
+        "schedules/tradeboard.html",
+        departments=manageable_departments,
+        selected_department=selected_department,
+        schedule_week=schedule_week,
+        week_label=format_week_label(week_start),
+        previous_week=week_start - timedelta(days=7),
+        next_week=week_start + timedelta(days=7),
+        shifts=sorted(shifts, key=lambda shift: (shift.shift_date, shift.start_time)),
+        pending_claims=pending_claims,
+        review_form=review_form,
+        action_form=action_form,
+    )
+
+
+@schedule.route("/schedules/setup", methods=["GET", "POST"])
+@login_required
+def setup():
+    """Manage scheduling departments and positions."""
+    department_form = DepartmentForm(prefix="department")
+    position_form = ShiftPositionForm(prefix="position")
+    action_form = CSRFOnlyForm(prefix="setup")
+    departments = Department.query.order_by(Department.name.asc()).all()
+    positions = (
+        ShiftPosition.query.options(selectinload(ShiftPosition.department))
+        .order_by(
+            ShiftPosition.department_id.asc(),
+            ShiftPosition.sort_order.asc(),
+            ShiftPosition.name.asc(),
+        )
+        .all()
+    )
+    users = (
+        User.query.filter(User.active.is_(True)).order_by(User.email.asc()).all()
+    )
+
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip()
+        if action == "add_department":
+            if not current_user.has_permission("schedules.manage_setup"):
+                abort(403)
+            if department_form.validate_on_submit():
+                db.session.add(
+                    Department(
+                        name=(department_form.name.data or "").strip(),
+                        description=(department_form.description.data or "").strip()
+                        or None,
+                        active=bool(department_form.active.data),
+                    )
+                )
+                db.session.commit()
+                flash("Department added.", "success")
+                return redirect(url_for("schedule.setup"))
+        elif action == "add_position":
+            if not current_user.has_permission("schedules.manage_setup"):
+                abort(403)
+            if position_form.validate_on_submit():
+                db.session.add(
+                    ShiftPosition(
+                        department_id=position_form.department_id.data,
+                        name=(position_form.name.data or "").strip(),
+                        description=(position_form.description.data or "").strip()
+                        or None,
+                        default_color=(position_form.default_color.data or "").strip()
+                        or None,
+                        sort_order=position_form.sort_order.data or 0,
+                        active=bool(position_form.active.data),
+                    )
+                )
+                db.session.commit()
+                flash("Position added.", "success")
+                return redirect(url_for("schedule.setup"))
+        elif action == "toggle_department":
+            if not current_user.has_permission("schedules.manage_setup"):
+                abort(403)
+            department = db.session.get(
+                Department, _parse_int(request.form.get("department_id"))
+            )
+            if department is None:
+                abort(404)
+            department.active = not department.active
+            db.session.commit()
+            flash("Department updated.", "success")
+            return redirect(url_for("schedule.setup"))
+        elif action == "toggle_position":
+            if not current_user.has_permission("schedules.manage_setup"):
+                abort(403)
+            position = db.session.get(
+                ShiftPosition, _parse_int(request.form.get("position_id"))
+            )
+            if position is None:
+                abort(404)
+            position.active = not position.active
+            db.session.commit()
+            flash("Position updated.", "success")
+            return redirect(url_for("schedule.setup"))
+
+    return render_template(
+        "schedules/setup.html",
+        department_form=department_form,
+        position_form=position_form,
+        action_form=action_form,
+        departments=departments,
+        positions=positions,
+        users=users,
+        can_manage_setup=current_user.has_permission("schedules.manage_setup"),
+        can_manage_pay_rates=current_user.has_permission(
+            "schedules.manage_pay_rates"
+        ),
+    )
+
+
+@schedule.route("/schedules/users/<int:user_id>", methods=["GET", "POST"])
+@login_required
+def user_settings(user_id: int):
+    """Manage per-user scheduling settings, department memberships, and positions."""
+    target_user = (
+        User.query.options(
+            selectinload(User.department_memberships).selectinload(
+                UserDepartmentMembership.department
+            ),
+            selectinload(User.position_eligibilities)
+            .selectinload(UserPositionEligibility.position)
+            .selectinload(ShiftPosition.department),
+        )
+        .filter_by(id=user_id)
+        .first()
+    )
+    if target_user is None:
+        abort(404)
+    if not _can_manage_user_in_any_department(current_user, target_user) and not getattr(
+        current_user, "is_super_admin", False
+    ):
+        abort(403)
+
+    profile_form = UserScheduleProfileForm(prefix="profile")
+    membership_form = UserDepartmentMembershipForm(prefix="membership")
+    eligibility_form = UserPositionEligibilityForm(prefix="eligibility")
+    action_form = CSRFOnlyForm(prefix="usersettings")
+
+    if request.method == "GET":
+        profile_form.hourly_rate.data = target_user.hourly_rate
+        profile_form.desired_weekly_hours.data = target_user.desired_weekly_hours
+        profile_form.max_weekly_hours.data = target_user.max_weekly_hours
+        profile_form.schedule_enabled.data = target_user.schedule_enabled
+        profile_form.schedule_notes.data = target_user.schedule_notes or ""
+
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip()
+        if action == "save_profile":
+            if not current_user.has_any_permission(
+                "schedules.manage_pay_rates", "schedules.manage_setup"
+            ):
+                abort(403)
+            if profile_form.validate_on_submit():
+                target_user.hourly_rate = float(profile_form.hourly_rate.data or 0.0)
+                target_user.desired_weekly_hours = float(
+                    profile_form.desired_weekly_hours.data or 0.0
+                )
+                target_user.max_weekly_hours = float(
+                    profile_form.max_weekly_hours.data or 0.0
+                )
+                if current_user.has_permission("schedules.manage_setup"):
+                    target_user.schedule_enabled = bool(
+                        profile_form.schedule_enabled.data
+                    )
+                    target_user.schedule_notes = (
+                        profile_form.schedule_notes.data or ""
+                    ).strip() or None
+                db.session.commit()
+                flash("Scheduling settings saved.", "success")
+                return redirect(url_for("schedule.user_settings", user_id=user_id))
+        elif action == "add_membership":
+            if not current_user.has_permission("schedules.manage_setup"):
+                abort(403)
+            if membership_form.validate_on_submit():
+                existing = UserDepartmentMembership.query.filter_by(
+                    user_id=target_user.id,
+                    department_id=membership_form.department_id.data,
+                ).first()
+                if existing:
+                    membership_form.department_id.errors.append(
+                        "User is already in that department."
+                    )
+                else:
+                    if membership_form.is_primary.data:
+                        for membership in target_user.department_memberships:
+                            membership.is_primary = False
+                    db.session.add(
+                        UserDepartmentMembership(
+                            user=target_user,
+                            department_id=membership_form.department_id.data,
+                            role=membership_form.role.data,
+                            reports_to_user_id=_parse_int(
+                                membership_form.reports_to_user_id.data
+                            ),
+                            is_primary=bool(membership_form.is_primary.data),
+                        )
+                    )
+                    db.session.commit()
+                    flash("Department membership added.", "success")
+                    return redirect(url_for("schedule.user_settings", user_id=user_id))
+        elif action == "remove_membership":
+            if not current_user.has_permission("schedules.manage_setup"):
+                abort(403)
+            membership = db.session.get(
+                UserDepartmentMembership,
+                _parse_int(request.form.get("membership_id")),
+            )
+            if membership is None or membership.user_id != target_user.id:
+                abort(404)
+            db.session.delete(membership)
+            db.session.commit()
+            flash("Department membership removed.", "success")
+            return redirect(url_for("schedule.user_settings", user_id=user_id))
+        elif action == "add_eligibility":
+            if not current_user.has_permission("schedules.manage_setup"):
+                abort(403)
+            if eligibility_form.validate_on_submit():
+                position = db.session.get(ShiftPosition, eligibility_form.position_id.data)
+                if position is None:
+                    eligibility_form.position_id.errors.append("Position not found.")
+                elif not any(
+                    membership.department_id == position.department_id
+                    for membership in target_user.department_memberships
+                ):
+                    eligibility_form.position_id.errors.append(
+                        "Add the user to that position's department first."
+                    )
+                else:
+                    existing = UserPositionEligibility.query.filter_by(
+                        user_id=target_user.id,
+                        position_id=position.id,
+                    ).first()
+                    if existing:
+                        eligibility_form.position_id.errors.append(
+                            "User already has that position."
+                        )
+                    else:
+                        db.session.add(
+                            UserPositionEligibility(
+                                user=target_user,
+                                position=position,
+                                priority=eligibility_form.priority.data or 0,
+                                active=bool(eligibility_form.active.data),
+                            )
+                        )
+                        db.session.commit()
+                        flash("Position eligibility added.", "success")
+                        return redirect(url_for("schedule.user_settings", user_id=user_id))
+        elif action == "remove_eligibility":
+            if not current_user.has_permission("schedules.manage_setup"):
+                abort(403)
+            eligibility = db.session.get(
+                UserPositionEligibility,
+                _parse_int(request.form.get("eligibility_id")),
+            )
+            if eligibility is None or eligibility.user_id != target_user.id:
+                abort(404)
+            db.session.delete(eligibility)
+            db.session.commit()
+            flash("Position eligibility removed.", "success")
+            return redirect(url_for("schedule.user_settings", user_id=user_id))
+
+    return render_template(
+        "schedules/user_settings.html",
+        target_user=target_user,
+        profile_form=profile_form,
+        membership_form=membership_form,
+        eligibility_form=eligibility_form,
+        action_form=action_form,
+        can_manage_setup=current_user.has_permission("schedules.manage_setup"),
+        can_manage_pay_rates=current_user.has_permission(
+            "schedules.manage_pay_rates"
+        ),
+    )

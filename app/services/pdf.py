@@ -9,10 +9,11 @@ from flask import current_app, render_template, request
 from pydyf import Stream as PDFStream
 from pydyf import _to_bytes as _pdf_to_bytes
 from pypdf import PdfReader, PdfWriter
-from weasyprint import CSS, HTML
-from weasyprint.formatting_structure.boxes import TableCellBox
 
 PDFPage = Tuple[str, Mapping[str, object]]
+_WEASYPRINT_HTML = None
+_WEASYPRINT_CSS = None
+_WEASYPRINT_IMPORT_ERROR = None
 
 
 # WeasyPrint 62 expects ``pydyf.Stream`` to provide a ``transform`` helper, but
@@ -60,23 +61,49 @@ if not hasattr(PDFStream, "text_matrix"):
 
     PDFStream.text_matrix = _stream_text_matrix
 
-# Some WeasyPrint builds omit border radius attributes on ``TableCellBox`` and
-# emit ``AttributeError`` during stand sheet rendering. Align the class with
-# other box types by providing zero-radius defaults when they are missing.
-if not hasattr(TableCellBox, "border_top_left_radius"):
-    TableCellBox.border_top_left_radius = (0, 0)
-    TableCellBox.border_top_right_radius = (0, 0)
-    TableCellBox.border_bottom_left_radius = (0, 0)
-    TableCellBox.border_bottom_right_radius = (0, 0)
+
+def _load_weasyprint():
+    """Import WeasyPrint on demand so app startup doesn't require native libs."""
+
+    global _WEASYPRINT_HTML, _WEASYPRINT_CSS, _WEASYPRINT_IMPORT_ERROR
+
+    if _WEASYPRINT_HTML is not None and _WEASYPRINT_CSS is not None:
+        return _WEASYPRINT_HTML, _WEASYPRINT_CSS
+    if _WEASYPRINT_IMPORT_ERROR is not None:
+        raise RuntimeError("WeasyPrint is unavailable in this environment.") from (
+            _WEASYPRINT_IMPORT_ERROR
+        )
+
+    try:
+        from weasyprint import CSS, HTML
+        from weasyprint.formatting_structure.boxes import TableCellBox
+    except Exception as exc:  # pragma: no cover - depends on local native libs
+        _WEASYPRINT_IMPORT_ERROR = exc
+        raise RuntimeError("WeasyPrint is unavailable in this environment.") from exc
+
+    # Some WeasyPrint builds omit border radius attributes on ``TableCellBox``
+    # and emit ``AttributeError`` during stand sheet rendering. Align the class
+    # with other box types by providing zero-radius defaults when they are
+    # missing.
+    if not hasattr(TableCellBox, "border_top_left_radius"):
+        TableCellBox.border_top_left_radius = (0, 0)
+        TableCellBox.border_top_right_radius = (0, 0)
+        TableCellBox.border_bottom_left_radius = (0, 0)
+        TableCellBox.border_bottom_right_radius = (0, 0)
+
+    _WEASYPRINT_HTML = HTML
+    _WEASYPRINT_CSS = CSS
+    return _WEASYPRINT_HTML, _WEASYPRINT_CSS
 
 
 def _render_html_to_pdf(
     html: str,
     *,
     base_url: str | None = None,
-    stylesheets: Sequence[CSS] | None = None,
+    stylesheets: Sequence[object] | None = None,
 ) -> bytes:
     """Render an HTML string to a PDF byte string."""
+    HTML, _CSS = _load_weasyprint()
     resolved_base_url = base_url
     if resolved_base_url is None:
         try:
@@ -156,6 +183,7 @@ def render_stand_sheet_pdf(
         raise ValueError("At least one template must be provided")
 
     pdf_pages = []
+    _HTML, CSS = _load_weasyprint()
     landscape_stylesheet = CSS(string="@page { size: letter landscape; }")
     for template_name, context in pages:
         html = render_template(template_name, **context)

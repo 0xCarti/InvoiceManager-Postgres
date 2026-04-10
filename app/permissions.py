@@ -51,6 +51,7 @@ PERMISSION_CATEGORY_LABELS: dict[str, str] = {
     "invoices": "Sales Invoices",
     "events": "Events",
     "reports": "Reports",
+    "schedules": "Schedules",
     "users": "Users",
     "permission_groups": "Permission Groups",
     "permissions": "Permissions",
@@ -148,6 +149,26 @@ PERMISSION_DEFINITIONS: tuple[PermissionDefinition, ...] = (
     _perm("reports.event_terminal_sales", "reports", "Event Terminal Sales Report", "Run the event terminal sales report."),
     _perm("reports.purchase_cost_forecast", "reports", "Forecasted Stock Item Sales", "Run the purchase cost forecast report."),
     _perm("reports.department_sales_forecast", "reports", "Department Sales Forecast", "Run the department sales forecast workflow."),
+    _perm("schedules.view_team", "schedules", "View Team Schedule", "View team schedule boards for managed departments."),
+    _perm("schedules.view_self", "schedules", "View My Schedule", "View your own published schedule."),
+    _perm("schedules.edit_team", "schedules", "Edit Team Schedule", "Create and edit team schedule shifts."),
+    _perm("schedules.self_schedule", "schedules", "Schedule Self", "Create and edit your own shifts on the schedule board."),
+    _perm("schedules.delete", "schedules", "Delete Schedule Shifts", "Delete shifts from draft schedules."),
+    _perm("schedules.publish", "schedules", "Publish Schedule", "Publish and unpublish department schedule weeks."),
+    _perm("schedules.view_labor", "schedules", "View Labor Forecast", "View scheduled labor totals and labor forecast summaries."),
+    _perm("schedules.manage_pay_rates", "schedules", "Manage Pay Rates", "Manage scheduling pay-rate and hours targets."),
+    _perm("schedules.manage_setup", "schedules", "Manage Scheduling Setup", "Manage departments, positions, memberships, and scheduling structure."),
+    _perm("schedules.manage_self_availability", "schedules", "Manage My Availability", "Manage your recurring availability and overrides."),
+    _perm("schedules.manage_team_availability", "schedules", "Manage Team Availability", "Manage availability settings for scoped users."),
+    _perm("schedules.request_time_off", "schedules", "Request Time Off", "Submit and cancel your own time-off requests."),
+    _perm("schedules.view_self_time_off", "schedules", "View My Time Off", "View your own time-off requests."),
+    _perm("schedules.view_team_time_off", "schedules", "View Team Time Off", "View time-off requests for scoped users."),
+    _perm("schedules.approve_time_off", "schedules", "Approve Time Off", "Approve or deny time-off requests for scoped users."),
+    _perm("schedules.auto_assign", "schedules", "Auto Assign Shifts", "Run the schedule auto-assignment workflow."),
+    _perm("schedules.view_seen_status", "schedules", "View Seen Status", "View who has seen published schedule versions."),
+    _perm("schedules.view_tradeboard", "schedules", "View Tradeboard", "View open and tradeboard shifts."),
+    _perm("schedules.claim_tradeboard", "schedules", "Claim Tradeboard Shifts", "Request tradeboard and open shifts."),
+    _perm("schedules.approve_tradeboard", "schedules", "Approve Tradeboard Claims", "Approve or reject tradeboard claim requests."),
     _perm("users.view", "users", "View Users", "View the user list and user access pages."),
     _perm("users.manage", "users", "Manage Users", "Invite users, activate users, archive users, and assign groups."),
     _perm("permission_groups.view", "permission_groups", "View Permission Groups", "View permission groups."),
@@ -302,6 +323,46 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "event.bulk_count_sheets": requirement(any_of=("events.reports",)),
     "event.close_event": requirement(any_of=("events.close",)),
     "event.inventory_report": requirement(any_of=("events.reports",)),
+    "schedule.team_schedule": requirement(
+        any_of=(
+            "schedules.view_team",
+            "schedules.edit_team",
+            "schedules.publish",
+            "schedules.view_labor",
+            "schedules.view_seen_status",
+            "schedules.self_schedule",
+        )
+    ),
+    "schedule.my_schedule": requirement(
+        any_of=("schedules.view_self", "schedules.self_schedule")
+    ),
+    "schedule.availability": requirement(
+        any_of=(
+            "schedules.manage_self_availability",
+            "schedules.manage_team_availability",
+        )
+    ),
+    "schedule.time_off": requirement(
+        any_of=(
+            "schedules.request_time_off",
+            "schedules.view_self_time_off",
+            "schedules.view_team_time_off",
+            "schedules.approve_time_off",
+        )
+    ),
+    "schedule.tradeboard": requirement(
+        any_of=(
+            "schedules.view_tradeboard",
+            "schedules.claim_tradeboard",
+            "schedules.approve_tradeboard",
+        )
+    ),
+    "schedule.setup": requirement(
+        any_of=("schedules.manage_setup", "schedules.manage_pay_rates")
+    ),
+    "schedule.user_settings": requirement(
+        any_of=("schedules.manage_setup", "schedules.manage_pay_rates")
+    ),
     "glcode.view_gl_codes": requirement(any_of=("gl_codes.view",)),
     "glcode.create_gl_code": requirement(any_of=("gl_codes.create",)),
     "glcode.edit_gl_code": requirement(any_of=("gl_codes.edit",)),
@@ -463,6 +524,75 @@ ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] =
             "reports.department_sales_forecast",
         )
     ),
+    ("schedule.team_schedule", "GET"): requirement(
+        any_of=(
+            "schedules.view_team",
+            "schedules.edit_team",
+            "schedules.publish",
+            "schedules.view_labor",
+            "schedules.view_seen_status",
+            "schedules.self_schedule",
+        )
+    ),
+    ("schedule.team_schedule", "POST"): requirement(
+        any_of=(
+            "schedules.edit_team",
+            "schedules.self_schedule",
+            "schedules.delete",
+            "schedules.publish",
+            "schedules.auto_assign",
+        )
+    ),
+    ("schedule.my_schedule", "GET"): requirement(
+        any_of=("schedules.view_self", "schedules.self_schedule")
+    ),
+    ("schedule.availability", "GET"): requirement(
+        any_of=(
+            "schedules.manage_self_availability",
+            "schedules.manage_team_availability",
+        )
+    ),
+    ("schedule.availability", "POST"): requirement(
+        any_of=(
+            "schedules.manage_self_availability",
+            "schedules.manage_team_availability",
+        )
+    ),
+    ("schedule.time_off", "GET"): requirement(
+        any_of=(
+            "schedules.request_time_off",
+            "schedules.view_self_time_off",
+            "schedules.view_team_time_off",
+            "schedules.approve_time_off",
+        )
+    ),
+    ("schedule.time_off", "POST"): requirement(
+        any_of=(
+            "schedules.request_time_off",
+            "schedules.approve_time_off",
+            "schedules.view_self_time_off",
+        )
+    ),
+    ("schedule.tradeboard", "GET"): requirement(
+        any_of=(
+            "schedules.view_tradeboard",
+            "schedules.claim_tradeboard",
+            "schedules.approve_tradeboard",
+        )
+    ),
+    ("schedule.tradeboard", "POST"): requirement(
+        any_of=("schedules.claim_tradeboard", "schedules.approve_tradeboard")
+    ),
+    ("schedule.setup", "GET"): requirement(
+        any_of=("schedules.manage_setup", "schedules.manage_pay_rates")
+    ),
+    ("schedule.setup", "POST"): requirement(any_of=("schedules.manage_setup",)),
+    ("schedule.user_settings", "GET"): requirement(
+        any_of=("schedules.manage_setup", "schedules.manage_pay_rates")
+    ),
+    ("schedule.user_settings", "POST"): requirement(
+        any_of=("schedules.manage_setup", "schedules.manage_pay_rates")
+    ),
     ("admin.user_profile", "GET"): requirement(any_of=("users.manage",)),
     ("admin.user_profile", "POST"): requirement(any_of=("users.manage",)),
     ("admin.users", "GET"): requirement(any_of=("users.view", "users.manage")),
@@ -503,6 +633,8 @@ DEFAULT_LANDING_ENDPOINTS: tuple[str, ...] = (
     "admin.backups",
     "admin.system_info",
     "admin.activity_logs",
+    "schedule.team_schedule",
+    "schedule.my_schedule",
     "invoice.view_invoices",
     "purchase.view_purchase_orders",
     "item.view_items",

@@ -49,6 +49,85 @@ def _with_search_path(database_uri: str, schema_name: str) -> str:
     )
 
 
+def _host_accessible_database_uri(database_uri: str) -> str:
+    """Return a URI rewritten for host-side access when Compose uses service DNS."""
+
+    parts = urlsplit(database_uri)
+    host = parts.hostname or "localhost"
+    port = parts.port
+
+    if host in {"postgres", "localhost"}:
+        host = os.getenv("TEST_DATABASE_HOST", "127.0.0.1")
+        host_port = os.getenv("TEST_DATABASE_PORT") or os.getenv("HOST_DATABASE_PORT")
+        if host_port:
+            port = int(host_port)
+
+    netloc = ""
+    if parts.username:
+        netloc += parts.username
+        if parts.password:
+            netloc += f":{parts.password}"
+        netloc += "@"
+    netloc += host
+    if port:
+        netloc += f":{port}"
+
+    return urlunsplit(
+        (
+            parts.scheme,
+            netloc,
+            parts.path,
+            parts.query,
+            parts.fragment,
+        )
+    )
+
+
+def _default_test_database_uri() -> str:
+    """Resolve the Postgres URI pytest should use for schema-isolated tests."""
+
+    explicit_test_uri = os.getenv("TEST_DATABASE_URL")
+    if explicit_test_uri:
+        return explicit_test_uri
+
+    driver = os.getenv("TEST_DATABASE_DRIVER") or os.getenv(
+        "DATABASE_DRIVER", "postgresql+psycopg"
+    )
+    user = os.getenv("TEST_DATABASE_USER") or os.getenv("DATABASE_USER")
+    password = os.getenv("TEST_DATABASE_PASSWORD") or os.getenv("DATABASE_PASSWORD")
+    database_name = os.getenv("TEST_DATABASE_NAME") or os.getenv("DATABASE_NAME")
+    database_host = os.getenv("TEST_DATABASE_HOST")
+    database_port = os.getenv("TEST_DATABASE_PORT")
+
+    if not database_host:
+        configured_host = os.getenv("DATABASE_HOST")
+        if configured_host and configured_host != "postgres":
+            database_host = configured_host
+            database_port = database_port or os.getenv("DATABASE_PORT")
+        else:
+            database_host = "127.0.0.1"
+            database_port = (
+                database_port
+                or os.getenv("HOST_DATABASE_PORT")
+                or os.getenv("DATABASE_PORT")
+            )
+
+    if database_host == "localhost":
+        database_host = "127.0.0.1"
+
+    if user and password and database_name:
+        return (
+            f"{driver}://{user}:{password}"
+            f"@{database_host}:{database_port or '5432'}/{database_name}"
+        )
+
+    fallback_uri = os.getenv("SQLALCHEMY_DATABASE_URI") or os.getenv("DATABASE_URL")
+    if fallback_uri:
+        return _host_accessible_database_uri(fallback_uri)
+
+    return "postgresql+psycopg://invoicemanager:invoicemanager@localhost:5432/invoicemanager_test"
+
+
 @pytest.fixture
 def app(tmp_path):
     os.environ.setdefault("SECRET_KEY", "testsecret")
@@ -60,10 +139,7 @@ def app(tmp_path):
     os.environ.setdefault("SMTP_PASSWORD", "pass")
     os.environ.setdefault("SMTP_SENDER", "test@example.com")
 
-    test_database_uri = os.getenv(
-        "TEST_DATABASE_URL",
-        "postgresql+psycopg://invoicemanager:invoicemanager@localhost:5432/invoicemanager_test",
-    )
+    test_database_uri = _default_test_database_uri()
     admin_database_uri = test_database_uri
     test_schema = f"pytest_{uuid.uuid4().hex}"
     test_database_uri = _with_search_path(test_database_uri, test_schema)
@@ -123,6 +199,19 @@ def app(tmp_path):
         db.session.rollback()
         db.session.remove()
         db.engine.dispose()
+        error_log_path = app.config.get("ERROR_LOG_PATH")
+        if error_log_path:
+            normalized_error_log_path = os.path.abspath(error_log_path)
+            for handler in list(app.logger.handlers):
+                if os.path.abspath(
+                    getattr(handler, "baseFilename", "")
+                ) != normalized_error_log_path:
+                    continue
+                app.logger.removeHandler(handler)
+                try:
+                    handler.close()
+                except Exception:
+                    pass
         drop_schema_sql = text(f'DROP SCHEMA IF EXISTS "{test_schema}" CASCADE')
         last_error = None
         for attempt in range(5):

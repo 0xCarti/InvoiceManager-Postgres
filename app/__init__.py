@@ -245,6 +245,12 @@ NAV_LINKS = {
     "vendor.view_vendors": "Vendors",
     "invoice.view_invoices": "Invoices",
     "event.view_events": "Events",
+    "schedule.team_schedule": "Team Schedule",
+    "schedule.my_schedule": "My Schedule",
+    "schedule.availability": "Availability",
+    "schedule.time_off": "Time Off",
+    "schedule.tradeboard": "Tradeboard",
+    "schedule.setup": "Scheduling Setup",
     "admin.users": "Control Panel",
     "admin.backups": "Backups",
     "admin.settings": "Settings",
@@ -259,6 +265,18 @@ NAV_LINKS = {
 }
 
 NAV_GROUPS = (
+    (
+        "Scheduling",
+        (
+            ("schedule.team_schedule", "Team Schedule"),
+            ("schedule.my_schedule", "My Schedule"),
+            ("schedule.availability", "Availability"),
+            ("schedule.time_off", "Time Off"),
+            ("schedule.tradeboard", "Tradeboard"),
+            ("schedule.setup", "Scheduling Setup"),
+        ),
+        False,
+    ),
     (
         "Sales",
         (
@@ -802,6 +820,7 @@ def create_app(args=None):
         from app.routes.product_routes import product
         from app.routes.purchase_routes import purchase
         from app.routes.report_routes import report
+        from app.routes.schedule_routes import schedule
         from app.routes.spoilage_routes import spoilage
         from app.routes.transfer_routes import transfer
         from app.routes.vendor_routes import vendor
@@ -820,6 +839,7 @@ def create_app(args=None):
         app.register_blueprint(notes)
         app.register_blueprint(purchase)
         app.register_blueprint(report)
+        app.register_blueprint(schedule)
         app.register_blueprint(vendor)
         app.register_blueprint(mailgun)
         app.register_blueprint(event)

@@ -1,0 +1,140 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container-fluid px-0">
+    {% include 'schedules/_schedule_tabs.html' %}
+
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <div>
+            <h1 class="h4 mb-1">Availability</h1>
+            <div class="text-muted small">Recurring weekly windows and date-specific overrides.</div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <form method="get" class="row g-2 align-items-end">
+                <div class="col-12 col-md-5">
+                    <label class="form-label">User</label>
+                    <select name="user_id" class="form-select">
+                        <option value="{{ current_user.id }}" {% if target_user.id == current_user.id %}selected{% endif %}>{{ current_user.email }}</option>
+                        {% for user in manageable_users %}
+                        <option value="{{ user.id }}" {% if target_user.id == user.id %}selected{% endif %}>{{ user.email }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-12 col-md-auto">
+                    <button type="submit" class="btn btn-primary">Load User</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-12 col-xl-6">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h2 class="h5">Recurring Availability for {{ target_user.email }}</h2>
+                    <form method="post" class="row g-2 align-items-end mb-3">
+                        {{ window_form.hidden_tag() }}
+                        <input type="hidden" name="action" value="add_window">
+                        <input type="hidden" name="user_id" value="{{ target_user.id }}">
+                        <div class="col-12 col-md-4">{{ window_form.weekday.label(class_='form-label') }}{{ window_form.weekday(class_='form-select') }}</div>
+                        <div class="col-6 col-md-3">{{ window_form.start_time.label(class_='form-label') }}{{ window_form.start_time(class_='form-control') }}</div>
+                        <div class="col-6 col-md-3">{{ window_form.end_time.label(class_='form-label') }}{{ window_form.end_time(class_='form-control') }}</div>
+                        <div class="col-12">{{ window_form.note.label(class_='form-label') }}{{ window_form.note(class_='form-control') }}</div>
+                        <div class="col-12"><button type="submit" class="btn btn-primary">Add Window</button></div>
+                    </form>
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Day</th>
+                                    <th>Time</th>
+                                    <th>Note</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for window in windows %}
+                                <tr>
+                                    <td>{{ weekday_labels[window.weekday] }}</td>
+                                    <td>{{ window.start_time.strftime('%H:%M') }} - {{ window.end_time.strftime('%H:%M') }}</td>
+                                    <td>{{ window.note or '' }}</td>
+                                    <td class="text-end">
+                                        <form method="post">
+                                            {{ action_form.hidden_tag() }}
+                                            <input type="hidden" name="action" value="delete_window">
+                                            <input type="hidden" name="user_id" value="{{ target_user.id }}">
+                                            <input type="hidden" name="window_id" value="{{ window.id }}">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr><td colspan="4" class="text-muted">No recurring availability set.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-xl-6">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h2 class="h5">Overrides</h2>
+                    <form method="post" class="row g-2 align-items-end mb-3">
+                        {{ override_form.hidden_tag() }}
+                        <input type="hidden" name="action" value="add_override">
+                        <input type="hidden" name="user_id" value="{{ target_user.id }}">
+                        <div class="col-12 col-md-6">{{ override_form.start_at.label(class_='form-label') }}{{ override_form.start_at(class_='form-control') }}</div>
+                        <div class="col-12 col-md-6">{{ override_form.end_at.label(class_='form-label') }}{{ override_form.end_at(class_='form-control') }}</div>
+                        <div class="col-12">{{ override_form.note.label(class_='form-label') }}{{ override_form.note(class_='form-control') }}</div>
+                        <div class="col-12">
+                            <div class="form-check">
+                                {{ override_form.is_available(class_='form-check-input') }}
+                                {{ override_form.is_available.label(class_='form-check-label') }}
+                            </div>
+                        </div>
+                        <div class="col-12"><button type="submit" class="btn btn-primary">Add Override</button></div>
+                    </form>
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Range</th>
+                                    <th>Type</th>
+                                    <th>Note</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for override_item in overrides %}
+                                <tr>
+                                    <td>{{ override_item.start_at.strftime('%Y-%m-%d %H:%M') }} - {{ override_item.end_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                    <td>{{ 'Available' if override_item.is_available else 'Unavailable' }}</td>
+                                    <td>{{ override_item.note or '' }}</td>
+                                    <td class="text-end">
+                                        <form method="post">
+                                            {{ action_form.hidden_tag() }}
+                                            <input type="hidden" name="action" value="delete_override">
+                                            <input type="hidden" name="user_id" value="{{ target_user.id }}">
+                                            <input type="hidden" name="override_id" value="{{ override_item.id }}">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr><td colspan="4" class="text-muted">No overrides added.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

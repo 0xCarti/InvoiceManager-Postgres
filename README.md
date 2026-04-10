@@ -427,7 +427,10 @@ The project includes a suite of `pytest` tests. Execute them with:
 pytest
 ```
 
-The tests automatically set the necessary environment variables, so no additional setup is required.
+The tests automatically set the necessary admin/mail defaults. For PostgreSQL,
+pytest uses `TEST_DATABASE_URL` when you provide it; otherwise it derives a
+host-side connection from `DATABASE_*` / `HOST_DATABASE_PORT` and runs each test
+inside an isolated schema.
 
 ## Code Style
 
@@ -495,7 +498,7 @@ When running `pytest`, the fixtures in `tests/conftest.py` set up several defaul
 - `SECRET_KEY` defaults to `"testsecret"`
 - `ADMIN_EMAIL` defaults to `"admin@example.com"`
 - `ADMIN_PASS` defaults to `"adminpass"`
-- `TEST_DATABASE_URL` defaults to `postgresql+psycopg://invoicemanager:invoicemanager@localhost:5432/invoicemanager_test`
+- `TEST_DATABASE_URL` is optional; when omitted, pytest derives a host-side URI from `DATABASE_*` / `HOST_DATABASE_PORT`
 - Each test runs in an isolated Postgres schema that is created and dropped automatically
 - Two GL codes (`4000` and `5000`) are populated if none exist
 
