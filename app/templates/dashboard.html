@@ -541,6 +541,56 @@
         </div>
     </div>
     {% endif %}
+
+    <div class="row g-3 mt-1">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5 class="mb-0">Bulletins</h5>
+                        <div class="small text-muted">Pinned updates targeted to you.</div>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        {% if context.bulletins.unread_count %}
+                        <span class="badge bg-primary">{{ context.bulletins.unread_count }} unread</span>
+                        {% endif %}
+                        {% if can_access_endpoint('communication.center') %}
+                        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('communication.center') }}">Open Communications</a>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="card-body">
+                    {% if context.bulletins.receipts %}
+                    <div class="d-flex flex-column gap-3">
+                        {% for receipt in context.bulletins.receipts %}
+                        <div class="border rounded p-3 {% if receipt.read_at is none %}border-primary-subtle bg-light{% endif %}">
+                            <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
+                                <div>
+                                    <div class="fw-semibold">{{ receipt.communication.subject }}</div>
+                                    <div class="small text-muted">
+                                        {{ receipt.communication.sender.display_label }}
+                                        {% if receipt.communication.audience_type == 'department' and receipt.communication.department %}
+                                        · {{ receipt.communication.department.name }}
+                                        {% elif receipt.communication.audience_type == 'all' %}
+                                        · All scoped users
+                                        {% else %}
+                                        · Selected users
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="small text-muted text-nowrap">{{ receipt.communication.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                            </div>
+                            <div style="white-space: pre-wrap;">{{ receipt.communication.body }}</div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="text-muted">No pinned bulletins are currently assigned to you.</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 

@@ -171,6 +171,7 @@ PERMISSION_DEFINITIONS: tuple[PermissionDefinition, ...] = (
     _perm("schedules.claim_tradeboard", "schedules", "Claim Tradeboard Shifts", "Request tradeboard and open shifts."),
     _perm("schedules.approve_tradeboard", "schedules", "Approve Tradeboard Claims", "Approve or reject tradeboard claim requests."),
     _perm("communications.view", "communications", "View Communications", "View your inbox and the bulletin board."),
+    _perm("communications.view_history", "communications", "View Message History", "View scoped messages sent between other users."),
     _perm("communications.send_direct", "communications", "Send Direct Messages", "Send messages to scoped users."),
     _perm("communications.send_broadcast", "communications", "Send Broadcasts", "Broadcast messages to multiple users, departments, or all scoped users."),
     _perm("communications.manage_bulletin", "communications", "Manage Bulletin Board", "Post and archive pinned bulletin board updates."),
@@ -371,6 +372,7 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "communication.center": requirement(
         any_of=(
             "communications.view",
+            "communications.view_history",
             "communications.send_direct",
             "communications.send_broadcast",
             "communications.manage_bulletin",
@@ -609,6 +611,7 @@ ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] =
     ("communication.center", "GET"): requirement(
         any_of=(
             "communications.view",
+            "communications.view_history",
             "communications.send_direct",
             "communications.send_broadcast",
             "communications.manage_bulletin",
@@ -617,6 +620,7 @@ ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] =
     ("communication.center", "POST"): requirement(
         any_of=(
             "communications.view",
+            "communications.view_history",
             "communications.send_direct",
             "communications.send_broadcast",
             "communications.manage_bulletin",

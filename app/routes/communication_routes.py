@@ -10,10 +10,12 @@ from app import db
 from app.forms import BulletinPostForm, CSRFOnlyForm, CommunicationMessageForm
 from app.models import Communication, CommunicationRecipient
 from app.services.communication_service import (
+    active_bulletin_receipts_for_user,
     can_manage_bulletin,
     communication_scope_departments,
     communication_scope_users,
     resolve_communication_recipients,
+    visible_message_history,
 )
 from app.utils.activity import log_activity
 
@@ -21,7 +23,9 @@ communication = Blueprint("communication", __name__)
 
 
 def _configure_compose_form_choices(form, scoped_users, scoped_departments) -> None:
-    form.recipient_user_ids.choices = [(user.id, user.email) for user in scoped_users]
+    form.recipient_user_ids.choices = [
+        (user.id, user.display_label) for user in scoped_users
+    ]
     form.department_id.choices = [(0, "Select a department")] + [
         (department.id, department.name) for department in scoped_departments
     ]
@@ -69,6 +73,7 @@ def _create_communication(
 def center():
     if not current_user.has_any_permission(
         "communications.view",
+        "communications.view_history",
         "communications.send_direct",
         "communications.send_broadcast",
         "communications.manage_bulletin",
@@ -228,24 +233,7 @@ def center():
         reverse=True,
     )
 
-    bulletin_receipts = (
-        CommunicationRecipient.query.options(*receipt_options)
-        .join(Communication, CommunicationRecipient.communication_id == Communication.id)
-        .filter(
-            CommunicationRecipient.user_id == current_user.id,
-            Communication.kind == Communication.KIND_BULLETIN,
-            Communication.active.is_(True),
-        )
-        .all()
-    )
-    bulletin_receipts = sorted(
-        bulletin_receipts,
-        key=lambda receipt: (
-            bool(getattr(receipt.communication, "pinned", False)),
-            getattr(receipt.communication, "created_at", datetime.min),
-        ),
-        reverse=True,
-    )
+    bulletin_receipts = active_bulletin_receipts_for_user(current_user)
     manageable_bulletin_ids = {
         receipt.communication.id
         for receipt in bulletin_receipts
@@ -269,6 +257,10 @@ def center():
             .all()
         )
 
+    scoped_message_history = []
+    if current_user.has_permission("communications.view_history"):
+        scoped_message_history = visible_message_history(current_user)
+
     return render_template(
         "communications/center.html",
         message_form=message_form,
@@ -285,5 +277,9 @@ def center():
         can_manage_bulletins=current_user.has_permission(
             "communications.manage_bulletin"
         ),
+        can_view_message_history=current_user.has_permission(
+            "communications.view_history"
+        ),
+        scoped_message_history=scoped_message_history,
         manageable_bulletin_ids=manageable_bulletin_ids,
     )

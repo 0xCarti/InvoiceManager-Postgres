@@ -65,7 +65,7 @@
                     <div class="d-flex justify-content-between align-items-center gap-2">
                         <h2 class="h5 mb-0">Team Requests</h2>
                         {% if selected_review_request %}
-                        <span class="badge text-bg-light border">Reviewing {{ selected_review_request.user.email }}</span>
+                        <span class="badge text-bg-light border">Reviewing {{ selected_review_request.user.name_or_email }}</span>
                         {% endif %}
                     </div>
 
@@ -75,7 +75,10 @@
                         <input type="hidden" name="action" value="review_request">
                         <input type="hidden" name="request_id" value="{{ selected_review_request.id }}">
                         <div class="col-12">
-                            <div class="fw-semibold">{{ selected_review_request.user.email }}</div>
+                            <div class="fw-semibold">{{ selected_review_request.user.name_or_email }}</div>
+                            {% if selected_review_request.user.preferred_name %}
+                            <div class="small text-muted">{{ selected_review_request.user.email }}</div>
+                            {% endif %}
                             <div class="small text-muted">{{ selected_review_request.start_date }} - {{ selected_review_request.end_date }}</div>
                         </div>
                         <div class="col-12 col-md-4">{{ review_form.status.label(class_='form-label') }}{{ review_form.status(class_='form-select') }}</div>
@@ -98,7 +101,12 @@
                             <tbody>
                                 {% for request_obj in team_requests %}
                                 <tr>
-                                    <td>{{ request_obj.user.email }}</td>
+                                    <td>
+                                        <div class="fw-semibold">{{ request_obj.user.name_or_email }}</div>
+                                        {% if request_obj.user.preferred_name %}
+                                        <div class="small text-muted">{{ request_obj.user.email }}</div>
+                                        {% endif %}
+                                    </td>
                                     <td>{{ request_obj.start_date }} - {{ request_obj.end_date }}</td>
                                     <td><span class="badge text-bg-{{ 'success' if request_obj.status == 'approved' else 'danger' if request_obj.status == 'denied' else 'secondary' }}">{{ request_obj.status|title }}</span></td>
                                     <td>{{ request_obj.reason }}</td>

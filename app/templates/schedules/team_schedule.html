@@ -133,7 +133,7 @@
                     <select name="user_id" class="form-select" data-auto-submit-filter="1">
                         <option value="" {% if not selected_user_filter_value %}selected{% endif %}>All Users</option>
                         {% for user in filter_users %}
-                        <option value="{{ user.id }}" {% if selected_user_filter_value == user.id|string %}selected{% endif %}>{{ user.email }}</option>
+                        <option value="{{ user.id }}" {% if selected_user_filter_value == user.id|string %}selected{% endif %}>{{ user.display_label }}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -279,7 +279,10 @@
                     {% for user in visible_users %}
                     <tr>
                         <th class="schedule-board-name">
-                            <div class="fw-semibold">{{ user.email }}</div>
+                            <div class="fw-semibold">{{ user.name_or_email }}</div>
+                            {% if user.preferred_name %}
+                            <div class="small text-muted">{{ user.email }}</div>
+                            {% endif %}
                             <div class="small text-muted">
                                 {{ '%.2f'|format(user_hours.get(user.id, 0.0)) }} hrs
                                 {% if show_seen_status %}
@@ -375,7 +378,10 @@
     <div class="d-lg-none d-grid gap-3">
         {% for user in visible_users %}
         <div class="schedule-mobile-day">
-            <div class="fw-semibold mb-2">{{ user.email }}</div>
+            <div class="fw-semibold mb-2">{{ user.name_or_email }}</div>
+            {% if user.preferred_name %}
+            <div class="small text-muted mb-2">{{ user.email }}</div>
+            {% endif %}
             {% for day in week_dates %}
             <div class="border rounded p-2 mb-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">

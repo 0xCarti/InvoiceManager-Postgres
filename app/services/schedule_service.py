@@ -224,7 +224,6 @@ def get_visible_schedule_users(
         .filter_by(department_id=department_id)
         .join(User, UserDepartmentMembership.user_id == User.id)
         .filter(User.active.is_(True))
-        .order_by(User.email.asc())
     )
     memberships = membership_query.all()
     users: list[User] = []
@@ -233,7 +232,7 @@ def get_visible_schedule_users(
             continue
         if user_can_manage_other_user(actor, membership.user, department_id):
             users.append(membership.user)
-    return users
+    return sorted(users, key=lambda user: (user.sort_key, user.email.casefold()))
 
 
 def calculate_paid_hours(start_time: time, end_time: time) -> float:

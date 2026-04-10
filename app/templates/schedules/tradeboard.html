@@ -105,7 +105,10 @@
                     <div class="vstack gap-3">
                         {% for claim in pending_claims %}
                         <div class="border rounded p-3">
-                            <div class="fw-semibold">{{ claim.user.email }}</div>
+                            <div class="fw-semibold">{{ claim.user.name_or_email }}</div>
+                            {% if claim.user.preferred_name %}
+                            <div class="small text-muted">{{ claim.user.email }}</div>
+                            {% endif %}
                             <div class="small text-muted">{{ claim.shift.shift_date }} | {{ claim.shift.start_time.strftime('%H:%M') }} - {{ claim.shift.end_time.strftime('%H:%M') }}</div>
                             <div class="small">{{ claim.shift.position.name }}</div>
                             <form method="post" class="row g-2 align-items-end mt-2">

@@ -334,7 +334,9 @@ def load_schedule_position_choices(
 
 
 def load_active_user_choices():
-    return [(user.id, user.email) for user in User.query.filter_by(active=True).order_by(User.email).all()]
+    users = User.query.filter_by(active=True).all()
+    users = sorted(users, key=lambda user: (user.sort_key, user.email.casefold()))
+    return [(user.id, user.display_label) for user in users]
 
 
 def load_schedule_membership_role_suggestions() -> list[str]:
@@ -849,6 +851,10 @@ class UserForm(FlaskForm):
 
 class InviteUserForm(FlaskForm):
     email = StringField("Email", validators=[DataRequired(), Email()])
+    display_name = StringField(
+        "Display Name",
+        validators=[Optional(), Length(max=120)],
+    )
     group_ids = SelectMultipleField(
         "Permission Groups",
         coerce=int,
@@ -863,6 +869,10 @@ class InviteUserForm(FlaskForm):
 
 
 class UserAccessForm(FlaskForm):
+    display_name = StringField(
+        "Display Name",
+        validators=[Optional(), Length(max=120)],
+    )
     group_ids = SelectMultipleField(
         "Permission Groups",
         coerce=int,

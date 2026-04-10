@@ -25,14 +25,21 @@
             <h3 class="h6 mb-3">Invite User</h3>
             <form action="{{ url_for('admin.users') }}" method="post" class="row g-3">
                 {{ invite_form.hidden_tag() }}
-                <div class="col-12 col-lg-5">
+                <div class="col-12 col-lg-4">
                     {{ invite_form.email.label(class_='form-label') }}
                     {{ invite_form.email(class_='form-control' ~ (' is-invalid' if invite_form.email.errors else ''), placeholder='Email') }}
                     {% for error in invite_form.email.errors %}
                     <div class="invalid-feedback d-block">{{ error }}</div>
                     {% endfor %}
                 </div>
-                <div class="col-12 col-lg-5">
+                <div class="col-12 col-lg-3">
+                    {{ invite_form.display_name.label(class_='form-label') }}
+                    {{ invite_form.display_name(class_='form-control' ~ (' is-invalid' if invite_form.display_name.errors else ''), placeholder='Optional name') }}
+                    {% for error in invite_form.display_name.errors %}
+                    <div class="invalid-feedback d-block">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-12 col-lg-3">
                     {{ invite_form.group_ids.label(class_='form-label') }}
                     {{ invite_form.group_ids(class_='form-select' ~ (' is-invalid' if invite_form.group_ids.errors else ''), multiple=true) }}
                     {% for error in invite_form.group_ids.errors %}
@@ -53,8 +60,8 @@
             table_id='admin-users-table',
             storage_key='adminUsersTableColumnVisibility',
             align='end',
-            columns=[
-                {'id': 'toggle-user-email', 'target': 'col-user-email', 'label': 'Email', 'checked': True},
+                columns=[
+                {'id': 'toggle-user-email', 'target': 'col-user-email', 'label': 'User', 'checked': True},
                 {'id': 'toggle-user-active', 'target': 'col-user-active', 'label': 'Status', 'checked': True},
                 {'id': 'toggle-user-access', 'target': 'col-user-access', 'label': 'Access', 'checked': True},
                 {'id': 'toggle-user-actions', 'target': 'col-user-actions', 'label': 'Actions', 'checked': True},
@@ -70,7 +77,10 @@
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
                     <div class="min-w-0">
-                        <div class="fw-semibold text-break">{{ user.email }}</div>
+                        <div class="fw-semibold text-break">{{ user.name_or_email }}</div>
+                        {% if user.preferred_name %}
+                        <div class="small text-muted text-break">{{ user.email }}</div>
+                        {% endif %}
                         <div class="small text-muted">User #{{ user.id }}</div>
                     </div>
                     <span class="badge {% if user.active %}text-bg-success{% elif invite_pending %}text-bg-warning{% else %}text-bg-secondary{% endif %}">
@@ -150,7 +160,7 @@
         <table class="table sortable" id="admin-users-table">
             <thead>
             <tr>
-                <th scope="col" class="col-user-email">Email</th>
+                <th scope="col" class="col-user-email">User</th>
                 <th scope="col" class="col-user-active">Status</th>
                 <th scope="col" class="col-user-access">Access</th>
                 <th scope="col" class="col-user-actions" data-sortable="false">Actions</th>
@@ -161,7 +171,12 @@
             {% for user in users %}
             {% set invite_pending = (not user.active and not user.last_login_at) %}
             <tr>
-                <td class="col-user-email">{{ user.email }}</td>
+                <td class="col-user-email">
+                    <div class="fw-semibold">{{ user.name_or_email }}</div>
+                    {% if user.preferred_name %}
+                    <div class="small text-muted">{{ user.email }}</div>
+                    {% endif %}
+                </td>
                 <td class="col-user-active">
                     <span class="badge {% if user.active %}text-bg-success{% elif invite_pending %}text-bg-warning{% else %}text-bg-secondary{% endif %}">
                         {{ 'Active' if user.active else 'Invited' if invite_pending else 'Inactive' }}

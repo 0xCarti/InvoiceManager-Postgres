@@ -8,9 +8,15 @@ from tests.permission_helpers import grant_permissions
 from tests.utils import login
 
 
-def create_user(email: str, *, password: str = "pass") -> int:
+def create_user(
+    email: str,
+    *,
+    password: str = "pass",
+    display_name: str | None = None,
+) -> int:
     user = User(
         email=email,
+        display_name=display_name,
         password=generate_password_hash(password),
         active=True,
     )
@@ -243,3 +249,63 @@ def test_manager_cannot_post_bulletin_to_unmanaged_department(client, app):
 
     with app.app_context():
         assert Communication.query.filter_by(subject="Kitchen memo").count() == 0
+
+
+def test_manager_with_history_permission_can_view_messages_between_other_users(
+    client, app
+):
+    with app.app_context():
+        manager_id = create_user("history-manager@example.com")
+        staff_sender_id = create_user(
+            "history-staff-one@example.com",
+            display_name="Taylor Sender",
+        )
+        staff_recipient_id = create_user(
+            "history-staff-two@example.com",
+            display_name="Jordan Receiver",
+        )
+        department_id = create_department("Operations")
+        add_membership(manager_id, department_id, role="manager")
+        add_membership(staff_sender_id, department_id, role="staff")
+        add_membership(staff_recipient_id, department_id, role="staff")
+
+        manager = db.session.get(User, manager_id)
+        sender = db.session.get(User, staff_sender_id)
+        grant_permissions(
+            manager,
+            "communications.view_history",
+            group_name="Communication History Viewer",
+            description="Can review scoped message history.",
+        )
+        grant_permissions(
+            sender,
+            "communications.view",
+            "communications.send_direct",
+            group_name="Direct Message Sender",
+            description="Can send direct messages.",
+        )
+
+    with client:
+        login(client, "history-staff-one@example.com", "pass")
+        send_response = client.post(
+            "/communications",
+            data={
+                "action": "send_message",
+                "message-audience": "users",
+                "message-recipient_user_ids": [str(staff_recipient_id)],
+                "message-subject": "Private handoff",
+                "message-body": "Inventory counts are on the back table.",
+            },
+            follow_redirects=True,
+        )
+        assert send_response.status_code == 200
+
+        login(client, "history-manager@example.com", "pass")
+        history_response = client.get("/communications", follow_redirects=True)
+
+    assert history_response.status_code == 200
+    assert b"Scoped Message History" in history_response.data
+    assert b"Private handoff" in history_response.data
+    assert b"Inventory counts are on the back table." in history_response.data
+    assert b"Taylor Sender" in history_response.data
+    assert b"Jordan Receiver" in history_response.data

@@ -109,8 +109,50 @@
             </div>
             {% endif %}
 
-            {% if sent_items %}
+            {% if sent_items or can_view_message_history %}
             <div class="card">
+                {% if can_view_message_history %}
+                <div class="card-body border-bottom">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h2 class="h5 mb-0">Scoped Message History</h2>
+                        <span class="badge text-bg-secondary">{{ scoped_message_history|length }}</span>
+                    </div>
+                    {% if scoped_message_history %}
+                    <div class="d-flex flex-column gap-3">
+                        {% for item in scoped_message_history %}
+                        <div class="border rounded p-3">
+                            <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
+                                <div>
+                                    <div class="fw-semibold">{{ item.subject }}</div>
+                                    <div class="small text-muted">
+                                        From {{ item.sender.display_label }}
+                                        {% if item.audience_type == 'department' and item.department %}
+                                        - {{ item.department.name }}
+                                        {% elif item.audience_type == 'all' %}
+                                        - All scoped users
+                                        {% else %}
+                                        -
+                                        {% for receipt in item.recipients[:3] %}
+                                        {{ receipt.user.name_or_email }}{% if not loop.last %}, {% endif %}
+                                        {% endfor %}
+                                        {% if item.recipients|length > 3 %}
+                                        +{{ item.recipients|length - 3 }} more
+                                        {% endif %}
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="small text-muted text-nowrap">{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                            </div>
+                            <div style="white-space: pre-wrap;">{{ item.body }}</div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="text-muted">No scoped message history is available yet.</div>
+                    {% endif %}
+                </div>
+                {% endif %}
+                {% if sent_items %}
                 <div class="card-body">
                     <h2 class="h5">Recent Sent</h2>
                     <div class="list-group list-group-flush">
@@ -137,6 +179,7 @@
                         {% endfor %}
                     </div>
                 </div>
+                {% endif %}
             </div>
             {% endif %}
         </div>
@@ -156,7 +199,7 @@
                                 <div>
                                     <div class="fw-semibold">{{ receipt.communication.subject }}</div>
                                     <div class="small text-muted">
-                                        {{ receipt.communication.sender.email }}
+                                        {{ receipt.communication.sender.display_label }}
                                         {% if receipt.communication.audience_type == 'department' and receipt.communication.department %}
                                         · {{ receipt.communication.department.name }}
                                         {% elif receipt.communication.audience_type == 'all' %}
@@ -209,7 +252,7 @@
                             <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
                                 <div>
                                     <div class="fw-semibold">{{ receipt.communication.subject }}</div>
-                                    <div class="small text-muted">From {{ receipt.communication.sender.email }}</div>
+                                    <div class="small text-muted">From {{ receipt.communication.sender.display_label }}</div>
                                 </div>
                                 <div class="small text-muted text-nowrap">{{ receipt.communication.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
                             </div>

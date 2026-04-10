@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+from flask_login import current_user
 from sqlalchemy import func
 
 from app import db
@@ -17,6 +18,7 @@ from app.models import (
     Transfer,
     TransferItem,
 )
+from app.services.communication_service import active_bulletin_receipts_for_user
 from app.services.event_service import current_user_today, event_schedule
 
 
@@ -215,6 +217,7 @@ def dashboard_context(activity_interval: Optional[str] = None) -> Dict[str, Any]
     """Aggregate metrics for the dashboard view."""
 
     today = current_user_today()
+    bulletin_receipts = active_bulletin_receipts_for_user(current_user)
 
     events = event_summary(today)
     events["schedule"] = event_schedule(today)
@@ -240,6 +243,13 @@ def dashboard_context(activity_interval: Optional[str] = None) -> Dict[str, Any]
         "purchase_invoices": purchase_invoice_summary(),
         "invoices": invoice_summary(),
         "events": events,
+        "bulletins": {
+            "receipts": bulletin_receipts[:5],
+            "total": len(bulletin_receipts),
+            "unread_count": sum(
+                1 for receipt in bulletin_receipts if receipt.read_at is None
+            ),
+        },
         "charts": {
             "weekly_activity": weekly_activity,
         },

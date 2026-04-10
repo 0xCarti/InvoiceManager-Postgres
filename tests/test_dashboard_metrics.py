@@ -7,6 +7,8 @@ import pytest
 
 from app import db
 from app.models import (
+    Communication,
+    CommunicationRecipient,
     Customer,
     Invoice,
     InvoiceProduct,
@@ -283,6 +285,32 @@ def test_dashboard_renders_sales_series(client, app):
 
     assert '"sales_total":' in body
     assert "$10.00" in body
+
+
+def test_dashboard_shows_bulletin_card(client, app):
+    with app.app_context():
+        user = User.query.filter_by(email="admin@example.com").first()
+        bulletin = Communication(
+            kind=Communication.KIND_BULLETIN,
+            sender=user,
+            audience_type=Communication.AUDIENCE_USERS,
+            subject="Dashboard bulletin",
+            body="Check the bulletin card on the dashboard.",
+            pinned=True,
+            active=True,
+        )
+        bulletin.recipients = [CommunicationRecipient(user_id=user.id)]
+        db.session.add(bulletin)
+        db.session.commit()
+
+    login(client, "admin@example.com", os.getenv("ADMIN_PASS", "adminpass"))
+    response = client.get("/", follow_redirects=True)
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Bulletins" in body
+    assert "Dashboard bulletin" in body
+    assert "Check the bulletin card on the dashboard." in body
 
 
 @pytest.mark.parametrize(

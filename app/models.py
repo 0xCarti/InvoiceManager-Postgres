@@ -150,6 +150,7 @@ class LocationStandItem(db.Model):
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
+    display_name = db.Column(db.String(120), nullable=True)
     password = db.Column(db.String(255), nullable=False)
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
     transfers = db.relationship("Transfer", backref="creator", lazy=True)
@@ -309,6 +310,26 @@ class User(UserMixin, db.Model):
     @property
     def is_super_admin(self) -> bool:
         return bool(self.is_admin)
+
+    @property
+    def preferred_name(self) -> str:
+        return " ".join((self.display_name or "").split())
+
+    @property
+    def name_or_email(self) -> str:
+        return self.preferred_name or self.email
+
+    @property
+    def display_label(self) -> str:
+        preferred_name = self.preferred_name
+        normalized_email = (self.email or "").strip()
+        if preferred_name and preferred_name.casefold() != normalized_email.casefold():
+            return f"{preferred_name} ({normalized_email})"
+        return normalized_email
+
+    @property
+    def sort_key(self) -> str:
+        return self.name_or_email.casefold()
 
     def get_permission_codes(self) -> set[str]:
         if self.is_super_admin:

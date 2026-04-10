@@ -808,10 +808,14 @@ def create_app(args=None):
         # application start.  This allows the app to run even if migrations
         # have not been executed yet, avoiding "no such table" errors.
         from . import models  # noqa: F401
+        from sqlalchemy.exc import OperationalError, ProgrammingError
 
         if should_create_all:
             db.create_all()
+        try:
             sync_permission_data(db.session)
+        except (OperationalError, ProgrammingError):
+            db.session.rollback()
 
         from app.routes.auth_routes import admin, auth
         from app.routes.communication_routes import communication
@@ -855,8 +859,6 @@ def create_app(args=None):
         app.register_blueprint(event)
         app.register_blueprint(glcode_bp)
         app.register_blueprint(preferences)
-        from sqlalchemy.exc import OperationalError, ProgrammingError
-
         from app.models import Setting
 
         try:

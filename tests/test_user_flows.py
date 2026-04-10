@@ -367,6 +367,40 @@ def test_pending_invite_cannot_be_manually_activated(client, app):
         assert pending_user.active is False
 
 
+def test_admin_can_assign_display_name_used_in_communication_user_lists(client, app):
+    with app.app_context():
+        user = User(
+            email="named-user@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add(user)
+        db.session.commit()
+        user_id = user.id
+
+    with client:
+        login(client, "admin@example.com", "adminpass")
+        response = client.post(
+            f"/controlpanel/users/{user_id}/access",
+            data={
+                "access-display_name": "Casey Crew",
+                "access-submit": "1",
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Casey Crew" in response.data
+
+        communications_page = client.get("/communications", follow_redirects=True)
+        assert communications_page.status_code == 200
+        assert b"Casey Crew (named-user@example.com)" in communications_page.data
+
+    with app.app_context():
+        user = db.session.get(User, user_id)
+        assert user is not None
+        assert user.display_name == "Casey Crew"
+
+
 def test_login_inactive_user(client, app):
     with app.app_context():
         user = User(

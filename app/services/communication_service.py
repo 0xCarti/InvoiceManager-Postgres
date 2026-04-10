@@ -2,13 +2,23 @@ from __future__ import annotations
 
 from sqlalchemy.orm import selectinload
 
-from app.models import Department, User, UserDepartmentMembership
+from app.models import (
+    Communication,
+    CommunicationRecipient,
+    Department,
+    User,
+    UserDepartmentMembership,
+)
 from app.services.schedule_service import (
     user_can_manage_department,
     user_can_manage_other_user,
     user_department_ids,
     user_is_schedule_gm,
 )
+
+
+def _user_sort_key(user: User) -> tuple[str, str]:
+    return (user.sort_key, (user.email or "").casefold())
 
 
 def communication_scope_departments(actor: User) -> list[Department]:
@@ -35,11 +45,8 @@ def communication_scope_departments(actor: User) -> list[Department]:
 
 def communication_scope_users(actor: User) -> list[User]:
     if getattr(actor, "is_super_admin", False) or user_is_schedule_gm(actor):
-        return (
-            User.query.filter(User.active.is_(True))
-            .order_by(User.email.asc())
-            .all()
-        )
+        users = User.query.filter(User.active.is_(True)).all()
+        return sorted(users, key=_user_sort_key)
 
     department_ids = sorted(user_department_ids(actor))
     scoped: dict[int, User] = {}
@@ -48,7 +55,7 @@ def communication_scope_users(actor: User) -> list[User]:
         scoped[actor.id] = actor
 
     if not department_ids:
-        return sorted(scoped.values(), key=lambda user: user.email.lower())
+        return sorted(scoped.values(), key=_user_sort_key)
 
     memberships = (
         UserDepartmentMembership.query.options(
@@ -67,7 +74,7 @@ def communication_scope_users(actor: User) -> list[User]:
         if user_can_manage_other_user(actor, user, membership.department_id):
             scoped[user.id] = user
 
-    return sorted(scoped.values(), key=lambda user: user.email.lower())
+    return sorted(scoped.values(), key=_user_sort_key)
 
 
 def resolve_communication_recipients(
@@ -131,6 +138,81 @@ def can_manage_bulletin(actor: User, sender_id: int) -> bool:
     if getattr(actor, "is_super_admin", False) or user_is_schedule_gm(actor):
         return True
     return actor.id == sender_id
+
+
+def active_bulletin_receipts_for_user(
+    user: User,
+    *,
+    limit: int | None = None,
+) -> list[CommunicationRecipient]:
+    receipt_options = (
+        selectinload(CommunicationRecipient.communication).selectinload(
+            Communication.sender
+        ),
+        selectinload(CommunicationRecipient.communication).selectinload(
+            Communication.department
+        ),
+    )
+    receipts = (
+        CommunicationRecipient.query.options(*receipt_options)
+        .join(Communication, CommunicationRecipient.communication_id == Communication.id)
+        .filter(
+            CommunicationRecipient.user_id == user.id,
+            Communication.kind == Communication.KIND_BULLETIN,
+            Communication.active.is_(True),
+        )
+        .all()
+    )
+    receipts = sorted(
+        receipts,
+        key=lambda receipt: (
+            bool(getattr(receipt.communication, "pinned", False)),
+            getattr(receipt.communication, "created_at", None),
+        ),
+        reverse=True,
+    )
+    if limit is not None:
+        return receipts[:limit]
+    return receipts
+
+
+def visible_message_history(actor: User, *, limit: int = 15) -> list[Communication]:
+    if not getattr(actor, "is_authenticated", False):
+        return []
+
+    candidate_limit = max(limit * 6, 50)
+    query = (
+        Communication.query.options(
+            selectinload(Communication.sender),
+            selectinload(Communication.department),
+            selectinload(Communication.recipients).selectinload(
+                CommunicationRecipient.user
+            ),
+        )
+        .filter(Communication.kind == Communication.KIND_MESSAGE)
+        .order_by(Communication.created_at.desc())
+        .limit(candidate_limit)
+    )
+
+    if getattr(actor, "is_super_admin", False):
+        return query.all()
+
+    scoped_user_ids = {user.id for user in communication_scope_users(actor)}
+    visible_messages: list[Communication] = []
+
+    for message in query.all():
+        recipient_ids = {receipt.user_id for receipt in message.recipients}
+        if not recipient_ids:
+            continue
+        if message.sender_id not in scoped_user_ids:
+            continue
+        if not recipient_ids.issubset(scoped_user_ids):
+            continue
+        visible_messages.append(message)
+        if len(visible_messages) >= limit:
+            break
+
+    return visible_messages
 
 
 def user_can_broadcast_to_all(actor: User) -> bool:

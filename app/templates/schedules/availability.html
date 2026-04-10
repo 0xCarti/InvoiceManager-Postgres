@@ -26,9 +26,9 @@
                 <div class="col-12 col-md-5">
                     <label class="form-label">User</label>
                     <select name="user_id" class="form-select">
-                        <option value="{{ current_user.id }}" {% if target_user.id == current_user.id %}selected{% endif %}>{{ current_user.email }}</option>
+                        <option value="{{ current_user.id }}" {% if target_user.id == current_user.id %}selected{% endif %}>{{ current_user.display_label }}</option>
                         {% for user in manageable_users %}
-                        <option value="{{ user.id }}" {% if target_user.id == user.id %}selected{% endif %}>{{ user.email }}</option>
+                        <option value="{{ user.id }}" {% if target_user.id == user.id %}selected{% endif %}>{{ user.display_label }}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -43,7 +43,7 @@
         <div class="col-12 col-xl-6">
             <div class="card h-100">
                 <div class="card-body">
-                    <h2 class="h5">Recurring Availability for {{ target_user.email }}</h2>
+                    <h2 class="h5">Recurring Availability for {{ target_user.name_or_email }}</h2>
                     <p class="small text-muted mb-3">Use this when someone usually works the same times each week.</p>
                     <form method="post" class="row g-2 align-items-end mb-3">
                         {{ window_form.hidden_tag() }}

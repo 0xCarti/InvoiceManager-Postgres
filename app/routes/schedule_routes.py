@@ -116,11 +116,8 @@ def _parse_department_filter_value(value) -> str | int | None:
 
 def _manager_scope_users(actor: User) -> list[User]:
     if getattr(actor, "is_super_admin", False) or user_is_schedule_gm(actor):
-        return (
-            User.query.filter(User.active.is_(True))
-            .order_by(User.email.asc())
-            .all()
-        )
+        users = User.query.filter(User.active.is_(True)).all()
+        return sorted(users, key=lambda user: (user.sort_key, user.email.casefold()))
     department_ids = sorted(user_department_ids(actor))
     if not department_ids:
         return []
@@ -138,7 +135,7 @@ def _manager_scope_users(actor: User) -> list[User]:
             continue
         if user_can_manage_other_user(actor, user, membership.department_id):
             scoped[user.id] = user
-    return sorted(scoped.values(), key=lambda user: user.email.lower())
+    return sorted(scoped.values(), key=lambda user: (user.sort_key, user.email.casefold()))
 
 
 def _filter_schedule_users(
@@ -167,7 +164,7 @@ def _build_team_schedule_filter_users(
             include_self_only=False,
         ):
             scoped[user.id] = user
-    return sorted(scoped.values(), key=lambda user: user.email.lower())
+    return sorted(scoped.values(), key=lambda user: (user.sort_key, user.email.casefold()))
 
 
 def _auto_assignable_departments(
@@ -1464,9 +1461,8 @@ def setup():
         )
         .all()
     )
-    users = (
-        User.query.filter(User.active.is_(True)).order_by(User.email.asc()).all()
-    )
+    users = User.query.filter(User.active.is_(True)).all()
+    users = sorted(users, key=lambda user: (user.sort_key, user.email.casefold()))
 
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()

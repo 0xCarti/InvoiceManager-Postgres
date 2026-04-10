@@ -292,6 +292,57 @@ def test_permission_group_forms_render_grouped_permission_checkboxes(client):
         assert b"Create Purchase Orders" in edit_page.data
 
 
+def test_permission_group_edit_recreates_missing_permission_rows_on_save(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        group = PermissionGroup(
+            name="Scheduling and Communications",
+            description="Used to verify missing permissions are recreated.",
+        )
+        db.session.add(group)
+        db.session.commit()
+        group_id = group.id
+
+        Permission.query.filter(
+            Permission.code.in_(["schedules.view_team", "communications.view_history"])
+        ).delete(synchronize_session=False)
+        db.session.commit()
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            f"/controlpanel/permission-groups/{group_id}",
+            data={
+                "group-name": "Scheduling and Communications",
+                "group-description": "Recovered missing permissions.",
+                "group-permissions": [
+                    "schedules.view_team",
+                    "communications.view_history",
+                ],
+                "group-submit": "1",
+            },
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"Permission group updated." in response.data
+
+    with app.app_context():
+        group = db.session.get(PermissionGroup, group_id)
+        assert group is not None
+        assert {permission.code for permission in group.permissions} == {
+            "communications.view_history",
+            "schedules.view_team",
+        }
+        assert Permission.query.filter_by(code="schedules.view_team").first() is not None
+        assert (
+            Permission.query.filter_by(code="communications.view_history").first()
+            is not None
+        )
+
+
 def test_permissions_manager_can_open_permission_group_editor(client, app):
     with app.app_context():
         permissions_manage = Permission.query.filter_by(

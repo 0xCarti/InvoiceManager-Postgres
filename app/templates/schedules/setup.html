@@ -128,7 +128,10 @@
                     <div class="list-group list-group-flush">
                         {% for user in users %}
                         <a class="list-group-item list-group-item-action px-0" href="{{ url_for('schedule.user_settings', user_id=user.id) }}">
-                            <div class="fw-semibold">{{ user.email }}</div>
+                            <div class="fw-semibold">{{ user.name_or_email }}</div>
+                            {% if user.preferred_name %}
+                            <div class="small text-muted">{{ user.email }}</div>
+                            {% endif %}
                             <div class="small text-muted">Rate: ${{ '%.2f'|format(user.hourly_rate or 0.0) }} | Max hrs: {{ '%.2f'|format(user.max_weekly_hours or 0.0) }}</div>
                         </a>
                         {% else %}

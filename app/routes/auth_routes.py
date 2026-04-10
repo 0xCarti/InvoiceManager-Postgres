@@ -101,7 +101,11 @@ from app.services.purchase_imports import (
     normalize_vendor_alias_text,
     update_or_create_vendor_alias,
 )
-from app.permissions import get_default_landing_endpoint, get_permission_categories
+from app.permissions import (
+    get_default_landing_endpoint,
+    get_permission_categories,
+    get_permission_definition,
+)
 from app.utils.filter_state import (
     filters_to_query_args,
     get_filter_defaults,
@@ -196,11 +200,35 @@ def _load_permissions_by_codes(codes: list[str] | set[str] | None) -> list[Permi
     selected_codes = sorted({code for code in (codes or []) if code})
     if not selected_codes:
         return []
-    return (
+    permissions = (
         Permission.query.filter(Permission.code.in_(selected_codes))
         .order_by(Permission.category, Permission.code)
         .all()
     )
+    permissions_by_code = {permission.code: permission for permission in permissions}
+    missing_codes = [
+        code for code in selected_codes if code not in permissions_by_code
+    ]
+    if missing_codes:
+        for code in missing_codes:
+            definition = get_permission_definition(code)
+            if definition is None:
+                continue
+            db.session.add(
+                Permission(
+                    code=definition.code,
+                    category=definition.category,
+                    label=definition.label,
+                    description=definition.description,
+                )
+            )
+        db.session.flush()
+        permissions = (
+            Permission.query.filter(Permission.code.in_(selected_codes))
+            .order_by(Permission.category, Permission.code)
+            .all()
+        )
+    return permissions
 
 
 def _load_permission_groups_by_ids(
@@ -509,6 +537,10 @@ def _find_user_by_email(email: str | None) -> User | None:
     if not normalized_email:
         return None
     return User.query.filter(func.lower(User.email) == normalized_email).first()
+
+
+def _normalize_display_name(value: str | None) -> str:
+    return " ".join((value or "").strip().split())
 
 
 def _find_permission_group_by_name(
@@ -994,11 +1026,8 @@ def activate_user(user_id):
 @login_required
 def users():
     """Admin interface for managing users."""
-    users = (
-        User.query.options(selectinload(User.permission_groups))
-        .order_by(User.email)
-        .all()
-    )
+    users = User.query.options(selectinload(User.permission_groups)).all()
+    users = sorted(users, key=lambda user: (user.sort_key, user.email.casefold()))
 
     form = UserForm()
     invite_form = InviteUserForm()
@@ -1009,9 +1038,11 @@ def users():
     if invite_submitted:
         if invite_form.validate_on_submit():
             email = _normalize_email(invite_form.email.data)
+            display_name = _normalize_display_name(invite_form.display_name.data)
             existing = _find_user_by_email(email)
             if existing:
                 if _is_pending_invited_user(existing):
+                    existing.display_name = display_name or None
                     _reset_user_invitation(
                         existing, group_ids=invite_form.group_ids.data
                     )
@@ -1028,6 +1059,7 @@ def users():
             else:
                 new_user = User(
                     email=email,
+                    display_name=display_name or None,
                     password="",
                     active=False,
                     is_admin=False,
@@ -1122,16 +1154,23 @@ def user_access(user_id):
 
     access_form = UserAccessForm(prefix="access")
     if request.method == "GET":
+        access_form.display_name.data = user.display_name or ""
         access_form.group_ids.data = [
             group.id for group in user.permission_groups
         ]
     elif access_form.submit.data and access_form.validate_on_submit():
+        user.display_name = (
+            _normalize_display_name(access_form.display_name.data) or None
+        )
         _assign_permission_groups_to_user(user, access_form.group_ids.data)
         db.session.commit()
         log_activity(f"Updated permission groups for user {user.email}")
         flash("User access updated.", "success")
         return redirect(url_for("admin.user_access", user_id=user.id))
     else:
+        access_form.display_name.data = access_form.display_name.data or (
+            user.display_name or ""
+        )
         access_form.group_ids.data = access_form.group_ids.data or [
             group.id for group in user.permission_groups
         ]
@@ -1941,9 +1980,8 @@ def activity_logs():
 
     form = ActivityLogFilterForm(meta={"csrf": False})
     user_choices = [(-1, "All Users"), (-2, "System Activity")]
-    user_choices.extend(
-        (user.id, user.email) for user in User.query.order_by(User.email)
-    )
+    users = sorted(User.query.all(), key=lambda user: (user.sort_key, user.email.casefold()))
+    user_choices.extend((user.id, user.display_label) for user in users)
     form.user_id.choices = user_choices
     form.process(request.args)
     if form.user_id.data is None:
