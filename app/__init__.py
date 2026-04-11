@@ -6,6 +6,7 @@ import traceback
 import logging
 from datetime import date, datetime, timedelta
 from logging.handlers import RotatingFileHandler
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
@@ -213,6 +214,26 @@ def _configure_error_file_logging(app: Flask) -> None:
     )
     app.logger.addHandler(rotating_handler)
     app.logger.setLevel(logging.INFO)
+
+
+def _metabase_frame_origin(site_url: str | None) -> str:
+    """Return the Metabase origin allowed for frame embeds."""
+
+    parsed = urlsplit((site_url or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _append_metabase_frame_src(csp: str, site_url: str | None) -> str:
+    """Allow the configured Metabase origin to render inside iframes."""
+
+    metabase_origin = _metabase_frame_origin(site_url)
+    if not metabase_origin or "frame-src" in csp:
+        return csp
+
+    separator = "" if csp.endswith(";") else "; "
+    return f"{csp}{separator}frame-src 'self' {metabase_origin}"
 
 
 DEFAULT_CSP_TEMPLATE = (
@@ -732,6 +753,10 @@ def create_app(args=None):
             csp = csp_template.format(nonce=nonce)
         except Exception:
             csp = csp_template
+        csp = _append_metabase_frame_src(
+            csp,
+            app.config.get("METABASE_SITE_URL"),
+        )
         response.headers.setdefault("Content-Security-Policy", csp)
         return response
 

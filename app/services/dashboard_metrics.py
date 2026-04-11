@@ -21,6 +21,7 @@ from app.models import (
 )
 from app.services.communication_service import active_bulletin_receipts_for_user
 from app.services.event_service import current_user_today, event_schedule
+from app.utils.dashboard_cards import cards_visible_on_dashboard
 
 
 def _coalesce_scalar(query) -> float:
@@ -255,6 +256,10 @@ def dashboard_context(activity_interval: Optional[str] = None) -> Dict[str, Any]
         "metabase": {
             "configured": bool(metabase_site_url),
             "site_url": metabase_site_url,
+            "cards": cards_visible_on_dashboard(
+                current_user,
+                metabase_site_url=metabase_site_url,
+            ),
         },
         "charts": {
             "weekly_activity": weekly_activity,

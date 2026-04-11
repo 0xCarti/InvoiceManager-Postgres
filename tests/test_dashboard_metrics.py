@@ -20,6 +20,7 @@ from app.models import (
     PurchaseOrder,
     Transfer,
     User,
+    UserFilterPreference,
     Vendor,
 )
 from app.services.dashboard_metrics import weekly_transfer_purchase_activity
@@ -387,6 +388,161 @@ def test_dashboard_shows_metabase_button_and_redirects_for_permitted_user(
     assert 'href="/metabase"' in dashboard_body
     assert redirect_response.status_code == 302
     assert redirect_response.headers["Location"] == "http://metabase.localhost:3000"
+
+
+def test_dashboard_csp_allows_configured_metabase_frame_origin(client, app):
+    app.config["METABASE_SITE_URL"] = "https://reports.example.com"
+
+    login(client, "admin@example.com", os.getenv("ADMIN_PASS", "adminpass"))
+    response = client.get("/", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert (
+        "frame-src 'self' https://reports.example.com"
+        in response.headers["Content-Security-Policy"]
+    )
+
+
+def test_dashboard_metabase_cards_can_be_added_updated_and_removed(client, app):
+    app.config["METABASE_SITE_URL"] = "http://metabase.localhost:3000"
+
+    with app.app_context():
+        user = _create_dashboard_user("dashboard-cards@example.com")
+        user_id = user.id
+        grant_permissions(
+            user,
+            "dashboard.view",
+            "reports.metabase",
+            group_name="Dashboard Cards",
+            description="Can manage dashboard cards.",
+        )
+
+    login(client, "dashboard-cards@example.com", "pass")
+
+    add_response = client.post(
+        "/dashboard/metabase-cards",
+        data={
+            "title": "Weekly Sales Snapshot",
+            "embed_url": "http://metabase.localhost:3000/public/dashboard/sales-card",
+            "height": "480",
+            "activity_interval": "month",
+        },
+        follow_redirects=True,
+    )
+    add_body = add_response.get_data(as_text=True)
+
+    assert add_response.status_code == 200
+    assert "Open Metabase" in add_body
+    assert "Metabase report card added." in add_body
+    assert "Weekly Sales Snapshot" in add_body
+    assert (
+        'src="http://metabase.localhost:3000/public/dashboard/sales-card"'
+        in add_body
+    )
+    assert "activity_interval=month" in (
+        add_response.request.path
+        + "?"
+        + add_response.request.query_string.decode()
+    )
+
+    with app.app_context():
+        preference = UserFilterPreference.query.filter_by(
+            user_id=user_id,
+            scope="dashboard.metabase_cards",
+        ).one()
+        card_id = preference.values["cards"][0]["id"]
+
+    update_response = client.post(
+        f"/dashboard/metabase-cards/{card_id}",
+        data={
+            "title": "Updated Snapshot",
+            "embed_url": "http://metabase.localhost:3000/public/question/sales-question",
+            "height": "560",
+            "activity_interval": "weekly",
+        },
+        follow_redirects=True,
+    )
+    update_body = update_response.get_data(as_text=True)
+
+    assert update_response.status_code == 200
+    assert "Metabase report card updated." in update_body
+    assert "Updated Snapshot" in update_body
+    assert 'value="Weekly Sales Snapshot"' not in update_body
+    assert (
+        'src="http://metabase.localhost:3000/public/question/sales-question"'
+        in update_body
+    )
+
+    delete_response = client.post(
+        f"/dashboard/metabase-cards/{card_id}/delete",
+        data={"activity_interval": "weekly"},
+        follow_redirects=True,
+    )
+    delete_body = delete_response.get_data(as_text=True)
+
+    assert delete_response.status_code == 200
+    assert "Metabase report card removed." in delete_body
+    assert "Updated Snapshot" not in delete_body
+    assert "No Metabase report cards saved yet." in delete_body
+
+
+def test_dashboard_metabase_card_rejects_external_origin(client, app):
+    app.config["METABASE_SITE_URL"] = "http://metabase.localhost:3000"
+
+    with app.app_context():
+        user = _create_dashboard_user("dashboard-cards-invalid@example.com")
+        grant_permissions(
+            user,
+            "dashboard.view",
+            "reports.metabase",
+            group_name="Dashboard Cards Invalid",
+            description="Can attempt invalid dashboard cards.",
+        )
+
+    login(client, "dashboard-cards-invalid@example.com", "pass")
+
+    response = client.post(
+        "/dashboard/metabase-cards",
+        data={
+            "title": "Bad Card",
+            "embed_url": "https://evil.example.com/public/dashboard/not-allowed",
+            "height": "480",
+        },
+        follow_redirects=True,
+    )
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Report links must use the configured Metabase site URL." in body
+    assert "Bad Card" not in body
+    assert "No Metabase report cards saved yet." in body
+
+
+def test_dashboard_metabase_card_routes_require_permission(client, app):
+    app.config["METABASE_SITE_URL"] = "http://metabase.localhost:3000"
+
+    with app.app_context():
+        user = _create_dashboard_user("dashboard-cards-basic@example.com")
+        grant_permissions(
+            user,
+            "dashboard.view",
+            group_name="Dashboard Cards Basic",
+            description="Can view dashboard without Metabase card access.",
+        )
+
+    login(client, "dashboard-cards-basic@example.com", "pass")
+
+    response = client.post(
+        "/dashboard/metabase-cards",
+        data={
+            "title": "Blocked Card",
+            "embed_url": "http://metabase.localhost:3000/public/dashboard/blocked",
+            "height": "480",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 403
 
 
 @pytest.mark.parametrize(

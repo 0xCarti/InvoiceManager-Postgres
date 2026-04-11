@@ -209,6 +209,18 @@ PERMISSION_DEFINITIONS_BY_CODE = {
 ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "main.home": requirement(any_of=("dashboard.view",)),
     "main.metabase_redirect": requirement(any_of=("reports.metabase",)),
+    "main.add_metabase_card": requirement(
+        any_of=("reports.metabase",),
+        all_of=("dashboard.view",),
+    ),
+    "main.update_metabase_card": requirement(
+        any_of=("reports.metabase",),
+        all_of=("dashboard.view",),
+    ),
+    "main.delete_metabase_card": requirement(
+        any_of=("reports.metabase",),
+        all_of=("dashboard.view",),
+    ),
     "transfer.view_transfers": requirement(any_of=("transfers.view",)),
     "transfer.add_transfer": requirement(any_of=("transfers.create",)),
     "transfer.ajax_add_transfer": requirement(any_of=("transfers.create",)),

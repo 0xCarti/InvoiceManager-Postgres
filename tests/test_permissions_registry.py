@@ -28,6 +28,14 @@ def test_user_can_access_endpoint_requires_matching_permission():
     assert user_can_access_endpoint(
         DummyUser("reports.metabase"), "main.metabase_redirect"
     )
+    assert not user_can_access_endpoint(
+        DummyUser("dashboard.view"), "main.add_metabase_card", "POST"
+    )
+    assert user_can_access_endpoint(
+        DummyUser("dashboard.view", "reports.metabase"),
+        "main.add_metabase_card",
+        "POST",
+    )
 
 
 def test_super_admin_bypasses_endpoint_permission_checks():

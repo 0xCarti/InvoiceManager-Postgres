@@ -5,7 +5,8 @@
 @media (max-width: 767.98px) {
     .dashboard-mobile-page .dashboard-header-actions,
     .dashboard-mobile-page .dashboard-meta-row,
-    .dashboard-mobile-page .dashboard-list-row {
+    .dashboard-mobile-page .dashboard-list-row,
+    .dashboard-mobile-page .dashboard-card-actions {
         display: flex;
         flex-wrap: wrap;
         align-items: flex-start !important;
@@ -13,7 +14,8 @@
 
     .dashboard-mobile-page .dashboard-header-actions > *,
     .dashboard-mobile-page .dashboard-meta-row > *,
-    .dashboard-mobile-page .dashboard-list-row > * {
+    .dashboard-mobile-page .dashboard-list-row > *,
+    .dashboard-mobile-page .dashboard-card-actions > * {
         min-width: 0;
     }
 
@@ -43,6 +45,18 @@
         gap: 0.15rem;
     }
 }
+
+.dashboard-metabase-frame {
+    width: 100%;
+    border: 0;
+    border-radius: 0.5rem;
+    background: #fff;
+}
+
+.dashboard-metabase-form-grid {
+    display: grid;
+    gap: 0.75rem;
+}
 </style>
 <div class="container mt-4 dashboard-mobile-page" data-dashboard-container data-user-id="{{ current_user.id if current_user.is_authenticated else 'guest' }}">
     {% set can_view_transfers = can_access_endpoint('transfer.view_transfers') %}
@@ -55,6 +69,7 @@
     {% set can_view_events = can_access_endpoint('event.view_events') %}
     {% set can_create_events = has_permission('events.create') %}
     {% set can_access_metabase = can_access_endpoint('main.metabase_redirect') %}
+    {% set selected_activity_interval = context.charts.weekly_activity.selected_interval %}
     <div class="d-flex align-items-center justify-content-between mb-4 page-header-stack">
         <div>
             <h1 class="mb-0">Dashboard</h1>
@@ -82,6 +97,171 @@
             {% endif %}
         </div>
     </div>
+
+    {% if can_access_metabase and context.metabase.configured %}
+    <div class="row g-3 mb-1">
+        <div class="col-12">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5 class="mb-0">Metabase report cards</h5>
+                        <p class="text-muted mb-0 small">Pin shared Metabase reports to this dashboard. Public, embed, dashboard, and question links from your configured Metabase site are supported.</p>
+                    </div>
+                    <span class="badge bg-light text-dark border">{{ context.metabase.cards | length }} saved</span>
+                </div>
+                <div class="card-body">
+                    <form method="post" action="{{ url_for('main.add_metabase_card') }}" class="dashboard-metabase-form-grid">
+                        {{ confirm_form.hidden_tag() }}
+                        <input type="hidden" name="activity_interval" value="{{ selected_activity_interval }}">
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label for="metabase-card-title" class="form-label">Card title</label>
+                                <input
+                                    id="metabase-card-title"
+                                    name="title"
+                                    type="text"
+                                    maxlength="120"
+                                    class="form-control"
+                                    placeholder="Weekly Sales Snapshot"
+                                    required
+                                >
+                            </div>
+                            <div class="col-md-5">
+                                <label for="metabase-card-url" class="form-label">Metabase report link</label>
+                                <input
+                                    id="metabase-card-url"
+                                    name="embed_url"
+                                    type="url"
+                                    maxlength="2000"
+                                    class="form-control"
+                                    placeholder="{{ context.metabase.site_url }}/public/dashboard/..."
+                                    required
+                                >
+                            </div>
+                            <div class="col-md-2">
+                                <label for="metabase-card-height" class="form-label">Height (px)</label>
+                                <input
+                                    id="metabase-card-height"
+                                    name="height"
+                                    type="number"
+                                    min="240"
+                                    max="1200"
+                                    step="10"
+                                    value="420"
+                                    class="form-control"
+                                    required
+                                >
+                            </div>
+                            <div class="col-md-1 d-flex align-items-end">
+                                <button type="submit" class="btn btn-primary w-100">Add</button>
+                            </div>
+                        </div>
+                    </form>
+                    {% if not context.metabase.cards %}
+                    <p class="text-muted mb-0 mt-3">No Metabase report cards saved yet.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% for card in context.metabase.cards %}
+        <div class="col-12 col-xl-6">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center gap-3">
+                    <div>
+                        <h5 class="mb-0">{{ card.title }}</h5>
+                        <p class="text-muted mb-0 small">{{ card.height }}px embed</p>
+                    </div>
+                    <div class="dashboard-card-actions d-flex align-items-center gap-2">
+                        <a
+                            class="btn btn-sm btn-outline-primary"
+                            href="{{ card.embed_url }}"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                        >
+                            Open report
+                        </a>
+                        <button
+                            class="btn btn-sm btn-outline-secondary"
+                            type="button"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#dashboard-card-metabase-{{ card.id }}"
+                            aria-expanded="true"
+                            aria-controls="dashboard-card-metabase-{{ card.id }}"
+                        >
+                            <span class="fw-semibold">Toggle</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="collapse show" id="dashboard-card-metabase-{{ card.id }}" data-dashboard-collapse>
+                    <div class="card-body">
+                        <iframe
+                            class="dashboard-metabase-frame"
+                            src="{{ card.embed_url }}"
+                            title="{{ card.title }}"
+                            loading="lazy"
+                            style="height: {{ card.height }}px;"
+                        ></iframe>
+                        <div class="border-top mt-3 pt-3">
+                            <form method="post" action="{{ url_for('main.update_metabase_card', card_id=card.id) }}" class="dashboard-metabase-form-grid">
+                                {{ confirm_form.hidden_tag() }}
+                                <input type="hidden" name="activity_interval" value="{{ selected_activity_interval }}">
+                                <div class="row g-3">
+                                    <div class="col-md-4">
+                                        <label for="metabase-card-title-{{ card.id }}" class="form-label">Card title</label>
+                                        <input
+                                            id="metabase-card-title-{{ card.id }}"
+                                            name="title"
+                                            type="text"
+                                            maxlength="120"
+                                            class="form-control"
+                                            value="{{ card.title }}"
+                                            required
+                                        >
+                                    </div>
+                                    <div class="col-md-5">
+                                        <label for="metabase-card-url-{{ card.id }}" class="form-label">Metabase report link</label>
+                                        <input
+                                            id="metabase-card-url-{{ card.id }}"
+                                            name="embed_url"
+                                            type="url"
+                                            maxlength="2000"
+                                            class="form-control"
+                                            value="{{ card.embed_url }}"
+                                            required
+                                        >
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label for="metabase-card-height-{{ card.id }}" class="form-label">Height (px)</label>
+                                        <input
+                                            id="metabase-card-height-{{ card.id }}"
+                                            name="height"
+                                            type="number"
+                                            min="240"
+                                            max="1200"
+                                            step="10"
+                                            class="form-control"
+                                            value="{{ card.height }}"
+                                            required
+                                        >
+                                    </div>
+                                    <div class="col-md-1 d-flex align-items-end">
+                                        <button type="submit" class="btn btn-outline-primary w-100">Save</button>
+                                    </div>
+                                </div>
+                            </form>
+                            <form method="post" action="{{ url_for('main.delete_metabase_card', card_id=card.id) }}" class="mt-3">
+                                {{ confirm_form.hidden_tag() }}
+                                <input type="hidden" name="activity_interval" value="{{ selected_activity_interval }}">
+                                <button type="submit" class="btn btn-outline-danger btn-sm">Remove card</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
 
     <div class="row g-3">
         {% if can_view_transfers %}
