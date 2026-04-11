@@ -14,9 +14,16 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEPS_DIR = REPO_ROOT / ".codex-pydeps311"
-if DEPS_DIR.exists():
-    sys.path.insert(0, str(DEPS_DIR))
+LOCAL_DEPENDENCY_DIRS = (
+    REPO_ROOT / ".codex-pydeps311",
+    REPO_ROOT / ".codex-pydeps",
+    REPO_ROOT / ".venv-codex" / "Lib" / "site-packages",
+    REPO_ROOT / ".venv-codex-test" / "Lib" / "site-packages",
+    REPO_ROOT / ".venv" / "Lib" / "site-packages",
+)
+for dependency_dir in LOCAL_DEPENDENCY_DIRS:
+    if dependency_dir.exists():
+        sys.path.insert(0, str(dependency_dir))
 sys.path.insert(0, str(REPO_ROOT))
 
 

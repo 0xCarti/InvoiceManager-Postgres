@@ -44,7 +44,7 @@ Additional production note:
 
 ## Installation
 
-You can perform the steps below manually or run one of the setup scripts provided in the repository. `setup.sh` works on Linux/macOS and `setup.ps1` works on Windows. Each script optionally accepts a repository URL and target directory, clones the project, installs dependencies, prepares a `.env` file, runs the database migrations, and seeds the default admin account and settings.
+Perform the steps below manually to install the application locally.
 
 
 1. **Clone the repository**
@@ -207,8 +207,6 @@ Use this sequence for **host/venv installs** (not Docker Compose):
    python seed_data.py
    ```
 
-> **Note:** `setup.sh` and `setup.ps1` already run these steps. Only run them manually if you performed installation yourself.
->
 > For Docker Compose flows, use the canonical Compose startup order in [Canonical Startup Order (Docker Compose)](#canonical-startup-order-docker-compose).
 
 ## Run the Application
@@ -329,7 +327,7 @@ your host (virtualenv) or with Docker Compose.
 Migration execution points (single reference list):
 
 1. **Container startup**: `entrypoint.sh` runs `flask db upgrade` before Gunicorn starts.
-2. **Host setup scripts**: `setup.sh` and `setup.ps1` run `python -m flask --app run.py db upgrade`.
+2. **Manual host migration**: `python -m flask --app run.py db upgrade`.
 3. **Manual Compose migration**: `./scripts/docker_migrate.sh` (preferred) or `docker compose run --rm web flask db upgrade`.
 
 Compose reminder: keep `DATABASE_HOST=postgres` (service DNS), and use

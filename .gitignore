@@ -18,6 +18,7 @@ backups/*.db
 .venv-codex/
 .venv-codex-test/
 .codex-pydeps/
+.codex-pydeps311/
 .codex-tmp/
 .pydeps-test/
 .tmp-pip/
