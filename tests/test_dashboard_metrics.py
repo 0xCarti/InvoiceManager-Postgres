@@ -24,6 +24,7 @@ from app.models import (
     Vendor,
 )
 from app.services.dashboard_metrics import weekly_transfer_purchase_activity
+from app.utils.dashboard_cards import save_dashboard_metabase_cards
 from tests.permission_helpers import grant_permissions
 from tests.utils import login
 
@@ -413,6 +414,8 @@ def test_dashboard_metabase_cards_can_be_added_updated_and_removed(client, app):
             user,
             "dashboard.view",
             "reports.metabase",
+            "dashboard.view_cards",
+            "dashboard.manage_cards",
             group_name="Dashboard Cards",
             description="Can manage dashboard cards.",
         )
@@ -433,6 +436,10 @@ def test_dashboard_metabase_cards_can_be_added_updated_and_removed(client, app):
 
     assert add_response.status_code == 200
     assert "Open Metabase" in add_body
+    assert "Add Dashboard Card" in add_body
+    assert "Dashboard Settings" in add_body
+    assert 'id="addMetabaseCardModal"' in add_body
+    assert 'id="dashboardCardSettingsModal"' in add_body
     assert "Metabase report card added." in add_body
     assert "Weekly Sales Snapshot" in add_body
     assert (
@@ -459,6 +466,7 @@ def test_dashboard_metabase_cards_can_be_added_updated_and_removed(client, app):
             "embed_url": "http://metabase.localhost:3000/public/question/sales-question",
             "height": "560",
             "activity_interval": "weekly",
+            "visible": "true",
         },
         follow_redirects=True,
     )
@@ -494,7 +502,8 @@ def test_dashboard_metabase_card_rejects_external_origin(client, app):
         grant_permissions(
             user,
             "dashboard.view",
-            "reports.metabase",
+            "dashboard.view_cards",
+            "dashboard.manage_cards",
             group_name="Dashboard Cards Invalid",
             description="Can attempt invalid dashboard cards.",
         )
@@ -541,8 +550,104 @@ def test_dashboard_metabase_card_routes_require_permission(client, app):
         },
         follow_redirects=False,
     )
+    settings_response = client.post(
+        "/dashboard/metabase-cards/settings",
+        data={"visible_card_ids": "blocked"},
+        follow_redirects=False,
+    )
 
     assert response.status_code == 403
+    assert settings_response.status_code == 403
+
+
+def test_dashboard_card_management_buttons_require_manage_permission(client, app):
+    app.config["METABASE_SITE_URL"] = "http://metabase.localhost:3000"
+
+    with app.app_context():
+        user = _create_dashboard_user("dashboard-cards-view-only@example.com")
+        grant_permissions(
+            user,
+            "dashboard.view",
+            "dashboard.view_cards",
+            group_name="Dashboard Cards View Only",
+            description="Can view dashboard cards without managing them.",
+        )
+        save_dashboard_metabase_cards(
+            user,
+            [
+                {
+                    "id": "view-only-card",
+                    "title": "Ops Snapshot",
+                    "embed_url": "http://metabase.localhost:3000/public/dashboard/view-only",
+                    "height": 420,
+                    "visible": True,
+                }
+            ],
+        )
+
+    login(client, "dashboard-cards-view-only@example.com", "pass")
+    response = client.get("/", follow_redirects=True)
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Ops Snapshot" in body
+    assert 'src="http://metabase.localhost:3000/public/dashboard/view-only"' in body
+    assert "Add Dashboard Card" not in body
+    assert "Dashboard Settings" not in body
+    assert "Open Metabase" not in body
+
+
+def test_dashboard_card_visibility_settings_control_rendered_cards(client, app):
+    app.config["METABASE_SITE_URL"] = "http://metabase.localhost:3000"
+
+    with app.app_context():
+        user = _create_dashboard_user("dashboard-card-settings@example.com")
+        grant_permissions(
+            user,
+            "dashboard.view",
+            "dashboard.view_cards",
+            "dashboard.manage_cards",
+            group_name="Dashboard Cards Settings",
+            description="Can manage dashboard card visibility.",
+        )
+        save_dashboard_metabase_cards(
+            user,
+            [
+                {
+                    "id": "settings-card",
+                    "title": "Settings Snapshot",
+                    "embed_url": "http://metabase.localhost:3000/public/dashboard/settings-card",
+                    "height": 420,
+                    "visible": True,
+                }
+            ],
+        )
+
+    login(client, "dashboard-card-settings@example.com", "pass")
+
+    hide_response = client.post(
+        "/dashboard/metabase-cards/settings",
+        data={},
+        follow_redirects=True,
+    )
+    hide_body = hide_response.get_data(as_text=True)
+
+    assert hide_response.status_code == 200
+    assert "Dashboard card visibility updated." in hide_body
+    assert "No Metabase cards are currently selected to show on this dashboard." in hide_body
+    assert 'src="http://metabase.localhost:3000/public/dashboard/settings-card"' not in hide_body
+    assert 'id="dashboardCardSettingsModal"' in hide_body
+
+    show_response = client.post(
+        "/dashboard/metabase-cards/settings",
+        data={"visible_card_ids": "settings-card"},
+        follow_redirects=True,
+    )
+    show_body = show_response.get_data(as_text=True)
+
+    assert show_response.status_code == 200
+    assert "Dashboard card visibility updated." in show_body
+    assert 'src="http://metabase.localhost:3000/public/dashboard/settings-card"' in show_body
 
 
 @pytest.mark.parametrize(

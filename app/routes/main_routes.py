@@ -16,6 +16,7 @@ from app.utils.dashboard_cards import (
     MAX_DASHBOARD_METABASE_CARDS,
     load_dashboard_metabase_cards,
     save_dashboard_metabase_cards,
+    set_dashboard_metabase_card_visibility,
     validate_metabase_card_input,
 )
 
@@ -72,6 +73,9 @@ def _dashboard_card_redirect() -> str:
 
 def _persist_metabase_card_change(card_id: str | None = None) -> None:
     cards = load_dashboard_metabase_cards(current_user)
+    visible_value = True
+    if card_id is not None or "visible" in request.form:
+        visible_value = "visible" in request.form
 
     if card_id is None and len(cards) >= MAX_DASHBOARD_METABASE_CARDS:
         raise ValueError(
@@ -84,6 +88,7 @@ def _persist_metabase_card_change(card_id: str | None = None) -> None:
         height=request.form.get("height"),
         metabase_site_url=current_app.config.get("METABASE_SITE_URL"),
         card_id=card_id,
+        visible=visible_value,
     )
 
     if card_id is None:
@@ -140,4 +145,28 @@ def delete_metabase_card(card_id):
 
     save_dashboard_metabase_cards(current_user, updated_cards)
     flash("Metabase report card removed.", "success")
+    return redirect(_dashboard_card_redirect())
+
+
+@main.route("/dashboard/metabase-cards/settings", methods=["POST"])
+@login_required
+def update_metabase_card_settings():
+    """Update which Metabase cards are shown on the dashboard."""
+
+    cards = load_dashboard_metabase_cards(current_user)
+    if not cards:
+        flash("No Metabase report cards are saved for this user.", "warning")
+        return redirect(_dashboard_card_redirect())
+
+    visible_card_ids = {
+        value.strip()
+        for value in request.form.getlist("visible_card_ids")
+        if str(value).strip()
+    }
+    known_card_ids = {card["id"] for card in cards}
+    set_dashboard_metabase_card_visibility(
+        current_user,
+        visible_card_ids & known_card_ids,
+    )
+    flash("Dashboard card visibility updated.", "success")
     return redirect(_dashboard_card_redirect())

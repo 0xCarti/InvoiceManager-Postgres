@@ -21,7 +21,10 @@ from app.models import (
 )
 from app.services.communication_service import active_bulletin_receipts_for_user
 from app.services.event_service import current_user_today, event_schedule
-from app.utils.dashboard_cards import cards_visible_on_dashboard
+from app.utils.dashboard_cards import (
+    cards_visible_on_dashboard,
+    load_dashboard_metabase_cards,
+)
 
 
 def _coalesce_scalar(query) -> float:
@@ -221,6 +224,11 @@ def dashboard_context(activity_interval: Optional[str] = None) -> Dict[str, Any]
     today = current_user_today()
     bulletin_receipts = active_bulletin_receipts_for_user(current_user)
     metabase_site_url = (current_app.config.get("METABASE_SITE_URL") or "").strip()
+    saved_metabase_cards = load_dashboard_metabase_cards(current_user)
+    visible_metabase_cards = cards_visible_on_dashboard(
+        current_user,
+        metabase_site_url=metabase_site_url,
+    )
 
     events = event_summary(today)
     events["schedule"] = event_schedule(today)
@@ -256,10 +264,10 @@ def dashboard_context(activity_interval: Optional[str] = None) -> Dict[str, Any]
         "metabase": {
             "configured": bool(metabase_site_url),
             "site_url": metabase_site_url,
-            "cards": cards_visible_on_dashboard(
-                current_user,
-                metabase_site_url=metabase_site_url,
-            ),
+            "cards": visible_metabase_cards,
+            "saved_cards": saved_metabase_cards,
+            "saved_count": len(saved_metabase_cards),
+            "visible_count": len(visible_metabase_cards),
         },
         "charts": {
             "weekly_activity": weekly_activity,

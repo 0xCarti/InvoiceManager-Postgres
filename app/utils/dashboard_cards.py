@@ -55,6 +55,20 @@ def _coerce_card_height(raw_value: Any) -> int:
     return max(MIN_METABASE_CARD_HEIGHT, min(MAX_METABASE_CARD_HEIGHT, height))
 
 
+def _coerce_card_visible(raw_value: Any) -> bool:
+    if isinstance(raw_value, bool):
+        return raw_value
+    if raw_value is None:
+        return True
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().lower()
+        if normalized in {"0", "false", "off", "no"}:
+            return False
+        if normalized in {"1", "true", "on", "yes"}:
+            return True
+    return bool(raw_value)
+
+
 def _stored_cards_preference(user: Any) -> UserFilterPreference | None:
     if not _is_authenticated(user):
         return None
@@ -91,6 +105,7 @@ def load_dashboard_metabase_cards(user: Any) -> list[dict[str, Any]]:
                 "title": title[:MAX_METABASE_CARD_TITLE_LENGTH],
                 "embed_url": embed_url[:MAX_METABASE_CARD_URL_LENGTH],
                 "height": _coerce_card_height(raw_card.get("height")),
+                "visible": _coerce_card_visible(raw_card.get("visible")),
             }
         )
 
@@ -104,6 +119,7 @@ def validate_metabase_card_input(
     height: Any,
     metabase_site_url: str | None,
     card_id: str | None = None,
+    visible: Any = True,
 ) -> dict[str, Any]:
     """Validate raw form input for a Metabase dashboard card."""
 
@@ -157,6 +173,7 @@ def validate_metabase_card_input(
         "title": normalized_title,
         "embed_url": normalized_url,
         "height": normalized_height,
+        "visible": _coerce_card_visible(visible),
     }
 
 
@@ -173,6 +190,8 @@ def cards_visible_on_dashboard(
 
     visible_cards: list[dict[str, Any]] = []
     for card in load_dashboard_metabase_cards(user):
+        if not card.get("visible", True):
+            continue
         parsed = urlsplit(card["embed_url"])
         if f"{parsed.scheme}://{parsed.netloc}" != configured_origin:
             continue
@@ -205,3 +224,15 @@ def save_dashboard_metabase_cards(
 
     db.session.commit()
     return cards
+
+
+def set_dashboard_metabase_card_visibility(
+    user: Any,
+    visible_card_ids: set[str],
+) -> list[dict[str, Any]]:
+    """Persist per-card dashboard visibility for ``user``."""
+
+    cards = load_dashboard_metabase_cards(user)
+    for card in cards:
+        card["visible"] = card["id"] in visible_card_ids
+    return save_dashboard_metabase_cards(user, cards)

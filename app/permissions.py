@@ -69,6 +69,18 @@ PERMISSION_CATEGORY_LABELS: dict[str, str] = {
 
 PERMISSION_DEFINITIONS: tuple[PermissionDefinition, ...] = (
     _perm("dashboard.view", "dashboard", "View Dashboard", "View the main dashboard."),
+    _perm(
+        "dashboard.view_cards",
+        "dashboard",
+        "View Dashboard Cards",
+        "View embedded Metabase dashboard cards.",
+    ),
+    _perm(
+        "dashboard.manage_cards",
+        "dashboard",
+        "Manage Dashboard Cards",
+        "Add, update, remove, and configure embedded dashboard cards.",
+    ),
     _perm("transfers.view", "transfers", "View Transfers", "View transfers and transfer details."),
     _perm("transfers.create", "transfers", "Create Transfers", "Create new transfers."),
     _perm("transfers.edit", "transfers", "Edit Transfers", "Edit existing transfers."),
@@ -210,16 +222,20 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "main.home": requirement(any_of=("dashboard.view",)),
     "main.metabase_redirect": requirement(any_of=("reports.metabase",)),
     "main.add_metabase_card": requirement(
-        any_of=("reports.metabase",),
-        all_of=("dashboard.view",),
+        any_of=("dashboard.manage_cards",),
+        all_of=("dashboard.view", "dashboard.view_cards"),
     ),
     "main.update_metabase_card": requirement(
-        any_of=("reports.metabase",),
-        all_of=("dashboard.view",),
+        any_of=("dashboard.manage_cards",),
+        all_of=("dashboard.view", "dashboard.view_cards"),
     ),
     "main.delete_metabase_card": requirement(
-        any_of=("reports.metabase",),
-        all_of=("dashboard.view",),
+        any_of=("dashboard.manage_cards",),
+        all_of=("dashboard.view", "dashboard.view_cards"),
+    ),
+    "main.update_metabase_card_settings": requirement(
+        any_of=("dashboard.manage_cards",),
+        all_of=("dashboard.view", "dashboard.view_cards"),
     ),
     "transfer.view_transfers": requirement(any_of=("transfers.view",)),
     "transfer.add_transfer": requirement(any_of=("transfers.create",)),

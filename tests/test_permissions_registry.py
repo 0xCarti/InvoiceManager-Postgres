@@ -32,8 +32,21 @@ def test_user_can_access_endpoint_requires_matching_permission():
         DummyUser("dashboard.view"), "main.add_metabase_card", "POST"
     )
     assert user_can_access_endpoint(
-        DummyUser("dashboard.view", "reports.metabase"),
+        DummyUser(
+            "dashboard.view",
+            "dashboard.view_cards",
+            "dashboard.manage_cards",
+        ),
         "main.add_metabase_card",
+        "POST",
+    )
+    assert user_can_access_endpoint(
+        DummyUser(
+            "dashboard.view",
+            "dashboard.view_cards",
+            "dashboard.manage_cards",
+        ),
+        "main.update_metabase_card_settings",
         "POST",
     )
 
