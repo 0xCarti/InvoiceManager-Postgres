@@ -50,11 +50,18 @@ jobs:
 
           import psycopg
 
-          dsn = os.environ["DATABASE_URL"]
+          connect_kwargs = {
+              "host": os.environ["DATABASE_HOST"],
+              "port": int(os.environ["DATABASE_PORT"]),
+              "user": os.environ["DATABASE_USER"],
+              "password": os.environ["DATABASE_PASSWORD"],
+              "dbname": os.environ["DATABASE_NAME"],
+              "connect_timeout": 3,
+          }
           last_error = None
           for attempt in range(1, 31):
               try:
-                  with psycopg.connect(dsn, connect_timeout=3) as conn:
+                  with psycopg.connect(**connect_kwargs) as conn:
                       with conn.cursor() as cur:
                           cur.execute("SELECT 1")
                           cur.fetchone()
