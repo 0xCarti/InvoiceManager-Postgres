@@ -283,15 +283,18 @@
             align-items: stretch;
             padding-top: 0.9rem;
             min-height: 0;
-            overflow-y: auto;
-            overscroll-behavior: contain;
-            scrollbar-gutter: stable;
-            -webkit-overflow-scrolling: touch;
+            overflow: hidden;
         }
 
         #navbarNav .offcanvas-body .sidebar-primary-nav {
             flex: 1 1 auto;
             min-height: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+            overscroll-behavior: contain;
+            scrollbar-gutter: stable;
+            -webkit-overflow-scrolling: touch;
+            padding-bottom: 0.75rem;
         }
 
         #navbarNav .offcanvas-body .sidebar-primary-nav .sidebar-search-row {
@@ -303,9 +306,14 @@
         }
 
         #navbarNav .offcanvas-body .sidebar-secondary-nav {
+            flex: 0 0 auto;
             margin-top: 0.75rem;
             padding-top: 0.6rem;
+            padding-bottom: max(0.35rem, env(safe-area-inset-bottom, 0px));
             border-top: 1px solid var(--sidebar-separator);
+            background-color: var(--sidebar-bg);
+            position: relative;
+            z-index: 1;
         }
 
         .navbar-nav.flex-row .nav-item {

@@ -135,22 +135,6 @@ def _get_enabled_import_vendors():
             return None
         return normalized.upper()
 
-    enabled_labels = {
-        normalized
-        for normalized in (
-            _normalize_label(name) for name in Setting.get_enabled_purchase_import_vendors()
-        )
-        if normalized
-    }
-    if not enabled_labels:
-        enabled_labels = {
-            normalized
-            for normalized in (
-                _normalize_label(name) for name in Setting.DEFAULT_PURCHASE_IMPORT_VENDORS
-            )
-            if normalized
-        }
-
     _CORPORATE_SUFFIXES = {
         "INC",
         "INC.",
@@ -179,6 +163,31 @@ def _get_enabled_import_vendors():
         while stripped and stripped[-1] in _CORPORATE_SUFFIXES:
             stripped.pop()
         return stripped
+
+    def _label_variants(label: str | None) -> set[str]:
+        normalized = _normalize_label(label)
+        if not normalized:
+            return set()
+
+        variants = {normalized}
+        parts = _tokenize_parts(label)
+        if parts:
+            variants.add(" ".join(parts))
+            stripped = _strip_corporate_suffixes(parts)
+            if stripped:
+                variants.add(" ".join(stripped))
+
+        return variants
+
+    enabled_names = Setting.get_enabled_purchase_import_vendors()
+    if not enabled_names:
+        enabled_names = Setting.DEFAULT_PURCHASE_IMPORT_VENDORS
+
+    enabled_labels = {
+        variant
+        for name in enabled_names
+        for variant in _label_variants(name)
+    }
 
     def _vendor_labels(vendor: Vendor) -> set[str]:
         labels: set[str] = set()

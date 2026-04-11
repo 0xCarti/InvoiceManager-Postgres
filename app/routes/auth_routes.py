@@ -2264,13 +2264,12 @@ def settings():
                 can_manage_settings=can_manage_settings,
             )
 
+        import_vendor_fields = list(form.iter_purchase_import_vendors())
         enabled_import_vendors = [
-            label
-            for label, field in form.iter_purchase_import_vendors()
-            if field.data
+            label for label, field in import_vendor_fields if field.data
         ]
         if not enabled_import_vendors:
-            form.enable_sysco_imports.errors.append(
+            import_vendor_fields[0][1].errors.append(
                 "Select at least one vendor to enable for imports."
             )
             return render_template(

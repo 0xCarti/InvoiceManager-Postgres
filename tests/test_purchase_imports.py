@@ -1,7 +1,11 @@
+import datetime
 import io
+import re
+import zipfile
 from pathlib import Path
 
 import pytest
+from openpyxl import Workbook
 from werkzeug.datastructures import FileStorage
 
 from app.models import Vendor
@@ -26,6 +30,86 @@ def _make_central_supply_file(csv_text: str) -> FileStorage:
 
 def _make_central_supply_vendor() -> Vendor:
     return Vendor(first_name="Central", last_name="Supply")
+
+
+def _make_manitoba_vendor() -> Vendor:
+    return Vendor(first_name="Manitoba", last_name="Liquor & Lotteries")
+
+
+def _make_manitoba_file(*, malformed_dimension: bool = False) -> FileStorage:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(
+        [
+            "Item Number",
+            "Order Quantity",
+            "Product Description",
+            "Vol/Case Size",
+            "Unit Price",
+            "Extended Price",
+            "Invoice No.",
+            "Order No.",
+            "Original Order No",
+            "Invoice Date",
+        ]
+    )
+    sheet.append(
+        [
+            18669,
+            15,
+            "COORS ORIGINAL 24/355C",
+            "8520 ml x 1",
+            46.57,
+            698.55,
+            7767932,
+            2677332,
+            "",
+            datetime.date(2026, 4, 7),
+        ]
+    )
+    sheet.append([None, None, "Container Deposit", None, None, 36.00])
+    sheet.append(
+        [
+            20406,
+            8,
+            "OLD STYLE PILSNER 58.67L KEG",
+            "58.67 L x 1",
+            219.99,
+            1759.92,
+            7767932,
+            2677332,
+            "",
+            datetime.date(2026, 4, 7),
+        ]
+    )
+
+    stream = io.BytesIO()
+    workbook.save(stream)
+    workbook.close()
+    payload = stream.getvalue()
+
+    if malformed_dimension:
+        source = io.BytesIO(payload)
+        rewritten = io.BytesIO()
+        with zipfile.ZipFile(source) as archive, zipfile.ZipFile(
+            rewritten, "w"
+        ) as target:
+            for info in archive.infolist():
+                content = archive.read(info.filename)
+                if info.filename == "xl/worksheets/sheet1.xml":
+                    content = re.sub(
+                        br'<dimension ref="[^"]+"',
+                        b'<dimension ref="A1:A1"',
+                        content,
+                        count=1,
+                    )
+                target.writestr(info, content)
+        payload = rewritten.getvalue()
+
+    return FileStorage(
+        stream=io.BytesIO(payload),
+        filename="manitoba_liquor.xlsx",
+    )
 
 
 def test_parse_pratts_csv_success():
@@ -130,3 +214,50 @@ CS-004,Delta Item,4,2.00,8.00
     assert only_item.vendor_sku == "CS-004"
     assert only_item.quantity == 4
     assert parsed.expected_total == 8.0
+
+
+def test_parse_manitoba_liquor_xlsx_success_with_malformed_dimension():
+    parsed = parse_purchase_order_csv(
+        _make_manitoba_file(malformed_dimension=True),
+        _make_manitoba_vendor(),
+    )
+
+    assert len(parsed.items) == 2
+    assert parsed.order_number == "2677332"
+    assert parsed.order_date == datetime.date(2026, 4, 7)
+    assert parsed.expected_total == pytest.approx(2494.47)
+
+    first: ParsedPurchaseLine = parsed.items[0]
+    assert first.vendor_sku == "18669"
+    assert first.vendor_description == "COORS ORIGINAL 24/355C"
+    assert first.pack_size == "8520 ml x 1"
+    assert first.quantity == 15
+    assert first.unit_cost == pytest.approx(46.57)
+
+    second: ParsedPurchaseLine = parsed.items[1]
+    assert second.vendor_sku == "20406"
+    assert second.vendor_description == "OLD STYLE PILSNER 58.67L KEG"
+    assert second.quantity == 8
+    assert second.unit_cost == pytest.approx(219.99)
+
+
+def test_parse_manitoba_liquor_xlsx_missing_headers():
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Item Number", "Product Description", "Extended Price"])
+    sheet.append([18669, "COORS ORIGINAL 24/355C", 698.55])
+
+    stream = io.BytesIO()
+    workbook.save(stream)
+    workbook.close()
+
+    with pytest.raises(CSVImportError) as excinfo:
+        parse_purchase_order_csv(
+            FileStorage(stream=io.BytesIO(stream.getvalue()), filename="bad.xlsx"),
+            _make_manitoba_vendor(),
+        )
+
+    assert "Missing required Manitoba Liquor & Lotteries columns" in str(
+        excinfo.value
+    )
+    assert "quantity" in str(excinfo.value)

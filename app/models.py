@@ -2395,7 +2395,12 @@ class Setting(db.Model):
     RECEIVE_LOCATION_SETTING = "PURCHASE_RECEIVE_LOCATION_DEFAULTS"
     PURCHASE_IMPORT_VENDORS = "PURCHASE_IMPORT_VENDORS"
     MENU_FEED_API_TOKEN = "MENU_FEED_API_TOKEN"
-    DEFAULT_PURCHASE_IMPORT_VENDORS = ["SYSCO", "PRATTS", "CENTRAL SUPPLY"]
+    DEFAULT_PURCHASE_IMPORT_VENDORS = [
+        "SYSCO",
+        "PRATTS",
+        "CENTRAL SUPPLY",
+        "MANITOBA LIQUOR & LOTTERIES",
+    ]
 
     @classmethod
     def get_receive_location_defaults(cls) -> dict[str, int]:

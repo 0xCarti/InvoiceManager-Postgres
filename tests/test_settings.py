@@ -31,6 +31,7 @@ def test_admin_can_update_settings(client, app):
                 "auto_backup_interval_unit": "week",
                 "max_backups": "5",
                 "enable_sysco_imports": "y",
+                "enable_manitoba_liquor_imports": "y",
                 "convert_ounce": "gram",
                 "convert_gram": "ounce",
                 "convert_each": "each",
@@ -67,6 +68,7 @@ def test_admin_can_update_settings(client, app):
         conversion_setting = Setting.query.filter_by(
             name="BASE_UNIT_CONVERSIONS"
         ).first()
+        enabled_import_vendors = Setting.get_enabled_purchase_import_vendors()
         mapping = parse_conversion_setting(conversion_setting.value)
         assert mapping == {
             "ounce": "gram",
@@ -74,6 +76,10 @@ def test_admin_can_update_settings(client, app):
             "each": "each",
             "millilitre": "ounce",
         }
+        assert enabled_import_vendors == [
+            "SYSCO",
+            "MANITOBA LIQUOR & LOTTERIES",
+        ]
         assert app.config["AUTO_BACKUP_ENABLED"] is True
         assert app.config["AUTO_BACKUP_INTERVAL_VALUE"] == 2
         assert app.config["AUTO_BACKUP_INTERVAL_UNIT"] == "week"
