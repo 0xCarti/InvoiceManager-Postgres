@@ -16,7 +16,7 @@
                 <select class="form-select" id="status" name="status">
                     <option value="">All statuses</option>
                     {% for status in available_statuses %}
-                    <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status|replace('_', ' ')|title }}</option>
+                    <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status|replace('_', ' ') }}</option>
                     {% endfor %}
                 </select>
             </div>
@@ -62,7 +62,7 @@
                             <span class="text-muted">Unknown</span>
                             {% endif %}
                         </td>
-                        <td><span class="badge bg-light text-dark border">{{ import.status|replace('_', ' ')|title }}</span></td>
+                        <td><span class="badge bg-light text-dark border text-capitalize">{{ import.status|replace('_', ' ') }}</span></td>
                         <td>{{ import.source_provider or 'Unknown' }}</td>
                         <td class="text-break">{{ import.attachment_filename }}</td>
                         <td class="text-end">

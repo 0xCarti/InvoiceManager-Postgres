@@ -64,6 +64,11 @@
     align-items: flex-start;
     gap: 0.75rem;
 }
+
+.dashboard-order-field {
+    width: 5.5rem;
+    flex-shrink: 0;
+}
 </style>
 <div class="container mt-4 dashboard-mobile-page" data-dashboard-container data-user-id="{{ current_user.id if current_user.is_authenticated else 'guest' }}">
     {% set can_view_transfers = can_access_endpoint('transfer.view_transfers') %}
@@ -205,6 +210,9 @@
     </div>
     {% endif %}
 
+    {% include "_dashboard_cards.html" %}
+
+    {% if false %}
     {% if
         (can_view_transfers and section_visibility['transfers_summary'])
         or (can_view_purchase_orders and section_visibility['purchase_orders_summary'])
@@ -745,6 +753,8 @@
     </div>
     {% endif %}
 
+    {% endif %}
+
     {% if can_manage_metabase_cards %}
     <div
         class="modal fade"
@@ -850,7 +860,7 @@
                         <input type="hidden" name="activity_interval" value="{{ selected_activity_interval }}">
                         <div class="mb-4">
                             <h6 class="mb-2">Dashboard sections</h6>
-                            <p class="text-muted small mb-3">Choose which built-in dashboard cards appear for you.</p>
+                            <p class="text-muted small mb-3">Choose which built-in dashboard cards appear for you and set the order they use.</p>
                             <div class="list-group dashboard-metabase-settings-list mb-3">
                                 {% for section in context.layout.sections %}
                                 <label class="list-group-item list-group-item-action" for="visible-section-{{ section.id }}">
@@ -868,6 +878,17 @@
                                         <div class="fw-semibold">{{ section.label }}</div>
                                         <div class="small text-muted">{{ section.description }}</div>
                                     </div>
+                                    <div class="dashboard-order-field">
+                                        <label class="form-label form-label-sm small text-muted mb-1" for="display-order-section-{{ section.id }}">Order</label>
+                                        <input
+                                            id="display-order-section-{{ section.id }}"
+                                            name="display_order_section_{{ section.id }}"
+                                            type="number"
+                                            min="1"
+                                            class="form-control form-control-sm"
+                                            value="{{ section.display_order }}"
+                                        >
+                                    </div>
                                 </label>
                                 {% endfor %}
                             </div>
@@ -876,7 +897,7 @@
                         {% if context.metabase.saved_cards %}
                         <div class="border-top pt-4 mb-4">
                             <h6 class="mb-2">Metabase cards</h6>
-                            <p class="text-muted small mb-3">Choose which saved Metabase cards appear on your dashboard.</p>
+                            <p class="text-muted small mb-3">Choose which saved Metabase cards appear on your dashboard and set the order they use.</p>
                             <div class="list-group dashboard-metabase-settings-list mb-3">
                                 {% for card in context.metabase.saved_cards %}
                                 <label class="list-group-item list-group-item-action" for="visible-card-{{ card.id }}">
@@ -894,7 +915,18 @@
                                         <div class="fw-semibold">{{ card.title }}</div>
                                         <div class="small text-muted text-break">{{ card.embed_url }}</div>
                                     </div>
-                                    <span class="badge bg-light text-dark border">{{ card.height }}px</span>
+                                    <div class="dashboard-order-field">
+                                        <label class="form-label form-label-sm small text-muted mb-1" for="display-order-card-{{ card.id }}">Order</label>
+                                        <input
+                                            id="display-order-card-{{ card.id }}"
+                                            name="display_order_card_{{ card.id }}"
+                                            type="number"
+                                            min="1"
+                                            class="form-control form-control-sm mb-2"
+                                            value="{{ card.display_order }}"
+                                        >
+                                        <span class="badge bg-light text-dark border w-100">{{ card.height }}px</span>
+                                    </div>
                                 </label>
                                 {% endfor %}
                             </div>

@@ -11,6 +11,8 @@ from pydyf import _to_bytes as _pdf_to_bytes
 from pypdf import PdfReader, PdfWriter
 
 PDFPage = Tuple[str, Mapping[str, object]]
+HTML = None
+CSS = None
 _WEASYPRINT_HTML = None
 _WEASYPRINT_CSS = None
 _WEASYPRINT_IMPORT_ERROR = None
@@ -65,7 +67,10 @@ if not hasattr(PDFStream, "text_matrix"):
 def _load_weasyprint():
     """Import WeasyPrint on demand so app startup doesn't require native libs."""
 
-    global _WEASYPRINT_HTML, _WEASYPRINT_CSS, _WEASYPRINT_IMPORT_ERROR
+    global HTML, CSS, _WEASYPRINT_HTML, _WEASYPRINT_CSS, _WEASYPRINT_IMPORT_ERROR
+
+    if HTML is not None and CSS is not None:
+        return HTML, CSS
 
     if _WEASYPRINT_HTML is not None and _WEASYPRINT_CSS is not None:
         return _WEASYPRINT_HTML, _WEASYPRINT_CSS
@@ -93,7 +98,7 @@ def _load_weasyprint():
 
     _WEASYPRINT_HTML = HTML
     _WEASYPRINT_CSS = CSS
-    return _WEASYPRINT_HTML, _WEASYPRINT_CSS
+    return HTML, CSS
 
 
 def _render_html_to_pdf(

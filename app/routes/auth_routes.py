@@ -765,6 +765,16 @@ def reset_token(token):
 @login_required
 def profile():
     """Allow the current user to change their password."""
+    current_user_obj = current_user._get_current_object()
+    db.session.expire(current_user_obj, ["active"])
+    if not current_user_obj.active:
+        logout_user()
+        flash(
+            "Your account is no longer active. Please contact an administrator.",
+            "warning",
+        )
+        return redirect(url_for("auth.login"))
+
     form = ChangePasswordForm()
     tz_form = TimezoneForm(timezone=current_user.timezone or "")
     notif_form = NotificationForm(
@@ -3588,9 +3598,6 @@ def sales_import_detail(import_id: int):
                 location_id=selected_location_id,
             )
         )
-
-    if _apply_auto_mappings():
-        db.session.commit()
 
     issue_state = _refresh_sales_import_mapping_status(sales_import)
     if issue_state["status_changed"]:

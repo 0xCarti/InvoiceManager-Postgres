@@ -295,6 +295,7 @@ def _create_invoice_from_form(form):
     )
     product_lookup = {p.name: p for p in products}
     created_line_count = 0
+    line_items_to_log = []
 
     for entry in parsed_entries:
         line_type = entry.get("line_type", "catalog")
@@ -320,6 +321,7 @@ def _create_invoice_from_form(form):
             )
             db.session.add(invoice_product)
             created_line_count += 1
+            line_items_to_log.append({"product_name": product_name, "quantity": quantity})
             continue
 
         override_gst = entry["override_gst"]
@@ -371,6 +373,7 @@ def _create_invoice_from_form(form):
             )
             db.session.add(invoice_product)
             created_line_count += 1
+            line_items_to_log.append({"product_id": product.id, "quantity": quantity})
 
             product.quantity = (product.quantity or 0) - quantity
 
@@ -396,10 +399,7 @@ def _create_invoice_from_form(form):
             extra={
                 "invoice_id": invoice.id,
                 "customer_id": customer.id,
-                "line_items": [
-                    {"product_id": item.product_id, "quantity": item.quantity}
-                    for item in invoice.products
-                ],
+                "line_items": line_items_to_log,
             },
         )
         raise InvoiceCreationError(

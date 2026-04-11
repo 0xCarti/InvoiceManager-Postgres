@@ -130,9 +130,7 @@
                                 </dd>
                             </dl>
                             <div class="vstack gap-2">
-                                <a class="btn btn-sm btn-outline-primary w-100" href="{{ url_for('admin.vendor_item_aliases', alias_id=alias.id) }}">
-                                    {{ 'Edit' if can_manage_vendor_item_aliases else 'View' }}
-                                </a>
+                                <a class="btn btn-sm btn-outline-primary w-100" href="{{ url_for('admin.vendor_item_aliases', alias_id=alias.id) }}">{{ 'Edit' if can_manage_vendor_item_aliases else 'View' }}</a>
                                 {% if can_manage_vendor_item_aliases %}
                                 <form method="post" action="{{ url_for('admin.delete_vendor_item_alias', alias_id=alias.id) }}">
                                     {{ delete_form.hidden_tag() }}
@@ -176,9 +174,7 @@
                                 </td>
                                 <td class="text-end">
                                     <div class="d-flex gap-2 justify-content-end">
-                                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.vendor_item_aliases', alias_id=alias.id) }}">
-                                            {{ 'Edit' if can_manage_vendor_item_aliases else 'View' }}
-                                        </a>
+                                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.vendor_item_aliases', alias_id=alias.id) }}">{{ 'Edit' if can_manage_vendor_item_aliases else 'View' }}</a>
                                         {% if can_manage_vendor_item_aliases %}
                                         <form method="post" action="{{ url_for('admin.delete_vendor_item_alias', alias_id=alias.id) }}">
                                             {{ delete_form.hidden_tag() }}

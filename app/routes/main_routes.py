@@ -14,9 +14,14 @@ from app.forms import ConfirmForm
 from app.services.dashboard_metrics import dashboard_context, dashboard_layout_context
 from app.utils.dashboard_cards import (
     MAX_DASHBOARD_METABASE_CARDS,
+    dashboard_metabase_card_key,
+    dashboard_section_card_key,
     load_dashboard_metabase_cards,
+    load_dashboard_card_order,
     save_dashboard_metabase_cards,
     set_dashboard_metabase_card_visibility,
+    sort_dashboard_items,
+    update_dashboard_card_order,
     update_dashboard_section_visibility,
     validate_metabase_card_input,
 )
@@ -70,6 +75,17 @@ def _dashboard_card_redirect() -> str:
             or None
         ),
     )
+
+
+def _coerce_dashboard_display_order(
+    field_name: str,
+    *,
+    default_value: int,
+) -> int:
+    try:
+        return max(1, int(request.form.get(field_name, default_value)))
+    except (TypeError, ValueError):
+        return default_value
 
 
 def _persist_metabase_card_change(card_id: str | None = None) -> None:
@@ -156,6 +172,7 @@ def update_metabase_card_settings():
 
     cards = load_dashboard_metabase_cards(current_user)
     layout = dashboard_layout_context()
+    stored_card_order = load_dashboard_card_order(current_user)
 
     visible_card_ids = {
         value.strip()
@@ -175,10 +192,55 @@ def update_metabase_card_settings():
             visible_card_ids & known_card_ids,
         )
 
+    ordered_section_keys = [
+        dashboard_section_card_key(section["id"])
+        for section in sorted(
+            layout["sections"],
+            key=lambda section: (
+                _coerce_dashboard_display_order(
+                    f"display_order_section_{section['id']}",
+                    default_value=section["display_order"],
+                ),
+                section["display_order"],
+            ),
+        )
+    ]
+    ordered_card_items = sort_dashboard_items(
+        [
+            {
+                "order_key": dashboard_metabase_card_key(card["id"]),
+                "field_name": f"display_order_card_{card['id']}",
+            }
+            for card in cards
+        ],
+        stored_card_order,
+    )
+    for display_order, item in enumerate(ordered_card_items, start=1):
+        item["display_order"] = display_order
+    ordered_metabase_card_keys = [
+        item["order_key"]
+        for item in sorted(
+            ordered_card_items,
+            key=lambda item: (
+                _coerce_dashboard_display_order(
+                    item["field_name"],
+                    default_value=item["display_order"],
+                ),
+                item["display_order"],
+            ),
+        )
+    ]
+    update_dashboard_card_order(
+        current_user,
+        available_card_keys=ordered_section_keys
+        + [item["order_key"] for item in ordered_card_items],
+        ordered_card_keys=ordered_section_keys + ordered_metabase_card_keys,
+    )
+
     update_dashboard_section_visibility(
         current_user,
         available_section_ids=set(layout["available_section_ids"]),
         visible_section_ids=visible_section_ids,
     )
-    flash("Dashboard card visibility updated.", "success")
+    flash("Dashboard settings updated.", "success")
     return redirect(_dashboard_card_redirect())

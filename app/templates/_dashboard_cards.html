@@ -1,0 +1,539 @@
+{% set summary_section_ids = ['transfers_summary', 'purchase_orders_summary', 'purchase_invoices_summary', 'invoices_summary'] %}
+{% set summary_state = namespace(has_cards=false) %}
+
+{% for section in context.layout.sections %}
+    {% if section.visible and section.id in summary_section_ids %}
+        {% set summary_state.has_cards = true %}
+    {% endif %}
+{% endfor %}
+
+{% if summary_state.has_cards %}
+<div class="row g-3">
+    {% for section in context.layout.sections %}
+        {% if section.visible and section.id in summary_section_ids %}
+            {% if section.id == 'transfers_summary' %}
+            <div class="col-12 col-sm-6 col-xl-3">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Transfers</h5>
+                        <button
+                            class="btn btn-sm btn-outline-secondary"
+                            type="button"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#dashboard-card-transfers"
+                            aria-expanded="true"
+                            aria-controls="dashboard-card-transfers"
+                        >
+                            <span class="fw-semibold">Toggle</span>
+                        </button>
+                    </div>
+                    <div class="collapse show" id="dashboard-card-transfers" data-dashboard-collapse>
+                        <div class="card-body">
+                            <p class="mb-1"><strong>Total:</strong> {{ context.transfers.total }}</p>
+                            <p class="mb-1"><strong>Completed:</strong> {{ context.transfers.completed }}</p>
+                            <p class="mb-0"><strong>Pending:</strong> {{ context.transfers.pending }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% elif section.id == 'purchase_orders_summary' %}
+            <div class="col-12 col-sm-6 col-xl-3">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Purchase Orders</h5>
+                        <button
+                            class="btn btn-sm btn-outline-secondary"
+                            type="button"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#dashboard-card-purchase-orders"
+                            aria-expanded="true"
+                            aria-controls="dashboard-card-purchase-orders"
+                        >
+                            <span class="fw-semibold">Toggle</span>
+                        </button>
+                    </div>
+                    <div class="collapse show" id="dashboard-card-purchase-orders" data-dashboard-collapse>
+                        <div class="card-body">
+                            <p class="mb-1"><strong>Open:</strong> {{ context.purchase_orders.open_count }}</p>
+                            <p class="mb-1"><strong>Overdue:</strong> {{ context.purchase_orders.overdue_count }}</p>
+                            <p class="mb-0"><strong>Expected Total:</strong> ${{ '%.2f'|format(context.purchase_orders.expected_total) }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% elif section.id == 'purchase_invoices_summary' %}
+            <div class="col-12 col-sm-6 col-xl-3">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Purchase Invoices</h5>
+                        <button
+                            class="btn btn-sm btn-outline-secondary"
+                            type="button"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#dashboard-card-purchase-invoices"
+                            aria-expanded="true"
+                            aria-controls="dashboard-card-purchase-invoices"
+                        >
+                            <span class="fw-semibold">Toggle</span>
+                        </button>
+                    </div>
+                    <div class="collapse show" id="dashboard-card-purchase-invoices" data-dashboard-collapse>
+                        <div class="card-body">
+                            <p class="mb-1"><strong>Received:</strong> {{ context.purchase_invoices.count }}</p>
+                            <p class="mb-0"><strong>Total Spend:</strong> ${{ '%.2f'|format(context.purchase_invoices.total) }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% elif section.id == 'invoices_summary' %}
+            <div class="col-12 col-sm-6 col-xl-3">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Invoices</h5>
+                        <button
+                            class="btn btn-sm btn-outline-secondary"
+                            type="button"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#dashboard-card-invoices"
+                            aria-expanded="true"
+                            aria-controls="dashboard-card-invoices"
+                        >
+                            <span class="fw-semibold">Toggle</span>
+                        </button>
+                    </div>
+                    <div class="collapse show" id="dashboard-card-invoices" data-dashboard-collapse>
+                        <div class="card-body">
+                            <p class="mb-1"><strong>Issued:</strong> {{ context.invoices.count }}</p>
+                            <p class="mb-0"><strong>Invoice Total:</strong> ${{ '%.2f'|format(context.invoices.total) }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        {% endif %}
+    {% endfor %}
+</div>
+{% endif %}
+
+{% for section in context.layout.sections %}
+    {% if section.visible and section.id not in summary_section_ids %}
+        {% if section.id == 'transfer_completion' %}
+        <div class="row g-3 mt-1">
+            <div class="col-12">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <div>
+                            <h5 class="mb-0">Transfer completion by location</h5>
+                            <p class="text-muted mb-0 small">Item-level completion for incoming transfers that still need receiving.</p>
+                        </div>
+                        <button
+                            class="btn btn-sm btn-outline-secondary"
+                            type="button"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#dashboard-card-transfer-completion"
+                            aria-expanded="true"
+                            aria-controls="dashboard-card-transfer-completion"
+                        >
+                            <span class="fw-semibold">Toggle</span>
+                        </button>
+                    </div>
+                    <div class="collapse show" id="dashboard-card-transfer-completion" data-dashboard-collapse>
+                        <div class="card-body">
+                            <ul class="list-group list-group-flush">
+                                {% for location in context.transfer_completion_by_location %}
+                                    <li class="list-group-item px-0">
+                                        <div class="d-flex justify-content-between align-items-center gap-2 dashboard-meta-row">
+                                            <div class="fw-semibold">{{ location.location_name }}</div>
+                                            <div class="text-end">
+                                                <div class="small text-muted">{{ location.transfer_count }} transfers</div>
+                                                <div class="fw-semibold">{{ '%.1f'|format(location.completion_percent) }}% complete</div>
+                                            </div>
+                                        </div>
+                                    </li>
+                                {% else %}
+                                    <li class="list-group-item px-0 text-muted">No transfer activity yet.</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% elif section.id == 'weekly_activity' %}
+        <div class="row g-3 mt-1">
+            <div class="col-12">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <div>
+                            <h5 class="mb-0">Weekly transfers, purchases & sales</h5>
+                            <p class="text-muted mb-0 small">Track recent movement volume alongside purchase receipts and sales totals.</p>
+                        </div>
+                        <button
+                            class="btn btn-sm btn-outline-secondary"
+                            type="button"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#dashboard-card-weekly"
+                            aria-expanded="true"
+                            aria-controls="dashboard-card-weekly"
+                        >
+                            <span class="fw-semibold">Toggle</span>
+                        </button>
+                    </div>
+                    <div class="collapse show" id="dashboard-card-weekly" data-dashboard-collapse>
+                        <div class="card-body">
+                            <form method="get" action="{{ url_for('main.home') }}" class="row g-2 align-items-end mb-3">
+                                <div class="col-sm-4 col-md-3">
+                                    <label for="activity_interval" class="form-label mb-1">Activity interval</label>
+                                    <select id="activity_interval" name="activity_interval" class="form-select form-select-sm">
+                                        {% for option in context.charts.weekly_activity.interval_options %}
+                                            <option value="{{ option.value }}" {% if option.value == context.charts.weekly_activity.selected_interval %}selected{% endif %}>
+                                                {{ option.label }}
+                                            </option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-auto">
+                                    <button type="submit" class="btn btn-sm btn-outline-primary">Apply</button>
+                                </div>
+                            </form>
+                            <div class="ratio ratio-16x9">
+                                <canvas id="weekly-activity-chart" aria-label="Weekly transfers and purchases" role="img"></canvas>
+                            </div>
+                            <noscript>
+                                <div class="alert alert-info mt-3 mb-2">JavaScript is disabled; showing tabular summary instead.</div>
+                                <div class="table-responsive">
+                                    <table class="table table-sm mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th scope="col">{{ context.charts.weekly_activity.bucket_label }}</th>
+                                                <th scope="col">Transfers</th>
+                                                <th scope="col">Purchases</th>
+                                                <th scope="col">Purchase total</th>
+                                                <th scope="col">Sales total</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for bucket in context.charts.weekly_activity.buckets %}
+                                                <tr>
+                                                    <td>{{ bucket.label }}</td>
+                                                    <td>{{ bucket.transfers }}</td>
+                                                    <td>{{ bucket.purchases }}</td>
+                                                    <td>${{ '%.2f'|format(bucket.purchase_total) }}</td>
+                                                    <td>${{ '%.2f'|format(bucket.sales_total) }}</td>
+                                                </tr>
+                                            {% else %}
+                                                <tr>
+                                                    <td colspan="5" class="text-muted">{{ context.charts.weekly_activity.empty_state_text }}</td>
+                                                </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </noscript>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% elif section.id == 'events_summary' %}
+        <div class="row g-3 mt-1">
+            <div class="col-12">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Events</h5>
+                        <button
+                            class="btn btn-sm btn-outline-secondary"
+                            type="button"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#dashboard-card-events-summary"
+                            aria-expanded="true"
+                            aria-controls="dashboard-card-events-summary"
+                        >
+                            <span class="fw-semibold">Toggle</span>
+                        </button>
+                    </div>
+                    <div class="collapse show" id="dashboard-card-events-summary" data-dashboard-collapse>
+                        <div class="card-body">
+                            <p class="mb-1"><strong>Today:</strong> {{ context.events.today_count }}</p>
+                            <p class="mb-1"><strong>Upcoming:</strong> {{ context.events.upcoming_count }}</p>
+                            {% if context.events.next_event %}
+                                <p class="mb-0"><strong>Next:</strong> {{ context.events.next_event.name }} ({{ context.events.next_event.start_date.strftime('%Y-%m-%d') }} - {{ context.events.next_event.end_date.strftime('%Y-%m-%d') }})</p>
+                            {% else %}
+                                <p class="mb-0 text-muted">No upcoming events scheduled.</p>
+                            {% endif %}
+                            <div class="mt-3">
+                                <h6 class="mb-2">Starting {{ context.events.next_day.strftime('%b %d, %Y') }}</h6>
+                                <ul class="list-group list-group-flush">
+                                    {% for ev in context.events.next_day_events %}
+                                        <li class="list-group-item px-0">
+                                            <div class="fw-semibold">{{ ev.name }}</div>
+                                            <div class="text-muted small">{{ ev.start_date.strftime('%b %d, %Y') }} - {{ ev.end_date.strftime('%b %d, %Y') }}</div>
+                                        </li>
+                                    {% else %}
+                                        <li class="list-group-item px-0 text-muted">No events starting tomorrow.</li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% elif section.id == 'action_queues' %}
+        <div class="row g-3 mt-1">
+            <div class="col-12">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <div>
+                            <h5 class="mb-0">Action queues</h5>
+                            <p class="text-muted mb-0 small">Stay ahead on receipts, approvals, and vendor payments.</p>
+                        </div>
+                        <button
+                            class="btn btn-sm btn-outline-secondary"
+                            type="button"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#dashboard-card-action-queues"
+                            aria-expanded="true"
+                            aria-controls="dashboard-card-action-queues"
+                        >
+                            <span class="fw-semibold">Toggle</span>
+                        </button>
+                    </div>
+                    <div class="collapse show" id="dashboard-card-action-queues" data-dashboard-collapse>
+                        <div class="card-body">
+                            <div class="row g-3 mt-2">
+                                <div class="col-lg-6">
+                                    <div class="border rounded p-3 h-100">
+                                        <div class="d-flex justify-content-between align-items-center mb-2 dashboard-meta-row">
+                                            <h6 class="mb-0">Pending purchase orders</h6>
+                                            {% if can_view_purchase_orders and context.queues.purchase_orders.total > context.queues.purchase_orders['items']|length %}
+                                                <a class="small" href="{{ url_for('purchase.view_purchase_orders') }}">Show more</a>
+                                            {% endif %}
+                                        </div>
+                                        <ul class="list-group list-group-flush">
+                                            {% for po in context.queues.purchase_orders['items'] %}
+                                                {% set vendor_label = po.vendor_name or (po.vendor and (po.vendor.first_name ~ ' ' ~ po.vendor.last_name)) or 'Unknown vendor' %}
+                                                <li class="list-group-item px-0">
+                                                    <div class="d-flex justify-content-between align-items-start gap-3 dashboard-list-row">
+                                                        <div>
+                                                            <div class="fw-semibold">{{ vendor_label }}</div>
+                                                            <div class="text-muted small">Due {{ po.expected_date.strftime('%b %d, %Y') }} &middot; ${{ '%.2f'|format(po.expected_total_cost or 0) }}</div>
+                                                        </div>
+                                                        <div class="text-end">
+                                                            {% if can_receive_purchase_invoices %}
+                                                                <a class="btn btn-sm btn-primary" href="{{ url_for('purchase.receive_invoice', po_id=po.id) }}">Receive</a>
+                                                            {% endif %}
+                                                        </div>
+                                                    </div>
+                                                </li>
+                                            {% else %}
+                                                <li class="list-group-item px-0 text-muted">No pending purchase orders.</li>
+                                            {% endfor %}
+                                        </ul>
+                                    </div>
+                                </div>
+                                <div class="col-lg-6">
+                                    <div class="border rounded p-3 h-100">
+                                        <div class="d-flex justify-content-between align-items-center mb-2 dashboard-meta-row">
+                                            <h6 class="mb-0">Transfers awaiting approval</h6>
+                                            <div class="d-flex align-items-center gap-2 dashboard-header-actions">
+                                                {% if can_create_transfers %}
+                                                <a class="btn btn-sm btn-primary" href="{{ url_for('transfer.add_transfer') }}">Start Transfer</a>
+                                                {% endif %}
+                                                {% if can_view_transfers and context.queues.transfers.total > context.queues.transfers['items']|length %}
+                                                    <a class="small" href="{{ url_for('transfer.view_transfers') }}">Show more</a>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                        <ul class="list-group list-group-flush">
+                                            {% for transfer in context.queues.transfers['items'] %}
+                                                <li class="list-group-item px-0">
+                                                    <div class="d-flex justify-content-between align-items-start gap-3 dashboard-list-row">
+                                                        <div>
+                                                            <div class="fw-semibold">{{ transfer.from_location_name or transfer.from_location.name }} &rarr; {{ transfer.to_location_name or transfer.to_location.name }}</div>
+                                                            <div class="text-muted small">Created {{ transfer.date_created.strftime('%b %d, %Y') }}</div>
+                                                        </div>
+                                                        <div class="text-end d-flex flex-column align-items-end gap-1 dashboard-queue-actions">
+                                                            {% if can_complete_transfers %}
+                                                                <form method="post" action="{{ url_for('transfer.complete_transfer', transfer_id=transfer.id) }}" class="d-inline">
+                                                                    {{ confirm_form.hidden_tag() }}
+                                                                    <button type="submit" class="btn btn-sm btn-success">Approve</button>
+                                                                </form>
+                                                            {% endif %}
+                                                            {% if can_view_transfers %}
+                                                            <a class="small" href="{{ url_for('transfer.view_transfer', transfer_id=transfer.id) }}">Review</a>
+                                                            {% endif %}
+                                                        </div>
+                                                    </div>
+                                                </li>
+                                            {% else %}
+                                                <li class="list-group-item px-0 text-muted">No transfers awaiting approval.</li>
+                                            {% endfor %}
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% elif section.id == 'event_schedule' %}
+        <div class="row g-3 mt-1">
+            <div class="col-12">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <div>
+                            <h5 class="mb-0">Event Schedule</h5>
+                            <p class="text-muted mb-0 small">Browse upcoming and active events; overdue dates are highlighted.</p>
+                        </div>
+                        <div class="d-flex align-items-center gap-2 dashboard-header-actions">
+                            {% if can_create_events %}
+                                <a class="btn btn-primary btn-sm" href="{{ url_for('event.create_event') }}">Schedule event</a>
+                            {% endif %}
+                            <button
+                                class="btn btn-sm btn-outline-secondary"
+                                type="button"
+                                data-bs-toggle="collapse"
+                                data-bs-target="#dashboard-card-event-schedule"
+                                aria-expanded="true"
+                                aria-controls="dashboard-card-event-schedule"
+                            >
+                                <span class="fw-semibold">Toggle</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="collapse show" id="dashboard-card-event-schedule" data-dashboard-collapse>
+                        <div class="card-body">
+                            <div class="row g-3 mt-3 align-items-start">
+                                <div class="col-12 col-lg-8">
+                                    <div class="border rounded p-3 h-100">
+                                        <div class="d-flex justify-content-between align-items-center mb-2 dashboard-meta-row">
+                                            <h6 class="mb-0">{{ context.events.schedule.calendar.month_label }}</h6>
+                                            <span class="badge bg-light text-body-secondary">Today: {{ context.events.schedule.calendar.today.strftime('%b %d') }}</span>
+                                        </div>
+                                        <p class="small text-muted mb-2">Click a date badge to view events filtered by that day.</p>
+                                        <div class="d-grid gap-2 event-calendar-grid" style="grid-template-columns: repeat(7, minmax(2.75rem, 1fr));">
+                                            {% for day in context.events.schedule.calendar.days %}
+                                                {% set has_events = day.count > 0 %}
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-sm btn-outline-secondary text-start event-calendar-day"
+                                                    data-date="{{ day.date.isoformat() }}"
+                                                    data-label="{{ day.date.strftime('%b %d') }}"
+                                                    {% if has_events %}data-events='{{ day.events | tojson }}'{% endif %}
+                                                    {% if day.date == context.events.schedule.calendar.today %}data-today="true"{% endif %}
+                                                    {% if not has_events %}data-empty="true"{% endif %}
+                                                    {% if not has_events %}disabled{% endif %}
+                                                    aria-label="{% if has_events %}{{ day.date.strftime('%b %d') }}: {% for ev in day.events %}{{ ev.name }} - {{ ev.open_location_count }} locations open{% if not loop.last %}, {% endif %}{% endfor %}{% else %}{{ day.date.strftime('%b %d') }}: No events scheduled{% endif %}"
+                                                    aria-haspopup="true"
+                                                    aria-expanded="false"
+                                                >
+                                                    <div class="d-flex justify-content-between align-items-center dashboard-meta-row">
+                                                        <span class="fw-semibold">{{ day.day }}</span>
+                                                        {% if has_events %}
+                                                            <span class="badge bg-primary">{{ day.count }}</span>
+                                                        {% else %}
+                                                            <span class="text-muted small">-</span>
+                                                        {% endif %}
+                                                    </div>
+                                                </button>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-12 col-lg-4">
+                                    <div class="border rounded p-3 h-100 d-flex flex-column">
+                                        <div class="d-flex justify-content-between align-items-center mb-2 dashboard-meta-row">
+                                            <h6 class="mb-0">Scheduled events</h6>
+                                            <span class="small text-muted" data-event-filter-label>Selecting a date opens the filtered events view</span>
+                                        </div>
+                                        <ul class="list-group list-group-flush flex-grow-1" id="event-schedule-list">
+                                            {% for ev in context.events.schedule.sidebar_events %}
+                                                <li class="list-group-item" data-event-row data-start-date="{{ ev.start_date.isoformat() }}" data-end-date="{{ ev.end_date.isoformat() }}">
+                                                    <div class="d-flex justify-content-between align-items-start gap-3 dashboard-list-row">
+                                                        <div>
+                                                            <div class="fw-semibold">{{ ev.name }}</div>
+                                                            <div class="text-muted small">{{ ev.start_date.strftime('%b %d, %Y') }} - {{ ev.end_date.strftime('%b %d, %Y') }}</div>
+                                                        </div>
+                                                        <div class="text-end">
+                                                            {% if ev.status == 'past_due' %}
+                                                                <span class="badge bg-danger">Past close date</span>
+                                                            {% elif ev.status == 'active' %}
+                                                                <span class="badge bg-success">Active today</span>
+                                                            {% elif ev.status == 'in_progress' %}
+                                                                <span class="badge bg-info text-dark">In progress</span>
+                                                            {% else %}
+                                                                <span class="badge bg-primary">Upcoming</span>
+                                                            {% endif %}
+                                                            <div>
+                                                                <a class="small" href="{{ url_for('event.view_event', event_id=ev.id) }}">View</a>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </li>
+                                            {% else %}
+                                                <li class="list-group-item text-muted">No events scheduled.</li>
+                                            {% endfor %}
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% elif section.id == 'bulletins' %}
+        <div class="row g-3 mt-1">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <div>
+                            <h5 class="mb-0">Bulletins</h5>
+                            <div class="small text-muted">Pinned updates targeted to you.</div>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            {% if context.bulletins.unread_count %}
+                            <span class="badge bg-primary">{{ context.bulletins.unread_count }} unread</span>
+                            {% endif %}
+                            {% if can_access_endpoint('communication.center') %}
+                            <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('communication.center') }}">Open Communications</a>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        {% if context.bulletins.receipts %}
+                        <div class="d-flex flex-column gap-3">
+                            {% for receipt in context.bulletins.receipts %}
+                            <div class="border rounded p-3 {% if receipt.read_at is none %}border-primary-subtle bg-light{% endif %}">
+                                <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
+                                    <div>
+                                        <div class="fw-semibold">{{ receipt.communication.subject }}</div>
+                                        <div class="small text-muted">
+                                            {{ receipt.communication.sender.display_label }}
+                                            {% if receipt.communication.audience_type == 'department' and receipt.communication.department %}
+                                            &middot; {{ receipt.communication.department.name }}
+                                            {% elif receipt.communication.audience_type == 'all' %}
+                                            &middot; All scoped users
+                                            {% else %}
+                                            &middot; Selected users
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="small text-muted text-nowrap">{{ receipt.communication.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                                </div>
+                                <div style="white-space: pre-wrap;">{{ receipt.communication.body }}</div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-muted">No pinned bulletins are currently assigned to you.</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    {% endif %}
+{% endfor %}

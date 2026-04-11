@@ -12,6 +12,7 @@ from app.models import UserFilterPreference
 
 DASHBOARD_METABASE_CARDS_SCOPE = "dashboard.metabase_cards"
 DASHBOARD_HIDDEN_SECTIONS_SCOPE = "dashboard.hidden_sections"
+DASHBOARD_CARD_ORDER_SCOPE = "dashboard.card_order"
 MAX_DASHBOARD_METABASE_CARDS = 12
 DEFAULT_METABASE_CARD_HEIGHT = 420
 MIN_METABASE_CARD_HEIGHT = 240
@@ -83,6 +84,18 @@ DASHBOARD_SECTION_DEFINITIONS_BY_ID = {
 }
 
 
+def dashboard_section_card_key(section_id: str) -> str:
+    """Return the persisted ordering key for a built-in dashboard section."""
+
+    return f"section:{section_id}"
+
+
+def dashboard_metabase_card_key(card_id: str) -> str:
+    """Return the persisted ordering key for a saved Metabase dashboard card."""
+
+    return f"metabase:{card_id}"
+
+
 def _is_authenticated(user: Any) -> bool:
     if user is None:
         return False
@@ -143,6 +156,29 @@ def _stored_hidden_sections_preference(user: Any) -> UserFilterPreference | None
         user_id=user.id,
         scope=DASHBOARD_HIDDEN_SECTIONS_SCOPE,
     ).one_or_none()
+
+
+def _stored_card_order_preference(user: Any) -> UserFilterPreference | None:
+    if not _is_authenticated(user):
+        return None
+    return UserFilterPreference.query.filter_by(
+        user_id=user.id,
+        scope=DASHBOARD_CARD_ORDER_SCOPE,
+    ).one_or_none()
+
+
+def _unique_preserving_order(values: list[Any]) -> list[str]:
+    seen: set[str] = set()
+    unique_values: list[str] = []
+
+    for raw_value in values:
+        normalized_value = str(raw_value or "").strip()
+        if not normalized_value or normalized_value in seen:
+            continue
+        seen.add(normalized_value)
+        unique_values.append(normalized_value)
+
+    return unique_values
 
 
 def load_dashboard_metabase_cards(user: Any) -> list[dict[str, Any]]:
@@ -268,6 +304,41 @@ def cards_visible_on_dashboard(
     return visible_cards
 
 
+def load_dashboard_card_order(user: Any) -> list[str]:
+    """Return the persisted dashboard card order keys for ``user``."""
+
+    preference = _stored_card_order_preference(user)
+    if preference is None or not isinstance(preference.values, Mapping):
+        return []
+
+    raw_card_keys = preference.values.get("card_keys")
+    if not isinstance(raw_card_keys, list):
+        return []
+
+    return _unique_preserving_order(raw_card_keys)
+
+
+def sort_dashboard_items(
+    items: list[dict[str, Any]],
+    order_keys: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Return ``items`` sorted by persisted dashboard order keys."""
+
+    order_positions = {
+        order_key: position
+        for position, order_key in enumerate(order_keys or [])
+    }
+
+    indexed_items = list(enumerate(items))
+    indexed_items.sort(
+        key=lambda pair: (
+            order_positions.get(pair[1].get("order_key"), len(order_positions) + pair[0]),
+            pair[0],
+        )
+    )
+    return [item for _, item in indexed_items]
+
+
 def save_dashboard_metabase_cards(
     user: Any,
     cards: list[dict[str, Any]],
@@ -293,6 +364,32 @@ def save_dashboard_metabase_cards(
     return cards
 
 
+def save_dashboard_card_order(
+    user: Any,
+    card_order_keys: list[str],
+) -> list[str]:
+    """Persist the dashboard card order for ``user``."""
+
+    if not _is_authenticated(user):
+        raise ValueError("Cannot store dashboard card order for anonymous users.")
+
+    normalized_order_keys = _unique_preserving_order(card_order_keys)
+    preference = _stored_card_order_preference(user)
+    if normalized_order_keys:
+        if preference is None:
+            preference = UserFilterPreference(
+                user_id=user.id,
+                scope=DASHBOARD_CARD_ORDER_SCOPE,
+            )
+            db.session.add(preference)
+        preference.values = {"card_keys": normalized_order_keys}
+    elif preference is not None:
+        db.session.delete(preference)
+
+    db.session.commit()
+    return normalized_order_keys
+
+
 def set_dashboard_metabase_card_visibility(
     user: Any,
     visible_card_ids: set[str],
@@ -303,6 +400,37 @@ def set_dashboard_metabase_card_visibility(
     for card in cards:
         card["visible"] = card["id"] in visible_card_ids
     return save_dashboard_metabase_cards(user, cards)
+
+
+def update_dashboard_card_order(
+    user: Any,
+    *,
+    available_card_keys: list[str],
+    ordered_card_keys: list[str],
+) -> list[str]:
+    """Update the persisted card order for the dashboard items visible in settings."""
+
+    normalized_available_keys = _unique_preserving_order(available_card_keys)
+    normalized_ordered_keys = [
+        card_key
+        for card_key in _unique_preserving_order(ordered_card_keys)
+        if card_key in normalized_available_keys
+    ]
+    ordered_with_remainder = normalized_ordered_keys + [
+        card_key
+        for card_key in normalized_available_keys
+        if card_key not in normalized_ordered_keys
+    ]
+    unavailable_existing_keys = [
+        card_key
+        for card_key in load_dashboard_card_order(user)
+        if card_key not in normalized_available_keys
+    ]
+
+    return save_dashboard_card_order(
+        user,
+        ordered_with_remainder + unavailable_existing_keys,
+    )
 
 
 def load_hidden_dashboard_sections(user: Any) -> set[str]:

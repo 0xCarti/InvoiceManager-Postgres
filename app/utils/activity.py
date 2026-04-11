@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 import threading
+from datetime import datetime
 from typing import List, Optional
 
 from flask import current_app
@@ -53,8 +54,17 @@ class _ActivityLogger:
             self._timer = None
         try:
             with self.app.app_context():
-                db.session.bulk_save_objects(logs)
-                db.session.commit()
+                payload = [
+                    {
+                        "user_id": log.user_id,
+                        "activity": log.activity,
+                        "timestamp": log.timestamp or datetime.utcnow(),
+                    }
+                    for log in logs
+                ]
+                if payload:
+                    with db.engine.begin() as connection:
+                        connection.execute(ActivityLog.__table__.insert(), payload)
         except Exception:
             # Swallow errors to avoid crashing the application during shutdown
             pass

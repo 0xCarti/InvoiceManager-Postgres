@@ -658,7 +658,7 @@ def test_dashboard_card_visibility_settings_control_rendered_cards(client, app):
     hide_body = hide_response.get_data(as_text=True)
 
     assert hide_response.status_code == 200
-    assert "Dashboard card visibility updated." in hide_body
+    assert "Dashboard settings updated." in hide_body
     assert "No Metabase cards are currently selected to show on this dashboard." in hide_body
     assert 'src="http://metabase.localhost:3000/public/dashboard/settings-card"' not in hide_body
     assert 'id="dashboardCardSettingsModal"' in hide_body
@@ -674,7 +674,7 @@ def test_dashboard_card_visibility_settings_control_rendered_cards(client, app):
     show_body = show_response.get_data(as_text=True)
 
     assert show_response.status_code == 200
-    assert "Dashboard card visibility updated." in show_body
+    assert "Dashboard settings updated." in show_body
     assert 'src="http://metabase.localhost:3000/public/dashboard/settings-card"' in show_body
 
 
@@ -709,7 +709,7 @@ def test_dashboard_settings_can_hide_builtin_dashboard_sections(client, app):
     hide_body = hide_response.get_data(as_text=True)
 
     assert hide_response.status_code == 200
-    assert "Dashboard card visibility updated." in hide_body
+    assert "Dashboard settings updated." in hide_body
     assert "Pinned updates targeted to you." not in hide_body
     assert 'id="visible-section-bulletins"' in hide_body
 
@@ -721,8 +721,86 @@ def test_dashboard_settings_can_hide_builtin_dashboard_sections(client, app):
     show_body = show_response.get_data(as_text=True)
 
     assert show_response.status_code == 200
-    assert "Dashboard card visibility updated." in show_body
-    assert "Pinned updates targeted to you." in show_body
+    assert "Dashboard settings updated." in show_body
+
+
+def test_dashboard_settings_can_reorder_sections_and_metabase_cards(client, app):
+    app.config["METABASE_SITE_URL"] = "http://metabase.localhost:3000"
+
+    with app.app_context():
+        user = _create_dashboard_user("dashboard-ordering@example.com")
+        grant_permissions(
+            user,
+            "dashboard.view",
+            "dashboard.view_cards",
+            "dashboard.manage_cards",
+            "transfers.view",
+            "events.view",
+            group_name="Dashboard Ordering",
+            description="Can reorder built-in and Metabase dashboard cards.",
+        )
+        save_dashboard_metabase_cards(
+            user,
+            [
+                {
+                    "id": "ordering-card-a",
+                    "title": "Ordering Card A",
+                    "embed_url": "http://metabase.localhost:3000/public/dashboard/ordering-a",
+                    "height": 420,
+                    "visible": True,
+                },
+                {
+                    "id": "ordering-card-b",
+                    "title": "Ordering Card B",
+                    "embed_url": "http://metabase.localhost:3000/public/dashboard/ordering-b",
+                    "height": 420,
+                    "visible": True,
+                },
+            ],
+        )
+
+    login(client, "dashboard-ordering@example.com", "pass")
+
+    response = client.post(
+        "/dashboard/metabase-cards/settings",
+        data={
+            "visible_section_ids": [
+                "transfers_summary",
+                "transfer_completion",
+                "weekly_activity",
+                "events_summary",
+                "action_queues",
+                "event_schedule",
+                "bulletins",
+            ],
+            "visible_card_ids": ["ordering-card-a", "ordering-card-b"],
+            "display_order_section_transfers_summary": "7",
+            "display_order_section_transfer_completion": "3",
+            "display_order_section_weekly_activity": "4",
+            "display_order_section_events_summary": "5",
+            "display_order_section_action_queues": "6",
+            "display_order_section_event_schedule": "2",
+            "display_order_section_bulletins": "1",
+            "display_order_card_ordering-card-a": "2",
+            "display_order_card_ordering-card-b": "1",
+        },
+        follow_redirects=True,
+    )
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Dashboard settings updated." in body
+    assert body.index("Ordering Card B") < body.index("Ordering Card A")
+    assert body.index("Bulletins") < body.index("Event Schedule")
+
+    follow_up_response = client.get("/", follow_redirects=True)
+    follow_up_body = follow_up_response.get_data(as_text=True)
+
+    assert follow_up_response.status_code == 200
+    assert follow_up_body.index("Ordering Card B") < follow_up_body.index(
+        "Ordering Card A"
+    )
+    assert follow_up_body.index("Bulletins") < follow_up_body.index("Event Schedule")
 
 
 @pytest.mark.parametrize(

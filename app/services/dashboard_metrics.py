@@ -22,10 +22,14 @@ from app.models import (
 from app.services.communication_service import active_bulletin_receipts_for_user
 from app.services.event_service import current_user_today, event_schedule
 from app.utils.dashboard_cards import (
-    cards_visible_on_dashboard,
     DASHBOARD_SECTION_DEFINITIONS_BY_ID,
+    cards_visible_on_dashboard,
+    dashboard_metabase_card_key,
+    dashboard_section_card_key,
+    load_dashboard_card_order,
     load_hidden_dashboard_sections,
     load_dashboard_metabase_cards,
+    sort_dashboard_items,
 )
 
 
@@ -224,6 +228,7 @@ def dashboard_layout_context() -> Dict[str, Any]:
     """Return per-user dashboard visibility metadata for built-in sections."""
 
     hidden_section_ids = load_hidden_dashboard_sections(current_user)
+    stored_card_order = load_dashboard_card_order(current_user)
     can_view_transfers = current_user.can_access_endpoint(
         "transfer.view_transfers", "GET"
     )
@@ -280,9 +285,14 @@ def dashboard_layout_context() -> Dict[str, Any]:
         sections.append(
             {
                 **definition,
+                "order_key": dashboard_section_card_key(section_id),
                 "visible": section_id not in hidden_section_ids,
             }
         )
+
+    sections = sort_dashboard_items(sections, stored_card_order)
+    for display_order, section in enumerate(sections, start=1):
+        section["display_order"] = display_order
 
     visibility = {
         section_id: section_id not in hidden_section_ids
@@ -291,7 +301,8 @@ def dashboard_layout_context() -> Dict[str, Any]:
 
     return {
         "sections": sections,
-        "available_section_ids": available_section_ids,
+        "available_section_ids": [section["id"] for section in sections],
+        "card_order_keys": stored_card_order,
         "section_visibility": visibility,
     }
 
@@ -302,12 +313,32 @@ def dashboard_context(activity_interval: Optional[str] = None) -> Dict[str, Any]
     today = current_user_today()
     bulletin_receipts = active_bulletin_receipts_for_user(current_user)
     metabase_site_url = (current_app.config.get("METABASE_SITE_URL") or "").strip()
-    saved_metabase_cards = load_dashboard_metabase_cards(current_user)
-    visible_metabase_cards = cards_visible_on_dashboard(
-        current_user,
-        metabase_site_url=metabase_site_url,
-    )
     layout = dashboard_layout_context()
+    saved_metabase_cards = [
+        {
+            **card,
+            "order_key": dashboard_metabase_card_key(card["id"]),
+        }
+        for card in load_dashboard_metabase_cards(current_user)
+    ]
+    saved_metabase_cards = sort_dashboard_items(
+        saved_metabase_cards,
+        layout["card_order_keys"],
+    )
+    for display_order, card in enumerate(saved_metabase_cards, start=1):
+        card["display_order"] = display_order
+    visible_metabase_card_ids = {
+        card["id"]
+        for card in cards_visible_on_dashboard(
+            current_user,
+            metabase_site_url=metabase_site_url,
+        )
+    }
+    visible_metabase_cards = [
+        card
+        for card in saved_metabase_cards
+        if card["id"] in visible_metabase_card_ids
+    ]
 
     events = event_summary(today)
     events["schedule"] = event_schedule(today)

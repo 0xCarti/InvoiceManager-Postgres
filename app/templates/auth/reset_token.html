@@ -4,7 +4,11 @@
   <div class="col-md-6 offset-md-3">
     <h2>Set New Password</h2>
     <form action="" method="post">
-      {{ form.hidden_tag() }}
+      {% if form.csrf_token is defined %}
+      {{ form.csrf_token }}
+      {% else %}
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {% endif %}
       <div class="form-group">
         {{ form.new_password.label(class_='form-label') }}
         <div class="input-group" data-password-toggle-group>

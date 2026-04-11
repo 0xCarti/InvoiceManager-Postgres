@@ -19,6 +19,7 @@ from flask_socketio import SocketIO
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError
+from sqlalchemy import update as sa_update
 from sqlalchemy.exc import PendingRollbackError
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 from werkzeug.routing import BuildError
@@ -808,10 +809,18 @@ def create_app(args=None):
             flash("Please sign in again to continue.", "warning")
             return redirect(url_for("auth.login"))
 
-        current_user.last_active_at = now
+        from app.models import User
+
+        update_values = {"last_active_at": now}
         if current_user.last_forced_login_at is None:
-            current_user.last_forced_login_at = now
-        db.session.commit()
+            update_values["last_forced_login_at"] = now
+
+        with db.engine.begin() as connection:
+            connection.execute(
+                sa_update(User)
+                .where(User.id == current_user.id)
+                .values(**update_values)
+            )
 
     @app.route("/.well-known/security.txt")
     def security_txt():
