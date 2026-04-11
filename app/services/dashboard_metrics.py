@@ -23,6 +23,8 @@ from app.services.communication_service import active_bulletin_receipts_for_user
 from app.services.event_service import current_user_today, event_schedule
 from app.utils.dashboard_cards import (
     cards_visible_on_dashboard,
+    DASHBOARD_SECTION_DEFINITIONS_BY_ID,
+    load_hidden_dashboard_sections,
     load_dashboard_metabase_cards,
 )
 
@@ -218,6 +220,82 @@ def _resolve_activity_interval(value: Optional[str]) -> Tuple[str, str]:
     return internal_interval, selected_value
 
 
+def dashboard_layout_context() -> Dict[str, Any]:
+    """Return per-user dashboard visibility metadata for built-in sections."""
+
+    hidden_section_ids = load_hidden_dashboard_sections(current_user)
+    can_view_transfers = current_user.can_access_endpoint(
+        "transfer.view_transfers", "GET"
+    )
+    can_view_purchase_orders = current_user.can_access_endpoint(
+        "purchase.view_purchase_orders", "GET"
+    )
+    can_receive_purchase_invoices = current_user.has_permission(
+        "purchase_invoices.receive"
+    )
+    can_view_purchase_invoices = current_user.can_access_endpoint(
+        "purchase.view_purchase_invoices", "GET"
+    )
+    can_view_invoices = current_user.can_access_endpoint("invoice.view_invoices", "GET")
+    can_view_events = current_user.can_access_endpoint("event.view_events", "GET")
+    can_create_transfers = current_user.has_permission("transfers.create")
+    can_complete_transfers = current_user.has_permission("transfers.complete")
+
+    available_section_ids: list[str] = []
+
+    def _append_if_available(section_id: str, condition: bool) -> None:
+        if condition:
+            available_section_ids.append(section_id)
+
+    _append_if_available("transfers_summary", can_view_transfers)
+    _append_if_available("purchase_orders_summary", can_view_purchase_orders)
+    _append_if_available(
+        "purchase_invoices_summary",
+        can_view_purchase_invoices or can_receive_purchase_invoices,
+    )
+    _append_if_available("invoices_summary", can_view_invoices)
+    _append_if_available("transfer_completion", can_view_transfers)
+    _append_if_available(
+        "weekly_activity",
+        can_view_transfers
+        or can_view_purchase_orders
+        or can_view_purchase_invoices
+        or can_view_invoices,
+    )
+    _append_if_available("events_summary", can_view_events)
+    _append_if_available(
+        "action_queues",
+        can_view_purchase_orders
+        or can_receive_purchase_invoices
+        or can_view_transfers
+        or can_create_transfers
+        or can_complete_transfers,
+    )
+    _append_if_available("event_schedule", can_view_events)
+    _append_if_available("bulletins", True)
+
+    sections = []
+    for section_id in available_section_ids:
+        definition = DASHBOARD_SECTION_DEFINITIONS_BY_ID[section_id]
+        sections.append(
+            {
+                **definition,
+                "visible": section_id not in hidden_section_ids,
+            }
+        )
+
+    visibility = {
+        section_id: section_id not in hidden_section_ids
+        for section_id in DASHBOARD_SECTION_DEFINITIONS_BY_ID
+    }
+
+    return {
+        "sections": sections,
+        "available_section_ids": available_section_ids,
+        "section_visibility": visibility,
+    }
+
+
 def dashboard_context(activity_interval: Optional[str] = None) -> Dict[str, Any]:
     """Aggregate metrics for the dashboard view."""
 
@@ -229,6 +307,7 @@ def dashboard_context(activity_interval: Optional[str] = None) -> Dict[str, Any]
         current_user,
         metabase_site_url=metabase_site_url,
     )
+    layout = dashboard_layout_context()
 
     events = event_summary(today)
     events["schedule"] = event_schedule(today)
@@ -269,6 +348,7 @@ def dashboard_context(activity_interval: Optional[str] = None) -> Dict[str, Any]
             "saved_count": len(saved_metabase_cards),
             "visible_count": len(visible_metabase_cards),
         },
+        "layout": layout,
         "charts": {
             "weekly_activity": weekly_activity,
         },

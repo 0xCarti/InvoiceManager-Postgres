@@ -79,6 +79,7 @@
     {% set can_view_metabase_cards = has_permission('dashboard.view_cards') %}
     {% set can_manage_metabase_cards = can_view_metabase_cards and has_permission('dashboard.manage_cards') %}
     {% set selected_activity_interval = context.charts.weekly_activity.selected_interval %}
+    {% set section_visibility = context.layout.section_visibility %}
     <div class="d-flex align-items-center justify-content-between mb-4 page-header-stack">
         <div>
             <h1 class="mb-0">Dashboard</h1>
@@ -129,6 +130,14 @@
                 title="Set METABASE_SITE_URL and restart the web service to manage dashboard cards."
             >
                 Add Dashboard Card
+            </button>
+            <button
+                type="button"
+                class="btn btn-outline-secondary"
+                data-bs-toggle="modal"
+                data-bs-target="#dashboardCardSettingsModal"
+            >
+                Dashboard Settings
             </button>
             {% endif %}
         </div>
@@ -196,8 +205,14 @@
     </div>
     {% endif %}
 
+    {% if
+        (can_view_transfers and section_visibility['transfers_summary'])
+        or (can_view_purchase_orders and section_visibility['purchase_orders_summary'])
+        or ((can_view_purchase_invoices or can_receive_purchase_invoices) and section_visibility['purchase_invoices_summary'])
+        or (can_view_invoices and section_visibility['invoices_summary'])
+    %}
     <div class="row g-3">
-        {% if can_view_transfers %}
+        {% if can_view_transfers and section_visibility['transfers_summary'] %}
         <div class="col-md-3 col-sm-6">
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
@@ -223,7 +238,7 @@
             </div>
         </div>
         {% endif %}
-        {% if can_view_purchase_orders %}
+        {% if can_view_purchase_orders and section_visibility['purchase_orders_summary'] %}
         <div class="col-md-3 col-sm-6">
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
@@ -249,7 +264,7 @@
             </div>
         </div>
         {% endif %}
-        {% if can_view_purchase_invoices or can_receive_purchase_invoices %}
+        {% if (can_view_purchase_invoices or can_receive_purchase_invoices) and section_visibility['purchase_invoices_summary'] %}
         <div class="col-md-3 col-sm-6">
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
@@ -274,7 +289,7 @@
             </div>
         </div>
         {% endif %}
-        {% if can_view_invoices %}
+        {% if can_view_invoices and section_visibility['invoices_summary'] %}
         <div class="col-md-3 col-sm-6">
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
@@ -300,8 +315,9 @@
         </div>
         {% endif %}
     </div>
+    {% endif %}
 
-    {% if can_view_transfers %}
+    {% if can_view_transfers and section_visibility['transfer_completion'] %}
     <div class="row g-3 mt-1">
         <div class="col-12">
             <div class="card h-100">
@@ -345,7 +361,7 @@
     </div>
     {% endif %}
 
-    {% if can_view_transfers or can_view_purchase_orders or can_view_purchase_invoices or can_view_invoices %}
+    {% if (can_view_transfers or can_view_purchase_orders or can_view_purchase_invoices or can_view_invoices) and section_visibility['weekly_activity'] %}
     <div class="row g-3 mt-1">
         <div class="col-12">
             <div class="card h-100">
@@ -422,7 +438,7 @@
         </div>
     </div>
     {% endif %}
-    {% if can_view_events %}
+    {% if can_view_events and section_visibility['events_summary'] %}
     <div class="row g-3 mt-1">
         <div class="col-12">
             <div class="card h-100">
@@ -468,7 +484,7 @@
     </div>
     {% endif %}
 
-    {% if can_view_purchase_orders or can_receive_purchase_invoices or can_view_transfers or can_create_transfers or can_complete_transfers %}
+    {% if (can_view_purchase_orders or can_receive_purchase_invoices or can_view_transfers or can_create_transfers or can_complete_transfers) and section_visibility['action_queues'] %}
     <div class="row g-3 mt-1">
         <div class="col-12">
             <div class="card h-100">
@@ -569,7 +585,7 @@
     </div>
     {% endif %}
 
-    {% if can_view_events %}
+    {% if can_view_events and section_visibility['event_schedule'] %}
     <div class="row g-3 mt-1">
         <div class="col-12">
             <div class="card h-100">
@@ -677,6 +693,7 @@
     </div>
     {% endif %}
 
+    {% if section_visibility['bulletins'] %}
     <div class="row g-3 mt-1">
         <div class="col-12">
             <div class="card">
@@ -726,6 +743,7 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
     {% if can_manage_metabase_cards %}
     <div
@@ -827,13 +845,38 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    {% if context.metabase.saved_cards %}
-                    <div class="mb-4">
-                        <h6 class="mb-2">Visible cards</h6>
-                        <p class="text-muted small mb-3">Choose which saved cards appear on your dashboard.</p>
-                        <form method="post" action="{{ url_for('main.update_metabase_card_settings') }}">
-                            {{ confirm_form.hidden_tag() }}
-                            <input type="hidden" name="activity_interval" value="{{ selected_activity_interval }}">
+                    <form method="post" action="{{ url_for('main.update_metabase_card_settings') }}">
+                        {{ confirm_form.hidden_tag() }}
+                        <input type="hidden" name="activity_interval" value="{{ selected_activity_interval }}">
+                        <div class="mb-4">
+                            <h6 class="mb-2">Dashboard sections</h6>
+                            <p class="text-muted small mb-3">Choose which built-in dashboard cards appear for you.</p>
+                            <div class="list-group dashboard-metabase-settings-list mb-3">
+                                {% for section in context.layout.sections %}
+                                <label class="list-group-item list-group-item-action" for="visible-section-{{ section.id }}">
+                                    <div class="form-check mb-0">
+                                        <input
+                                            id="visible-section-{{ section.id }}"
+                                            name="visible_section_ids"
+                                            type="checkbox"
+                                            value="{{ section.id }}"
+                                            class="form-check-input"
+                                            {% if section.visible %}checked{% endif %}
+                                        >
+                                    </div>
+                                    <div class="flex-grow-1">
+                                        <div class="fw-semibold">{{ section.label }}</div>
+                                        <div class="small text-muted">{{ section.description }}</div>
+                                    </div>
+                                </label>
+                                {% endfor %}
+                            </div>
+                        </div>
+
+                        {% if context.metabase.saved_cards %}
+                        <div class="border-top pt-4 mb-4">
+                            <h6 class="mb-2">Metabase cards</h6>
+                            <p class="text-muted small mb-3">Choose which saved Metabase cards appear on your dashboard.</p>
                             <div class="list-group dashboard-metabase-settings-list mb-3">
                                 {% for card in context.metabase.saved_cards %}
                                 <label class="list-group-item list-group-item-action" for="visible-card-{{ card.id }}">
@@ -855,11 +898,19 @@
                                 </label>
                                 {% endfor %}
                             </div>
-                            <button type="submit" class="btn btn-primary">Save visibility</button>
-                        </form>
-                    </div>
+                        </div>
+                        {% elif context.metabase.configured %}
+                        <div class="border-top pt-4 mb-4">
+                            <h6 class="mb-2">Metabase cards</h6>
+                            <p class="text-muted mb-0">No Metabase report cards saved yet.</p>
+                        </div>
+                        {% endif %}
 
-                    <div class="border-top pt-4">
+                        <button type="submit" class="btn btn-primary">Save dashboard settings</button>
+                    </form>
+
+                    {% if context.metabase.saved_cards %}
+                    <div class="border-top pt-4 mt-4">
                         <h6 class="mb-3">Edit saved cards</h6>
                         <div class="vstack gap-3">
                             {% for card in context.metabase.saved_cards %}
@@ -939,8 +990,6 @@
                             {% endfor %}
                         </div>
                     </div>
-                    {% else %}
-                    <p class="text-muted mb-0">No Metabase report cards saved yet.</p>
                     {% endif %}
                 </div>
                 <div class="modal-footer">

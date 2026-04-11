@@ -11,12 +11,13 @@ from flask import (
 from flask_login import current_user, login_required
 
 from app.forms import ConfirmForm
-from app.services.dashboard_metrics import dashboard_context
+from app.services.dashboard_metrics import dashboard_context, dashboard_layout_context
 from app.utils.dashboard_cards import (
     MAX_DASHBOARD_METABASE_CARDS,
     load_dashboard_metabase_cards,
     save_dashboard_metabase_cards,
     set_dashboard_metabase_card_visibility,
+    update_dashboard_section_visibility,
     validate_metabase_card_input,
 )
 
@@ -154,19 +155,30 @@ def update_metabase_card_settings():
     """Update which Metabase cards are shown on the dashboard."""
 
     cards = load_dashboard_metabase_cards(current_user)
-    if not cards:
-        flash("No Metabase report cards are saved for this user.", "warning")
-        return redirect(_dashboard_card_redirect())
+    layout = dashboard_layout_context()
 
     visible_card_ids = {
         value.strip()
         for value in request.form.getlist("visible_card_ids")
         if str(value).strip()
     }
-    known_card_ids = {card["id"] for card in cards}
-    set_dashboard_metabase_card_visibility(
+    visible_section_ids = {
+        value.strip()
+        for value in request.form.getlist("visible_section_ids")
+        if str(value).strip()
+    }
+
+    if cards:
+        known_card_ids = {card["id"] for card in cards}
+        set_dashboard_metabase_card_visibility(
+            current_user,
+            visible_card_ids & known_card_ids,
+        )
+
+    update_dashboard_section_visibility(
         current_user,
-        visible_card_ids & known_card_ids,
+        available_section_ids=set(layout["available_section_ids"]),
+        visible_section_ids=visible_section_ids,
     )
     flash("Dashboard card visibility updated.", "success")
     return redirect(_dashboard_card_redirect())

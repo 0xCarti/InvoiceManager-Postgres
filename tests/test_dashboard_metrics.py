@@ -597,6 +597,31 @@ def test_dashboard_card_management_buttons_require_manage_permission(client, app
     assert "Open Metabase" not in body
 
 
+def test_dashboard_settings_available_without_metabase_configuration(client, app):
+    app.config["METABASE_SITE_URL"] = ""
+
+    with app.app_context():
+        user = _create_dashboard_user("dashboard-sections-only@example.com")
+        grant_permissions(
+            user,
+            "dashboard.view",
+            "dashboard.view_cards",
+            "dashboard.manage_cards",
+            group_name="Dashboard Sections Only",
+            description="Can manage built-in dashboard section visibility.",
+        )
+
+    login(client, "dashboard-sections-only@example.com", "pass")
+    response = client.get("/", follow_redirects=True)
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Dashboard Settings" in body
+    assert 'data-bs-target="#dashboardCardSettingsModal"' in body
+    assert 'id="visible-section-bulletins"' in body
+    assert "Pinned communications assigned to the current user." in body
+
+
 def test_dashboard_card_visibility_settings_control_rendered_cards(client, app):
     app.config["METABASE_SITE_URL"] = "http://metabase.localhost:3000"
 
@@ -640,7 +665,10 @@ def test_dashboard_card_visibility_settings_control_rendered_cards(client, app):
 
     show_response = client.post(
         "/dashboard/metabase-cards/settings",
-        data={"visible_card_ids": "settings-card"},
+        data={
+            "visible_card_ids": "settings-card",
+            "visible_section_ids": "bulletins",
+        },
         follow_redirects=True,
     )
     show_body = show_response.get_data(as_text=True)
@@ -648,6 +676,53 @@ def test_dashboard_card_visibility_settings_control_rendered_cards(client, app):
     assert show_response.status_code == 200
     assert "Dashboard card visibility updated." in show_body
     assert 'src="http://metabase.localhost:3000/public/dashboard/settings-card"' in show_body
+
+
+def test_dashboard_settings_can_hide_builtin_dashboard_sections(client, app):
+    app.config["METABASE_SITE_URL"] = ""
+
+    with app.app_context():
+        user = _create_dashboard_user("dashboard-hide-builtin@example.com")
+        grant_permissions(
+            user,
+            "dashboard.view",
+            "dashboard.view_cards",
+            "dashboard.manage_cards",
+            group_name="Dashboard Builtin Visibility",
+            description="Can hide built-in dashboard sections.",
+        )
+
+    login(client, "dashboard-hide-builtin@example.com", "pass")
+
+    initial_response = client.get("/", follow_redirects=True)
+    initial_body = initial_response.get_data(as_text=True)
+
+    assert initial_response.status_code == 200
+    assert "Pinned updates targeted to you." in initial_body
+    assert 'id="visible-section-bulletins"' in initial_body
+
+    hide_response = client.post(
+        "/dashboard/metabase-cards/settings",
+        data={},
+        follow_redirects=True,
+    )
+    hide_body = hide_response.get_data(as_text=True)
+
+    assert hide_response.status_code == 200
+    assert "Dashboard card visibility updated." in hide_body
+    assert "Pinned updates targeted to you." not in hide_body
+    assert 'id="visible-section-bulletins"' in hide_body
+
+    show_response = client.post(
+        "/dashboard/metabase-cards/settings",
+        data={"visible_section_ids": "bulletins"},
+        follow_redirects=True,
+    )
+    show_body = show_response.get_data(as_text=True)
+
+    assert show_response.status_code == 200
+    assert "Dashboard card visibility updated." in show_body
+    assert "Pinned updates targeted to you." in show_body
 
 
 @pytest.mark.parametrize(

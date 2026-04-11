@@ -11,6 +11,7 @@ from app import db
 from app.models import UserFilterPreference
 
 DASHBOARD_METABASE_CARDS_SCOPE = "dashboard.metabase_cards"
+DASHBOARD_HIDDEN_SECTIONS_SCOPE = "dashboard.hidden_sections"
 MAX_DASHBOARD_METABASE_CARDS = 12
 DEFAULT_METABASE_CARD_HEIGHT = 420
 MIN_METABASE_CARD_HEIGHT = 240
@@ -23,6 +24,63 @@ ALLOWED_METABASE_PATH_PREFIXES = (
     "/dashboard/",
     "/question/",
 )
+
+DASHBOARD_SECTION_DEFINITIONS: tuple[dict[str, str], ...] = (
+    {
+        "id": "transfers_summary",
+        "label": "Transfers",
+        "description": "The transfer summary card in the top row.",
+    },
+    {
+        "id": "purchase_orders_summary",
+        "label": "Purchase Orders",
+        "description": "The purchase order summary card in the top row.",
+    },
+    {
+        "id": "purchase_invoices_summary",
+        "label": "Purchase Invoices",
+        "description": "The purchase invoice summary card in the top row.",
+    },
+    {
+        "id": "invoices_summary",
+        "label": "Invoices",
+        "description": "The sales invoice summary card in the top row.",
+    },
+    {
+        "id": "transfer_completion",
+        "label": "Transfer Completion",
+        "description": "Transfer completion by location.",
+    },
+    {
+        "id": "weekly_activity",
+        "label": "Weekly Activity",
+        "description": "Weekly transfers, purchases, and sales chart.",
+    },
+    {
+        "id": "events_summary",
+        "label": "Events",
+        "description": "The events summary card.",
+    },
+    {
+        "id": "action_queues",
+        "label": "Action Queues",
+        "description": "Pending purchase orders, transfer approvals, and invoice work queues.",
+    },
+    {
+        "id": "event_schedule",
+        "label": "Event Schedule",
+        "description": "Calendar and scheduled events board.",
+    },
+    {
+        "id": "bulletins",
+        "label": "Bulletins",
+        "description": "Pinned communications assigned to the current user.",
+    },
+)
+
+DASHBOARD_SECTION_DEFINITIONS_BY_ID = {
+    definition["id"]: definition for definition in DASHBOARD_SECTION_DEFINITIONS
+}
 
 
 def _is_authenticated(user: Any) -> bool:
@@ -75,6 +133,15 @@ def _stored_cards_preference(user: Any) -> UserFilterPreference | None:
     return UserFilterPreference.query.filter_by(
         user_id=user.id,
         scope=DASHBOARD_METABASE_CARDS_SCOPE,
+    ).one_or_none()
+
+
+def _stored_hidden_sections_preference(user: Any) -> UserFilterPreference | None:
+    if not _is_authenticated(user):
+        return None
+    return UserFilterPreference.query.filter_by(
+        user_id=user.id,
+        scope=DASHBOARD_HIDDEN_SECTIONS_SCOPE,
     ).one_or_none()
 
 
@@ -236,3 +303,76 @@ def set_dashboard_metabase_card_visibility(
     for card in cards:
         card["visible"] = card["id"] in visible_card_ids
     return save_dashboard_metabase_cards(user, cards)
+
+
+def load_hidden_dashboard_sections(user: Any) -> set[str]:
+    """Return the per-user dashboard section ids hidden by the user."""
+
+    preference = _stored_hidden_sections_preference(user)
+    if preference is None or not isinstance(preference.values, Mapping):
+        return set()
+
+    raw_hidden = preference.values.get("section_ids")
+    if not isinstance(raw_hidden, list):
+        return set()
+
+    valid_ids = set(DASHBOARD_SECTION_DEFINITIONS_BY_ID)
+    return {
+        str(section_id).strip()
+        for section_id in raw_hidden
+        if str(section_id).strip() in valid_ids
+    }
+
+
+def save_hidden_dashboard_sections(
+    user: Any,
+    hidden_section_ids: set[str],
+) -> set[str]:
+    """Persist the hidden built-in dashboard sections for ``user``."""
+
+    if not _is_authenticated(user):
+        raise ValueError("Cannot store dashboard sections for anonymous users.")
+
+    valid_ids = set(DASHBOARD_SECTION_DEFINITIONS_BY_ID)
+    normalized_hidden = {section_id for section_id in hidden_section_ids if section_id in valid_ids}
+
+    preference = _stored_hidden_sections_preference(user)
+    if normalized_hidden:
+        if preference is None:
+            preference = UserFilterPreference(
+                user_id=user.id,
+                scope=DASHBOARD_HIDDEN_SECTIONS_SCOPE,
+            )
+            db.session.add(preference)
+        preference.values = {"section_ids": sorted(normalized_hidden)}
+    elif preference is not None:
+        db.session.delete(preference)
+
+    db.session.commit()
+    return normalized_hidden
+
+
+def update_dashboard_section_visibility(
+    user: Any,
+    *,
+    available_section_ids: set[str],
+    visible_section_ids: set[str],
+) -> set[str]:
+    """Update hidden sections for the subset of cards currently shown in settings."""
+
+    existing_hidden = load_hidden_dashboard_sections(user)
+    normalized_available = {
+        section_id
+        for section_id in available_section_ids
+        if section_id in DASHBOARD_SECTION_DEFINITIONS_BY_ID
+    }
+    normalized_visible = {
+        section_id
+        for section_id in visible_section_ids
+        if section_id in normalized_available
+    }
+
+    updated_hidden = (existing_hidden - normalized_available) | (
+        normalized_available - normalized_visible
+    )
+    return save_hidden_dashboard_sections(user, updated_hidden)
