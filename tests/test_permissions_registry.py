@@ -53,6 +53,10 @@ def test_user_can_access_endpoint_requires_matching_permission():
         DummyUser("communications.view_bulletin_receipts"),
         "communication.center",
     )
+    assert user_can_access_endpoint(
+        DummyUser("communications.view"),
+        "communication.bulletin_detail",
+    )
 
 
 def test_super_admin_bypasses_endpoint_permission_checks():

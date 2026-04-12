@@ -1,0 +1,229 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style nonce="{{ csp_nonce }}">
+.communications-detail-page {
+    --communications-detail-accent: #1d4f91;
+    --communications-detail-border: rgba(17, 24, 39, 0.08);
+    --communications-detail-paper: #fff9d8;
+    --communications-detail-paper-border: #dbc66f;
+}
+
+.communications-detail-page .communications-detail-paper {
+    border: 1px solid var(--communications-detail-paper-border);
+    border-radius: 1.1rem;
+    background:
+        linear-gradient(180deg, rgba(255, 252, 231, 0.96) 0%, rgba(255, 248, 196, 0.92) 100%);
+    padding: 1.4rem;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.68),
+        0 18px 34px rgba(15, 23, 42, 0.05);
+}
+
+.communications-detail-page .communications-detail-panel {
+    border-color: var(--communications-detail-border);
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+}
+
+.communications-detail-page .communications-detail-meta {
+    display: grid;
+    gap: 0.9rem;
+    margin: 0;
+}
+
+.communications-detail-page .communications-detail-meta div {
+    display: grid;
+    gap: 0.18rem;
+}
+
+.communications-detail-page .communications-detail-meta dt {
+    color: rgba(17, 24, 39, 0.58);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    margin: 0;
+    text-transform: uppercase;
+}
+
+.communications-detail-page .communications-detail-meta dd {
+    margin: 0;
+}
+
+.communications-detail-page .communications-detail-receipts {
+    max-height: 18rem;
+    overflow-y: auto;
+}
+</style>
+<div class="container-fluid px-0 communications-detail-page">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+        <div>
+            <a class="btn btn-link px-0 mb-2" href="{{ back_to_center_url }}">&larr; Back to Communications</a>
+            <h1 class="h3 mb-1">{{ receipt.communication.subject }}</h1>
+            <div class="text-muted small">
+                Posted by {{ receipt.communication.sender.display_label }}
+                {% if receipt.communication.audience_type == 'department' and receipt.communication.department %}
+                &middot; {{ receipt.communication.department.name }}
+                {% elif receipt.communication.audience_type == 'all' %}
+                &middot; All scoped users
+                {% else %}
+                &middot; Selected users
+                {% endif %}
+            </div>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            {% if receipt.read_at is none %}
+            <span class="badge bg-primary">New</span>
+            {% else %}
+            <span class="badge text-bg-light border">Read</span>
+            {% endif %}
+            {% if receipt.communication.id in saved_dashboard_bulletin_ids %}
+            <span class="badge bg-warning-subtle text-dark border">Pinned to Dashboard</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="row g-3 align-items-start">
+        <div class="col-12 col-xl-8">
+            <div class="card communications-detail-panel">
+                <div class="card-body">
+                    <div class="communications-detail-paper" style="white-space: pre-wrap;">{{ receipt.communication.body }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-xl-4">
+            <div class="card communications-detail-panel mb-3">
+                <div class="card-body">
+                    <h2 class="h6 text-uppercase text-muted mb-3">Bulletin Details</h2>
+                    <dl class="communications-detail-meta">
+                        <div>
+                            <dt>Posted By</dt>
+                            <dd>{{ receipt.communication.sender.display_label }}</dd>
+                        </div>
+                        <div>
+                            <dt>Posted</dt>
+                            <dd>{{ receipt.communication.created_at.strftime('%Y-%m-%d %H:%M') }}</dd>
+                        </div>
+                        <div>
+                            <dt>Audience</dt>
+                            <dd>
+                                {% if receipt.communication.audience_type == 'department' and receipt.communication.department %}
+                                {{ receipt.communication.department.name }}
+                                {% elif receipt.communication.audience_type == 'all' %}
+                                All scoped users
+                                {% else %}
+                                Selected users
+                                {% endif %}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt>Status</dt>
+                            <dd>
+                                {% if receipt.read_at is none %}
+                                Unread
+                                {% else %}
+                                Read {{ receipt.read_at.strftime('%Y-%m-%d %H:%M') }}
+                                {% endif %}
+                            </dd>
+                        </div>
+                    </dl>
+
+                    <div class="d-grid gap-2 mt-4">
+                        {% if receipt.read_at is none %}
+                        <form method="post" action="{{ url_for('communication.center') }}">
+                            {{ action_form.hidden_tag() }}
+                            <input type="hidden" name="action" value="mark_read">
+                            <input type="hidden" name="receipt_id" value="{{ receipt.id }}">
+                            <input type="hidden" name="communication_id" value="{{ receipt.communication.id }}">
+                            <input type="hidden" name="bulletin_page" value="{{ bulletin_page }}">
+                            <input type="hidden" name="return_view" value="bulletin_detail">
+                            <button type="submit" class="btn btn-outline-secondary w-100">Mark Bulletin Read</button>
+                        </form>
+                        {% endif %}
+
+                        {% if can_save_dashboard_bulletins %}
+                        <form method="post" action="{{ url_for('communication.center') }}">
+                            {{ action_form.hidden_tag() }}
+                            <input type="hidden" name="action" value="toggle_dashboard_bulletin">
+                            <input type="hidden" name="communication_id" value="{{ receipt.communication.id }}">
+                            <input type="hidden" name="save_on_dashboard" value="{% if receipt.communication.id in saved_dashboard_bulletin_ids %}0{% else %}1{% endif %}">
+                            <input type="hidden" name="bulletin_page" value="{{ bulletin_page }}">
+                            <input type="hidden" name="return_view" value="bulletin_detail">
+                            <button type="submit" class="btn {% if receipt.communication.id in saved_dashboard_bulletin_ids %}btn-outline-secondary{% else %}btn-outline-primary{% endif %} w-100">
+                                {% if receipt.communication.id in saved_dashboard_bulletin_ids %}
+                                Unpin from Dashboard
+                                {% else %}
+                                Pin to Dashboard
+                                {% endif %}
+                            </button>
+                        </form>
+                        {% endif %}
+
+                        {% if can_manage_this_bulletin %}
+                        <form method="post" action="{{ url_for('communication.center') }}">
+                            {{ action_form.hidden_tag() }}
+                            <input type="hidden" name="action" value="deactivate_bulletin">
+                            <input type="hidden" name="communication_id" value="{{ receipt.communication.id }}">
+                            <input type="hidden" name="bulletin_page" value="{{ bulletin_page }}">
+                            <button type="submit" class="btn btn-outline-danger w-100">Archive Bulletin</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            {% if can_view_bulletin_receipts and bulletin_read_summary %}
+            <div class="card communications-detail-panel">
+                <div class="card-body">
+                    <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
+                        <h2 class="h6 mb-0">Read receipts</h2>
+                        <div class="small text-muted">Visible because you have bulletin receipt access.</div>
+                    </div>
+                    <div class="row g-3 mb-3">
+                        <div class="col-4">
+                            <div class="small text-muted">Sent to</div>
+                            <div class="fw-semibold">{{ bulletin_read_summary.total_count }}</div>
+                        </div>
+                        <div class="col-4">
+                            <div class="small text-muted">Read</div>
+                            <div class="fw-semibold text-success">{{ bulletin_read_summary.read_count }}</div>
+                        </div>
+                        <div class="col-4">
+                            <div class="small text-muted">Unread</div>
+                            <div class="fw-semibold">{{ bulletin_read_summary.unread_count }}</div>
+                        </div>
+                    </div>
+
+                    <div class="communications-detail-receipts">
+                        {% if bulletin_read_summary.read_receipts %}
+                        <div class="mb-3">
+                            <div class="small text-uppercase text-muted mb-2">Read By</div>
+                            <div class="d-flex flex-column gap-2">
+                                {% for item in bulletin_read_summary.read_receipts %}
+                                <div class="d-flex justify-content-between gap-2 small">
+                                    <span>{{ item.user.display_label }}</span>
+                                    <span class="text-muted text-nowrap">{{ item.read_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        {% if bulletin_read_summary.unread_receipts %}
+                        <div>
+                            <div class="small text-uppercase text-muted mb-2">Still Unread</div>
+                            <div class="d-flex flex-wrap gap-2">
+                                {% for item in bulletin_read_summary.unread_receipts %}
+                                <span class="badge text-bg-light border">{{ item.user.display_label }}</span>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

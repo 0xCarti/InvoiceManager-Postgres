@@ -449,6 +449,7 @@ def test_bulletin_board_uses_paginated_list_detail_layout(client, app):
         grant_permissions(
             user,
             "communications.view",
+            "communications.manage_bulletin",
             "dashboard.view",
             group_name="Bulletin Reader",
             description="Can view communications and the dashboard.",
@@ -490,7 +491,7 @@ def test_bulletin_board_uses_paginated_list_detail_layout(client, app):
     assert "Page 1 of 2" in first_body
     assert "Bulletin 01" in first_body
     assert "Bulletin 11" not in first_body
-    assert "Click a bulletin header to open the full memo." in first_body
+    assert "Open any row to view the full bulletin on its own page." in first_body
     assert "Pin" in first_body
     assert "Full bulletin body 01" not in first_body
 
@@ -500,11 +501,12 @@ def test_bulletin_board_uses_paginated_list_detail_layout(client, app):
     assert "Full bulletin body 11" not in second_body
 
     assert expanded_response.status_code == 200
-    assert f"bulletin_id={oldest_bulletin_id}" in (
+    assert f"/communications/bulletins/{oldest_bulletin_id}" in (
         expanded_response.request.path
         + "?"
         + expanded_response.request.query_string.decode()
     )
+    assert "Back to Communications" in expanded_body
     assert "Full bulletin body 11" in expanded_body
     assert "Archive Bulletin" in expanded_body
 

@@ -540,8 +540,8 @@
                                         {% endif %}
                                         {% endfor %}
                                     </div>
-                                    {% if can_access_endpoint('communication.center') %}
-                                    <a class="small" href="{{ url_for('communication.center', bulletin_id=receipt.communication.id) }}">Open bulletin</a>
+                                    {% if can_access_endpoint('communication.bulletin_detail') %}
+                                    <a class="small" href="{{ url_for('communication.bulletin_detail', communication_id=receipt.communication.id) }}">Open bulletin</a>
                                     {% endif %}
                                 </div>
                             </div>

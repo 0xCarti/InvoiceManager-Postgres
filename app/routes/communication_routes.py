@@ -11,7 +11,6 @@ from app.forms import BulletinPostForm, CSRFOnlyForm, CommunicationMessageForm
 from app.models import Communication, CommunicationRecipient
 from app.services.communication_service import (
     active_bulletin_receipt_for_user,
-    active_bulletin_receipts_for_user,
     active_bulletin_receipts_query_for_user,
     build_bulletin_audience_snapshot,
     can_manage_bulletin,
@@ -30,6 +29,14 @@ from app.utils.dashboard_bulletins import (
 
 communication = Blueprint("communication", __name__)
 COMMUNICATION_BULLETIN_PAGE_SIZE = 10
+COMMUNICATION_ACCESS_PERMISSIONS = (
+    "communications.view",
+    "communications.view_history",
+    "communications.send_direct",
+    "communications.send_broadcast",
+    "communications.manage_bulletin",
+    "communications.view_bulletin_receipts",
+)
 
 
 def _configure_compose_form_choices(form, scoped_users, scoped_departments) -> None:
@@ -72,35 +79,76 @@ def _create_communication(
         department_id=department_id,
         pinned=(kind == Communication.KIND_BULLETIN),
     )
-    item.recipients = [
-        CommunicationRecipient(user=user)
-        for user in recipients
-    ]
+    item.recipients = [CommunicationRecipient(user=user) for user in recipients]
     db.session.add(item)
     return item
 
 
-def _coerce_positive_int(value, *, default: int = 1) -> int:
+def _coerce_positive_int(
+    value,
+    *,
+    default: int = 1,
+    minimum: int = 1,
+) -> int:
     try:
         normalized = int(value)
     except (TypeError, ValueError):
         return default
-    return max(1, normalized)
+    return max(minimum, normalized)
 
 
-def _communication_center_redirect(
-    *,
-    bulletin_page=None,
-    bulletin_id=None,
-) -> str:
+def _ensure_communication_access() -> None:
+    if not current_user.has_any_permission(*COMMUNICATION_ACCESS_PERMISSIONS):
+        abort(403)
+
+
+def _communication_center_redirect(*, bulletin_page=None) -> str:
     params = {}
-    normalized_page = _coerce_positive_int(bulletin_page, default=1)
+    normalized_page = _coerce_positive_int(
+        bulletin_page,
+        default=1,
+        minimum=1,
+    )
     if normalized_page > 1:
         params["bulletin_page"] = normalized_page
-    normalized_bulletin_id = _coerce_positive_int(bulletin_id, default=0)
-    if normalized_bulletin_id > 0:
-        params["bulletin_id"] = normalized_bulletin_id
     return url_for("communication.center", **params)
+
+
+def _bulletin_detail_redirect(*, communication_id, bulletin_page=None) -> str:
+    params = {
+        "communication_id": _coerce_positive_int(
+            communication_id,
+            default=1,
+            minimum=1,
+        )
+    }
+    normalized_page = _coerce_positive_int(
+        bulletin_page,
+        default=1,
+        minimum=1,
+    )
+    if normalized_page > 1:
+        params["bulletin_page"] = normalized_page
+    return url_for("communication.bulletin_detail", **params)
+
+
+def _redirect_after_bulletin_action(
+    *,
+    communication_id=None,
+    bulletin_page=None,
+) -> str:
+    if request.form.get("return_view") == "bulletin_detail":
+        normalized_communication_id = _coerce_positive_int(
+            communication_id,
+            default=0,
+            minimum=0,
+        )
+        if normalized_communication_id > 0:
+            return _bulletin_detail_redirect(
+                communication_id=normalized_communication_id,
+                bulletin_page=bulletin_page,
+            )
+    return _communication_center_redirect(bulletin_page=bulletin_page)
 
 
 def _build_bulletin_read_summary(receipt: CommunicationRecipient) -> dict[str, object]:
@@ -123,18 +171,34 @@ def _build_bulletin_read_summary(receipt: CommunicationRecipient) -> dict[str, o
     }
 
 
+def _inbox_receipt_options():
+    return (
+        selectinload(CommunicationRecipient.communication).selectinload(
+            Communication.sender
+        ),
+        selectinload(CommunicationRecipient.communication).selectinload(
+            Communication.department
+        ),
+    )
+
+
 @communication.route("/communications", methods=["GET", "POST"])
 @login_required
 def center():
-    if not current_user.has_any_permission(
-        "communications.view",
-        "communications.view_history",
-        "communications.send_direct",
-        "communications.send_broadcast",
-        "communications.manage_bulletin",
-        "communications.view_bulletin_receipts",
-    ):
-        abort(403)
+    _ensure_communication_access()
+
+    legacy_bulletin_id = _coerce_positive_int(
+        request.args.get("bulletin_id"),
+        default=0,
+        minimum=0,
+    )
+    if request.method == "GET" and legacy_bulletin_id:
+        return redirect(
+            _bulletin_detail_redirect(
+                communication_id=legacy_bulletin_id,
+                bulletin_page=request.args.get("bulletin_page"),
+            )
+        )
 
     scoped_users = communication_scope_users(current_user)
     scoped_departments = communication_scope_departments(current_user)
@@ -144,6 +208,8 @@ def center():
     action_form = CSRFOnlyForm(prefix="communication")
     _configure_compose_form_choices(message_form, scoped_users, scoped_departments)
     _configure_compose_form_choices(bulletin_form, scoped_users, scoped_departments)
+
+    open_modal_id = None
 
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()
@@ -174,6 +240,7 @@ def center():
                     )
                 except (PermissionError, ValueError) as exc:
                     _attach_audience_error(message_form, str(exc))
+                    open_modal_id = "sendMessageModal"
                 else:
                     message = _create_communication(
                         kind=Communication.KIND_MESSAGE,
@@ -197,6 +264,8 @@ def center():
                         "success",
                     )
                     return redirect(url_for("communication.center"))
+            else:
+                open_modal_id = "sendMessageModal"
 
         elif action == "post_bulletin":
             if not current_user.has_permission("communications.manage_bulletin"):
@@ -212,6 +281,7 @@ def center():
                     )
                 except (PermissionError, ValueError) as exc:
                     _attach_audience_error(bulletin_form, str(exc))
+                    open_modal_id = "postBulletinModal"
                 else:
                     bulletin = _create_communication(
                         kind=Communication.KIND_BULLETIN,
@@ -239,6 +309,8 @@ def center():
                         "success",
                     )
                     return redirect(url_for("communication.center"))
+            else:
+                open_modal_id = "postBulletinModal"
 
         elif action == "mark_read":
             receipt = db.session.get(
@@ -250,12 +322,12 @@ def center():
             receipt.mark_read()
             db.session.commit()
             return redirect(
-                _communication_center_redirect(
-                    bulletin_page=request.form.get("bulletin_page"),
-                    bulletin_id=(
+                _redirect_after_bulletin_action(
+                    communication_id=(
                         request.form.get("communication_id")
                         or request.form.get("bulletin_id")
                     ),
+                    bulletin_page=request.form.get("bulletin_page"),
                 )
             )
 
@@ -280,9 +352,9 @@ def center():
                 else:
                     flash("Bulletin removed from your dashboard.", "success")
             return redirect(
-                _communication_center_redirect(
+                _redirect_after_bulletin_action(
+                    communication_id=communication_id,
                     bulletin_page=request.form.get("bulletin_page"),
-                    bulletin_id=communication_id,
                 )
             )
 
@@ -308,14 +380,8 @@ def center():
                 )
             )
 
-    receipt_options = (
-        selectinload(CommunicationRecipient.communication)
-        .selectinload(Communication.sender),
-        selectinload(CommunicationRecipient.communication)
-        .selectinload(Communication.department),
-    )
     inbox_receipts = (
-        CommunicationRecipient.query.options(*receipt_options)
+        CommunicationRecipient.query.options(*_inbox_receipt_options())
         .join(Communication, CommunicationRecipient.communication_id == Communication.id)
         .filter(
             CommunicationRecipient.user_id == current_user.id,
@@ -332,9 +398,6 @@ def center():
         reverse=True,
     )
 
-    can_view_bulletin_receipts = current_user.has_permission(
-        "communications.view_bulletin_receipts"
-    )
     sync_dynamic_bulletin_receipts_for_user(current_user)
     can_save_dashboard_bulletins = current_user.can_access_endpoint("main.home", "GET")
     saved_dashboard_bulletin_ids = set(
@@ -345,6 +408,7 @@ def center():
     bulletin_page = _coerce_positive_int(
         request.args.get("bulletin_page"),
         default=1,
+        minimum=1,
     )
     bulletin_query = active_bulletin_receipts_query_for_user(current_user)
     bulletin_receipts_pagination = bulletin_query.paginate(
@@ -362,37 +426,13 @@ def center():
             per_page=COMMUNICATION_BULLETIN_PAGE_SIZE,
             error_out=False,
         )
-    bulletin_receipts = bulletin_receipts_pagination.items
-    selected_bulletin_id = _coerce_positive_int(
-        request.args.get("bulletin_id"),
-        default=0,
-    )
-    if selected_bulletin_id:
-        if can_view_bulletin_receipts:
-            sync_dynamic_bulletin_recipients(selected_bulletin_id)
-        selected_bulletin_receipt = active_bulletin_receipt_for_user(
-            current_user,
-            selected_bulletin_id,
-            include_recipient_users=can_view_bulletin_receipts,
-        )
-    else:
-        selected_bulletin_receipt = None
-    bulletin_read_summary = (
-        _build_bulletin_read_summary(selected_bulletin_receipt)
-        if selected_bulletin_receipt is not None and can_view_bulletin_receipts
-        else None
-    )
+
     bulletin_unread_count = (
         active_bulletin_receipts_query_for_user(current_user)
         .order_by(None)
         .filter(CommunicationRecipient.read_at.is_(None))
         .count()
     )
-    manageable_bulletin_ids = {
-        receipt.communication.id
-        for receipt in active_bulletin_receipts_for_user(current_user)
-        if can_manage_bulletin(current_user, receipt.communication.sender_id)
-    }
 
     sent_items = []
     if current_user.has_any_permission(
@@ -417,31 +457,81 @@ def center():
 
     return render_template(
         "communications/center.html",
-        message_form=message_form,
-        bulletin_form=bulletin_form,
         action_form=action_form,
-        inbox_receipts=inbox_receipts,
-        bulletin_receipts=bulletin_receipts,
-        bulletin_receipts_pagination=bulletin_receipts_pagination,
+        bulletin_form=bulletin_form,
         bulletin_page=bulletin_page,
+        bulletin_receipts_pagination=bulletin_receipts_pagination,
         bulletin_unread_count=bulletin_unread_count,
-        selected_bulletin_receipt=selected_bulletin_receipt,
-        selected_bulletin_read_summary=bulletin_read_summary,
-        sent_items=sent_items,
+        can_manage_bulletins=current_user.has_permission(
+            "communications.manage_bulletin"
+        ),
+        can_save_dashboard_bulletins=can_save_dashboard_bulletins,
         can_send_direct=current_user.has_any_permission(
             "communications.send_direct",
             "communications.send_broadcast",
         ),
-        can_send_broadcast=current_user.has_permission("communications.send_broadcast"),
-        can_manage_bulletins=current_user.has_permission(
-            "communications.manage_bulletin"
-        ),
         can_view_message_history=current_user.has_permission(
             "communications.view_history"
         ),
-        can_view_bulletin_receipts=can_view_bulletin_receipts,
-        can_save_dashboard_bulletins=can_save_dashboard_bulletins,
+        inbox_receipts=inbox_receipts,
+        message_form=message_form,
+        open_modal_id=open_modal_id,
         saved_dashboard_bulletin_ids=saved_dashboard_bulletin_ids,
         scoped_message_history=scoped_message_history,
-        manageable_bulletin_ids=manageable_bulletin_ids,
+        sent_items=sent_items,
+    )
+
+
+@communication.route("/communications/bulletins/<int:communication_id>", methods=["GET"])
+@login_required
+def bulletin_detail(communication_id: int):
+    _ensure_communication_access()
+
+    can_view_bulletin_receipts = current_user.has_permission(
+        "communications.view_bulletin_receipts"
+    )
+    if can_view_bulletin_receipts:
+        sync_dynamic_bulletin_recipients(communication_id)
+
+    receipt = active_bulletin_receipt_for_user(
+        current_user,
+        communication_id,
+        include_recipient_users=can_view_bulletin_receipts,
+    )
+    if receipt is None:
+        abort(404)
+
+    action_form = CSRFOnlyForm(prefix="communication")
+    bulletin_page = _coerce_positive_int(
+        request.args.get("bulletin_page"),
+        default=1,
+        minimum=1,
+    )
+    can_save_dashboard_bulletins = current_user.can_access_endpoint("main.home", "GET")
+    saved_dashboard_bulletin_ids = set(
+        load_saved_dashboard_bulletin_ids(current_user)
+        if can_save_dashboard_bulletins
+        else []
+    )
+    bulletin_read_summary = (
+        _build_bulletin_read_summary(receipt) if can_view_bulletin_receipts else None
+    )
+
+    return render_template(
+        "communications/bulletin_detail.html",
+        action_form=action_form,
+        back_to_center_url=_communication_center_redirect(bulletin_page=bulletin_page),
+        bulletin_page=bulletin_page,
+        bulletin_read_summary=bulletin_read_summary,
+        can_manage_this_bulletin=(
+            current_user.has_permission("communications.manage_bulletin")
+            and can_manage_bulletin(
+                current_user,
+                receipt.communication.sender_id,
+            )
+        ),
+        can_save_dashboard_bulletins=can_save_dashboard_bulletins,
+        can_view_bulletin_receipts=can_view_bulletin_receipts,
+        receipt=receipt,
+        saved_dashboard_bulletin_ids=saved_dashboard_bulletin_ids,
     )
