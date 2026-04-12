@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from sqlalchemy import case
 from sqlalchemy.orm import selectinload
 
 from app.models import (
@@ -140,12 +141,11 @@ def can_manage_bulletin(actor: User, sender_id: int) -> bool:
     return actor.id == sender_id
 
 
-def active_bulletin_receipts_for_user(
-    user: User,
+def _bulletin_receipt_options(
     *,
-    limit: int | None = None,
-) -> list[CommunicationRecipient]:
-    receipt_options = (
+    include_recipient_users: bool = False,
+):
+    options = (
         selectinload(CommunicationRecipient.communication).selectinload(
             Communication.sender
         ),
@@ -153,27 +153,73 @@ def active_bulletin_receipts_for_user(
             Communication.department
         ),
     )
-    receipts = (
-        CommunicationRecipient.query.options(*receipt_options)
+    if include_recipient_users:
+        options += (
+            selectinload(CommunicationRecipient.communication)
+            .selectinload(Communication.recipients)
+            .selectinload(CommunicationRecipient.user),
+        )
+    return options
+
+
+def active_bulletin_receipts_query_for_user(
+    user: User,
+    *,
+    include_recipient_users: bool = False,
+):
+    """Return the base query for active bulletin receipts visible to ``user``."""
+
+    return (
+        CommunicationRecipient.query.options(
+            *_bulletin_receipt_options(
+                include_recipient_users=include_recipient_users,
+            )
+        )
         .join(Communication, CommunicationRecipient.communication_id == Communication.id)
         .filter(
             CommunicationRecipient.user_id == user.id,
             Communication.kind == Communication.KIND_BULLETIN,
             Communication.active.is_(True),
         )
-        .all()
+        .order_by(
+            case((CommunicationRecipient.read_at.is_(None), 0), else_=1).asc(),
+            Communication.created_at.desc(),
+            Communication.id.desc(),
+        )
     )
-    receipts = sorted(
-        receipts,
-        key=lambda receipt: (
-            bool(getattr(receipt.communication, "pinned", False)),
-            getattr(receipt.communication, "created_at", None),
-        ),
-        reverse=True,
+
+
+def active_bulletin_receipts_for_user(
+    user: User,
+    *,
+    limit: int | None = None,
+    include_recipient_users: bool = False,
+) -> list[CommunicationRecipient]:
+    query = active_bulletin_receipts_query_for_user(
+        user,
+        include_recipient_users=include_recipient_users,
     )
     if limit is not None:
-        return receipts[:limit]
-    return receipts
+        query = query.limit(limit)
+    return query.all()
+
+
+def active_bulletin_receipt_for_user(
+    user: User,
+    communication_id: int,
+    *,
+    include_recipient_users: bool = False,
+) -> CommunicationRecipient | None:
+    """Return a single active bulletin receipt for ``user`` by communication id."""
+
+    return (
+        active_bulletin_receipts_query_for_user(
+            user,
+            include_recipient_users=include_recipient_users,
+        )
+        .filter(Communication.id == communication_id)
+        .first()
+    )
 
 
 def visible_message_history(actor: User, *, limit: int = 15) -> list[Communication]:

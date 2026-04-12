@@ -20,6 +20,7 @@ from app.models import (
     TransferItem,
 )
 from app.services.communication_service import active_bulletin_receipts_for_user
+from app.utils.dashboard_bulletins import load_saved_dashboard_bulletin_ids
 from app.services.event_service import current_user_today, event_schedule
 from app.utils.dashboard_cards import (
     DASHBOARD_SECTION_DEFINITIONS_BY_ID,
@@ -31,6 +32,10 @@ from app.utils.dashboard_cards import (
     load_dashboard_metabase_cards,
     sort_dashboard_items,
 )
+
+MAX_SAVED_BULLETIN_PREVIEW_ITEMS = 2
+MAX_UNREAD_BULLETIN_PREVIEW_ITEMS = 3
+MAX_RECENT_BULLETIN_PREVIEW_ITEMS = 3
 
 
 def _coalesce_scalar(query) -> float:
@@ -224,6 +229,65 @@ def _resolve_activity_interval(value: Optional[str]) -> Tuple[str, str]:
     return internal_interval, selected_value
 
 
+def _dashboard_bulletin_preview_context(
+    bulletin_receipts,
+    *,
+    saved_bulletin_ids: list[int],
+) -> Dict[str, Any]:
+    accessible_receipts_by_id = {
+        receipt.communication_id: receipt for receipt in bulletin_receipts
+    }
+    saved_receipts = [
+        accessible_receipts_by_id[communication_id]
+        for communication_id in saved_bulletin_ids
+        if communication_id in accessible_receipts_by_id
+    ]
+    saved_receipt_ids = {
+        receipt.communication_id for receipt in saved_receipts
+    }
+    unread_unsaved_receipts = [
+        receipt
+        for receipt in bulletin_receipts
+        if receipt.read_at is None and receipt.communication_id not in saved_receipt_ids
+    ]
+
+    preview_items: list[dict[str, Any]] = []
+    for receipt in saved_receipts[:MAX_SAVED_BULLETIN_PREVIEW_ITEMS]:
+        badges = ["Saved"]
+        if receipt.read_at is None:
+            badges.append("Unread")
+        preview_items.append(
+            {
+                "receipt": receipt,
+                "badges": badges,
+            }
+        )
+
+    for receipt in unread_unsaved_receipts[:MAX_UNREAD_BULLETIN_PREVIEW_ITEMS]:
+        preview_items.append(
+            {
+                "receipt": receipt,
+                "badges": ["Unread"],
+            }
+        )
+
+    if not preview_items:
+        for receipt in bulletin_receipts[:MAX_RECENT_BULLETIN_PREVIEW_ITEMS]:
+            preview_items.append(
+                {
+                    "receipt": receipt,
+                    "badges": ["Recent"],
+                }
+            )
+
+    return {
+        "receipts": [item["receipt"] for item in preview_items],
+        "preview_items": preview_items,
+        "saved_count": len(saved_receipts),
+        "saved_bulletin_ids": [receipt.communication_id for receipt in saved_receipts],
+    }
+
+
 def dashboard_layout_context() -> Dict[str, Any]:
     """Return per-user dashboard visibility metadata for built-in sections."""
 
@@ -312,6 +376,7 @@ def dashboard_context(activity_interval: Optional[str] = None) -> Dict[str, Any]
 
     today = current_user_today()
     bulletin_receipts = active_bulletin_receipts_for_user(current_user)
+    saved_dashboard_bulletin_ids = load_saved_dashboard_bulletin_ids(current_user)
     metabase_site_url = (current_app.config.get("METABASE_SITE_URL") or "").strip()
     layout = dashboard_layout_context()
     saved_metabase_cards = [
@@ -356,6 +421,10 @@ def dashboard_context(activity_interval: Optional[str] = None) -> Dict[str, Any]
         {"value": "half_year", "label": "Half-year"},
         {"value": "year", "label": "Yearly"},
     ]
+    bulletin_preview = _dashboard_bulletin_preview_context(
+        bulletin_receipts,
+        saved_bulletin_ids=saved_dashboard_bulletin_ids,
+    )
 
     return {
         "transfers": transfer_summary(),
@@ -365,7 +434,7 @@ def dashboard_context(activity_interval: Optional[str] = None) -> Dict[str, Any]
         "invoices": invoice_summary(),
         "events": events,
         "bulletins": {
-            "receipts": bulletin_receipts[:5],
+            **bulletin_preview,
             "total": len(bulletin_receipts),
             "unread_count": sum(
                 1 for receipt in bulletin_receipts if receipt.read_at is None

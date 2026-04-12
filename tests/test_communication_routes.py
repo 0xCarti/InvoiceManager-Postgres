@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 from werkzeug.security import generate_password_hash
 
 from app import db
@@ -309,3 +311,163 @@ def test_manager_with_history_permission_can_view_messages_between_other_users(
     assert b"Inventory counts are on the back table." in history_response.data
     assert b"Taylor Sender" in history_response.data
     assert b"Jordan Receiver" in history_response.data
+
+
+def test_bulletin_board_uses_paginated_list_detail_layout(client, app):
+    with app.app_context():
+        user_id = create_user("bulletin-reader@example.com")
+        user = db.session.get(User, user_id)
+        grant_permissions(
+            user,
+            "communications.view",
+            "dashboard.view",
+            group_name="Bulletin Reader",
+            description="Can view communications and the dashboard.",
+        )
+
+        for index in range(11):
+            ordinal = f"{index + 1:02d}"
+            bulletin = Communication(
+                kind=Communication.KIND_BULLETIN,
+                sender=user,
+                audience_type=Communication.AUDIENCE_USERS,
+                subject=f"Bulletin {ordinal}",
+                body=f"Full bulletin body {ordinal}",
+                pinned=True,
+                active=True,
+                created_at=datetime.utcnow() - timedelta(minutes=index),
+            )
+            db.session.add(bulletin)
+            bulletin.recipients = [CommunicationRecipient(user_id=user.id)]
+        db.session.commit()
+
+    with client:
+        login(client, "bulletin-reader@example.com", "pass")
+        first_page = client.get("/communications", follow_redirects=True)
+        second_page = client.get("/communications?bulletin_page=2", follow_redirects=True)
+
+    first_body = first_page.get_data(as_text=True)
+    second_body = second_page.get_data(as_text=True)
+
+    assert first_page.status_code == 200
+    assert "Page 1 of 2" in first_body
+    assert "Bulletin 01" in first_body
+    assert "Bulletin 11" not in first_body
+    assert "Show On Dashboard" in first_body
+
+    assert second_page.status_code == 200
+    assert "Page 2 of 2" in second_body
+    assert "Bulletin 11" in second_body
+    assert "Full bulletin body 11" in second_body
+
+
+def test_user_can_save_bulletin_for_dashboard_from_communications(client, app):
+    with app.app_context():
+        user_id = create_user("bulletin-dashboard@example.com")
+        user = db.session.get(User, user_id)
+        grant_permissions(
+            user,
+            "communications.view",
+            "dashboard.view",
+            group_name="Bulletin Dashboard",
+            description="Can save bulletins for the dashboard.",
+        )
+        bulletin = Communication(
+            kind=Communication.KIND_BULLETIN,
+            sender=user,
+            audience_type=Communication.AUDIENCE_USERS,
+            subject="Training bulletin",
+            body="This bulletin should be saved to the dashboard.",
+            pinned=True,
+            active=True,
+        )
+        db.session.add(bulletin)
+        bulletin.recipients = [CommunicationRecipient(user_id=user.id)]
+        db.session.commit()
+        bulletin_id = bulletin.id
+
+    with client:
+        login(client, "bulletin-dashboard@example.com", "pass")
+        save_response = client.post(
+            "/communications",
+            data={
+                "action": "toggle_dashboard_bulletin",
+                "communication_id": str(bulletin_id),
+                "save_on_dashboard": "1",
+            },
+            follow_redirects=True,
+        )
+        dashboard_response = client.get("/", follow_redirects=True)
+
+    save_body = save_response.get_data(as_text=True)
+    dashboard_body = dashboard_response.get_data(as_text=True)
+
+    assert save_response.status_code == 200
+    assert "Bulletin saved to your dashboard." in save_body
+    assert "Saved for dashboard" in save_body
+
+    assert dashboard_response.status_code == 200
+    assert "Training bulletin" in dashboard_body
+    assert "Saved" in dashboard_body
+
+
+def test_bulletin_read_receipts_require_permission(client, app):
+    with app.app_context():
+        manager_id = create_user("bulletin-receipts-manager@example.com")
+        elevated_manager_id = create_user("bulletin-receipts-manager-elevated@example.com")
+        coworker_id = create_user("bulletin-receipts-staff@example.com")
+        manager = db.session.get(User, manager_id)
+        elevated_manager = db.session.get(User, elevated_manager_id)
+        grant_permissions(
+            manager,
+            "communications.view",
+            group_name="Bulletin Receipt Viewer",
+            description="Can view the communications page.",
+        )
+        grant_permissions(
+            elevated_manager,
+            "communications.view",
+            "communications.view_bulletin_receipts",
+            group_name="Bulletin Receipt Viewer Elevated",
+            description="Can view bulletin read receipts.",
+        )
+        bulletin = Communication(
+            kind=Communication.KIND_BULLETIN,
+            sender=manager,
+            audience_type=Communication.AUDIENCE_USERS,
+            subject="Receipt audit bulletin",
+            body="Visibility should only appear with the right permission.",
+            pinned=True,
+            active=True,
+        )
+        db.session.add(bulletin)
+        bulletin.recipients = [
+            CommunicationRecipient(user_id=manager.id, read_at=datetime.utcnow()),
+            CommunicationRecipient(user_id=elevated_manager.id, read_at=datetime.utcnow()),
+            CommunicationRecipient(user_id=coworker_id, read_at=datetime.utcnow()),
+        ]
+        db.session.commit()
+        bulletin_id = bulletin.id
+
+    with client:
+        login(client, "bulletin-receipts-manager@example.com", "pass")
+        hidden_response = client.get(
+            f"/communications?bulletin_id={bulletin_id}",
+            follow_redirects=True,
+        )
+
+    hidden_body = hidden_response.get_data(as_text=True)
+    assert hidden_response.status_code == 200
+    assert "Read receipts" not in hidden_body
+
+    with client:
+        login(client, "bulletin-receipts-manager-elevated@example.com", "pass")
+        visible_response = client.get(
+            f"/communications?bulletin_id={bulletin_id}",
+            follow_redirects=True,
+        )
+
+    visible_body = visible_response.get_data(as_text=True)
+    assert visible_response.status_code == 200
+    assert "Read receipts" in visible_body
+    assert "bulletin-receipts-staff@example.com" in visible_body

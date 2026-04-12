@@ -188,6 +188,7 @@ PERMISSION_DEFINITIONS: tuple[PermissionDefinition, ...] = (
     _perm("communications.send_direct", "communications", "Send Direct Messages", "Send messages to scoped users."),
     _perm("communications.send_broadcast", "communications", "Send Broadcasts", "Broadcast messages to multiple users, departments, or all scoped users."),
     _perm("communications.manage_bulletin", "communications", "Manage Bulletin Board", "Post and archive pinned bulletin board updates."),
+    _perm("communications.view_bulletin_receipts", "communications", "View Bulletin Read Receipts", "View who has read assigned bulletin board updates."),
     _perm("users.view", "users", "View Users", "View the user list and user access pages."),
     _perm("users.manage", "users", "Manage Users", "Invite users, activate users, archive users, and assign groups."),
     _perm("permission_groups.view", "permission_groups", "View Permission Groups", "View permission groups."),
@@ -406,6 +407,7 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
             "communications.send_direct",
             "communications.send_broadcast",
             "communications.manage_bulletin",
+            "communications.view_bulletin_receipts",
         )
     ),
     "glcode.view_gl_codes": requirement(any_of=("gl_codes.view",)),
@@ -645,6 +647,7 @@ ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] =
             "communications.send_direct",
             "communications.send_broadcast",
             "communications.manage_bulletin",
+            "communications.view_bulletin_receipts",
         )
     ),
     ("communication.center", "POST"): requirement(
@@ -654,6 +657,7 @@ ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] =
             "communications.send_direct",
             "communications.send_broadcast",
             "communications.manage_bulletin",
+            "communications.view_bulletin_receipts",
         )
     ),
     ("admin.user_profile", "GET"): requirement(any_of=("users.manage",)),

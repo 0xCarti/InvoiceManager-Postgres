@@ -24,6 +24,7 @@ from app.models import (
     Vendor,
 )
 from app.services.dashboard_metrics import weekly_transfer_purchase_activity
+from app.utils.dashboard_bulletins import save_saved_dashboard_bulletin_ids
 from app.utils.dashboard_cards import save_dashboard_metabase_cards
 from tests.permission_helpers import grant_permissions
 from tests.utils import login
@@ -338,6 +339,53 @@ def test_dashboard_shows_bulletin_card(client, app):
     assert "Bulletins" in body
     assert "Dashboard bulletin" in body
     assert "Check the bulletin card on the dashboard." in body
+
+
+def test_dashboard_prioritizes_saved_bulletins_and_surfaces_unread(client, app):
+    with app.app_context():
+        user = _create_dashboard_user("dashboard-bulletin-priority@example.com")
+        grant_permissions(
+            user,
+            "dashboard.view",
+            "communications.view",
+            group_name="Dashboard Bulletin Priority",
+            description="Can view dashboard bulletins and communications.",
+        )
+        saved_bulletin = Communication(
+            kind=Communication.KIND_BULLETIN,
+            sender=user,
+            audience_type=Communication.AUDIENCE_USERS,
+            subject="Saved training memo",
+            body="Saved bulletin body for the dashboard preview.",
+            pinned=True,
+            active=True,
+        )
+        unread_bulletin = Communication(
+            kind=Communication.KIND_BULLETIN,
+            sender=user,
+            audience_type=Communication.AUDIENCE_USERS,
+            subject="Unread operations update",
+            body="Unread bulletin body for the dashboard preview.",
+            pinned=True,
+            active=True,
+        )
+        db.session.add_all([saved_bulletin, unread_bulletin])
+        saved_bulletin.recipients = [
+            CommunicationRecipient(user_id=user.id, read_at=datetime.utcnow())
+        ]
+        unread_bulletin.recipients = [CommunicationRecipient(user_id=user.id)]
+        db.session.commit()
+        save_saved_dashboard_bulletin_ids(user, [saved_bulletin.id])
+
+    login(client, "dashboard-bulletin-priority@example.com", "pass")
+    response = client.get("/", follow_redirects=True)
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "1 saved" in body
+    assert "1 unread" in body
+    assert body.index("Saved training memo") < body.index("Unread operations update")
+    assert "Open bulletin" in body
 
 
 def test_dashboard_hides_metabase_button_without_permission(client, app):
@@ -698,7 +746,7 @@ def test_dashboard_settings_can_hide_builtin_dashboard_sections(client, app):
     initial_body = initial_response.get_data(as_text=True)
 
     assert initial_response.status_code == 200
-    assert "Pinned updates targeted to you." in initial_body
+    assert "Pinned updates and saved quick-access bulletins." in initial_body
     assert 'id="visible-section-bulletins"' in initial_body
 
     hide_response = client.post(
@@ -710,7 +758,7 @@ def test_dashboard_settings_can_hide_builtin_dashboard_sections(client, app):
 
     assert hide_response.status_code == 200
     assert "Dashboard settings updated." in hide_body
-    assert "Pinned updates targeted to you." not in hide_body
+    assert "Pinned updates and saved quick-access bulletins." not in hide_body
     assert 'id="visible-section-bulletins"' in hide_body
 
     show_response = client.post(

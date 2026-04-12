@@ -49,6 +49,10 @@ def test_user_can_access_endpoint_requires_matching_permission():
         "main.update_metabase_card_settings",
         "POST",
     )
+    assert user_can_access_endpoint(
+        DummyUser("communications.view_bulletin_receipts"),
+        "communication.center",
+    )
 
 
 def test_super_admin_bypasses_endpoint_permission_checks():
