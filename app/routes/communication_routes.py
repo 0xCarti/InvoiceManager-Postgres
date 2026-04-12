@@ -375,14 +375,6 @@ def center():
             selected_bulletin_id,
             include_recipient_users=can_view_bulletin_receipts,
         )
-    elif bulletin_receipts:
-        if can_view_bulletin_receipts:
-            sync_dynamic_bulletin_recipients(bulletin_receipts[0].communication_id)
-        selected_bulletin_receipt = active_bulletin_receipt_for_user(
-            current_user,
-            bulletin_receipts[0].communication_id,
-            include_recipient_users=can_view_bulletin_receipts,
-        )
     else:
         selected_bulletin_receipt = None
     bulletin_read_summary = (

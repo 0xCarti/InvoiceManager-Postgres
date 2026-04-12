@@ -469,25 +469,44 @@ def test_bulletin_board_uses_paginated_list_detail_layout(client, app):
             db.session.add(bulletin)
             bulletin.recipients = [CommunicationRecipient(user_id=user.id)]
         db.session.commit()
+        oldest_bulletin_id = (
+            Communication.query.filter_by(subject="Bulletin 11").one().id
+        )
 
     with client:
         login(client, "bulletin-reader@example.com", "pass")
         first_page = client.get("/communications", follow_redirects=True)
         second_page = client.get("/communications?bulletin_page=2", follow_redirects=True)
+        expanded_response = client.get(
+            f"/communications?bulletin_page=2&bulletin_id={oldest_bulletin_id}",
+            follow_redirects=True,
+        )
 
     first_body = first_page.get_data(as_text=True)
     second_body = second_page.get_data(as_text=True)
+    expanded_body = expanded_response.get_data(as_text=True)
 
     assert first_page.status_code == 200
     assert "Page 1 of 2" in first_body
     assert "Bulletin 01" in first_body
     assert "Bulletin 11" not in first_body
-    assert "Show On Dashboard" in first_body
+    assert "Click a bulletin header to open the full memo." in first_body
+    assert "Pin" in first_body
+    assert "Full bulletin body 01" not in first_body
 
     assert second_page.status_code == 200
     assert "Page 2 of 2" in second_body
     assert "Bulletin 11" in second_body
-    assert "Full bulletin body 11" in second_body
+    assert "Full bulletin body 11" not in second_body
+
+    assert expanded_response.status_code == 200
+    assert f"bulletin_id={oldest_bulletin_id}" in (
+        expanded_response.request.path
+        + "?"
+        + expanded_response.request.query_string.decode()
+    )
+    assert "Full bulletin body 11" in expanded_body
+    assert "Archive Bulletin" in expanded_body
 
 
 def test_user_can_save_bulletin_for_dashboard_from_communications(client, app):
@@ -533,7 +552,7 @@ def test_user_can_save_bulletin_for_dashboard_from_communications(client, app):
 
     assert save_response.status_code == 200
     assert "Bulletin saved to your dashboard." in save_body
-    assert "Saved for dashboard" in save_body
+    assert "Unpin" in save_body
 
     assert dashboard_response.status_code == 200
     assert "Training bulletin" in dashboard_body
