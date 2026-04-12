@@ -1,7 +1,64 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="container-fluid px-0">
+<style nonce="{{ csp_nonce }}">
+.communications-page .communications-bulletin-board {
+    display: flex;
+    flex-direction: column;
+    min-height: 24rem;
+}
+
+.communications-page .communications-bulletin-shell {
+    display: grid;
+    gap: 1rem;
+}
+
+.communications-page .communications-bulletin-list-column,
+.communications-page .communications-bulletin-detail-column {
+    min-height: 0;
+}
+
+.communications-page .communications-bulletin-list-panel {
+    overflow-y: auto;
+    max-height: 22rem;
+}
+
+.communications-page .communications-bulletin-pagination {
+    flex-shrink: 0;
+}
+
+@media (min-width: 1200px) {
+    .communications-page .communications-bulletin-board {
+        min-height: 30rem;
+        max-height: min(72vh, 46rem);
+    }
+
+    .communications-page .communications-bulletin-shell {
+        grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr);
+        align-items: stretch;
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+
+    .communications-page .communications-bulletin-list-column {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+    }
+
+    .communications-page .communications-bulletin-list-panel {
+        flex: 1 1 auto;
+        max-height: none;
+    }
+
+    .communications-page .communications-bulletin-detail-panel {
+        height: 100%;
+        max-height: min(72vh, 46rem);
+        overflow-y: auto;
+    }
+}
+</style>
+<div class="container-fluid px-0 communications-page">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <div>
             <h1 class="h4 mb-1">Communications</h1>
@@ -197,9 +254,10 @@
                         </div>
                     </div>
                     {% if bulletin_receipts_pagination.items %}
-                    <div class="row g-3">
-                        <div class="col-12 col-xl-5">
-                            <div class="list-group">
+                    <div class="communications-bulletin-board">
+                        <div class="communications-bulletin-shell">
+                        <div class="communications-bulletin-list-column">
+                            <div class="list-group communications-bulletin-list-panel">
                                 {% for receipt in bulletin_receipts_pagination.items %}
                                 {% set is_selected = selected_bulletin_receipt and selected_bulletin_receipt.communication.id == receipt.communication.id %}
                                 <a
@@ -233,7 +291,7 @@
                                 {% endfor %}
                             </div>
                             {% if bulletin_receipts_pagination.pages > 1 %}
-                            <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 mt-3">
+                            <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 mt-3 communications-bulletin-pagination">
                                 <div class="small text-muted">Page {{ bulletin_receipts_pagination.page }} of {{ bulletin_receipts_pagination.pages }}</div>
                                 <nav aria-label="Bulletin pagination">
                                     <ul class="pagination pagination-sm mb-0">
@@ -260,9 +318,9 @@
                             </div>
                             {% endif %}
                         </div>
-                        <div class="col-12 col-xl-7">
+                        <div class="communications-bulletin-detail-column">
                             {% if selected_bulletin_receipt %}
-                            <div class="border rounded p-3 h-100 {% if selected_bulletin_receipt.read_at is none %}border-primary-subtle bg-light{% endif %}">
+                            <div class="border rounded p-3 h-100 communications-bulletin-detail-panel {% if selected_bulletin_receipt.read_at is none %}border-primary-subtle bg-light{% endif %}">
                                 <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
                                     <div>
                                         <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
@@ -377,8 +435,9 @@
                                 {% endif %}
                             </div>
                             {% else %}
-                            <div class="border rounded p-4 h-100 text-muted">Select a bulletin to read the full memo.</div>
+                            <div class="border rounded p-4 h-100 communications-bulletin-detail-panel text-muted">Select a bulletin to read the full memo.</div>
                             {% endif %}
+                        </div>
                         </div>
                     </div>
                     {% else %}
