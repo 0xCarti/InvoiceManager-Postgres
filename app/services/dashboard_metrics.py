@@ -19,7 +19,10 @@ from app.models import (
     Transfer,
     TransferItem,
 )
-from app.services.communication_service import active_bulletin_receipts_for_user
+from app.services.communication_service import (
+    active_bulletin_receipts_for_user,
+    sync_dynamic_bulletin_receipts_for_user,
+)
 from app.utils.dashboard_bulletins import load_saved_dashboard_bulletin_ids
 from app.services.event_service import current_user_today, event_schedule
 from app.utils.dashboard_cards import (
@@ -375,6 +378,7 @@ def dashboard_context(activity_interval: Optional[str] = None) -> Dict[str, Any]
     """Aggregate metrics for the dashboard view."""
 
     today = current_user_today()
+    sync_dynamic_bulletin_receipts_for_user(current_user)
     bulletin_receipts = active_bulletin_receipts_for_user(current_user)
     saved_dashboard_bulletin_ids = load_saved_dashboard_bulletin_ids(current_user)
     metabase_site_url = (current_app.config.get("METABASE_SITE_URL") or "").strip()

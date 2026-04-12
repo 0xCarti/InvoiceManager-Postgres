@@ -141,6 +141,135 @@ def test_manager_department_bulletin_is_scoped_to_department(client, app):
         assert staff_two_id not in recipient_user_ids
 
 
+def test_new_scoped_employee_sees_existing_all_scope_bulletin(client, app):
+    with app.app_context():
+        manager_id = create_user("dynamic-bulletin-manager@example.com")
+        staff_one_id = create_user("dynamic-bulletin-staff-one@example.com")
+        warehouse_id = create_department("Dynamic Warehouse")
+        add_membership(manager_id, warehouse_id, role="manager")
+        add_membership(staff_one_id, warehouse_id, role="staff")
+
+        manager = db.session.get(User, manager_id)
+        grant_permissions(
+            manager,
+            "communications.view",
+            "communications.send_broadcast",
+            "communications.manage_bulletin",
+            group_name="Dynamic Bulletin Manager",
+            description="Can post dynamic all-scope bulletins.",
+        )
+
+    with client:
+        login(client, "dynamic-bulletin-manager@example.com", "pass")
+        response = client.post(
+            "/communications",
+            data={
+                "action": "post_bulletin",
+                "bulletin-audience": "all",
+                "bulletin-subject": "Warehouse handbook",
+                "bulletin-body": "This bulletin should reach future scoped staff too.",
+            },
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"Bulletin posted for 2 user(s)." in response.data
+
+    with app.app_context():
+        staff_two_id = create_user("dynamic-bulletin-staff-two@example.com")
+        add_membership(staff_two_id, warehouse_id, role="staff")
+        staff_two = db.session.get(User, staff_two_id)
+        grant_permissions(
+            staff_two,
+            "communications.view",
+            group_name="Dynamic Bulletin Reader",
+            description="Can view dynamic bulletins.",
+        )
+
+    with client:
+        login(client, "dynamic-bulletin-staff-two@example.com", "pass")
+        inbox_response = client.get("/communications", follow_redirects=True)
+
+    assert inbox_response.status_code == 200
+    assert b"Warehouse handbook" in inbox_response.data
+
+    with app.app_context():
+        receipt = (
+            CommunicationRecipient.query.join(Communication)
+            .filter(
+                Communication.subject == "Warehouse handbook",
+                CommunicationRecipient.user_id == staff_two_id,
+            )
+            .first()
+        )
+        assert receipt is not None
+
+
+def test_selected_user_bulletin_does_not_expand_to_new_staff(client, app):
+    with app.app_context():
+        manager_id = create_user("explicit-bulletin-manager@example.com")
+        staff_one_id = create_user("explicit-bulletin-staff-one@example.com")
+        warehouse_id = create_department("Explicit Warehouse")
+        add_membership(manager_id, warehouse_id, role="manager")
+        add_membership(staff_one_id, warehouse_id, role="staff")
+
+        manager = db.session.get(User, manager_id)
+        grant_permissions(
+            manager,
+            "communications.view",
+            "communications.send_broadcast",
+            "communications.manage_bulletin",
+            group_name="Explicit Bulletin Manager",
+            description="Can post explicit-user bulletins.",
+        )
+
+    with client:
+        login(client, "explicit-bulletin-manager@example.com", "pass")
+        response = client.post(
+            "/communications",
+            data={
+                "action": "post_bulletin",
+                "bulletin-audience": "users",
+                "bulletin-recipient_user_ids": [str(staff_one_id)],
+                "bulletin-subject": "Named training memo",
+                "bulletin-body": "Only explicitly selected users should keep this memo.",
+            },
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"Bulletin posted for 1 user(s)." in response.data
+
+    with app.app_context():
+        staff_two_id = create_user("explicit-bulletin-staff-two@example.com")
+        add_membership(staff_two_id, warehouse_id, role="staff")
+        staff_two = db.session.get(User, staff_two_id)
+        grant_permissions(
+            staff_two,
+            "communications.view",
+            group_name="Explicit Bulletin Reader",
+            description="Can view communications.",
+        )
+
+    with client:
+        login(client, "explicit-bulletin-staff-two@example.com", "pass")
+        inbox_response = client.get("/communications", follow_redirects=True)
+
+    assert inbox_response.status_code == 200
+    assert b"Named training memo" not in inbox_response.data
+
+    with app.app_context():
+        receipt = (
+            CommunicationRecipient.query.join(Communication)
+            .filter(
+                Communication.subject == "Named training memo",
+                CommunicationRecipient.user_id == staff_two_id,
+            )
+            .first()
+        )
+        assert receipt is None
+
+
 def test_staff_can_read_direct_message_and_mark_it_read(client, app):
     with app.app_context():
         manager_id = create_user("direct-manager@example.com")

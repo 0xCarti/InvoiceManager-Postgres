@@ -1892,6 +1892,7 @@ class Communication(db.Model):
         db.Integer, db.ForeignKey("schedule_department.id"), nullable=True
     )
     audience_type = db.Column(db.String(20), nullable=False)
+    audience_snapshot = db.Column(db.JSON, nullable=True)
     subject = db.Column(db.String(200), nullable=False)
     body = db.Column(db.Text, nullable=False)
     pinned = db.Column(

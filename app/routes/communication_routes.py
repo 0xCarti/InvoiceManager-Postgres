@@ -13,10 +13,13 @@ from app.services.communication_service import (
     active_bulletin_receipt_for_user,
     active_bulletin_receipts_for_user,
     active_bulletin_receipts_query_for_user,
+    build_bulletin_audience_snapshot,
     can_manage_bulletin,
     communication_scope_departments,
     communication_scope_users,
     resolve_communication_recipients,
+    sync_dynamic_bulletin_receipts_for_user,
+    sync_dynamic_bulletin_recipients,
     visible_message_history,
 )
 from app.utils.activity import log_activity
@@ -57,11 +60,13 @@ def _create_communication(
     body: str,
     department_id: int | None,
     recipients,
+    audience_snapshot: dict[str, object] | None = None,
 ) -> Communication:
     item = Communication(
         kind=kind,
         sender=current_user,
         audience_type=audience,
+        audience_snapshot=audience_snapshot,
         subject=subject,
         body=body,
         department_id=department_id,
@@ -211,6 +216,10 @@ def center():
                     bulletin = _create_communication(
                         kind=Communication.KIND_BULLETIN,
                         audience=bulletin_form.audience.data,
+                        audience_snapshot=build_bulletin_audience_snapshot(
+                            current_user,
+                            audience=bulletin_form.audience.data,
+                        ),
                         subject=(bulletin_form.subject.data or "").strip(),
                         body=(bulletin_form.body.data or "").strip(),
                         department_id=(
@@ -326,6 +335,7 @@ def center():
     can_view_bulletin_receipts = current_user.has_permission(
         "communications.view_bulletin_receipts"
     )
+    sync_dynamic_bulletin_receipts_for_user(current_user)
     can_save_dashboard_bulletins = current_user.can_access_endpoint("main.home", "GET")
     saved_dashboard_bulletin_ids = set(
         load_saved_dashboard_bulletin_ids(current_user)
@@ -358,12 +368,16 @@ def center():
         default=0,
     )
     if selected_bulletin_id:
+        if can_view_bulletin_receipts:
+            sync_dynamic_bulletin_recipients(selected_bulletin_id)
         selected_bulletin_receipt = active_bulletin_receipt_for_user(
             current_user,
             selected_bulletin_id,
             include_recipient_users=can_view_bulletin_receipts,
         )
     elif bulletin_receipts:
+        if can_view_bulletin_receipts:
+            sync_dynamic_bulletin_recipients(bulletin_receipts[0].communication_id)
         selected_bulletin_receipt = active_bulletin_receipt_for_user(
             current_user,
             bulletin_receipts[0].communication_id,
