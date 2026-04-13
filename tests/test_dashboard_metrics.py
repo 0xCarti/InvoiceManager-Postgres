@@ -341,7 +341,7 @@ def test_dashboard_shows_bulletin_card(client, app):
     assert "Check the bulletin card on the dashboard." in body
 
 
-def test_dashboard_prioritizes_saved_bulletins_and_surfaces_unread(client, app):
+def test_dashboard_surfaces_unread_before_saved_bulletins(client, app):
     with app.app_context():
         user = _create_dashboard_user("dashboard-bulletin-priority@example.com")
         grant_permissions(
@@ -384,8 +384,69 @@ def test_dashboard_prioritizes_saved_bulletins_and_surfaces_unread(client, app):
     assert response.status_code == 200
     assert "1 saved" in body
     assert "1 unread" in body
-    assert body.index("Saved training memo") < body.index("Unread operations update")
+    assert "Unread bulletins first, then the bulletins you pinned for yourself." in body
+    assert "Unread" in body
+    assert "Pinned By You" in body
+    assert body.index("Unread operations update") < body.index("Saved training memo")
     assert "Open bulletin" in body
+
+
+def test_dashboard_bulletin_card_only_shows_unread_and_saved_items(client, app):
+    with app.app_context():
+        user = _create_dashboard_user("dashboard-bulletin-filtering@example.com")
+        grant_permissions(
+            user,
+            "dashboard.view",
+            "communications.view",
+            group_name="Dashboard Bulletin Filtering",
+            description="Can view dashboard bulletins and communications.",
+        )
+        read_unsaved_bulletin = Communication(
+            kind=Communication.KIND_BULLETIN,
+            sender=user,
+            audience_type=Communication.AUDIENCE_USERS,
+            subject="Already read bulletin",
+            body="This should not appear on the dashboard card anymore.",
+            pinned=True,
+            active=True,
+        )
+        unread_bulletin = Communication(
+            kind=Communication.KIND_BULLETIN,
+            sender=user,
+            audience_type=Communication.AUDIENCE_USERS,
+            subject="Unread shift reminder",
+            body="Unread bulletin still belongs at the top of the card.",
+            pinned=True,
+            active=True,
+        )
+        saved_bulletin = Communication(
+            kind=Communication.KIND_BULLETIN,
+            sender=user,
+            audience_type=Communication.AUDIENCE_USERS,
+            subject="Pinned catering note",
+            body="Saved bulletin stays in the pinned section.",
+            pinned=True,
+            active=True,
+        )
+        db.session.add_all([read_unsaved_bulletin, unread_bulletin, saved_bulletin])
+        read_unsaved_bulletin.recipients = [
+            CommunicationRecipient(user_id=user.id, read_at=datetime.utcnow())
+        ]
+        unread_bulletin.recipients = [CommunicationRecipient(user_id=user.id)]
+        saved_bulletin.recipients = [
+            CommunicationRecipient(user_id=user.id, read_at=datetime.utcnow())
+        ]
+        db.session.commit()
+        save_saved_dashboard_bulletin_ids(user, [saved_bulletin.id])
+
+    login(client, "dashboard-bulletin-filtering@example.com", "pass")
+    response = client.get("/", follow_redirects=True)
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Unread shift reminder" in body
+    assert "Pinned catering note" in body
+    assert "Already read bulletin" not in body
 
 
 def test_dashboard_hides_metabase_button_without_permission(client, app):
@@ -667,7 +728,7 @@ def test_dashboard_settings_available_without_metabase_configuration(client, app
     assert "Dashboard Settings" in body
     assert 'data-bs-target="#dashboardCardSettingsModal"' in body
     assert 'id="visible-section-bulletins"' in body
-    assert "Pinned communications assigned to the current user." in body
+    assert "Unread bulletins and saved dashboard shortcuts." in body
 
 
 def test_dashboard_card_visibility_settings_control_rendered_cards(client, app):
@@ -746,7 +807,7 @@ def test_dashboard_settings_can_hide_builtin_dashboard_sections(client, app):
     initial_body = initial_response.get_data(as_text=True)
 
     assert initial_response.status_code == 200
-    assert "Pinned updates and saved quick-access bulletins." in initial_body
+    assert "Unread bulletins first, then the bulletins you pinned for yourself." in initial_body
     assert 'id="visible-section-bulletins"' in initial_body
 
     hide_response = client.post(
@@ -758,7 +819,7 @@ def test_dashboard_settings_can_hide_builtin_dashboard_sections(client, app):
 
     assert hide_response.status_code == 200
     assert "Dashboard settings updated." in hide_body
-    assert "Pinned updates and saved quick-access bulletins." not in hide_body
+    assert "Unread bulletins first, then the bulletins you pinned for yourself." not in hide_body
     assert 'id="visible-section-bulletins"' in hide_body
 
     show_response = client.post(

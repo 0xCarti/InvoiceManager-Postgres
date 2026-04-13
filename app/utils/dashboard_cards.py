@@ -75,7 +75,7 @@ DASHBOARD_SECTION_DEFINITIONS: tuple[dict[str, str], ...] = (
     {
         "id": "bulletins",
         "label": "Bulletins",
-        "description": "Pinned communications assigned to the current user.",
+        "description": "Unread bulletins and saved dashboard shortcuts.",
     },
 )
 

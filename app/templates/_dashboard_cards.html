@@ -491,7 +491,7 @@
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <div>
                             <h5 class="mb-0">Bulletins</h5>
-                            <div class="small text-muted">Pinned updates and saved quick-access bulletins.</div>
+                            <div class="small text-muted">Unread bulletins first, then the bulletins you pinned for yourself.</div>
                         </div>
                         <div class="d-flex align-items-center gap-2">
                             {% if context.bulletins.saved_count %}
@@ -506,49 +506,104 @@
                         </div>
                     </div>
                     <div class="card-body">
-                        {% if context.bulletins.preview_items %}
-                        <div class="d-flex flex-column gap-3">
-                            {% for item in context.bulletins.preview_items %}
-                            {% set receipt = item.receipt %}
-                            <div class="border rounded p-3 {% if receipt.read_at is none %}border-primary-subtle bg-light{% endif %}">
-                                <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
-                                    <div>
-                                        <div class="fw-semibold">{{ receipt.communication.subject }}</div>
-                                        <div class="small text-muted">
-                                            {{ receipt.communication.sender.display_label }}
-                                            {% if receipt.communication.audience_type == 'department' and receipt.communication.department %}
-                                            &middot; {{ receipt.communication.department.name }}
-                                            {% elif receipt.communication.audience_type == 'all' %}
-                                            &middot; All scoped users
-                                            {% else %}
-                                            &middot; Selected users
-                                            {% endif %}
+                        {% if context.bulletins.unread_preview_items or context.bulletins.saved_preview_items %}
+                        <div class="d-flex flex-column gap-4">
+                            {% if context.bulletins.unread_preview_items %}
+                            <div class="d-flex flex-column gap-3">
+                                <div class="d-flex justify-content-between align-items-center gap-2">
+                                    <h6 class="mb-0">Unread</h6>
+                                    <span class="badge bg-primary">{{ context.bulletins.unread_count }}</span>
+                                </div>
+                                {% for item in context.bulletins.unread_preview_items %}
+                                {% set receipt = item.receipt %}
+                                <div class="border rounded p-3 border-primary-subtle bg-light">
+                                    <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
+                                        <div>
+                                            <div class="fw-semibold">{{ receipt.communication.subject }}</div>
+                                            <div class="small text-muted">
+                                                {{ receipt.communication.sender.display_label }}
+                                                {% if receipt.communication.audience_type == 'department' and receipt.communication.department %}
+                                                &middot; {{ receipt.communication.department.name }}
+                                                {% elif receipt.communication.audience_type == 'all' %}
+                                                &middot; All scoped users
+                                                {% else %}
+                                                &middot; Selected users
+                                                {% endif %}
+                                            </div>
                                         </div>
+                                        <div class="small text-muted text-nowrap">{{ receipt.communication.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
                                     </div>
-                                    <div class="small text-muted text-nowrap">{{ receipt.communication.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
-                                </div>
-                                <div class="small text-body-secondary">{{ receipt.communication.body|truncate(180, True, '...') }}</div>
-                                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
-                                    <div class="d-flex flex-wrap gap-2">
-                                        {% for badge in item.badges %}
-                                        {% if badge == 'Unread' %}
-                                        <span class="badge bg-primary">{{ badge }}</span>
-                                        {% elif badge == 'Saved' %}
-                                        <span class="badge bg-warning-subtle text-dark border">{{ badge }}</span>
-                                        {% else %}
-                                        <span class="badge text-bg-light border">{{ badge }}</span>
+                                    <div class="small text-body-secondary">{{ receipt.communication.body|truncate(180, True, '...') }}</div>
+                                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
+                                        <div class="d-flex flex-wrap gap-2">
+                                            {% for badge in item.badges %}
+                                            {% if badge == 'Unread' %}
+                                            <span class="badge bg-primary">{{ badge }}</span>
+                                            {% elif badge == 'Saved' %}
+                                            <span class="badge bg-warning-subtle text-dark border">{{ badge }}</span>
+                                            {% else %}
+                                            <span class="badge text-bg-light border">{{ badge }}</span>
+                                            {% endif %}
+                                            {% endfor %}
+                                        </div>
+                                        {% if can_access_endpoint('communication.bulletin_detail') %}
+                                        <a class="small" href="{{ url_for('communication.bulletin_detail', communication_id=receipt.communication.id) }}">Open bulletin</a>
                                         {% endif %}
-                                        {% endfor %}
                                     </div>
-                                    {% if can_access_endpoint('communication.bulletin_detail') %}
-                                    <a class="small" href="{{ url_for('communication.bulletin_detail', communication_id=receipt.communication.id) }}">Open bulletin</a>
-                                    {% endif %}
                                 </div>
+                                {% endfor %}
                             </div>
-                            {% endfor %}
+                            {% endif %}
+
+                            {% if context.bulletins.saved_preview_items %}
+                            <div class="d-flex flex-column gap-3">
+                                <div class="d-flex justify-content-between align-items-center gap-2">
+                                    <h6 class="mb-0">Pinned By You</h6>
+                                    <span class="badge bg-warning-subtle text-dark border">{{ context.bulletins.saved_count }}</span>
+                                </div>
+                                {% for item in context.bulletins.saved_preview_items %}
+                                {% set receipt = item.receipt %}
+                                <div class="border rounded p-3 {% if receipt.read_at is none %}border-primary-subtle bg-light{% endif %}">
+                                    <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
+                                        <div>
+                                            <div class="fw-semibold">{{ receipt.communication.subject }}</div>
+                                            <div class="small text-muted">
+                                                {{ receipt.communication.sender.display_label }}
+                                                {% if receipt.communication.audience_type == 'department' and receipt.communication.department %}
+                                                &middot; {{ receipt.communication.department.name }}
+                                                {% elif receipt.communication.audience_type == 'all' %}
+                                                &middot; All scoped users
+                                                {% else %}
+                                                &middot; Selected users
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                        <div class="small text-muted text-nowrap">{{ receipt.communication.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                                    </div>
+                                    <div class="small text-body-secondary">{{ receipt.communication.body|truncate(180, True, '...') }}</div>
+                                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
+                                        <div class="d-flex flex-wrap gap-2">
+                                            {% for badge in item.badges %}
+                                            {% if badge == 'Unread' %}
+                                            <span class="badge bg-primary">{{ badge }}</span>
+                                            {% elif badge == 'Saved' %}
+                                            <span class="badge bg-warning-subtle text-dark border">{{ badge }}</span>
+                                            {% else %}
+                                            <span class="badge text-bg-light border">{{ badge }}</span>
+                                            {% endif %}
+                                            {% endfor %}
+                                        </div>
+                                        {% if can_access_endpoint('communication.bulletin_detail') %}
+                                        <a class="small" href="{{ url_for('communication.bulletin_detail', communication_id=receipt.communication.id) }}">Open bulletin</a>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
                         </div>
                         {% else %}
-                        <div class="text-muted">No pinned bulletins are currently assigned to you.</div>
+                        <div class="text-muted">No unread or pinned bulletins are currently assigned to you.</div>
                         {% endif %}
                     </div>
                 </div>

@@ -38,7 +38,6 @@ from app.utils.dashboard_cards import (
 
 MAX_SAVED_BULLETIN_PREVIEW_ITEMS = 2
 MAX_UNREAD_BULLETIN_PREVIEW_ITEMS = 3
-MAX_RECENT_BULLETIN_PREVIEW_ITEMS = 3
 
 
 def _coalesce_scalar(query) -> float:
@@ -245,47 +244,33 @@ def _dashboard_bulletin_preview_context(
         for communication_id in saved_bulletin_ids
         if communication_id in accessible_receipts_by_id
     ]
-    saved_receipt_ids = {
-        receipt.communication_id for receipt in saved_receipts
-    }
-    unread_unsaved_receipts = [
-        receipt
+    saved_receipt_ids = {receipt.communication_id for receipt in saved_receipts}
+    unread_preview_items = [
+        {
+            "receipt": receipt,
+            "badges": (
+                ["Unread", "Saved"]
+                if receipt.communication_id in saved_receipt_ids
+                else ["Unread"]
+            ),
+        }
         for receipt in bulletin_receipts
-        if receipt.read_at is None and receipt.communication_id not in saved_receipt_ids
+        if receipt.read_at is None
+    ][:MAX_UNREAD_BULLETIN_PREVIEW_ITEMS]
+    saved_preview_items = [
+        {
+            "receipt": receipt,
+            "badges": ["Saved"],
+        }
+        for receipt in saved_receipts[:MAX_SAVED_BULLETIN_PREVIEW_ITEMS]
     ]
-
-    preview_items: list[dict[str, Any]] = []
-    for receipt in saved_receipts[:MAX_SAVED_BULLETIN_PREVIEW_ITEMS]:
-        badges = ["Saved"]
-        if receipt.read_at is None:
-            badges.append("Unread")
-        preview_items.append(
-            {
-                "receipt": receipt,
-                "badges": badges,
-            }
-        )
-
-    for receipt in unread_unsaved_receipts[:MAX_UNREAD_BULLETIN_PREVIEW_ITEMS]:
-        preview_items.append(
-            {
-                "receipt": receipt,
-                "badges": ["Unread"],
-            }
-        )
-
-    if not preview_items:
-        for receipt in bulletin_receipts[:MAX_RECENT_BULLETIN_PREVIEW_ITEMS]:
-            preview_items.append(
-                {
-                    "receipt": receipt,
-                    "badges": ["Recent"],
-                }
-            )
+    preview_items = unread_preview_items + saved_preview_items
 
     return {
         "receipts": [item["receipt"] for item in preview_items],
         "preview_items": preview_items,
+        "unread_preview_items": unread_preview_items,
+        "saved_preview_items": saved_preview_items,
         "saved_count": len(saved_receipts),
         "saved_bulletin_ids": [receipt.communication_id for receipt in saved_receipts],
     }
