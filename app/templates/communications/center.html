@@ -162,9 +162,22 @@
     box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18);
 }
 
+.communications-page .communications-modal form {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+}
+
 .communications-page .communications-modal .modal-header {
     border-bottom-color: rgba(17, 24, 39, 0.08);
     background: linear-gradient(180deg, rgba(29, 79, 145, 0.06) 0%, rgba(255, 255, 255, 0.96) 100%);
+}
+
+.communications-page .communications-modal .modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
 }
 
 .communications-page .communications-modal .modal-footer {
@@ -215,6 +228,9 @@
                 </div>
                 <div class="d-flex flex-column align-items-xl-end gap-3">
                     <div class="d-flex flex-wrap gap-2 justify-content-xl-end">
+                        {% if can_access_endpoint('communication.messages') %}
+                        <a class="btn btn-outline-secondary" href="{{ url_for('communication.messages') }}">View Messages</a>
+                        {% endif %}
                         {% if can_send_direct %}
                         <button
                             type="button"

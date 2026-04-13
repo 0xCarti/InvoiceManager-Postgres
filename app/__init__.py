@@ -274,6 +274,7 @@ NAV_LINKS = {
     "schedule.tradeboard": "Tradeboard",
     "schedule.setup": "Scheduling Setup",
     "communication.center": "Communications",
+    "communication.messages": "Messages",
     "admin.users": "Control Panel",
     "admin.backups": "Backups",
     "admin.settings": "Settings",
@@ -304,6 +305,7 @@ NAV_GROUPS = (
         "Communication",
         (
             ("communication.center", "Communications"),
+            ("communication.messages", "Messages"),
         ),
         False,
     ),

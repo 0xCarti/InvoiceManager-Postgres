@@ -344,6 +344,176 @@ def test_staff_can_read_direct_message_and_mark_it_read(client, app):
         assert receipt.read_at is not None
 
 
+def test_messages_page_lists_mailbox_and_archives_message(client, app):
+    with app.app_context():
+        manager_id = create_user("mailbox-manager@example.com")
+        staff_id = create_user("mailbox-staff@example.com")
+        department_id = create_department("Mailbox Ops")
+        add_membership(manager_id, department_id, role="manager")
+        add_membership(staff_id, department_id, role="staff")
+
+        manager = db.session.get(User, manager_id)
+        staff = db.session.get(User, staff_id)
+        grant_permissions(
+            manager,
+            "communications.view",
+            "communications.send_direct",
+            group_name="Mailbox Sender",
+            description="Can send mailbox test messages.",
+        )
+        grant_permissions(
+            staff,
+            "communications.view",
+            group_name="Mailbox Recipient",
+            description="Can use the mailbox pages.",
+        )
+
+    with client:
+        login(client, "mailbox-manager@example.com", "pass")
+        send_response = client.post(
+            "/communications",
+            data={
+                "action": "send_message",
+                "message-audience": "users",
+                "message-recipient_user_ids": [str(staff_id)],
+                "message-subject": "Mailbox handoff",
+                "message-body": "Review the evening inventory count sheet.",
+            },
+            follow_redirects=True,
+        )
+        assert send_response.status_code == 200
+
+    with app.app_context():
+        receipt = (
+            CommunicationRecipient.query.join(Communication)
+            .filter(
+                Communication.subject == "Mailbox handoff",
+                CommunicationRecipient.user_id == staff_id,
+            )
+            .one()
+        )
+        receipt_id = receipt.id
+
+    with client:
+        login(client, "mailbox-staff@example.com", "pass")
+        mailbox_response = client.get("/communications/messages", follow_redirects=True)
+        mailbox_body = mailbox_response.get_data(as_text=True)
+
+        assert mailbox_response.status_code == 200
+        assert "Mailbox handoff" in mailbox_body
+        assert "Send New Message" not in mailbox_body
+        assert 'href="/communications/messages"' in mailbox_body
+
+        archive_response = client.post(
+            "/communications/messages",
+            data={
+                "action": "archive_message",
+                "receipt_id": str(receipt_id),
+                "mailbox": "inbox",
+            },
+            follow_redirects=True,
+        )
+        archived_mailbox_response = client.get(
+            "/communications/messages?mailbox=archived",
+            follow_redirects=True,
+        )
+        communications_response = client.get("/communications", follow_redirects=True)
+
+    archive_body = archive_response.get_data(as_text=True)
+    archived_mailbox_body = archived_mailbox_response.get_data(as_text=True)
+    communications_body = communications_response.get_data(as_text=True)
+
+    assert archive_response.status_code == 200
+    assert "Message archived." in archive_body
+    assert "Mailbox handoff" in archived_mailbox_body
+    assert "Mailbox handoff" not in communications_body
+
+    with app.app_context():
+        receipt = db.session.get(CommunicationRecipient, receipt_id)
+        assert receipt is not None
+        assert receipt.archived_at is not None
+        assert receipt.deleted_at is None
+
+
+def test_messages_page_can_delete_message_for_current_user(client, app):
+    with app.app_context():
+        manager_id = create_user("mailbox-delete-manager@example.com")
+        staff_id = create_user("mailbox-delete-staff@example.com")
+        department_id = create_department("Mailbox Delete")
+        add_membership(manager_id, department_id, role="manager")
+        add_membership(staff_id, department_id, role="staff")
+
+        manager = db.session.get(User, manager_id)
+        staff = db.session.get(User, staff_id)
+        grant_permissions(
+            manager,
+            "communications.view",
+            "communications.send_direct",
+            group_name="Mailbox Delete Sender",
+            description="Can send deletable messages.",
+        )
+        grant_permissions(
+            staff,
+            "communications.view",
+            group_name="Mailbox Delete Recipient",
+            description="Can delete messages from mailbox.",
+        )
+
+    with client:
+        login(client, "mailbox-delete-manager@example.com", "pass")
+        send_response = client.post(
+            "/communications",
+            data={
+                "action": "send_message",
+                "message-audience": "users",
+                "message-recipient_user_ids": [str(staff_id)],
+                "message-subject": "Delete me",
+                "message-body": "This message should disappear from the mailbox.",
+            },
+            follow_redirects=True,
+        )
+        assert send_response.status_code == 200
+
+    with app.app_context():
+        receipt = (
+            CommunicationRecipient.query.join(Communication)
+            .filter(
+                Communication.subject == "Delete me",
+                CommunicationRecipient.user_id == staff_id,
+            )
+            .one()
+        )
+        receipt_id = receipt.id
+
+    with client:
+        login(client, "mailbox-delete-staff@example.com", "pass")
+        delete_response = client.post(
+            "/communications/messages",
+            data={
+                "action": "delete_message",
+                "receipt_id": str(receipt_id),
+                "mailbox": "inbox",
+            },
+            follow_redirects=True,
+        )
+        mailbox_response = client.get("/communications/messages", follow_redirects=True)
+        communications_response = client.get("/communications", follow_redirects=True)
+
+    delete_body = delete_response.get_data(as_text=True)
+    mailbox_body = mailbox_response.get_data(as_text=True)
+    communications_body = communications_response.get_data(as_text=True)
+
+    assert delete_response.status_code == 200
+    assert "Message deleted from your mailbox." in delete_body
+    assert "Delete me" not in mailbox_body
+    assert "Delete me" not in communications_body
+
+    with app.app_context():
+        receipt = db.session.get(CommunicationRecipient, receipt_id)
+        assert receipt is not None
+        assert receipt.deleted_at is not None
+
+
 def test_manager_cannot_post_bulletin_to_unmanaged_department(client, app):
     with app.app_context():
         manager_id = create_user("scope-manager@example.com")

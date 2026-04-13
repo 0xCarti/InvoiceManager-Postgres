@@ -420,6 +420,26 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
             "communications.view_bulletin_receipts",
         )
     ),
+    "communication.messages": requirement(
+        any_of=(
+            "communications.view",
+            "communications.view_history",
+            "communications.send_direct",
+            "communications.send_broadcast",
+            "communications.manage_bulletin",
+            "communications.view_bulletin_receipts",
+        )
+    ),
+    "communication.message_detail": requirement(
+        any_of=(
+            "communications.view",
+            "communications.view_history",
+            "communications.send_direct",
+            "communications.send_broadcast",
+            "communications.manage_bulletin",
+            "communications.view_bulletin_receipts",
+        )
+    ),
     "glcode.view_gl_codes": requirement(any_of=("gl_codes.view",)),
     "glcode.create_gl_code": requirement(any_of=("gl_codes.create",)),
     "glcode.edit_gl_code": requirement(any_of=("gl_codes.edit",)),
@@ -671,6 +691,36 @@ ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] =
         )
     ),
     ("communication.bulletin_detail", "GET"): requirement(
+        any_of=(
+            "communications.view",
+            "communications.view_history",
+            "communications.send_direct",
+            "communications.send_broadcast",
+            "communications.manage_bulletin",
+            "communications.view_bulletin_receipts",
+        )
+    ),
+    ("communication.messages", "GET"): requirement(
+        any_of=(
+            "communications.view",
+            "communications.view_history",
+            "communications.send_direct",
+            "communications.send_broadcast",
+            "communications.manage_bulletin",
+            "communications.view_bulletin_receipts",
+        )
+    ),
+    ("communication.messages", "POST"): requirement(
+        any_of=(
+            "communications.view",
+            "communications.view_history",
+            "communications.send_direct",
+            "communications.send_broadcast",
+            "communications.manage_bulletin",
+            "communications.view_bulletin_receipts",
+        )
+    ),
+    ("communication.message_detail", "GET"): requirement(
         any_of=(
             "communications.view",
             "communications.view_history",

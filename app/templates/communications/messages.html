@@ -1,0 +1,344 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style nonce="{{ csp_nonce }}">
+.messages-page .messages-shell {
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+}
+
+.messages-page .messages-summary {
+    max-width: 46rem;
+}
+
+.messages-page .messages-tabs .nav-link {
+    border-radius: 999px;
+    font-weight: 600;
+}
+
+.messages-page .messages-table td,
+.messages-page .messages-table th {
+    vertical-align: middle;
+}
+
+.messages-page .messages-subject-link {
+    color: inherit;
+    text-decoration: none;
+}
+
+.messages-page .messages-subject-link:hover .messages-subject,
+.messages-page .messages-subject-link:focus-visible .messages-subject {
+    color: var(--bs-primary);
+}
+
+.messages-page .messages-subject {
+    transition: color 0.15s ease;
+}
+
+.messages-page .messages-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.messages-page .messages-actions form {
+    margin: 0;
+}
+
+.messages-page .messages-compose-modal .modal-content {
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18);
+}
+
+.messages-page .messages-compose-modal form {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.messages-page .messages-compose-modal .modal-header {
+    border-bottom-color: rgba(17, 24, 39, 0.08);
+    background: linear-gradient(180deg, rgba(29, 79, 145, 0.06) 0%, rgba(255, 255, 255, 0.96) 100%);
+}
+
+.messages-page .messages-compose-modal .modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+@media (max-width: 767.98px) {
+    .messages-page .messages-actions .btn {
+        width: 100%;
+    }
+}
+</style>
+<div class="container-fluid px-0 messages-page">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+        <div class="messages-summary">
+            <h1 class="h3 mb-1">Messages</h1>
+            <p class="text-muted mb-0">
+                Use this mailbox view when you want a clean message table with archive and delete controls, while the communications page stays focused on bulletins and the smaller inbox preview.
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-outline-secondary" href="{{ url_for('communication.center') }}">Open Communications</a>
+            {% if can_send_direct %}
+            <button
+                type="button"
+                class="btn btn-primary"
+                data-bs-toggle="modal"
+                data-bs-target="#messagesSendMessageModal"
+            >
+                Send New Message
+            </button>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
+        <ul class="nav nav-pills messages-tabs">
+            <li class="nav-item">
+                <a class="nav-link {% if active_mailbox == 'inbox' %}active{% endif %}" href="{{ url_for('communication.messages') }}">
+                    Inbox
+                    <span class="badge text-bg-light ms-1">{{ inbox_count }}</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if active_mailbox == 'archived' %}active{% endif %}" href="{{ url_for('communication.messages', mailbox='archived') }}">
+                    Archived
+                    <span class="badge text-bg-light ms-1">{{ archived_count }}</span>
+                </a>
+            </li>
+        </ul>
+        <div class="d-flex flex-wrap gap-2">
+            <span class="badge bg-primary">{{ unread_count }} unread</span>
+            <span class="badge text-bg-secondary">{{ message_receipts_pagination.total }} shown</span>
+        </div>
+    </div>
+
+    <div class="card messages-shell">
+        <div class="card-body">
+            {% if message_receipts_pagination.items %}
+            <div class="table-responsive">
+                <table class="table table-hover align-middle messages-table mb-0">
+                    <thead>
+                        <tr>
+                            <th>Subject</th>
+                            <th>From</th>
+                            <th>Received</th>
+                            <th>Status</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for receipt in message_receipts_pagination.items %}
+                        <tr>
+                            <td class="text-wrap">
+                                <a
+                                    class="messages-subject-link"
+                                    href="{{ url_for('communication.message_detail', receipt_id=receipt.id, mailbox=active_mailbox if active_mailbox == 'archived' else None, message_page=message_page if message_page > 1 else None) }}"
+                                >
+                                    <div class="fw-semibold messages-subject">{{ receipt.communication.subject }}</div>
+                                    <div class="small text-muted">{{ receipt.communication.body|truncate(120) }}</div>
+                                </a>
+                            </td>
+                            <td>{{ receipt.communication.sender.display_label }}</td>
+                            <td class="text-nowrap">{{ receipt.communication.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td class="text-nowrap">
+                                {% if receipt.archived_at %}
+                                <span class="badge bg-warning-subtle text-dark border">Archived</span>
+                                {% endif %}
+                                {% if receipt.read_at is none %}
+                                <span class="badge bg-primary">Unread</span>
+                                {% else %}
+                                <span class="badge text-bg-light border">Read</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="messages-actions justify-content-end">
+                                    {% if active_mailbox != 'archived' and receipt.read_at is none %}
+                                    <form method="post">
+                                        {{ action_form.hidden_tag() }}
+                                        <input type="hidden" name="action" value="mark_read_message">
+                                        <input type="hidden" name="receipt_id" value="{{ receipt.id }}">
+                                        <input type="hidden" name="mailbox" value="{{ active_mailbox }}">
+                                        <input type="hidden" name="message_page" value="{{ message_page }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-secondary">Mark Read</button>
+                                    </form>
+                                    {% endif %}
+                                    {% if active_mailbox == 'archived' %}
+                                    <form method="post">
+                                        {{ action_form.hidden_tag() }}
+                                        <input type="hidden" name="action" value="restore_message">
+                                        <input type="hidden" name="receipt_id" value="{{ receipt.id }}">
+                                        <input type="hidden" name="mailbox" value="{{ active_mailbox }}">
+                                        <input type="hidden" name="message_page" value="{{ message_page }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-primary">Restore</button>
+                                    </form>
+                                    {% else %}
+                                    <form method="post">
+                                        {{ action_form.hidden_tag() }}
+                                        <input type="hidden" name="action" value="archive_message">
+                                        <input type="hidden" name="receipt_id" value="{{ receipt.id }}">
+                                        <input type="hidden" name="mailbox" value="{{ active_mailbox }}">
+                                        <input type="hidden" name="message_page" value="{{ message_page }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-secondary">Archive</button>
+                                    </form>
+                                    {% endif %}
+                                    <form method="post">
+                                        {{ action_form.hidden_tag() }}
+                                        <input type="hidden" name="action" value="delete_message">
+                                        <input type="hidden" name="receipt_id" value="{{ receipt.id }}">
+                                        <input type="hidden" name="mailbox" value="{{ active_mailbox }}">
+                                        <input type="hidden" name="message_page" value="{{ message_page }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% if message_receipts_pagination.pages > 1 %}
+            <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 mt-3">
+                <div class="small text-muted">Page {{ message_receipts_pagination.page }} of {{ message_receipts_pagination.pages }}</div>
+                <nav aria-label="Messages pagination">
+                    <ul class="pagination pagination-sm mb-0">
+                        <li class="page-item {% if not message_receipts_pagination.has_prev %}disabled{% endif %}">
+                            <a
+                                class="page-link"
+                                href="{{ url_for('communication.messages', mailbox=active_mailbox if active_mailbox == 'archived' else None, message_page=message_receipts_pagination.prev_num if message_receipts_pagination.has_prev else 1) }}"
+                                {% if not message_receipts_pagination.has_prev %}tabindex="-1" aria-disabled="true"{% endif %}
+                            >
+                                Previous
+                            </a>
+                        </li>
+                        <li class="page-item {% if not message_receipts_pagination.has_next %}disabled{% endif %}">
+                            <a
+                                class="page-link"
+                                href="{{ url_for('communication.messages', mailbox=active_mailbox if active_mailbox == 'archived' else None, message_page=message_receipts_pagination.next_num if message_receipts_pagination.has_next else message_receipts_pagination.pages) }}"
+                                {% if not message_receipts_pagination.has_next %}tabindex="-1" aria-disabled="true"{% endif %}
+                            >
+                                Next
+                            </a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+            {% endif %}
+            {% else %}
+            <div class="text-muted">
+                {% if active_mailbox == 'archived' %}
+                No archived messages are available.
+                {% else %}
+                No messages are currently assigned to you.
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if can_send_direct %}
+    <div class="modal fade messages-compose-modal" id="messagesSendMessageModal" tabindex="-1" aria-labelledby="messagesSendMessageModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div>
+                        <h2 class="modal-title fs-5 mb-1" id="messagesSendMessageModalLabel">Send New Message</h2>
+                        <div class="small text-muted">Compose without leaving the mailbox.</div>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form method="post" data-audience-form>
+                    <div class="modal-body">
+                        {{ message_form.hidden_tag() }}
+                        <input type="hidden" name="action" value="send_message">
+                        <input type="hidden" name="mailbox" value="{{ active_mailbox }}">
+                        <div class="mb-3">
+                            {{ message_form.audience.label(class_='form-label') }}
+                            {{ message_form.audience(class_='form-select', data_audience_select='1') }}
+                            {% for error in message_form.audience.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="mb-3" data-audience-users>
+                            {{ message_form.recipient_user_ids.label(class_='form-label') }}
+                            {{ message_form.recipient_user_ids(class_='form-select') }}
+                            {% for error in message_form.recipient_user_ids.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="mb-3" data-audience-department>
+                            {{ message_form.department_id.label(class_='form-label') }}
+                            {{ message_form.department_id(class_='form-select') }}
+                            {% for error in message_form.department_id.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="mb-3">
+                            {{ message_form.subject.label(class_='form-label') }}
+                            {{ message_form.subject(class_='form-control') }}
+                            {% for error in message_form.subject.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="mb-0">
+                            {{ message_form.body.label(class_='form-label') }}
+                            {{ message_form.body(class_='form-control', rows='8') }}
+                            {% for error in message_form.body.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Send Message</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+<script nonce="{{ csp_nonce }}">
+    document.addEventListener("DOMContentLoaded", () => {
+        const updateAudienceFields = (form) => {
+            const select = form.querySelector("[data-audience-select]");
+            if (!select) {
+                return;
+            }
+            const audience = select.value;
+            const usersField = form.querySelector("[data-audience-users]");
+            const departmentField = form.querySelector("[data-audience-department]");
+            if (usersField) {
+                usersField.style.display = audience === "users" ? "" : "none";
+            }
+            if (departmentField) {
+                departmentField.style.display = audience === "department" ? "" : "none";
+            }
+        };
+
+        document.querySelectorAll("[data-audience-form]").forEach((form) => {
+            const select = form.querySelector("[data-audience-select]");
+            if (!select) {
+                return;
+            }
+            updateAudienceFields(form);
+            select.addEventListener("change", () => updateAudienceFields(form));
+        });
+
+        const openModalId = {{ open_modal_id|tojson }};
+        if (openModalId && window.bootstrap?.Modal) {
+            const modalElement = document.getElementById(openModalId);
+            if (modalElement) {
+                window.requestAnimationFrame(() => {
+                    bootstrap.Modal.getOrCreateInstance(modalElement).show();
+                });
+            }
+        }
+    });
+</script>
+{% endblock %}

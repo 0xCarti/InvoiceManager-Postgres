@@ -1,0 +1,135 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style nonce="{{ csp_nonce }}">
+.message-detail-page .message-detail-card {
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+}
+
+.message-detail-page .message-detail-body {
+    border: 1px solid rgba(29, 79, 145, 0.12);
+    border-radius: 1rem;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(248, 250, 252, 0.95) 100%);
+    padding: 1.35rem;
+}
+
+.message-detail-page .message-detail-meta {
+    display: grid;
+    gap: 0.9rem;
+    margin: 0;
+}
+
+.message-detail-page .message-detail-meta div {
+    display: grid;
+    gap: 0.18rem;
+}
+
+.message-detail-page .message-detail-meta dt {
+    color: rgba(17, 24, 39, 0.58);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    margin: 0;
+    text-transform: uppercase;
+}
+
+.message-detail-page .message-detail-meta dd {
+    margin: 0;
+}
+</style>
+<div class="container-fluid px-0 message-detail-page">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+        <div>
+            <a class="btn btn-link px-0 mb-2" href="{{ back_to_messages_url }}">&larr; Back to Messages</a>
+            <h1 class="h3 mb-1">{{ receipt.communication.subject }}</h1>
+            <div class="text-muted small">From {{ receipt.communication.sender.display_label }}</div>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            {% if receipt.archived_at %}
+            <span class="badge bg-warning-subtle text-dark border">Archived</span>
+            {% endif %}
+            {% if receipt.read_at is none %}
+            <span class="badge bg-primary">Unread</span>
+            {% else %}
+            <span class="badge text-bg-light border">Read</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="row g-3 align-items-start">
+        <div class="col-12 col-xl-8">
+            <div class="card message-detail-card">
+                <div class="card-body">
+                    <div class="message-detail-body" style="white-space: pre-wrap;">{{ receipt.communication.body }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-xl-4">
+            <div class="card message-detail-card">
+                <div class="card-body">
+                    <h2 class="h6 text-uppercase text-muted mb-3">Message Details</h2>
+                    <dl class="message-detail-meta">
+                        <div>
+                            <dt>From</dt>
+                            <dd>{{ receipt.communication.sender.display_label }}</dd>
+                        </div>
+                        <div>
+                            <dt>Sent</dt>
+                            <dd>{{ receipt.communication.created_at.strftime('%Y-%m-%d %H:%M') }}</dd>
+                        </div>
+                        <div>
+                            <dt>Status</dt>
+                            <dd>
+                                {% if receipt.archived_at %}
+                                Archived
+                                {% else %}
+                                In inbox
+                                {% endif %}
+                                {% if receipt.read_at %}
+                                &middot; Read {{ receipt.read_at.strftime('%Y-%m-%d %H:%M') }}
+                                {% endif %}
+                            </dd>
+                        </div>
+                    </dl>
+
+                    <div class="d-grid gap-2 mt-4">
+                        {% if receipt.archived_at %}
+                        <form method="post" action="{{ url_for('communication.messages') }}">
+                            {{ action_form.hidden_tag() }}
+                            <input type="hidden" name="action" value="restore_message">
+                            <input type="hidden" name="receipt_id" value="{{ receipt.id }}">
+                            <input type="hidden" name="mailbox" value="{{ mailbox }}">
+                            <input type="hidden" name="message_page" value="{{ message_page }}">
+                            <input type="hidden" name="return_view" value="message_detail">
+                            <button type="submit" class="btn btn-outline-primary w-100">Restore to Inbox</button>
+                        </form>
+                        {% else %}
+                        <form method="post" action="{{ url_for('communication.messages') }}">
+                            {{ action_form.hidden_tag() }}
+                            <input type="hidden" name="action" value="archive_message">
+                            <input type="hidden" name="receipt_id" value="{{ receipt.id }}">
+                            <input type="hidden" name="mailbox" value="{{ mailbox }}">
+                            <input type="hidden" name="message_page" value="{{ message_page }}">
+                            <input type="hidden" name="return_view" value="message_detail">
+                            <button type="submit" class="btn btn-outline-secondary w-100">Archive Message</button>
+                        </form>
+                        {% endif %}
+                        <form method="post" action="{{ url_for('communication.messages') }}">
+                            {{ action_form.hidden_tag() }}
+                            <input type="hidden" name="action" value="delete_message">
+                            <input type="hidden" name="receipt_id" value="{{ receipt.id }}">
+                            <input type="hidden" name="mailbox" value="{{ mailbox }}">
+                            <input type="hidden" name="message_page" value="{{ message_page }}">
+                            <button type="submit" class="btn btn-outline-danger w-100">Delete Message</button>
+                        </form>
+                        {% if can_send_direct %}
+                        <a class="btn btn-primary w-100" href="{{ url_for('communication.messages', compose=1) }}">Send New Message</a>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

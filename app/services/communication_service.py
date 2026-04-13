@@ -420,6 +420,82 @@ def _bulletin_receipt_options(
     return options
 
 
+def _message_receipt_options():
+    return (
+        selectinload(CommunicationRecipient.communication).selectinload(
+            Communication.sender
+        ),
+        selectinload(CommunicationRecipient.communication).selectinload(
+            Communication.department
+        ),
+    )
+
+
+def message_receipts_query_for_user(
+    user: User,
+    *,
+    archived: bool = False,
+):
+    """Return the base query for message receipts visible to ``user``."""
+
+    query = (
+        CommunicationRecipient.query.options(*_message_receipt_options())
+        .join(Communication, CommunicationRecipient.communication_id == Communication.id)
+        .filter(
+            CommunicationRecipient.user_id == user.id,
+            Communication.kind == Communication.KIND_MESSAGE,
+            CommunicationRecipient.deleted_at.is_(None),
+        )
+    )
+
+    if archived:
+        query = query.filter(CommunicationRecipient.archived_at.is_not(None))
+        return query.order_by(
+            CommunicationRecipient.archived_at.desc(),
+            Communication.created_at.desc(),
+            Communication.id.desc(),
+        )
+
+    return query.filter(CommunicationRecipient.archived_at.is_(None)).order_by(
+        case((CommunicationRecipient.read_at.is_(None), 0), else_=1).asc(),
+        Communication.created_at.desc(),
+        Communication.id.desc(),
+    )
+
+
+def message_receipts_for_user(
+    user: User,
+    *,
+    archived: bool = False,
+    limit: int | None = None,
+) -> list[CommunicationRecipient]:
+    query = message_receipts_query_for_user(user, archived=archived)
+    if limit is not None:
+        query = query.limit(limit)
+    return query.all()
+
+
+def message_receipt_for_user(
+    user: User,
+    receipt_id: int,
+    *,
+    include_archived: bool = True,
+) -> CommunicationRecipient | None:
+    query = (
+        CommunicationRecipient.query.options(*_message_receipt_options())
+        .join(Communication, CommunicationRecipient.communication_id == Communication.id)
+        .filter(
+            CommunicationRecipient.id == receipt_id,
+            CommunicationRecipient.user_id == user.id,
+            Communication.kind == Communication.KIND_MESSAGE,
+            CommunicationRecipient.deleted_at.is_(None),
+        )
+    )
+    if not include_archived:
+        query = query.filter(CommunicationRecipient.archived_at.is_(None))
+    return query.first()
+
+
 def active_bulletin_receipts_query_for_user(
     user: User,
     *,

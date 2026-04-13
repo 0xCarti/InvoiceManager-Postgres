@@ -1949,6 +1949,8 @@ class CommunicationRecipient(db.Model):
     )
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     read_at = db.Column(db.DateTime, nullable=True)
+    archived_at = db.Column(db.DateTime, nullable=True)
+    deleted_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(
         db.DateTime,
         nullable=False,
@@ -1971,11 +1973,32 @@ class CommunicationRecipient(db.Model):
             "user_id",
             "read_at",
         ),
+        db.Index(
+            "ix_communication_recipient_user_archived",
+            "user_id",
+            "archived_at",
+        ),
+        db.Index(
+            "ix_communication_recipient_user_deleted",
+            "user_id",
+            "deleted_at",
+        ),
     )
 
     def mark_read(self) -> None:
         if self.read_at is None:
             self.read_at = datetime.utcnow()
+
+    def archive(self) -> None:
+        if self.archived_at is None:
+            self.archived_at = datetime.utcnow()
+
+    def restore(self) -> None:
+        self.archived_at = None
+
+    def delete_for_user(self) -> None:
+        if self.deleted_at is None:
+            self.deleted_at = datetime.utcnow()
 
 
 class Event(db.Model):
