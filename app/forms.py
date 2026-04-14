@@ -42,6 +42,7 @@ from wtforms.widgets import CheckboxInput, ListWidget, TextInput
 
 from app.models import (
     Department,
+    Display,
     Event,
     EventLocation,
     GLCode,
@@ -50,6 +51,8 @@ from app.models import (
     Location,
     Menu,
     PermissionGroup,
+    Playlist,
+    PlaylistItem,
     Product,
     ShiftPosition,
     User,
@@ -293,6 +296,22 @@ def load_menu_choices(include_blank: bool = True):
     return choices
 
 
+def load_playlist_choices(include_blank: bool = True):
+    """Return playlist options for selection fields."""
+
+    playlists = Playlist.query.order_by(Playlist.name).all()
+    choices = [
+        (
+            playlist.id,
+            f"{playlist.name} (archived)" if playlist.archived else playlist.name,
+        )
+        for playlist in playlists
+    ]
+    if include_blank:
+        return [(0, "No Playlist")] + choices
+    return choices
+
+
 def load_permission_group_choices(include_system: bool = True):
     """Return available permission group choices."""
     query = PermissionGroup.query.order_by(
@@ -465,14 +484,24 @@ class LocationForm(FlaskForm):
         validate_choice=False,
         default=0,
     )
+    default_playlist_id = SelectField(
+        "Default Playlist",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
     is_spoilage = BooleanField("Spoilage Location")
     submit = SubmitField("Submit")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.menu_id.choices = load_menu_choices()
+        self.default_playlist_id.choices = load_playlist_choices()
         if self.menu_id.data is None:
             self.menu_id.data = 0
+        if self.default_playlist_id.data is None:
+            self.default_playlist_id.data = 0
 
 
 class LocationItemAddForm(FlaskForm):
@@ -721,6 +750,115 @@ class MenuAssignmentForm(FlaskForm):
             (loc.id, f"{loc.name} (archived)" if loc.archived else loc.name)
             for loc in Location.query.order_by(Location.name).all()
         ]
+
+
+class PlaylistItemForm(FlaskForm):
+    source_type = SelectField(
+        "Menu Source",
+        choices=[
+            (PlaylistItem.SOURCE_LOCATION_MENU, "Use location menu"),
+            (PlaylistItem.SOURCE_MENU, "Use specific menu"),
+        ],
+        validators=[DataRequired()],
+    )
+    menu_id = SelectField(
+        "Menu",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    duration_seconds = IntegerField(
+        "Duration (seconds)",
+        validators=[InputRequired(), NumberRange(min=5, max=3600)],
+        default=15,
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.menu_id.choices = load_menu_choices()
+        if self.menu_id.data is None:
+            self.menu_id.data = 0
+
+
+class PlaylistForm(FlaskForm):
+    name = StringField("Playlist Name", validators=[DataRequired(), Length(max=100)])
+    description = TextAreaField("Description", validators=[Optional()])
+    items = FieldList(FormField(PlaylistItemForm), min_entries=0)
+    submit = SubmitField("Save Playlist")
+
+    def __init__(self, *args, **kwargs):
+        self.obj_id = kwargs.pop("obj_id", None)
+        super().__init__(*args, **kwargs)
+        for item_form in self.items:
+            item_form.source_type.choices = PlaylistItemForm().source_type.choices
+            item_form.menu_id.choices = load_menu_choices()
+
+    def validate_name(self, field):
+        query = Playlist.query.filter(Playlist.name == field.data)
+        if self.obj_id is not None:
+            query = query.filter(Playlist.id != self.obj_id)
+        if query.first() is not None:
+            raise ValidationError("A playlist with this name already exists.")
+
+    def validate(self, **kwargs):
+        valid = super().validate(**kwargs)
+        if not valid:
+            return False
+        if not self.items.entries:
+            self.form_errors.append("Add at least one playlist item.")
+            return False
+        for item_form in self.items:
+            source_type = item_form.source_type.data
+            if (
+                source_type == PlaylistItem.SOURCE_MENU
+                and not int(item_form.menu_id.data or 0)
+            ):
+                item_form.menu_id.errors.append("Select a menu for this playlist item.")
+                return False
+        return True
+
+
+class DisplayForm(FlaskForm):
+    name = StringField("Display Name", validators=[DataRequired(), Length(max=100)])
+    location_id = SelectField(
+        "Location",
+        coerce=int,
+        validators=[DataRequired()],
+        validate_choice=False,
+    )
+    playlist_override_id = SelectField(
+        "Playlist Override",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    archived = BooleanField("Archived")
+    submit = SubmitField("Save Display")
+
+    def __init__(self, *args, **kwargs):
+        self.obj_id = kwargs.pop("obj_id", None)
+        super().__init__(*args, **kwargs)
+        self.location_id.choices = [
+            (location.id, f"{location.name} (archived)" if location.archived else location.name)
+            for location in Location.query.order_by(Location.name).all()
+        ]
+        self.playlist_override_id.choices = load_playlist_choices()
+        if self.playlist_override_id.data is None:
+            self.playlist_override_id.data = 0
+
+    def validate_name(self, field):
+        query = Display.query.filter(
+            Display.name == field.data,
+            Display.location_id == self.location_id.data,
+        )
+        if self.obj_id is not None:
+            query = query.filter(Display.id != self.obj_id)
+        if query.first() is not None:
+            raise ValidationError(
+                "A display with this name already exists for the selected location."
+            )
 
 
 class PurchaseCostForecastForm(FlaskForm):

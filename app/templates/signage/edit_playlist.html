@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container my-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h1 class="h3 mb-1">{{ "Edit Playlist" if playlist else "Create Playlist" }}</h1>
+            <p class="text-muted mb-0">Rotate multiple menu screens on a single TV. Use the location menu source when you want screens to follow location menu changes automatically.</p>
+        </div>
+        <div>
+            <a href="{{ url_for('signage.view_playlists') }}" class="btn btn-outline-secondary">Back to Playlists</a>
+        </div>
+    </div>
+
+    <form method="post" id="playlist-form">
+        {{ form.hidden_tag() }}
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <div class="mb-3">
+                    {{ form.name.label(class="form-label") }}
+                    {{ form.name(class="form-control", placeholder="Main Counter Rotation") }}
+                    {% for error in form.name.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="mb-3">
+                    {{ form.description.label(class="form-label") }}
+                    {{ form.description(class="form-control", rows=3, placeholder="Optional notes about when this playlist is used") }}
+                    {% for error in form.description.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <h2 class="h5 mb-1">Playlist Items</h2>
+                <p class="text-muted small mb-0">Items play top to bottom in the order shown here.</p>
+            </div>
+            <button type="button" class="btn btn-outline-primary btn-sm" id="add-playlist-item">Add Item</button>
+        </div>
+
+        <div id="playlist-items" data-playlist-items data-next-index="{{ form.items|length }}">
+            {% for item_form in form.items %}
+            <div class="card shadow-sm mb-3 playlist-item-row" data-playlist-item>
+                <div class="card-body">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-4">
+                            {{ item_form.source_type.label(class="form-label") }}
+                            {{ item_form.source_type(class="form-select playlist-source-type") }}
+                            {% for error in item_form.source_type.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="col-md-4">
+                            {{ item_form.menu_id.label(class="form-label") }}
+                            {{ item_form.menu_id(class="form-select playlist-menu-field") }}
+                            {% for error in item_form.menu_id.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="col-md-3">
+                            {{ item_form.duration_seconds.label(class="form-label") }}
+                            {{ item_form.duration_seconds(class="form-control", min="5", max="3600") }}
+                            {% for error in item_form.duration_seconds.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="col-md-1 d-grid">
+                            <button type="button" class="btn btn-outline-danger" data-remove-playlist-item>&times;</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <template id="playlist-item-template">
+            <div class="card shadow-sm mb-3 playlist-item-row" data-playlist-item>
+                <div class="card-body">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-4">
+                            {{ item_template_form.source_type.label(class="form-label") }}
+                            {{ item_template_form.source_type(class="form-select playlist-source-type") }}
+                        </div>
+                        <div class="col-md-4">
+                            {{ item_template_form.menu_id.label(class="form-label") }}
+                            {{ item_template_form.menu_id(class="form-select playlist-menu-field") }}
+                        </div>
+                        <div class="col-md-3">
+                            {{ item_template_form.duration_seconds.label(class="form-label") }}
+                            {{ item_template_form.duration_seconds(class="form-control", min="5", max="3600") }}
+                        </div>
+                        <div class="col-md-1 d-grid">
+                            <button type="button" class="btn btn-outline-danger" data-remove-playlist-item>&times;</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </template>
+
+        <div class="d-flex flex-wrap gap-2 mt-4">
+            {{ form.submit(class="btn btn-primary") }}
+            <a href="{{ url_for('signage.view_playlists') }}" class="btn btn-secondary">Cancel</a>
+        </div>
+    </form>
+</div>
+<script src="{{ url_for('static', filename='js/signage_playlist_form.js') }}"></script>
+{% endblock %}

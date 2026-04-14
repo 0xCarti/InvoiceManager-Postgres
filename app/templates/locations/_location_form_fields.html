@@ -10,6 +10,11 @@
     <div class="form-text">{{ menu_help_text }}</div>
     {% endif %}
 </div>
+<div class="mb-3">
+    {{ form.default_playlist_id.label(class="form-label") }}
+    {{ form.default_playlist_id(class="form-select") }}
+    <div class="form-text">Displays assigned to this location use this playlist unless they have an override.</div>
+</div>
 <div class="form-check mb-3">
     {{ form.is_spoilage(class="form-check-input") }}
     {{ form.is_spoilage.label(class="form-check-label") }}

@@ -27,7 +27,7 @@ from app.forms import (
     MenuForm,
     QuickProductForm,
 )
-from app.models import Location, Menu, MenuAssignment, Product, Setting
+from app.models import Location, Menu, MenuAssignment, PlaylistItem, Product, Setting
 from app.utils.activity import log_activity
 from app.utils.menu_assignments import set_location_menu, sync_menu_locations
 from app.utils.text import (
@@ -249,6 +249,9 @@ def delete_menu(menu_id: int):
     menu = db.session.get(Menu, menu_id)
     if menu is None:
         abort(404)
+    if PlaylistItem.query.filter_by(menu_id=menu.id).first() is not None:
+        flash("This menu is used by a signage playlist and cannot be deleted.", "danger")
+        return redirect(url_for("menu.view_menus"))
     active_locations = [assignment.location for assignment in menu.assignments if assignment.unassigned_at is None and assignment.location]
     for location in active_locations:
         set_location_menu(location, None)

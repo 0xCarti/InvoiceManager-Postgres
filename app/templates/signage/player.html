@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ display.name }} Player</title>
+    <style nonce="{{ csp_nonce }}">
+        :root {
+            --bg: #08121d;
+            --panel: rgba(10, 20, 32, 0.88);
+            --panel-strong: rgba(9, 17, 27, 0.96);
+            --accent: #ffbf47;
+            --accent-soft: rgba(255, 191, 71, 0.18);
+            --text: #f5efe5;
+            --muted: #b9c4d0;
+            --card: rgba(255, 255, 255, 0.07);
+            --border: rgba(255, 255, 255, 0.12);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(circle at top left, rgba(255, 191, 71, 0.24), transparent 28%),
+                radial-gradient(circle at bottom right, rgba(55, 139, 255, 0.18), transparent 32%),
+                linear-gradient(140deg, #08121d 0%, #12283f 52%, #09111b 100%);
+        }
+
+        .player-shell {
+            min-height: 100vh;
+            padding: 3.25rem;
+            display: grid;
+            grid-template-rows: auto auto 1fr;
+            gap: 1.5rem;
+        }
+
+        .player-topbar,
+        .player-footer,
+        .menu-panel {
+            background: var(--panel);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 1.5rem;
+            box-shadow: 0 1.5rem 4rem rgba(0, 0, 0, 0.24);
+        }
+
+        .player-topbar,
+        .player-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem 1.25rem;
+        }
+
+        .player-kicker {
+            text-transform: uppercase;
+            letter-spacing: 0.18em;
+            font-size: 0.74rem;
+            color: var(--accent);
+        }
+
+        .player-title {
+            margin: 0.15rem 0 0;
+            font-size: clamp(1.8rem, 3vw, 3rem);
+        }
+
+        .player-meta {
+            text-align: right;
+            color: var(--muted);
+            font-size: 0.95rem;
+        }
+
+        .menu-panel {
+            display: grid;
+            grid-template-rows: auto 1fr;
+            overflow: hidden;
+        }
+
+        .menu-panel-header {
+            padding: 1.6rem 1.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+            background: linear-gradient(180deg, var(--panel-strong), transparent);
+        }
+
+        .menu-name {
+            margin: 0;
+            font-size: clamp(2.4rem, 5vw, 4.75rem);
+            line-height: 0.96;
+        }
+
+        .menu-description {
+            margin: 0.6rem 0 0;
+            max-width: 60rem;
+            color: var(--muted);
+            font-size: 1.15rem;
+        }
+
+        .menu-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+            gap: 1rem;
+            padding: 1.5rem 1.75rem 1.75rem;
+            align-content: start;
+        }
+
+        .menu-item {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 1rem 1.1rem;
+            border-radius: 1rem;
+            background: var(--card);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .menu-item-name {
+            font-size: 1.15rem;
+            font-weight: 700;
+        }
+
+        .menu-item-price {
+            white-space: nowrap;
+            color: var(--accent);
+            font-weight: 800;
+            font-size: 1.1rem;
+        }
+
+        .empty-state {
+            min-height: 18rem;
+            display: grid;
+            place-items: center;
+            text-align: center;
+            color: var(--muted);
+            font-size: 1.2rem;
+            padding: 2rem;
+        }
+
+        .player-footer {
+            color: var(--muted);
+            font-size: 0.95rem;
+        }
+
+        .player-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.45rem 0.8rem;
+            border-radius: 999px;
+            background: var(--accent-soft);
+            color: var(--text);
+        }
+
+        @media (max-width: 900px) {
+            .player-shell {
+                padding: 1rem;
+            }
+
+            .player-topbar,
+            .player-footer {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .player-meta {
+                text-align: left;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div
+        id="signage-player"
+        class="player-shell"
+        data-manifest-url="{{ manifest_url }}"
+        data-heartbeat-url="{{ heartbeat_url }}"
+    >
+        <section class="player-topbar">
+            <div>
+                <div class="player-kicker">Digital Menu Board</div>
+                <h1 class="player-title" id="display-title">{{ display.name }}</h1>
+            </div>
+            <div class="player-meta">
+                <div id="display-location">{{ display.location.name if display.location else "" }}</div>
+                <div id="playlist-name">Loading playlist...</div>
+            </div>
+        </section>
+
+        <section class="menu-panel">
+            <div class="menu-panel-header">
+                <div class="player-kicker" id="slide-source">Loading...</div>
+                <h2 class="menu-name" id="menu-name">Loading menu...</h2>
+                <p class="menu-description" id="menu-description"></p>
+            </div>
+            <div class="menu-grid" id="menu-grid"></div>
+        </section>
+
+        <section class="player-footer">
+            <div class="player-pill" id="slide-timer">Preparing player...</div>
+            <div id="player-status">Waiting for server...</div>
+        </section>
+    </div>
+    <script src="{{ url_for('static', filename='js/signage_player.js') }}"></script>
+</body>
+</html>

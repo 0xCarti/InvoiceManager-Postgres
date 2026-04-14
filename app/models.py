@@ -1,4 +1,5 @@
 import json
+import secrets
 from datetime import date as date_cls, datetime, timedelta
 from typing import Optional
 
@@ -1072,6 +1073,9 @@ class Location(db.Model):
         db.Boolean, default=False, nullable=False, server_default="0"
     )
     current_menu_id = db.Column(db.Integer, db.ForeignKey("menu.id"), nullable=True)
+    default_playlist_id = db.Column(
+        db.Integer, db.ForeignKey("playlist.id"), nullable=True
+    )
     products = db.relationship(
         "Product", secondary=location_products, backref="locations"
     )
@@ -1088,11 +1092,22 @@ class Location(db.Model):
     current_menu = relationship(
         "Menu", back_populates="locations", foreign_keys="Location.current_menu_id"
     )
+    default_playlist = relationship(
+        "Playlist",
+        back_populates="locations",
+        foreign_keys="Location.default_playlist_id",
+    )
     menu_assignments = relationship(
         "MenuAssignment",
         back_populates="location",
         order_by="MenuAssignment.assigned_at.desc()",
         cascade="all, delete-orphan",
+    )
+    displays = relationship(
+        "Display",
+        back_populates="location",
+        cascade="all, delete-orphan",
+        order_by="Display.name.asc()",
     )
     terminal_sale_location_aliases = relationship(
         "TerminalSaleLocationAlias",
@@ -1481,6 +1496,7 @@ class Menu(db.Model):
     locations = relationship(
         "Location", back_populates="current_menu", foreign_keys="Location.current_menu_id"
     )
+    playlist_items = relationship("PlaylistItem", back_populates="menu")
 
 
 class MenuAssignment(db.Model):
@@ -1498,6 +1514,150 @@ class MenuAssignment(db.Model):
     __table_args__ = (
         db.Index("ix_menu_assignment_active", "location_id", "unassigned_at"),
     )
+
+
+class Playlist(db.Model):
+    __tablename__ = "playlist"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    description = db.Column(db.Text, nullable=True)
+    archived = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
+    created_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow, server_default=func.now()
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    items = relationship(
+        "PlaylistItem",
+        back_populates="playlist",
+        cascade="all, delete-orphan",
+        order_by="PlaylistItem.position.asc(), PlaylistItem.id.asc()",
+    )
+    locations = relationship(
+        "Location",
+        back_populates="default_playlist",
+        foreign_keys="Location.default_playlist_id",
+    )
+    displays = relationship(
+        "Display",
+        back_populates="playlist_override",
+        foreign_keys="Display.playlist_override_id",
+    )
+
+
+class PlaylistItem(db.Model):
+    __tablename__ = "playlist_item"
+
+    SOURCE_LOCATION_MENU = "location_menu"
+    SOURCE_MENU = "menu"
+
+    id = db.Column(db.Integer, primary_key=True)
+    playlist_id = db.Column(db.Integer, db.ForeignKey("playlist.id"), nullable=False)
+    position = db.Column(
+        db.Integer, nullable=False, default=0, server_default="0"
+    )
+    source_type = db.Column(
+        db.String(32),
+        nullable=False,
+        default=SOURCE_LOCATION_MENU,
+        server_default=SOURCE_LOCATION_MENU,
+    )
+    menu_id = db.Column(db.Integer, db.ForeignKey("menu.id"), nullable=True)
+    duration_seconds = db.Column(
+        db.Integer, nullable=False, default=15, server_default="15"
+    )
+    created_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow, server_default=func.now()
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    playlist = relationship("Playlist", back_populates="items")
+    menu = relationship("Menu", back_populates="playlist_items")
+
+    __table_args__ = (
+        db.Index("ix_playlist_item_playlist_position", "playlist_id", "position"),
+    )
+
+
+class Display(db.Model):
+    __tablename__ = "signage_display"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    location_id = db.Column(db.Integer, db.ForeignKey("location.id"), nullable=False)
+    playlist_override_id = db.Column(
+        db.Integer, db.ForeignKey("playlist.id"), nullable=True
+    )
+    public_token = db.Column(
+        db.String(64),
+        unique=True,
+        nullable=False,
+        default=lambda: secrets.token_urlsafe(24),
+    )
+    last_seen_at = db.Column(db.DateTime, nullable=True)
+    last_seen_ip = db.Column(db.String(64), nullable=True)
+    last_seen_user_agent = db.Column(db.String(255), nullable=True)
+    archived = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
+    created_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow, server_default=func.now()
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    location = relationship("Location", back_populates="displays")
+    playlist_override = relationship(
+        "Playlist",
+        back_populates="displays",
+        foreign_keys=[playlist_override_id],
+    )
+
+    __table_args__ = (
+        db.Index("ix_signage_display_location_archived", "location_id", "archived"),
+        db.Index("ix_signage_display_last_seen_at", "last_seen_at"),
+    )
+
+    @property
+    def effective_playlist(self) -> Optional[Playlist]:
+        if self.playlist_override is not None:
+            return self.playlist_override
+        if self.location is None:
+            return None
+        return self.location.default_playlist
+
+    @property
+    def is_online(self) -> bool:
+        if self.last_seen_at is None:
+            return False
+        threshold_seconds = 120
+        if has_app_context():
+            threshold_seconds = int(
+                current_app.config.get("DISPLAY_ONLINE_THRESHOLD_SECONDS", 120)
+            )
+        return (
+            datetime.utcnow() - self.last_seen_at
+        ).total_seconds() <= threshold_seconds
 
 
 class Invoice(db.Model):

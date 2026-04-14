@@ -41,6 +41,7 @@ PERMISSION_CATEGORY_LABELS: dict[str, str] = {
     "items": "Items",
     "locations": "Locations",
     "menus": "Menus",
+    "signage": "Digital Signage",
     "products": "Products",
     "spoilage": "Spoilage",
     "gl_codes": "GL Codes",
@@ -106,6 +107,19 @@ PERMISSION_DEFINITIONS: tuple[PermissionDefinition, ...] = (
     _perm("menus.edit", "menus", "Edit Menus", "Edit menus."),
     _perm("menus.delete", "menus", "Delete Menus", "Delete menus."),
     _perm("menus.assign", "menus", "Assign Menus", "Assign menus to locations."),
+    _perm("signage.view", "signage", "View Signage", "View signage displays and playlists."),
+    _perm(
+        "signage.manage_displays",
+        "signage",
+        "Manage Displays",
+        "Create, edit, archive, and reconnect signage displays.",
+    ),
+    _perm(
+        "signage.manage_playlists",
+        "signage",
+        "Manage Playlists",
+        "Create, edit, archive, and delete signage playlists.",
+    ),
     _perm("products.view", "products", "View Products", "View products and product lists."),
     _perm("products.create", "products", "Create Products", "Create products."),
     _perm("products.edit", "products", "Edit Products", "Edit products."),
@@ -277,6 +291,26 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "menu.delete_menu": requirement(any_of=("menus.delete",)),
     "menu.assign_menu": requirement(any_of=("menus.assign",)),
     "menu.get_menu_products": requirement(any_of=("menus.view", "menus.assign")),
+    "signage.view_displays": requirement(
+        any_of=("signage.view", "signage.manage_displays")
+    ),
+    "signage.add_display": requirement(any_of=("signage.manage_displays",)),
+    "signage.edit_display": requirement(any_of=("signage.manage_displays",)),
+    "signage.toggle_display_archive": requirement(
+        any_of=("signage.manage_displays",)
+    ),
+    "signage.regenerate_display_token": requirement(
+        any_of=("signage.manage_displays",)
+    ),
+    "signage.view_playlists": requirement(
+        any_of=("signage.view", "signage.manage_playlists")
+    ),
+    "signage.add_playlist": requirement(any_of=("signage.manage_playlists",)),
+    "signage.edit_playlist": requirement(any_of=("signage.manage_playlists",)),
+    "signage.toggle_playlist_archive": requirement(
+        any_of=("signage.manage_playlists",)
+    ),
+    "signage.delete_playlist": requirement(any_of=("signage.manage_playlists",)),
     "customer.view_customers": requirement(any_of=("customers.view",)),
     "customer.create_customer": requirement(any_of=("customers.create",)),
     "customer.edit_customer": requirement(any_of=("customers.edit",)),

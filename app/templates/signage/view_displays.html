@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block content %}
+{% set can_manage_displays = can_access_endpoint('signage.add_display', 'GET') %}
+<div class="container my-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h1 class="h3 mb-1">Displays</h1>
+            <p class="text-muted mb-0">Manage player URLs, TV assignment, and live screen status.</p>
+        </div>
+        {% if can_manage_displays %}
+        <div>
+            <a href="{{ url_for('signage.add_display') }}" class="btn btn-primary">Create Display</a>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if displays %}
+    <div class="table-responsive">
+        <table class="table table-striped align-middle">
+            <thead>
+                <tr>
+                    <th scope="col">Display</th>
+                    <th scope="col">Location</th>
+                    <th scope="col">Effective Playlist</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Last Seen</th>
+                    <th scope="col">Player URL</th>
+                    <th scope="col" class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for display in displays %}
+                {% set effective_playlist = display.effective_playlist %}
+                <tr>
+                    <td>
+                        <div class="fw-semibold">{{ display.name }}</div>
+                        {% if display.archived %}
+                        <span class="badge text-bg-secondary mt-1">Archived</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ display.location.name if display.location else "Unassigned" }}</td>
+                    <td>
+                        {% if effective_playlist %}
+                        <div>{{ effective_playlist.name }}</div>
+                        {% if display.playlist_override %}
+                        <div class="text-muted small">Display override</div>
+                        {% else %}
+                        <div class="text-muted small">Inherited from location</div>
+                        {% endif %}
+                        {% else %}
+                        <div>Location Menu Fallback</div>
+                        <div class="text-muted small">Uses the location's current menu directly</div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if display.is_online %}
+                        <span class="badge text-bg-success">Online</span>
+                        {% else %}
+                        <span class="badge text-bg-secondary">Offline</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if display.last_seen_at %}
+                        {{ display.last_seen_at|format_datetime('%Y-%m-%d %H:%M:%S') }}
+                        {% else %}
+                        <span class="text-muted">Never</span>
+                        {% endif %}
+                    </td>
+                    <td style="min-width: 20rem;">
+                        <input
+                            type="text"
+                            class="form-control form-control-sm"
+                            readonly
+                            value="{{ url_for('signage.player_page', public_token=display.public_token, _external=True) }}"
+                        >
+                    </td>
+                    <td class="text-end">
+                        <div class="d-flex flex-wrap justify-content-end gap-2">
+                            <a
+                                href="{{ url_for('signage.player_page', public_token=display.public_token) }}"
+                                class="btn btn-sm btn-outline-secondary"
+                                target="_blank"
+                                rel="noopener"
+                            >
+                                Open Player
+                            </a>
+                            {% if can_manage_displays %}
+                            <a href="{{ url_for('signage.edit_display', display_id=display.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                            <form method="post" action="{{ url_for('signage.regenerate_display_token', display_id=display.id) }}" class="d-inline">
+                                {{ action_form.hidden_tag() }}
+                                <button type="submit" class="btn btn-sm btn-outline-warning">Regenerate URL</button>
+                            </form>
+                            <form method="post" action="{{ url_for('signage.toggle_display_archive', display_id=display.id) }}" class="d-inline">
+                                {{ action_form.hidden_tag() }}
+                                <button type="submit" class="btn btn-sm btn-outline-danger">
+                                    {{ "Restore" if display.archived else "Archive" }}
+                                </button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="alert alert-info">No displays have been created yet.</div>
+    {% endif %}
+</div>
+{% endblock %}

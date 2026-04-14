@@ -46,6 +46,12 @@ PURCHASE_PERMISSION_CODES = (
     "purchase_invoices.view",
 )
 
+SIGNAGE_PERMISSION_CODES = (
+    "signage.view",
+    "signage.manage_displays",
+    "signage.manage_playlists",
+)
+
 
 def grant_permissions(
     user: User,
@@ -134,6 +140,15 @@ def grant_purchase_permissions(user: User) -> PermissionGroup:
         *PURCHASE_PERMISSION_CODES,
         group_name=f"Purchase Test Group {user.email}",
         description="Test permissions for purchase workflows.",
+    )
+
+
+def grant_signage_permissions(user: User) -> PermissionGroup:
+    return grant_permissions(
+        user,
+        *SIGNAGE_PERMISSION_CODES,
+        group_name=f"Signage Test Group {user.email}",
+        description="Test permissions for signage workflows.",
     )
 
 

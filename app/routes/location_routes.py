@@ -24,7 +24,7 @@ from app.forms import (
     LocationForm,
     LocationItemAddForm,
 )
-from app.models import GLCode, Item, Location, LocationStandItem, Menu
+from app.models import GLCode, Item, Location, LocationStandItem, Menu, Playlist
 from app.services.pdf import render_stand_sheet_pdf
 from app.utils.activity import log_activity
 from app.utils.filter_state import (
@@ -135,14 +135,25 @@ def add_location():
     form = LocationForm()
     if form.validate_on_submit():
         menu_obj = None
+        playlist_obj = None
         menu_id = form.menu_id.data or 0
         if menu_id:
             menu_obj = db.session.get(Menu, menu_id)
             if menu_obj is None:
                 form.menu_id.errors.append("Selected menu is no longer available.")
                 return render_template("locations/add_location.html", form=form)
+        playlist_id = form.default_playlist_id.data or 0
+        if playlist_id:
+            playlist_obj = db.session.get(Playlist, playlist_id)
+            if playlist_obj is None:
+                form.default_playlist_id.errors.append(
+                    "Selected playlist is no longer available."
+                )
+                return render_template("locations/add_location.html", form=form)
         new_location = Location(
-            name=form.name.data, is_spoilage=form.is_spoilage.data
+            name=form.name.data,
+            is_spoilage=form.is_spoilage.data,
+            default_playlist=playlist_obj,
         )
         db.session.add(new_location)
         db.session.flush()
@@ -162,6 +173,9 @@ def add_location():
                         "name": new_location.name,
                         "menu_name": new_location.current_menu.name
                         if new_location.current_menu
+                        else None,
+                        "playlist_name": new_location.default_playlist.name
+                        if new_location.default_playlist
                         else None,
                     },
                 }
@@ -183,6 +197,7 @@ def edit_location(location_id):
     form = LocationForm(obj=location)
     if request.method == "GET":
         form.menu_id.data = location.current_menu_id or 0
+        form.default_playlist_id.data = location.default_playlist_id or 0
 
     safe_next = _safe_next_url(request.args.get("next"))
     cancel_url = safe_next or url_for("locations.view_locations")
@@ -207,14 +222,24 @@ def edit_location(location_id):
 
     if form.validate_on_submit():
         menu_obj = None
+        playlist_obj = None
         menu_id = form.menu_id.data or 0
         if menu_id:
             menu_obj = db.session.get(Menu, menu_id)
             if menu_obj is None:
                 form.menu_id.errors.append("Selected menu is no longer available.")
                 return render_form()
+        playlist_id = form.default_playlist_id.data or 0
+        if playlist_id:
+            playlist_obj = db.session.get(Playlist, playlist_id)
+            if playlist_obj is None:
+                form.default_playlist_id.errors.append(
+                    "Selected playlist is no longer available."
+                )
+                return render_form()
         location.name = form.name.data
         location.is_spoilage = form.is_spoilage.data
+        location.default_playlist = playlist_obj
         if menu_obj is not None:
             set_location_menu(location, menu_obj)
         elif location.current_menu is not None:

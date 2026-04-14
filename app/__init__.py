@@ -258,6 +258,8 @@ NAV_LINKS = {
     "item.view_items": "Items",
     "locations.view_locations": "Locations",
     "menu.view_menus": "Menus",
+    "signage.view_displays": "Displays",
+    "signage.view_playlists": "Playlists",
     "product.view_products": "Products",
     "spoilage.view_spoilage": "Spoilage",
     "glcode.view_gl_codes": "GL Codes",
@@ -334,6 +336,14 @@ NAV_GROUPS = (
             ("product.view_products", "Products"),
             ("menu.view_menus", "Menus"),
             ("locations.view_locations", "Locations"),
+        ),
+        False,
+    ),
+    (
+        "Signage",
+        (
+            ("signage.view_displays", "Displays"),
+            ("signage.view_playlists", "Playlists"),
         ),
         False,
     ),
@@ -566,6 +576,9 @@ def create_app(args=None):
     app.config["POS_IMPORT_API_BASE_URL"] = os.getenv("POS_IMPORT_API_BASE_URL", "")
     app.config["POS_IMPORT_API_TOKEN"] = os.getenv("POS_IMPORT_API_TOKEN", "")
     app.config["MENU_FEED_API_TOKEN"] = os.getenv("MENU_FEED_API_TOKEN", "")
+    app.config["DISPLAY_ONLINE_THRESHOLD_SECONDS"] = _get_int_env(
+        "DISPLAY_ONLINE_THRESHOLD_SECONDS", 120
+    )
     app.config["POS_IMPORT_API_MESSAGES_PATH"] = os.getenv(
         "POS_IMPORT_API_MESSAGES_PATH", "/messages/unseen"
     )
@@ -871,6 +884,7 @@ def create_app(args=None):
         from app.routes.purchase_routes import purchase
         from app.routes.report_routes import report
         from app.routes.schedule_routes import schedule
+        from app.routes.signage_routes import player_heartbeat, signage as signage_bp
         from app.routes.spoilage_routes import spoilage
         from app.routes.transfer_routes import transfer
         from app.routes.vendor_routes import vendor
@@ -879,6 +893,7 @@ def create_app(args=None):
         app.register_blueprint(main)
         app.register_blueprint(communication)
         app.register_blueprint(menu_bp)
+        app.register_blueprint(signage_bp)
         app.register_blueprint(location)
         app.register_blueprint(item)
         app.register_blueprint(transfer)
@@ -969,6 +984,7 @@ def create_app(args=None):
 
         csrf_protect = CSRFProtect(app)
         csrf_protect.exempt(mailgun)
+        csrf_protect.exempt(player_heartbeat)
 
         @app.errorhandler(CSRFError)
         def handle_csrf_error(error):

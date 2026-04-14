@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block content %}
+{% set can_manage_playlists = can_access_endpoint('signage.add_playlist', 'GET') %}
+<div class="container my-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h1 class="h3 mb-1">Playlists</h1>
+            <p class="text-muted mb-0">Build menu rotations that can be assigned to locations or used as display overrides.</p>
+        </div>
+        {% if can_manage_playlists %}
+        <div>
+            <a href="{{ url_for('signage.add_playlist') }}" class="btn btn-primary">Create Playlist</a>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if playlists %}
+    <div class="table-responsive">
+        <table class="table table-striped align-middle">
+            <thead>
+                <tr>
+                    <th scope="col">Playlist</th>
+                    <th scope="col">Items</th>
+                    <th scope="col">Locations</th>
+                    <th scope="col">Overrides</th>
+                    <th scope="col">Status</th>
+                    <th scope="col" class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for playlist in playlists %}
+                <tr>
+                    <td>
+                        <div class="fw-semibold">{{ playlist.name }}</div>
+                        <div class="text-muted small">{{ playlist.description or "No description" }}</div>
+                    </td>
+                    <td>
+                        {% if playlist.items %}
+                        <ol class="mb-0 ps-3 small">
+                            {% for item in playlist.items %}
+                            <li>
+                                {% if item.source_type == 'location_menu' %}
+                                Location menu
+                                {% else %}
+                                {{ item.menu.name if item.menu else "Missing menu" }}
+                                {% endif %}
+                                <span class="text-muted">({{ item.duration_seconds }}s)</span>
+                            </li>
+                            {% endfor %}
+                        </ol>
+                        {% else %}
+                        <span class="text-muted">No items</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ playlist.locations|length }}</td>
+                    <td>{{ playlist.displays|length }}</td>
+                    <td>
+                        {% if playlist.archived %}
+                        <span class="badge text-bg-secondary">Archived</span>
+                        {% else %}
+                        <span class="badge text-bg-success">Active</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-end">
+                        <div class="d-flex flex-wrap justify-content-end gap-2">
+                            {% if can_manage_playlists %}
+                            <a href="{{ url_for('signage.edit_playlist', playlist_id=playlist.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                            <form method="post" action="{{ url_for('signage.toggle_playlist_archive', playlist_id=playlist.id) }}" class="d-inline">
+                                {{ action_form.hidden_tag() }}
+                                <button type="submit" class="btn btn-sm btn-outline-warning">
+                                    {{ "Restore" if playlist.archived else "Archive" }}
+                                </button>
+                            </form>
+                            <form method="post" action="{{ url_for('signage.delete_playlist', playlist_id=playlist.id) }}" class="d-inline">
+                                {{ action_form.hidden_tag() }}
+                                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="alert alert-info">No playlists have been created yet.</div>
+    {% endif %}
+</div>
+{% endblock %}
