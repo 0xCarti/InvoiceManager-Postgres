@@ -884,7 +884,11 @@ def create_app(args=None):
         from app.routes.purchase_routes import purchase
         from app.routes.report_routes import report
         from app.routes.schedule_routes import schedule
-        from app.routes.signage_routes import player_heartbeat, signage as signage_bp
+        from app.routes.signage_routes import (
+            player_heartbeat,
+            signage as signage_bp,
+            tizen_activate,
+        )
         from app.routes.spoilage_routes import spoilage
         from app.routes.transfer_routes import transfer
         from app.routes.vendor_routes import vendor
@@ -985,6 +989,7 @@ def create_app(args=None):
         csrf_protect = CSRFProtect(app)
         csrf_protect.exempt(mailgun)
         csrf_protect.exempt(player_heartbeat)
+        csrf_protect.exempt(tizen_activate)
 
         @app.errorhandler(CSRFError)
         def handle_csrf_error(error):

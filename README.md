@@ -73,6 +73,9 @@ SECRET_KEY=replace-with-a-long-random-value
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASS=replace-with-a-long-random-admin-password
 PORT=5000
+SUPPORT_MODE=false
+SHOW_ERROR_DETAILS_TO_USERS=false
+ERROR_DETAILS_MAX_LENGTH=8000
 
 DATABASE_DRIVER=postgresql+psycopg
 DATABASE_HOST=postgres
@@ -115,6 +118,9 @@ POS_IMPORT_INGEST_MODE=webhook
 | `SECRET_KEY` | Flask secret key used for sessions. |
 | `ADMIN_EMAIL`, `ADMIN_PASS` | Initial administrator account credentials. |
 | `PORT` | Web server port (optional, defaults to `5000`). |
+| `SUPPORT_MODE` | Enables support-oriented defaults. When `true`, the internal error page shows redacted technical details unless `SHOW_ERROR_DETAILS_TO_USERS` is set explicitly (defaults to `false`). |
+| `SHOW_ERROR_DETAILS_TO_USERS` | Shows redacted traceback details on the internal error page. Defaults to the value of `SUPPORT_MODE`. |
+| `ERROR_DETAILS_MAX_LENGTH` | Maximum number of redacted traceback characters rendered on the internal error page before truncation (defaults to `8000`). |
 | `DATABASE_DRIVER`, `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_USER`, `DATABASE_PASSWORD`, `DATABASE_NAME` | Individual PostgreSQL connection components used to build the SQLAlchemy URI. `DATABASE_USER`, `DATABASE_PASSWORD`, and `DATABASE_NAME` are required unless you set `DATABASE_URL` or `SQLALCHEMY_DATABASE_URI` directly. |
 | `HOST_DATABASE_PORT` | Host-side port published for the Postgres container in Docker Compose. Leave this at `5432` unless that port is already in use on your machine. |
 | `DATABASE_URL`, `SQLALCHEMY_DATABASE_URI` | Optional full SQLAlchemy URI overrides. If either is set, it takes precedence over individual `DATABASE_*` values. |

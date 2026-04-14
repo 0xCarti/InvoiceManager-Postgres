@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import secrets
-from datetime import datetime
+import string
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import selectinload
@@ -9,12 +10,41 @@ from sqlalchemy.orm import selectinload
 from app import db
 from app.models import Display, Location, Menu, Playlist, PlaylistItem, Product
 
+DISPLAY_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
 
 def generate_display_token() -> str:
     while True:
         token = secrets.token_urlsafe(24)
         if not Display.query.filter_by(public_token=token).first():
             return token
+
+
+def normalize_display_browser_code(raw_value: str | None) -> str:
+    cleaned = "".join(
+        ch for ch in (raw_value or "").upper() if ch in DISPLAY_CODE_ALPHABET
+    )
+    return cleaned[:8]
+
+
+def generate_display_browser_code() -> str:
+    while True:
+        code = "".join(secrets.choice(DISPLAY_CODE_ALPHABET) for _ in range(6))
+        if not Display.query.filter_by(browser_code=code).first():
+            return code
+
+
+def normalize_activation_code(raw_value: str | None) -> str:
+    allowed = string.ascii_uppercase + string.digits
+    cleaned = "".join(ch for ch in (raw_value or "").upper() if ch in allowed)
+    return cleaned[:8]
+
+
+def generate_display_activation_code() -> str:
+    while True:
+        code = "".join(secrets.choice(DISPLAY_CODE_ALPHABET) for _ in range(6))
+        if not Display.query.filter_by(activation_code=code).first():
+            return code
 
 
 def load_display_for_player(public_token: str) -> Display | None:
@@ -38,6 +68,60 @@ def load_display_for_player(public_token: str) -> Display | None:
     )
 
 
+def load_display_for_browser_code(browser_code: str) -> Display | None:
+    normalized = normalize_display_browser_code(browser_code)
+    if not normalized:
+        return None
+    return (
+        Display.query.options(
+            selectinload(Display.location)
+            .selectinload(Location.current_menu)
+            .selectinload(Menu.products),
+            selectinload(Display.location)
+            .selectinload(Location.default_playlist)
+            .selectinload(Playlist.items)
+            .selectinload(PlaylistItem.menu)
+            .selectinload(Menu.products),
+            selectinload(Display.playlist_override)
+            .selectinload(Playlist.items)
+            .selectinload(PlaylistItem.menu)
+            .selectinload(Menu.products),
+        )
+        .filter_by(browser_code=normalized, archived=False)
+        .first()
+    )
+
+
+def load_display_for_activation_code(activation_code: str) -> Display | None:
+    normalized = normalize_activation_code(activation_code)
+    if not normalized:
+        return None
+    return (
+        Display.query.options(selectinload(Display.location))
+        .filter_by(activation_code=normalized, archived=False)
+        .first()
+    )
+
+
+def refresh_display_activation_code(
+    display: Display, *, lifetime_minutes: int = 30
+) -> Display:
+    display.activation_code = generate_display_activation_code()
+    display.activation_code_expires_at = datetime.utcnow() + timedelta(
+        minutes=max(int(lifetime_minutes), 1)
+    )
+    db.session.commit()
+    return display
+
+
+def consume_display_activation_code(display: Display) -> Display:
+    display.last_activated_at = datetime.utcnow()
+    display.activation_code = None
+    display.activation_code_expires_at = None
+    db.session.commit()
+    return display
+
+
 def update_display_heartbeat(
     display: Display, *, remote_addr: str | None, user_agent: str | None
 ) -> None:
@@ -56,6 +140,8 @@ def build_display_manifest(display: Display) -> dict[str, Any]:
             "name": display.name,
             "location_name": display.location.name if display.location else "",
             "is_online": display.is_online,
+            "public_token": display.public_token,
+            "browser_code": display.browser_code,
         },
         "playlist": {
             "id": playlist.id if playlist is not None else None,

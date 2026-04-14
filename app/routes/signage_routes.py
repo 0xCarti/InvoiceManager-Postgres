@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from flask import (
     Blueprint,
     abort,
@@ -18,8 +20,13 @@ from app.forms import CSRFOnlyForm, DisplayForm, PlaylistForm, PlaylistItemForm
 from app.models import Display, Location, Menu, Playlist, PlaylistItem
 from app.services.signage import (
     build_display_manifest,
+    consume_display_activation_code,
     generate_display_token,
+    load_display_for_browser_code,
+    load_display_for_activation_code,
     load_display_for_player,
+    normalize_activation_code,
+    refresh_display_activation_code,
     update_display_heartbeat,
 )
 from app.utils.activity import log_activity
@@ -94,6 +101,19 @@ def _build_playlist_items(form: PlaylistForm) -> list[PlaylistItem] | None:
             )
         )
     return items
+
+
+def _render_player(display: Display):
+    return render_template(
+        "signage/player.html",
+        display=display,
+        manifest_url=url_for(
+            "signage.player_manifest", public_token=display.public_token
+        ),
+        heartbeat_url=url_for(
+            "signage.player_heartbeat", public_token=display.public_token
+        ),
+    )
 
 
 @signage.route("/signage/displays")
@@ -199,6 +219,25 @@ def regenerate_display_token(display_id: int):
     db.session.commit()
     log_activity(f"Regenerated signage player token for {display.name}")
     flash("Display player URL regenerated.", "success")
+    return redirect(url_for("signage.view_displays"))
+
+
+@signage.route("/signage/displays/<int:display_id>/activation-code", methods=["POST"])
+@login_required
+def issue_display_activation_code(display_id: int):
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Unable to validate activation request.", "danger")
+        return redirect(url_for("signage.view_displays"))
+    display = db.session.get(Display, display_id)
+    if display is None:
+        abort(404)
+    refresh_display_activation_code(display, lifetime_minutes=30)
+    log_activity(f"Issued Tizen activation code for signage display {display.name}")
+    flash(
+        f"Activation code for {display.name}: {display.activation_code}",
+        "success",
+    )
     return redirect(url_for("signage.view_displays"))
 
 
@@ -331,17 +370,80 @@ def delete_playlist(playlist_id: int):
     return redirect(url_for("signage.view_playlists"))
 
 
+@signage.route("/signage/tizen/launcher")
+def tizen_launcher():
+    if request.args.get("reset") == "1":
+        return render_template(
+            "signage/tizen_launcher.html",
+            reset=True,
+            activate_url=url_for("signage.tizen_activate"),
+        )
+    return render_template(
+        "signage/tizen_launcher.html",
+        reset=False,
+        activate_url=url_for("signage.tizen_activate"),
+    )
+
+
+@signage.route("/api/signage/tizen/activate", methods=["POST"])
+def tizen_activate():
+    payload = request.get_json(silent=True) or request.form
+    submitted_code = normalize_activation_code(payload.get("code"))
+    if not submitted_code:
+        return jsonify({"ok": False, "error": "Activation code is required."}), 400
+
+    display = load_display_for_activation_code(submitted_code)
+    if display is None:
+        return jsonify({"ok": False, "error": "Activation code was not found."}), 404
+    if (
+        display.activation_code_expires_at is None
+        or display.activation_code_expires_at < datetime.utcnow()
+    ):
+        return jsonify({"ok": False, "error": "Activation code has expired."}), 410
+
+    consume_display_activation_code(display)
+    return jsonify(
+        {
+            "ok": True,
+            "display": {
+                "id": display.id,
+                "name": display.name,
+                "public_token": display.public_token,
+                "browser_code": display.browser_code,
+            },
+            "player_url": url_for(
+                "signage.player_short_page",
+                browser_code=display.browser_code,
+                _external=True,
+            ),
+            "manifest_url": url_for(
+                "signage.player_manifest",
+                public_token=display.public_token,
+                _external=True,
+            ),
+            "heartbeat_url": url_for(
+                "signage.player_heartbeat",
+                public_token=display.public_token,
+                _external=True,
+            ),
+        }
+    )
+
+
+@signage.route("/s/<browser_code>")
+def player_short_page(browser_code: str):
+    display = load_display_for_browser_code(browser_code)
+    if display is None:
+        abort(404)
+    return _render_player(display)
+
+
 @signage.route("/player/<public_token>")
 def player_page(public_token: str):
     display = load_display_for_player(public_token)
     if display is None:
         abort(404)
-    return render_template(
-        "signage/player.html",
-        display=display,
-        manifest_url=url_for("signage.player_manifest", public_token=public_token),
-        heartbeat_url=url_for("signage.player_heartbeat", public_token=public_token),
-    )
+    return _render_player(display)
 
 
 @signage.route("/api/player/<public_token>/manifest")

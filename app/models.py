@@ -1594,6 +1594,17 @@ class PlaylistItem(db.Model):
     )
 
 
+def _generate_display_browser_code() -> str:
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    display_model = globals().get("Display")
+    while True:
+        code = "".join(secrets.choice(alphabet) for _ in range(6))
+        if display_model is None or not display_model.query.filter_by(
+            browser_code=code
+        ).first():
+            return code
+
+
 class Display(db.Model):
     __tablename__ = "signage_display"
 
@@ -1609,6 +1620,15 @@ class Display(db.Model):
         nullable=False,
         default=lambda: secrets.token_urlsafe(24),
     )
+    browser_code = db.Column(
+        db.String(8),
+        unique=True,
+        nullable=False,
+        default=_generate_display_browser_code,
+    )
+    activation_code = db.Column(db.String(12), nullable=True, unique=True)
+    activation_code_expires_at = db.Column(db.DateTime, nullable=True)
+    last_activated_at = db.Column(db.DateTime, nullable=True)
     last_seen_at = db.Column(db.DateTime, nullable=True)
     last_seen_ip = db.Column(db.String(64), nullable=True)
     last_seen_user_agent = db.Column(db.String(255), nullable=True)
@@ -1658,6 +1678,12 @@ class Display(db.Model):
         return (
             datetime.utcnow() - self.last_seen_at
         ).total_seconds() <= threshold_seconds
+
+    @property
+    def has_active_activation_code(self) -> bool:
+        if not self.activation_code or self.activation_code_expires_at is None:
+            return False
+        return self.activation_code_expires_at >= datetime.utcnow()
 
 
 class Invoice(db.Model):

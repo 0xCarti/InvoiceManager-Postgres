@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Tizen Signage Launcher</title>
+    <style nonce="{{ csp_nonce }}">
+        :root {
+            --bg: #07111c;
+            --panel: rgba(255, 255, 255, 0.08);
+            --panel-strong: rgba(5, 12, 20, 0.86);
+            --border: rgba(255, 255, 255, 0.12);
+            --accent: #ffbf47;
+            --text: #f7f4ed;
+            --muted: #c3cfdb;
+            --danger: #ff7f7f;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            padding: 2rem;
+            font-family: "Avenir Next", "Segoe UI", sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(circle at top left, rgba(255, 191, 71, 0.18), transparent 25%),
+                linear-gradient(145deg, #07111c 0%, #11263d 55%, #07111c 100%);
+        }
+
+        .launcher-card {
+            width: min(42rem, 100%);
+            background: var(--panel-strong);
+            border: 1px solid var(--border);
+            border-radius: 1.5rem;
+            padding: 2rem;
+            box-shadow: 0 1.5rem 3.5rem rgba(0, 0, 0, 0.24);
+        }
+
+        .launcher-kicker {
+            text-transform: uppercase;
+            letter-spacing: 0.18em;
+            font-size: 0.74rem;
+            color: var(--accent);
+        }
+
+        .launcher-title {
+            margin: 0.4rem 0 0.65rem;
+            font-size: clamp(2rem, 5vw, 3.5rem);
+            line-height: 0.96;
+        }
+
+        .launcher-copy {
+            color: var(--muted);
+            font-size: 1.05rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .launcher-form {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .launcher-field label {
+            display: block;
+            margin-bottom: 0.45rem;
+            font-size: 0.95rem;
+        }
+
+        .launcher-field input {
+            width: 100%;
+            padding: 0.95rem 1rem;
+            font-size: 1.15rem;
+            letter-spacing: 0.24em;
+            text-transform: uppercase;
+            color: var(--text);
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 0.9rem;
+        }
+
+        .launcher-field input:focus {
+            outline: 2px solid rgba(255, 191, 71, 0.4);
+            outline-offset: 1px;
+        }
+
+        .launcher-actions {
+            display: flex;
+            gap: 0.8rem;
+            flex-wrap: wrap;
+        }
+
+        .launcher-btn {
+            border: 0;
+            border-radius: 999px;
+            padding: 0.9rem 1.3rem;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .launcher-btn-primary {
+            background: var(--accent);
+            color: #1b1405;
+        }
+
+        .launcher-btn-secondary {
+            background: transparent;
+            color: var(--muted);
+            border: 1px solid var(--border);
+        }
+
+        .launcher-status {
+            margin-top: 1.2rem;
+            min-height: 1.4rem;
+            color: var(--muted);
+        }
+
+        .launcher-status.is-error {
+            color: var(--danger);
+        }
+    </style>
+</head>
+<body>
+    <main
+        class="launcher-card"
+        id="tizen-launcher"
+        data-activate-url="{{ activate_url }}"
+        data-reset="{{ '1' if reset else '0' }}"
+    >
+        <div class="launcher-kicker">Samsung Tizen Signage Player</div>
+        <h1 class="launcher-title">Activate This Screen</h1>
+        <p class="launcher-copy">
+            Generate an activation code for the display inside Invoice Manager, enter it here, and this Tizen player will switch into menu-board mode.
+        </p>
+
+        <form class="launcher-form" id="launcher-form">
+            <div class="launcher-field">
+                <label for="activation-code">Activation Code</label>
+                <input
+                    id="activation-code"
+                    name="code"
+                    type="text"
+                    maxlength="8"
+                    autocomplete="off"
+                    autocapitalize="characters"
+                    spellcheck="false"
+                    placeholder="ABC123"
+                >
+            </div>
+            <div class="launcher-actions">
+                <button type="submit" class="launcher-btn launcher-btn-primary">Activate</button>
+                <button type="button" class="launcher-btn launcher-btn-secondary" id="reset-player">Reset Player</button>
+            </div>
+        </form>
+
+        <div class="launcher-status" id="launcher-status"></div>
+    </main>
+    <script src="{{ url_for('static', filename='js/signage_tizen_launcher.js') }}"></script>
+</body>
+</html>

@@ -302,6 +302,9 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "signage.regenerate_display_token": requirement(
         any_of=("signage.manage_displays",)
     ),
+    "signage.issue_display_activation_code": requirement(
+        any_of=("signage.manage_displays",)
+    ),
     "signage.view_playlists": requirement(
         any_of=("signage.view", "signage.manage_playlists")
     ),

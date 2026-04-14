@@ -14,6 +14,11 @@
         {% endif %}
     </div>
 
+    <div class="alert alert-info">
+        <div class="fw-semibold mb-1">Short Browser URLs</div>
+        <div class="small">Open the browser URL on the TV's built-in web browser. Each display now has a short browser code so you only need to type a compact <code>/s/&lt;code&gt;</code> path instead of the full player token.</div>
+    </div>
+
     {% if displays %}
     <div class="table-responsive">
         <table class="table table-striped align-middle">
@@ -24,7 +29,8 @@
                     <th scope="col">Effective Playlist</th>
                     <th scope="col">Status</th>
                     <th scope="col">Last Seen</th>
-                    <th scope="col">Player URL</th>
+                    <th scope="col">Activation</th>
+                    <th scope="col">Browser URL</th>
                     <th scope="col" class="text-end">Actions</th>
                 </tr>
             </thead>
@@ -66,18 +72,27 @@
                         <span class="text-muted">Never</span>
                         {% endif %}
                     </td>
-                    <td style="min-width: 20rem;">
+                    <td>
+                        {% if display.has_active_activation_code %}
+                        <div class="fw-semibold">{{ display.activation_code }}</div>
+                        <div class="text-muted small">Expires {{ display.activation_code_expires_at|format_datetime('%Y-%m-%d %H:%M:%S') }}</div>
+                        {% else %}
+                        <span class="text-muted">No active code</span>
+                        {% endif %}
+                    </td>
+                    <td style="min-width: 18rem;">
+                        <div class="fw-semibold small mb-1">Code: {{ display.browser_code }}</div>
                         <input
                             type="text"
                             class="form-control form-control-sm"
                             readonly
-                            value="{{ url_for('signage.player_page', public_token=display.public_token, _external=True) }}"
+                            value="{{ url_for('signage.player_short_page', browser_code=display.browser_code, _external=True) }}"
                         >
                     </td>
                     <td class="text-end">
                         <div class="d-flex flex-wrap justify-content-end gap-2">
                             <a
-                                href="{{ url_for('signage.player_page', public_token=display.public_token) }}"
+                                href="{{ url_for('signage.player_short_page', browser_code=display.browser_code) }}"
                                 class="btn btn-sm btn-outline-secondary"
                                 target="_blank"
                                 rel="noopener"
@@ -86,6 +101,10 @@
                             </a>
                             {% if can_manage_displays %}
                             <a href="{{ url_for('signage.edit_display', display_id=display.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                            <form method="post" action="{{ url_for('signage.issue_display_activation_code', display_id=display.id) }}" class="d-inline">
+                                {{ action_form.hidden_tag() }}
+                                <button type="submit" class="btn btn-sm btn-outline-success">Activation Code</button>
+                            </form>
                             <form method="post" action="{{ url_for('signage.regenerate_display_token', display_id=display.id) }}" class="d-inline">
                                 {{ action_form.hidden_tag() }}
                                 <button type="submit" class="btn btn-sm btn-outline-warning">Regenerate URL</button>

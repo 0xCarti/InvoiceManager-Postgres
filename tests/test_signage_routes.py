@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from werkzeug.security import generate_password_hash
 
 from app import db
@@ -40,7 +42,12 @@ def test_display_manifest_inherits_location_playlist_and_menu(client, app):
             current_menu=breakfast,
             default_playlist=playlist,
         )
-        display = Display(name="Front TV", location=location, public_token="front-token")
+        display = Display(
+            name="Front TV",
+            location=location,
+            public_token="front-token",
+            browser_code="FRNT23",
+        )
         db.session.add_all([playlist, location, display])
         db.session.commit()
 
@@ -49,6 +56,7 @@ def test_display_manifest_inherits_location_playlist_and_menu(client, app):
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["display"]["name"] == "Front TV"
+    assert payload["display"]["browser_code"] == "FRNT23"
     assert payload["playlist"]["name"] == "Counter Rotation"
     assert [slide["menu"]["name"] for slide in payload["slides"]] == [
         "Breakfast",
@@ -89,6 +97,7 @@ def test_display_manifest_prefers_display_override_playlist(client, app):
             location=location,
             playlist_override=override_playlist,
             public_token="bar-token",
+            browser_code="BARTV2",
         )
         db.session.add_all([default_playlist, override_playlist, location, display])
         db.session.commit()
@@ -104,7 +113,12 @@ def test_display_manifest_prefers_display_override_playlist(client, app):
 def test_player_heartbeat_updates_display_status(client, app):
     with app.app_context():
         location = Location(name="Kitchen")
-        display = Display(name="Kitchen TV", location=location, public_token="heartbeat-token")
+        display = Display(
+            name="Kitchen TV",
+            location=location,
+            public_token="heartbeat-token",
+            browser_code="KITCH2",
+        )
         db.session.add_all([location, display])
         db.session.commit()
         display_id = display.id
@@ -121,6 +135,109 @@ def test_player_heartbeat_updates_display_status(client, app):
         assert display.last_seen_at is not None
         assert display.last_seen_user_agent == "pytest-signage"
         assert display.is_online
+
+
+def test_signage_user_can_issue_activation_code(client, app):
+    with app.app_context():
+        user = User(
+            email="activate@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        location = Location(name="Activation Counter")
+        display = Display(name="Activation TV", location=location)
+        db.session.add_all([user, location, display])
+        db.session.commit()
+        grant_signage_permissions(user)
+        display_id = display.id
+
+    with client:
+        login(client, "activate@example.com", "pass")
+        response = client.post(
+            f"/signage/displays/{display_id}/activation-code",
+            data={},
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    with app.app_context():
+        display = db.session.get(Display, display_id)
+        assert display is not None
+        assert display.activation_code
+        assert display.activation_code_expires_at is not None
+        assert display.activation_code_expires_at > datetime.utcnow()
+
+
+def test_short_player_url_loads_display(client, app):
+    with app.app_context():
+        menu = _create_menu("Short URL Menu", ["Fries"])
+        location = Location(name="Drive Thru", current_menu=menu)
+        display = Display(
+            name="Drive Thru TV",
+            location=location,
+            public_token="short-token",
+            browser_code="DRV234",
+        )
+        db.session.add_all([location, display])
+        db.session.commit()
+
+    response = client.get("/s/drv234")
+
+    assert response.status_code == 200
+    assert b"Drive Thru TV" in response.data
+    assert b"/api/player/short-token/manifest" in response.data
+
+
+def test_tizen_activation_consumes_display_code(client, app):
+    with app.app_context():
+        location = Location(name="Hosted App Counter")
+        display = Display(
+            name="Hosted App TV",
+            location=location,
+            public_token="activate-token",
+            browser_code="HOST23",
+            activation_code="ABC123",
+            activation_code_expires_at=datetime.utcnow() + timedelta(minutes=20),
+        )
+        db.session.add_all([location, display])
+        db.session.commit()
+        display_id = display.id
+
+    response = client.post("/api/signage/tizen/activate", json={"code": "abc123"})
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["display"]["public_token"] == "activate-token"
+    assert payload["display"]["browser_code"] == "HOST23"
+    assert payload["player_url"].endswith("/s/HOST23")
+    with app.app_context():
+        display = db.session.get(Display, display_id)
+        assert display is not None
+        assert display.activation_code is None
+        assert display.activation_code_expires_at is None
+        assert display.last_activated_at is not None
+
+
+def test_tizen_activation_rejects_expired_code(client, app):
+    with app.app_context():
+        location = Location(name="Expired Counter")
+        display = Display(
+            name="Expired TV",
+            location=location,
+            browser_code="EXP234",
+            activation_code="ZZZ999",
+            activation_code_expires_at=datetime.utcnow() - timedelta(minutes=1),
+        )
+        db.session.add_all([location, display])
+        db.session.commit()
+
+    response = client.post("/api/signage/tizen/activate", json={"code": "ZZZ999"})
+
+    assert response.status_code == 410
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert "expired" in payload["error"].lower()
 
 
 def test_signage_user_can_create_playlist(client, app):
