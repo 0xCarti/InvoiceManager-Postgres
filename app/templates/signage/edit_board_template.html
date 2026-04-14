@@ -1,0 +1,370 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container my-4">
+    {% include "signage/_nav.html" %}
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h1 class="h3 mb-1">{{ "Edit Board Template" if board_template else "Create Board Template" }}</h1>
+            <p class="text-muted mb-0">Define the board canvas, menu grid, side panel, and branding that displays can reuse.</p>
+        </div>
+        <div>
+            <a href="{{ url_for('signage.view_board_templates') }}" class="btn btn-outline-secondary">Back to Templates</a>
+        </div>
+    </div>
+
+    <form method="post" class="card shadow-sm">
+        <div class="card-body">
+            {{ form.hidden_tag() }}
+            {% if form.form_errors %}
+            <div class="alert alert-danger">
+                <ul class="mb-0">
+                    {% for error in form.form_errors %}
+                    <li>{{ error }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+            <div class="row g-3">
+                <div class="col-md-6">
+                    {{ form.name.label(class="form-label") }}
+                    {{ form.name(class="form-control", placeholder="Arena 1080p Board") }}
+                    {% for error in form.name.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-md-6">
+                    {{ form.theme.label(class="form-label") }}
+                    {{ form.theme(class="form-select") }}
+                    {% for error in form.theme.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="mt-3">
+                {{ form.description.label(class="form-label") }}
+                {{ form.description(class="form-control", rows=3, placeholder="Optional notes about where this template is used") }}
+                {% for error in form.description.errors %}
+                <div class="text-danger small">{{ error }}</div>
+                {% endfor %}
+            </div>
+
+            <hr class="my-4">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <div>
+                    <h2 class="h5 mb-1">Template Blocks</h2>
+                    <p class="text-muted small mb-0">Add menu, text, image, or video blocks. Move them up or down to rearrange the board. Total width across all blocks can be at most 12 units.</p>
+                </div>
+                <button type="button" class="btn btn-outline-primary btn-sm" id="add-board-block">Add Block</button>
+            </div>
+
+            <div id="board-template-blocks" data-board-blocks data-next-index="{{ form.blocks|length }}">
+                {% for block_form in form.blocks %}
+                <div class="card border-secondary-subtle shadow-sm mb-3 board-block-row" data-board-block>
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <div class="fw-semibold" data-block-label>Block {{ loop.index }}</div>
+                            <div class="d-flex gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-move-block-up>Up</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-move-block-down>Down</button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" data-remove-board-block>Remove</button>
+                            </div>
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                {{ block_form.block_type.label(class="form-label") }}
+                                {{ block_form.block_type(class="form-select board-block-type") }}
+                                {% for error in block_form.block_type.errors %}
+                                <div class="text-danger small">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                            <div class="col-md-2">
+                                {{ block_form.width_units.label(class="form-label") }}
+                                {{ block_form.width_units(class="form-control", min="1", max="12") }}
+                                {% for error in block_form.width_units.errors %}
+                                <div class="text-danger small">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                            <div class="col-md-6">
+                                {{ block_form.title.label(class="form-label") }}
+                                {{ block_form.title(class="form-control", placeholder="Optional block title") }}
+                                {% for error in block_form.title.errors %}
+                                <div class="text-danger small">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                        </div>
+
+                        <div class="row g-3 mt-1 board-block-menu-fields">
+                            <div class="col-md-3">
+                                {{ block_form.menu_columns.label(class="form-label") }}
+                                {{ block_form.menu_columns(class="form-control", min="1", max="6") }}
+                            </div>
+                            <div class="col-md-3">
+                                {{ block_form.menu_rows.label(class="form-label") }}
+                                {{ block_form.menu_rows(class="form-control", min="1", max="8") }}
+                            </div>
+                            <div class="col-md-6">
+                                {{ block_form.selected_product_ids.label(class="form-label") }}
+                                {{ block_form.selected_product_ids(class="form-select", multiple=true, size=6) }}
+                                {% for error in block_form.selected_product_ids.errors %}
+                                <div class="text-danger small">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                        </div>
+
+                        <div class="mt-3 board-block-body-field">
+                            {{ block_form.body.label(class="form-label") }}
+                            {{ block_form.body(class="form-control", rows=4, placeholder="Text content or supporting copy") }}
+                            {% for error in block_form.body.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+
+                        <div class="mt-3 board-block-media-field">
+                            {{ block_form.media_url.label(class="form-label") }}
+                            {{ block_form.media_url(class="form-control", placeholder="https://example.com/media.jpg or .mp4") }}
+                            {% for error in block_form.media_url.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+
+                        <div class="row g-3 mt-1">
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    {{ block_form.show_title(class="form-check-input") }}
+                                    {{ block_form.show_title.label(class="form-check-label") }}
+                                </div>
+                            </div>
+                            <div class="col-md-4 board-block-menu-fields">
+                                <div class="form-check">
+                                    {{ block_form.show_prices(class="form-check-input") }}
+                                    {{ block_form.show_prices.label(class="form-check-label") }}
+                                </div>
+                            </div>
+                            <div class="col-md-4 board-block-menu-fields">
+                                <div class="form-check">
+                                    {{ block_form.show_menu_description(class="form-check-input") }}
+                                    {{ block_form.show_menu_description.label(class="form-check-label") }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <template id="board-block-template">
+                <div class="card border-secondary-subtle shadow-sm mb-3 board-block-row" data-board-block>
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <div class="fw-semibold" data-block-label>Block</div>
+                            <div class="d-flex gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-move-block-up>Up</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-move-block-down>Down</button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" data-remove-board-block>Remove</button>
+                            </div>
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                {{ item_template_form.block_type.label(class="form-label") }}
+                                {{ item_template_form.block_type(class="form-select board-block-type") }}
+                            </div>
+                            <div class="col-md-2">
+                                {{ item_template_form.width_units.label(class="form-label") }}
+                                {{ item_template_form.width_units(class="form-control", min="1", max="12") }}
+                            </div>
+                            <div class="col-md-6">
+                                {{ item_template_form.title.label(class="form-label") }}
+                                {{ item_template_form.title(class="form-control", placeholder="Optional block title") }}
+                            </div>
+                        </div>
+
+                        <div class="row g-3 mt-1 board-block-menu-fields">
+                            <div class="col-md-3">
+                                {{ item_template_form.menu_columns.label(class="form-label") }}
+                                {{ item_template_form.menu_columns(class="form-control", min="1", max="6") }}
+                            </div>
+                            <div class="col-md-3">
+                                {{ item_template_form.menu_rows.label(class="form-label") }}
+                                {{ item_template_form.menu_rows(class="form-control", min="1", max="8") }}
+                            </div>
+                            <div class="col-md-6">
+                                {{ item_template_form.selected_product_ids.label(class="form-label") }}
+                                {{ item_template_form.selected_product_ids(class="form-select", multiple=true, size=6) }}
+                            </div>
+                        </div>
+
+                        <div class="mt-3 board-block-body-field">
+                            {{ item_template_form.body.label(class="form-label") }}
+                            {{ item_template_form.body(class="form-control", rows=4, placeholder="Text content or supporting copy") }}
+                        </div>
+
+                        <div class="mt-3 board-block-media-field">
+                            {{ item_template_form.media_url.label(class="form-label") }}
+                            {{ item_template_form.media_url(class="form-control", placeholder="https://example.com/media.jpg or .mp4") }}
+                        </div>
+
+                        <div class="row g-3 mt-1">
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    {{ item_template_form.show_title(class="form-check-input") }}
+                                    {{ item_template_form.show_title.label(class="form-check-label") }}
+                                </div>
+                            </div>
+                            <div class="col-md-4 board-block-menu-fields">
+                                <div class="form-check">
+                                    {{ item_template_form.show_prices(class="form-check-input") }}
+                                    {{ item_template_form.show_prices.label(class="form-check-label") }}
+                                </div>
+                            </div>
+                            <div class="col-md-4 board-block-menu-fields">
+                                <div class="form-check">
+                                    {{ item_template_form.show_menu_description(class="form-check-input") }}
+                                    {{ item_template_form.show_menu_description.label(class="form-check-label") }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <hr class="my-4">
+            <h2 class="h5 mb-3">Canvas</h2>
+            <div class="row g-3">
+                <div class="col-md-3">
+                    {{ form.canvas_width.label(class="form-label") }}
+                    {{ form.canvas_width(class="form-control", min="640", max="7680") }}
+                    {% for error in form.canvas_width.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-md-3">
+                    {{ form.canvas_height.label(class="form-label") }}
+                    {{ form.canvas_height(class="form-control", min="360", max="4320") }}
+                    {% for error in form.canvas_height.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-md-3">
+                    {{ form.menu_columns.label(class="form-label") }}
+                    {{ form.menu_columns(class="form-control", min="1", max="6") }}
+                    {% for error in form.menu_columns.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-md-3">
+                    {{ form.menu_rows.label(class="form-label") }}
+                    {{ form.menu_rows(class="form-control", min="1", max="8") }}
+                    {% for error in form.menu_rows.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <hr class="my-4">
+            <h2 class="h5 mb-3">Branding</h2>
+            <div class="row g-3">
+                <div class="col-md-4">
+                    {{ form.brand_label.label(class="form-label") }}
+                    {{ form.brand_label(class="form-control", placeholder="Digital Menu Board") }}
+                    {% for error in form.brand_label.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-md-8">
+                    {{ form.brand_name.label(class="form-label") }}
+                    {{ form.brand_name(class="form-control", placeholder="Prairie Grill") }}
+                    {% for error in form.brand_name.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="mt-3">
+                {{ form.footer_text.label(class="form-label") }}
+                {{ form.footer_text(class="form-control", placeholder="Optional footer text, promos, or service notes") }}
+                {% for error in form.footer_text.errors %}
+                <div class="text-danger small">{{ error }}</div>
+                {% endfor %}
+            </div>
+
+            <hr class="my-4">
+            <h2 class="h5 mb-3">Side Panel</h2>
+            <div class="row g-3">
+                <div class="col-md-4">
+                    {{ form.side_panel_position.label(class="form-label") }}
+                    {{ form.side_panel_position(class="form-select") }}
+                    {% for error in form.side_panel_position.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-md-4">
+                    {{ form.side_panel_width_percent.label(class="form-label") }}
+                    {{ form.side_panel_width_percent(class="form-control", min="20", max="45") }}
+                    {% for error in form.side_panel_width_percent.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-md-4">
+                    {{ form.side_title.label(class="form-label") }}
+                    {{ form.side_title(class="form-control", placeholder="Specials") }}
+                    {% for error in form.side_title.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="mt-3">
+                {{ form.side_body.label(class="form-label") }}
+                {{ form.side_body(class="form-control", rows=4, placeholder="Custom text for promos, hours, combo callouts, or announcements") }}
+                {% for error in form.side_body.errors %}
+                <div class="text-danger small">{{ error }}</div>
+                {% endfor %}
+            </div>
+
+            <div class="mt-3">
+                {{ form.side_image_url.label(class="form-label") }}
+                {{ form.side_image_url(class="form-control", placeholder="https://example.com/promo.jpg") }}
+                <div class="form-text">Legacy side-panel image. Prefer the block editor above for new templates.</div>
+                {% for error in form.side_image_url.errors %}
+                <div class="text-danger small">{{ error }}</div>
+                {% endfor %}
+            </div>
+
+            <hr class="my-4">
+            <h2 class="h5 mb-3">Menu Data</h2>
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <div class="form-check">
+                        {{ form.show_prices(class="form-check-input") }}
+                        {{ form.show_prices.label(class="form-check-label") }}
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="form-check">
+                        {{ form.show_menu_description(class="form-check-input") }}
+                        {{ form.show_menu_description.label(class="form-check-label") }}
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="form-check">
+                        {{ form.show_page_indicator(class="form-check-input") }}
+                        {{ form.show_page_indicator.label(class="form-check-label") }}
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-check mt-4">
+                {{ form.archived(class="form-check-input") }}
+                {{ form.archived.label(class="form-check-label") }}
+            </div>
+
+            <div class="d-flex flex-wrap gap-2 mt-4">
+                {{ form.submit(class="btn btn-primary") }}
+                <a href="{{ url_for('signage.view_board_templates') }}" class="btn btn-secondary">Cancel</a>
+            </div>
+        </div>
+    </form>
+</div>
+<script src="{{ url_for('static', filename='js/signage_board_template_form.js') }}"></script>
+{% endblock %}

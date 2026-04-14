@@ -1,0 +1,17 @@
+{% set signage_links = [
+    ('signage.view_displays', 'Displays'),
+    ('signage.view_playlists', 'Playlists'),
+    ('signage.view_board_templates', 'Board Templates'),
+] %}
+<div class="d-flex flex-wrap gap-2 mb-3">
+    {% for endpoint, label in signage_links %}
+        {% if can_access_endpoint(endpoint, 'GET') %}
+        <a
+            href="{{ url_for(endpoint) }}"
+            class="btn btn-sm {% if request.endpoint == endpoint %}btn-primary{% else %}btn-outline-secondary{% endif %}"
+        >
+            {{ label }}
+        </a>
+        {% endif %}
+    {% endfor %}
+</div>

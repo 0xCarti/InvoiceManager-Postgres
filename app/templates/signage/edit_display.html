@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="container my-4">
+    {% include "signage/_nav.html" %}
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
         <div>
             <h1 class="h3 mb-1">{{ "Edit Display" if display else "Create Display" }}</h1>
@@ -36,6 +37,54 @@
                 {% for error in form.playlist_override_id.errors %}
                 <div class="text-danger small">{{ error }}</div>
                 {% endfor %}
+            </div>
+            <div class="mb-3">
+                {{ form.board_template_id.label(class="form-label") }}
+                {{ form.board_template_id(class="form-select") }}
+                <div class="form-text">Optional. When a board template is selected, it controls the canvas, theme, side panel, and default board layout for this display.</div>
+                {% for error in form.board_template_id.errors %}
+                <div class="text-danger small">{{ error }}</div>
+                {% endfor %}
+            </div>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    {{ form.board_columns.label(class="form-label") }}
+                    {{ form.board_columns(class="form-control", min="1", max="6") }}
+                    <div class="form-text">How many product columns to show on the board.</div>
+                    {% for error in form.board_columns.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-md-6">
+                    {{ form.board_rows.label(class="form-label") }}
+                    {{ form.board_rows(class="form-control", min="1", max="8") }}
+                    <div class="form-text">How many rows fit on each page before the board rotates to the next page.</div>
+                    {% for error in form.board_rows.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="mt-3">
+                {{ form.selected_product_ids.label(class="form-label") }}
+                {{ form.selected_product_ids(class="form-select", multiple=true, size=10) }}
+                <div class="form-text">Optional. If you select products here, only those products from the location menu will appear on this display.</div>
+                {% for error in form.selected_product_ids.errors %}
+                <div class="text-danger small">{{ error }}</div>
+                {% endfor %}
+            </div>
+            <div class="row g-3 mt-1">
+                <div class="col-md-6">
+                    <div class="form-check">
+                        {{ form.show_prices(class="form-check-input") }}
+                        {{ form.show_prices.label(class="form-check-label") }}
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="form-check">
+                        {{ form.show_menu_description(class="form-check-input") }}
+                        {{ form.show_menu_description.label(class="form-check-label") }}
+                    </div>
+                </div>
             </div>
             <div class="form-check mb-3">
                 {{ form.archived(class="form-check-input") }}

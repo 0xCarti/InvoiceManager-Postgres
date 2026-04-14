@@ -6,48 +6,103 @@
     <title>{{ display.name }} Player</title>
     <style nonce="{{ csp_nonce }}">
         :root {
-            --bg: #08121d;
-            --panel: rgba(10, 20, 32, 0.88);
-            --panel-strong: rgba(9, 17, 27, 0.96);
+            --bg-1: #08121d;
+            --bg-2: #15395e;
+            --panel: rgba(10, 20, 32, 0.9);
+            --panel-strong: rgba(6, 14, 24, 0.98);
+            --card: rgba(255, 255, 255, 0.06);
+            --card-strong: rgba(255, 255, 255, 0.1);
             --accent: #ffbf47;
-            --accent-soft: rgba(255, 191, 71, 0.18);
-            --text: #f5efe5;
-            --muted: #b9c4d0;
-            --card: rgba(255, 255, 255, 0.07);
+            --text: #f5f7fb;
+            --muted: #b3c1d1;
             --border: rgba(255, 255, 255, 0.12);
+            --shadow: rgba(0, 0, 0, 0.28);
         }
 
         * {
             box-sizing: border-box;
         }
 
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+
         body {
             margin: 0;
-            min-height: 100vh;
             font-family: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
             color: var(--text);
             background:
-                radial-gradient(circle at top left, rgba(255, 191, 71, 0.24), transparent 28%),
-                radial-gradient(circle at bottom right, rgba(55, 139, 255, 0.18), transparent 32%),
-                linear-gradient(140deg, #08121d 0%, #12283f 52%, #09111b 100%);
+                radial-gradient(circle at top left, rgba(255, 191, 71, 0.18), transparent 24%),
+                radial-gradient(circle at top right, rgba(47, 126, 255, 0.24), transparent 34%),
+                linear-gradient(140deg, var(--bg-1) 0%, var(--bg-2) 56%, #09111b 100%);
         }
 
-        .player-shell {
-            min-height: 100vh;
-            padding: 3.25rem;
+        #signage-player[data-theme="midnight"] {
+            --bg-1: #060a12;
+            --bg-2: #161f2d;
+            --panel: rgba(10, 14, 20, 0.92);
+            --panel-strong: rgba(8, 11, 17, 0.99);
+            --accent: #9ac6ff;
+            --text: #f0f3f8;
+            --muted: #aeb8c8;
+        }
+
+        #signage-player[data-theme="sunset"] {
+            --bg-1: #2d0c09;
+            --bg-2: #613015;
+            --panel: rgba(41, 18, 14, 0.9);
+            --panel-strong: rgba(30, 12, 10, 0.98);
+            --accent: #ffd166;
+            --text: #fff4e8;
+            --muted: #ebd0be;
+        }
+
+        #signage-player[data-theme="concourse"] {
+            --bg-1: #111517;
+            --bg-2: #384043;
+            --panel: rgba(17, 21, 23, 0.92);
+            --panel-strong: rgba(13, 16, 18, 0.98);
+            --accent: #f3be4b;
+            --text: #fcfbf7;
+            --muted: #d3d0c7;
+        }
+
+        .player-stage {
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
             display: grid;
-            grid-template-rows: auto auto 1fr;
-            gap: 1.5rem;
+            place-items: center;
+            padding: 0.5rem;
+        }
+
+        .board-canvas {
+            width: 100%;
+            height: 100%;
+            max-width: 100%;
+            max-height: 100%;
+            overflow: hidden;
+            padding: 1rem;
+            display: grid;
+            grid-template-rows: auto auto 1fr auto;
+            gap: 0.8rem;
+            border-radius: 1.6rem;
+            background: rgba(0, 0, 0, 0.08);
         }
 
         .player-topbar,
-        .player-footer,
-        .menu-panel {
+        .menu-panel,
+        .player-footer {
+            min-width: 0;
+            min-height: 0;
+            border: 1px solid var(--border);
+            border-radius: 1.35rem;
             background: var(--panel);
             backdrop-filter: blur(12px);
-            border: 1px solid var(--border);
-            border-radius: 1.5rem;
-            box-shadow: 0 1.5rem 4rem rgba(0, 0, 0, 0.24);
+            box-shadow: 0 1.2rem 2.8rem var(--shadow);
         }
 
         .player-topbar,
@@ -56,90 +111,267 @@
             justify-content: space-between;
             align-items: center;
             gap: 1rem;
-            padding: 1rem 1.25rem;
+            padding: 0.85rem 1.15rem;
         }
 
         .player-kicker {
             text-transform: uppercase;
             letter-spacing: 0.18em;
-            font-size: 0.74rem;
+            font-size: 0.72rem;
             color: var(--accent);
         }
 
         .player-title {
-            margin: 0.15rem 0 0;
-            font-size: clamp(1.8rem, 3vw, 3rem);
+            margin: 0.18rem 0 0;
+            font-size: clamp(1.3rem, 2vw, 2.3rem);
+            line-height: 1.02;
         }
 
         .player-meta {
             text-align: right;
             color: var(--muted);
             font-size: 0.95rem;
+            line-height: 1.3;
         }
 
-        .menu-panel {
-            display: grid;
-            grid-template-rows: auto 1fr;
-            overflow: hidden;
+        .board-summary {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 1rem;
+            min-width: 0;
+            padding: 0 0.2rem;
         }
 
-        .menu-panel-header {
-            padding: 1.6rem 1.75rem 1rem;
-            border-bottom: 1px solid var(--border);
-            background: linear-gradient(180deg, var(--panel-strong), transparent);
+        .board-title {
+            min-width: 0;
         }
 
         .menu-name {
-            margin: 0;
-            font-size: clamp(2.4rem, 5vw, 4.75rem);
-            line-height: 0.96;
+            margin: 0.15rem 0 0;
+            font-size: clamp(2rem, 3.8vw, 3.9rem);
+            line-height: 0.95;
         }
 
         .menu-description {
-            margin: 0.6rem 0 0;
-            max-width: 60rem;
+            margin: 0.45rem 0 0;
             color: var(--muted);
-            font-size: 1.15rem;
+            font-size: 1rem;
+            max-width: 52rem;
+        }
+
+        .page-pill {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 7rem;
+            padding: 0.65rem 0.95rem;
+            border-radius: 999px;
+            background: rgba(255, 191, 71, 0.14);
+            border: 1px solid rgba(255, 191, 71, 0.22);
+            color: var(--text);
+            font-weight: 700;
+            font-size: 0.95rem;
+        }
+
+        .menu-panel {
+            min-height: 0;
+            display: grid;
+            grid-template-rows: auto 1fr;
+            overflow: hidden;
+            background:
+                linear-gradient(180deg, var(--panel-strong), rgba(8, 18, 31, 0.86) 38%),
+                var(--panel);
+        }
+
+        .menu-panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 1rem;
+            padding: 1rem 1.15rem 0.85rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .board-content {
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        .menu-layout {
+            min-height: 100%;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            overflow: hidden;
+        }
+
+        .menu-layout.has-side-panel[data-side-panel-position="left"] {
+            grid-template-columns: minmax(0, var(--side-panel-width)) minmax(0, 1fr);
+        }
+
+        .menu-layout.has-side-panel[data-side-panel-position="right"] {
+            grid-template-columns: minmax(0, 1fr) minmax(0, var(--side-panel-width));
         }
 
         .menu-grid {
+            min-height: 0;
+            padding: 1rem 1.15rem 1.15rem;
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
-            gap: 1rem;
-            padding: 1.5rem 1.75rem 1.75rem;
-            align-content: start;
+            grid-template-columns: repeat(var(--board-columns, 3), minmax(0, 1fr));
+            grid-template-rows: repeat(var(--board-rows, 4), minmax(0, 1fr));
+            gap: 0.75rem;
+            overflow: hidden;
+            align-content: stretch;
         }
 
-        .menu-item {
-            display: flex;
-            justify-content: space-between;
-            gap: 1rem;
-            padding: 1rem 1.1rem;
+        .menu-item,
+        .menu-block-item {
+            min-width: 0;
+            min-height: 0;
+            overflow: hidden;
+            padding: 0.9rem 0.95rem;
+            display: grid;
+            grid-template-columns: 1fr auto;
+            align-items: center;
+            gap: 0.75rem;
             border-radius: 1rem;
-            background: var(--card);
-            border: 1px solid rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background:
+                linear-gradient(180deg, var(--card-strong), var(--card)),
+                var(--card);
         }
 
-        .menu-item-name {
-            font-size: 1.15rem;
+        .menu-item-name,
+        .menu-block-item-name {
+            min-width: 0;
+            font-size: clamp(1rem, 1.35vw, 1.48rem);
             font-weight: 700;
+            line-height: 1.12;
+            word-break: break-word;
         }
 
-        .menu-item-price {
+        .menu-item-price,
+        .menu-block-item-price {
             white-space: nowrap;
             color: var(--accent);
             font-weight: 800;
-            font-size: 1.1rem;
+            font-size: clamp(1rem, 1.2vw, 1.35rem);
+        }
+
+        .side-panel {
+            min-width: 0;
+            min-height: 0;
+            display: grid;
+            grid-template-rows: auto auto 1fr;
+            gap: 0.85rem;
+            padding: 1rem;
+            border-left: 1px solid var(--border);
+            overflow: hidden;
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .menu-layout.has-side-panel[data-side-panel-position="left"] .side-panel {
+            border-left: 0;
+            border-right: 1px solid var(--border);
+            order: -1;
+        }
+
+        .side-panel-title,
+        .board-block-title {
+            margin: 0;
+            font-size: clamp(1.15rem, 1.7vw, 1.8rem);
+            line-height: 1.05;
+        }
+
+        .side-panel-body,
+        .text-block-body,
+        .board-block-description {
+            color: var(--muted);
+            font-size: clamp(0.95rem, 1.05vw, 1.12rem);
+            line-height: 1.4;
+            white-space: pre-line;
+            overflow: hidden;
+        }
+
+        .side-panel-image-wrap,
+        .board-block-media-wrap {
+            min-height: 0;
+            display: grid;
+            place-items: center;
+            overflow: hidden;
+            border-radius: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .side-panel-image,
+        .image-block-image,
+        .video-block-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .block-board {
+            min-height: 100%;
+            padding: 1rem 1.15rem 1.15rem;
+            display: grid;
+            grid-template-columns: repeat(12, minmax(0, 1fr));
+            gap: 0.85rem;
+            overflow: hidden;
+        }
+
+        .board-block {
+            grid-column: span var(--block-span, 6);
+            min-width: 0;
+            min-height: 0;
+            overflow: hidden;
+            display: grid;
+            grid-template-rows: auto auto 1fr;
+            gap: 0.75rem;
+            padding: 1rem;
+            border-radius: 1.15rem;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background:
+                linear-gradient(180deg, var(--card-strong), var(--card)),
+                var(--card);
+        }
+
+        .board-block[data-block-type="menu"] .board-block-media-wrap,
+        .board-block[data-block-type="text"] .board-block-media-wrap {
+            display: none;
+        }
+
+        .menu-block-grid {
+            min-height: 0;
+            display: grid;
+            grid-template-columns: repeat(var(--block-columns, 2), minmax(0, 1fr));
+            grid-template-rows: repeat(var(--block-rows, 4), minmax(0, 1fr));
+            gap: 0.65rem;
+            overflow: hidden;
+        }
+
+        .menu-block-item-name {
+            font-size: clamp(0.95rem, 1.15vw, 1.2rem);
+        }
+
+        .menu-block-item-price {
+            font-size: clamp(0.9rem, 1vw, 1.1rem);
         }
 
         .empty-state {
-            min-height: 18rem;
+            grid-column: 1 / -1;
+            grid-row: 1 / -1;
             display: grid;
             place-items: center;
             text-align: center;
             color: var(--muted);
-            font-size: 1.2rem;
+            font-size: 1.15rem;
             padding: 2rem;
+            border-radius: 1rem;
+            border: 1px dashed rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.03);
         }
 
         .player-footer {
@@ -153,78 +385,49 @@
             gap: 0.45rem;
             padding: 0.45rem 0.8rem;
             border-radius: 999px;
-            background: var(--accent-soft);
+            background: rgba(255, 191, 71, 0.14);
             color: var(--text);
         }
 
-        @media (max-width: 900px) {
-            .player-shell {
-                padding: 1rem;
+        .hidden {
+            display: none !important;
+        }
+
+        @media (max-width: 1100px) {
+            .board-canvas {
+                padding: 0.65rem;
+                gap: 0.65rem;
             }
 
-            .player-topbar,
-            .player-footer {
-                flex-direction: column;
-                align-items: flex-start;
-            }
-
-            .player-meta {
-                text-align: left;
+            .menu-grid,
+            .block-board,
+            .menu-block-grid {
+                gap: 0.55rem;
             }
         }
     </style>
 </head>
 <body>
-    {% set initial_menu = initial_slide.menu if initial_slide else None %}
-    {% set initial_products = initial_slide.products if initial_slide and initial_slide.products else [] %}
-    {% set initial_source = initial_slide.source_type if initial_slide else "" %}
-    {% set initial_duration = initial_slide.duration_seconds if initial_slide else None %}
-    <div
-        id="signage-player"
-        class="player-shell"
-        data-manifest-url="{{ manifest_url }}"
-        data-heartbeat-url="{{ heartbeat_url }}"
-    >
-        <section class="player-topbar">
-            <div>
-                <div class="player-kicker">Digital Menu Board</div>
-                <h1 class="player-title" id="display-title">{{ display.name }}</h1>
-            </div>
-            <div class="player-meta">
-                <div id="display-location">{{ display.location.name if display.location else "" }}</div>
-                <div id="playlist-name">{{ initial_playlist_name }}</div>
-            </div>
-        </section>
-
-        <section class="menu-panel">
-            <div class="menu-panel-header">
-                <div class="player-kicker" id="slide-source">
-                    {% if initial_slide %}
-                        {{ "Location Menu" if initial_source == "location_menu" else "Specific Menu" }}
-                    {% else %}
-                        No Slides
-                    {% endif %}
-                </div>
-                <h2 class="menu-name" id="menu-name">
-                    {% if initial_menu %}
-                        {{ initial_menu.name }}
-                    {% else %}
-                        Nothing Scheduled
-                    {% endif %}
-                </h2>
-                <p class="menu-description" id="menu-description">{{ initial_menu.description if initial_menu else "" }}</p>
-            </div>
-            <div class="menu-grid" id="menu-grid">
-                {% if initial_products %}
-                    {% for product in initial_products %}
+    {% macro render_classic_content(slide, layout) -%}
+        {% set products = slide.products if slide and slide.products else [] %}
+        {% set has_side_panel = layout.side_panel_position != 'none' and (layout.side_title or layout.side_body or layout.side_image_url) %}
+        <div
+            class="menu-layout {% if has_side_panel %}has-side-panel{% endif %}"
+            data-side-panel-position="{{ layout.side_panel_position or 'none' }}"
+        >
+            <div class="menu-grid">
+                {% if products %}
+                    {% for product in products %}
                     <article class="menu-item">
                         <div class="menu-item-name">{{ product.name }}</div>
+                        {% if layout.show_prices %}
                         <div class="menu-item-price">${{ "%.2f"|format(product.price or 0) }}</div>
+                        {% endif %}
                     </article>
                     {% endfor %}
                 {% else %}
                     <div class="empty-state">
-                        {% if initial_slide %}
+                        {% if slide %}
                             No products are available for this menu yet.
                         {% else %}
                             No playlist items are available for this display.
@@ -232,19 +435,181 @@
                     </div>
                 {% endif %}
             </div>
-        </section>
+            <aside class="side-panel {% if not has_side_panel %}hidden{% endif %}">
+                <div>
+                    <div class="player-kicker">Template Panel</div>
+                    <h3 class="side-panel-title">{{ layout.side_title or "" }}</h3>
+                </div>
+                <div class="side-panel-body">{{ layout.side_body or "" }}</div>
+                <div class="side-panel-image-wrap {% if not layout.side_image_url %}hidden{% endif %}">
+                    <img
+                        src="{{ layout.side_image_url or '' }}"
+                        alt=""
+                        class="side-panel-image"
+                    >
+                </div>
+            </aside>
+        </div>
+    {%- endmacro %}
 
-        <section class="player-footer">
-            <div class="player-pill" id="slide-timer">
-                {% if initial_duration %}
-                    Showing for {{ initial_duration }} seconds
-                {% else %}
-                    Static menu loaded
-                {% endif %}
-            </div>
-            <div id="player-status">Player page loaded</div>
-        </section>
+    {% macro render_block_content(slide) -%}
+        {% set blocks = slide.blocks if slide and slide.blocks else [] %}
+        <div class="block-board">
+            {% if blocks %}
+                {% for block in blocks %}
+                {% set block_title = block.title or (block.menu.name if block.menu else "") %}
+                <section
+                    class="board-block"
+                    data-block-type="{{ block.type }}"
+                    style="--block-span: {{ block.width_units or 6 }};"
+                >
+                    {% if block.show_title and block_title %}
+                    <div class="player-kicker">{{ block.type|title }} Block</div>
+                    <h3 class="board-block-title">{{ block_title }}</h3>
+                    {% endif %}
+
+                    {% if block.type == 'menu' %}
+                        {% if block.show_menu_description and block.menu and block.menu.description %}
+                        <p class="board-block-description">{{ block.menu.description }}</p>
+                        {% endif %}
+                        <div
+                            class="menu-block-grid"
+                            style="--block-columns: {{ block.menu_columns or 2 }}; --block-rows: {{ block.menu_rows or 4 }};"
+                        >
+                            {% if block.products %}
+                                {% for product in block.products %}
+                                <article class="menu-block-item">
+                                    <div class="menu-block-item-name">{{ product.name }}</div>
+                                    {% if block.show_prices %}
+                                    <div class="menu-block-item-price">${{ "%.2f"|format(product.price or 0) }}</div>
+                                    {% endif %}
+                                </article>
+                                {% endfor %}
+                            {% else %}
+                                <div class="empty-state">No products are available for this block.</div>
+                            {% endif %}
+                        </div>
+                    {% elif block.type == 'text' %}
+                        <div class="text-block-body">{{ block.body or "" }}</div>
+                    {% elif block.type == 'image' %}
+                        {% if block.media_url %}
+                        <div class="board-block-media-wrap">
+                            <img src="{{ block.media_url }}" alt="" class="image-block-image">
+                        </div>
+                        {% else %}
+                        <div class="empty-state">No image has been configured for this block.</div>
+                        {% endif %}
+                    {% elif block.type == 'video' %}
+                        {% if block.media_url %}
+                        <div class="board-block-media-wrap">
+                            <video
+                                class="video-block-video"
+                                src="{{ block.media_url }}"
+                                autoplay
+                                muted
+                                loop
+                                playsinline
+                                webkit-playsinline
+                            ></video>
+                        </div>
+                        {% else %}
+                        <div class="empty-state">No video has been configured for this block.</div>
+                        {% endif %}
+                    {% endif %}
+                </section>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">No board blocks are configured for this template.</div>
+            {% endif %}
+        </div>
+    {%- endmacro %}
+
+    {% set initial_menu = initial_slide.menu if initial_slide else None %}
+    {% set initial_layout = initial_layout or {} %}
+    {% set initial_source = initial_slide.source_type if initial_slide else "" %}
+    {% set initial_duration = initial_slide.duration_seconds if initial_slide else None %}
+    {% set initial_page_index = initial_slide.page_index if initial_slide else 0 %}
+    {% set initial_page_count = initial_slide.page_count if initial_slide else 0 %}
+    {% set initial_summary_kicker = initial_slide.summary_kicker if initial_slide and initial_slide.summary_kicker else ("Location Menu" if initial_source == "location_menu" else ("Specific Menu" if initial_slide else "No Slides")) %}
+    {% set initial_summary_title = initial_slide.summary_title if initial_slide and initial_slide.summary_title else (initial_menu.name if initial_menu else ("Nothing Scheduled" if not initial_slide else display.name)) %}
+    {% set initial_show_summary_description = initial_slide.show_summary_description if initial_slide and initial_slide.show_summary_description is not none else initial_layout.show_menu_description %}
+    {% set initial_summary_description = initial_slide.summary_description if initial_slide and initial_slide.summary_description else (initial_menu.description if initial_menu and initial_show_summary_description else "") %}
+    <div
+        id="signage-player"
+        class="player-stage"
+        data-manifest-url="{{ manifest_url }}"
+        data-heartbeat-url="{{ heartbeat_url }}"
+        data-theme="{{ initial_layout.template.theme or 'aurora' }}"
+        data-show-prices="{{ '1' if initial_layout.show_prices else '0' }}"
+        data-show-menu-description="{{ '1' if initial_layout.show_menu_description else '0' }}"
+        data-show-page-indicator="{{ '1' if initial_layout.show_page_indicator else '0' }}"
+        data-canvas-width="{{ initial_layout.canvas_width or 1920 }}"
+        data-canvas-height="{{ initial_layout.canvas_height or 1080 }}"
+        style="--board-columns: {{ initial_layout.board_columns or 3 }}; --board-rows: {{ initial_layout.board_rows or 4 }}; --side-panel-width: {{ initial_layout.side_panel_width_percent or 30 }}%;"
+    >
+        <div class="board-canvas" id="board-canvas">
+            <section class="player-topbar">
+                <div>
+                    <div class="player-kicker" id="brand-label">{{ initial_layout.brand_label or 'Digital Menu Board' }}</div>
+                    <h1 class="player-title" id="display-title">{{ initial_layout.brand_name or display.name }}</h1>
+                </div>
+                <div class="player-meta">
+                    <div id="display-location">{{ display.location.name if display.location else "" }}</div>
+                    <div id="playlist-name">{{ initial_playlist_name }}</div>
+                </div>
+            </section>
+
+            <section class="board-summary">
+                <div class="board-title">
+                    <div class="player-kicker" id="slide-source">{{ initial_summary_kicker }}</div>
+                    <h2 class="menu-name" id="menu-name">{{ initial_summary_title }}</h2>
+                    <p
+                        class="menu-description {% if not initial_show_summary_description or not initial_summary_description %}hidden{% endif %}"
+                        id="menu-description"
+                    >{{ initial_summary_description }}</p>
+                </div>
+                <div class="page-pill {% if not initial_layout.show_page_indicator %}hidden{% endif %}" id="page-indicator">
+                    {% if initial_page_count and initial_page_count > 1 %}
+                        Page {{ initial_page_index }} of {{ initial_page_count }}
+                    {% else %}
+                        Single Page
+                    {% endif %}
+                </div>
+            </section>
+
+            <section class="menu-panel">
+                <div class="menu-panel-header">
+                    <div class="player-kicker">Board Canvas {{ initial_layout.canvas_width or 1920 }} x {{ initial_layout.canvas_height or 1080 }}</div>
+                    <div class="player-meta" id="layout-summary">
+                        {% if initial_layout.uses_blocks %}
+                            {{ initial_layout.blocks|length }} blocks / 12-unit board
+                        {% else %}
+                            Columns {{ initial_layout.board_columns or 3 }} / Rows {{ initial_layout.board_rows or 4 }}
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="board-content" id="board-content">
+                    {% if initial_layout.uses_blocks %}
+                        {{ render_block_content(initial_slide) }}
+                    {% else %}
+                        {{ render_classic_content(initial_slide, initial_layout) }}
+                    {% endif %}
+                </div>
+            </section>
+
+            <section class="player-footer">
+                <div class="player-pill" id="slide-timer">
+                    {% if initial_duration %}
+                        Showing for {{ initial_duration }} seconds
+                    {% else %}
+                        Static menu loaded
+                    {% endif %}
+                </div>
+                <div id="footer-text">{{ initial_layout.footer_text or "" }}</div>
+                <div id="player-status">Player page loaded</div>
+            </section>
+        </div>
     </div>
-    <script src="{{ url_for('static', filename='js/signage_player.js', v='20260414') }}"></script>
+    <script src="{{ url_for('static', filename='js/signage_player.js', v='20260414d') }}"></script>
 </body>
 </html>

@@ -3,7 +3,17 @@ from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash
 
 from app import db
-from app.models import Display, Location, Menu, Playlist, PlaylistItem, Product, User
+from app.models import (
+    BoardTemplate,
+    BoardTemplateBlock,
+    Display,
+    Location,
+    Menu,
+    Playlist,
+    PlaylistItem,
+    Product,
+    User,
+)
 from tests.permission_helpers import grant_signage_permissions
 from tests.utils import login
 
@@ -108,6 +118,203 @@ def test_display_manifest_prefers_display_override_playlist(client, app):
     payload = response.get_json()
     assert payload["playlist"]["name"] == "Override Rotation"
     assert [slide["menu"]["name"] for slide in payload["slides"]] == ["Dinner"]
+
+
+def test_display_manifest_filters_products_and_paginates(client, app):
+    with app.app_context():
+        menu = _create_menu(
+            "Concourse Board",
+            ["Burger", "Fries", "Hot Dog", "Nachos", "Popcorn", "Pretzel"],
+        )
+        location = Location(name="Concourse", current_menu=menu)
+        selected_ids = [menu.products[0].id, menu.products[2].id, menu.products[4].id]
+        display = Display(
+            name="Concourse TV",
+            location=location,
+            public_token="concourse-token",
+            browser_code="CNCRSE",
+            board_columns=1,
+            board_rows=2,
+            selected_product_ids=",".join(str(product_id) for product_id in selected_ids),
+        )
+        db.session.add_all([location, display])
+        db.session.commit()
+
+    response = client.get("/api/player/concourse-token/manifest")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["layout"]["board_columns"] == 1
+    assert payload["layout"]["board_rows"] == 2
+    assert payload["layout"]["selected_product_ids"] == selected_ids
+    assert len(payload["slides"]) == 2
+    assert [product["name"] for product in payload["slides"][0]["products"]] == [
+        "Burger",
+        "Hot Dog",
+    ]
+    assert [product["name"] for product in payload["slides"][1]["products"]] == [
+        "Popcorn",
+    ]
+    assert payload["slides"][0]["page_index"] == 1
+    assert payload["slides"][0]["page_count"] == 2
+
+
+def test_board_template_overrides_display_layout_and_renders_side_panel(client, app):
+    with app.app_context():
+        menu = _create_menu(
+            "Arena Combos",
+            ["Combo A", "Combo B", "Combo C", "Combo D", "Combo E"],
+        )
+        template = BoardTemplate(
+            name="Arena 1080p",
+            theme=BoardTemplate.THEME_CONCOURSE,
+            canvas_width=1920,
+            canvas_height=1080,
+            menu_columns=2,
+            menu_rows=2,
+            show_prices=False,
+            show_menu_description=True,
+            show_page_indicator=True,
+            brand_label="Arena Specials",
+            brand_name="Arena Combos",
+            side_panel_position=BoardTemplate.PANEL_RIGHT,
+            side_panel_width_percent=30,
+            side_title="Hat Trick Combo",
+            side_body="Big flavor. Big value.",
+            footer_text="Section A pickup",
+        )
+        location = Location(name="Upper Bowl", current_menu=menu)
+        display = Display(
+            name="Upper Bowl TV",
+            location=location,
+            board_template=template,
+            public_token="arena-token",
+            browser_code="ARNA23",
+            board_columns=4,
+            board_rows=1,
+            show_prices=True,
+        )
+        db.session.add_all([template, location, display])
+        db.session.commit()
+
+    manifest_response = client.get("/api/player/arena-token/manifest")
+
+    assert manifest_response.status_code == 200
+    payload = manifest_response.get_json()
+    assert payload["layout"]["source"] == "board_template"
+    assert payload["layout"]["template"]["name"] == "Arena 1080p"
+    assert payload["layout"]["board_columns"] == 2
+    assert payload["layout"]["board_rows"] == 2
+    assert payload["layout"]["show_prices"] is False
+    assert payload["layout"]["side_panel_position"] == BoardTemplate.PANEL_RIGHT
+    assert payload["layout"]["side_title"] == "Hat Trick Combo"
+    assert len(payload["slides"]) == 2
+
+    player_response = client.get("/s/ARNA23")
+
+    assert player_response.status_code == 200
+    assert b"Arena Combos" in player_response.data
+    assert b"Hat Trick Combo" in player_response.data
+    assert b"Section A pickup" in player_response.data
+    assert b"/api/player/arena-token/manifest" in player_response.data
+
+
+def test_board_template_blocks_render_menu_text_image_and_video(client, app):
+    with app.app_context():
+        menu = _create_menu(
+            "Board Blocks",
+            ["Burger", "Fries", "Nachos", "Pretzel"],
+        )
+        template = BoardTemplate(
+            name="Block Layout",
+            theme=BoardTemplate.THEME_AURORA,
+            canvas_width=1920,
+            canvas_height=1080,
+            footer_text="Intermission pickup",
+        )
+        template.blocks = [
+            BoardTemplateBlock(
+                position=0,
+                block_type=BoardTemplateBlock.TYPE_MENU,
+                width_units=6,
+                title="Featured Snacks",
+                menu_columns=1,
+                menu_rows=2,
+                show_title=True,
+                show_prices=True,
+                show_menu_description=True,
+            ),
+            BoardTemplateBlock(
+                position=1,
+                block_type=BoardTemplateBlock.TYPE_TEXT,
+                width_units=2,
+                title="Specials",
+                body="Add a drink for $2.00",
+                show_title=True,
+            ),
+            BoardTemplateBlock(
+                position=2,
+                block_type=BoardTemplateBlock.TYPE_IMAGE,
+                width_units=2,
+                title="Combo Poster",
+                media_url="https://example.com/promo.jpg",
+                show_title=True,
+            ),
+            BoardTemplateBlock(
+                position=3,
+                block_type=BoardTemplateBlock.TYPE_VIDEO,
+                width_units=2,
+                title="Ad Loop",
+                media_url="https://example.com/promo.mp4",
+                show_title=True,
+            ),
+        ]
+        location = Location(name="Main Concourse", current_menu=menu)
+        display = Display(
+            name="Main Board",
+            location=location,
+            board_template=template,
+            public_token="block-token",
+            browser_code="BLK234",
+        )
+        db.session.add_all([template, location, display])
+        db.session.commit()
+
+    manifest_response = client.get("/api/player/block-token/manifest")
+
+    assert manifest_response.status_code == 200
+    payload = manifest_response.get_json()
+    assert payload["layout"]["uses_blocks"] is True
+    assert [block["type"] for block in payload["layout"]["blocks"]] == [
+        BoardTemplateBlock.TYPE_MENU,
+        BoardTemplateBlock.TYPE_TEXT,
+        BoardTemplateBlock.TYPE_IMAGE,
+        BoardTemplateBlock.TYPE_VIDEO,
+    ]
+    assert len(payload["slides"]) == 2
+    assert payload["slides"][0]["type"] == "board"
+    assert payload["slides"][0]["summary_title"] == "Board Blocks"
+    first_menu_block = payload["slides"][0]["blocks"][0]
+    second_menu_block = payload["slides"][1]["blocks"][0]
+    assert [product["name"] for product in first_menu_block["products"]] == [
+        "Burger",
+        "Fries",
+    ]
+    assert [product["name"] for product in second_menu_block["products"]] == [
+        "Nachos",
+        "Pretzel",
+    ]
+    assert payload["slides"][0]["blocks"][1]["body"] == "Add a drink for $2.00"
+    assert payload["slides"][0]["blocks"][2]["media_url"] == "https://example.com/promo.jpg"
+    assert payload["slides"][0]["blocks"][3]["media_url"] == "https://example.com/promo.mp4"
+
+    player_response = client.get("/s/BLK234")
+
+    assert player_response.status_code == 200
+    assert b"Featured Snacks" in player_response.data
+    assert b"Add a drink for $2.00" in player_response.data
+    assert b"https://example.com/promo.jpg" in player_response.data
+    assert b"https://example.com/promo.mp4" in player_response.data
 
 
 def test_player_heartbeat_updates_display_status(client, app):
@@ -282,6 +489,77 @@ def test_signage_user_can_create_playlist(client, app):
             PlaylistItem.SOURCE_MENU,
         ]
         assert playlist.items[1].menu_id == second_menu_id
+
+
+def test_signage_user_can_create_board_template(client, app):
+    with app.app_context():
+        user = User(
+            email="signage-template@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add(user)
+        db.session.commit()
+        grant_signage_permissions(user)
+
+    with client:
+        login(client, "signage-template@example.com", "pass")
+        response = client.post(
+            "/signage/board-templates/add",
+            data={
+                "name": "Lobby Board",
+                "description": "Main lobby layout",
+                "canvas_width": "1920",
+                "canvas_height": "1080",
+                "theme": BoardTemplate.THEME_AURORA,
+                "brand_label": "Digital Menu Board",
+                "brand_name": "Prairie Grill",
+                "menu_columns": "3",
+                "menu_rows": "4",
+                "side_panel_position": BoardTemplate.PANEL_RIGHT,
+                "side_panel_width_percent": "30",
+                "side_title": "Specials",
+                "side_body": "Combo and promo text",
+                "side_image_url": "https://example.com/promo.jpg",
+                "footer_text": "Open during intermission",
+                "show_prices": "y",
+                "show_menu_description": "",
+                "show_page_indicator": "y",
+                "blocks-0-block_type": BoardTemplateBlock.TYPE_MENU,
+                "blocks-0-width_units": "8",
+                "blocks-0-title": "Entrees",
+                "blocks-0-body": "",
+                "blocks-0-media_url": "",
+                "blocks-0-menu_columns": "2",
+                "blocks-0-menu_rows": "4",
+                "blocks-0-show_title": "y",
+                "blocks-0-show_prices": "y",
+                "blocks-0-show_menu_description": "",
+                "blocks-1-block_type": BoardTemplateBlock.TYPE_TEXT,
+                "blocks-1-width_units": "4",
+                "blocks-1-title": "Announcements",
+                "blocks-1-body": "Two-for-one special after 7 PM",
+                "blocks-1-media_url": "",
+                "blocks-1-menu_columns": "2",
+                "blocks-1-menu_rows": "4",
+                "blocks-1-show_title": "y",
+                "blocks-1-show_prices": "",
+                "blocks-1-show_menu_description": "",
+            },
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    with app.app_context():
+        template = BoardTemplate.query.filter_by(name="Lobby Board").first()
+        assert template is not None
+        assert template.side_panel_position == BoardTemplate.PANEL_RIGHT
+        assert template.side_image_url == "https://example.com/promo.jpg"
+        assert [block.block_type for block in template.blocks] == [
+            BoardTemplateBlock.TYPE_MENU,
+            BoardTemplateBlock.TYPE_TEXT,
+        ]
+        assert template.blocks[1].body == "Two-for-one special after 7 PM"
 
 
 def test_menu_delete_blocked_when_used_by_playlist(client, app):

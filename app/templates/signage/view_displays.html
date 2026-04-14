@@ -2,6 +2,7 @@
 {% block content %}
 {% set can_manage_displays = can_access_endpoint('signage.add_display', 'GET') %}
 <div class="container my-4">
+    {% include "signage/_nav.html" %}
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
         <div>
             <h1 class="h3 mb-1">Displays</h1>
@@ -40,6 +41,19 @@
                 <tr>
                     <td>
                         <div class="fw-semibold">{{ display.name }}</div>
+                        <div class="text-muted small mt-1">
+                            {% if display.board_template %}
+                            {{ display.board_template.menu_columns }} columns × {{ display.board_template.menu_rows }} rows
+                            {% else %}
+                            {{ display.board_columns }} columns × {{ display.board_rows }} rows
+                            {% endif %}
+                            {% if display.selected_product_id_list %}
+                            • {{ display.selected_product_id_list|length }} products selected
+                            {% endif %}
+                        </div>
+                        {% if display.board_template %}
+                        <div class="text-muted small">Template: {{ display.board_template.name }}</div>
+                        {% endif %}
                         {% if display.archived %}
                         <span class="badge text-bg-secondary mt-1">Archived</span>
                         {% endif %}

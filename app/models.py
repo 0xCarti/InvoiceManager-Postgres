@@ -1594,6 +1594,175 @@ class PlaylistItem(db.Model):
     )
 
 
+class BoardTemplate(db.Model):
+    __tablename__ = "signage_board_template"
+
+    PANEL_NONE = "none"
+    PANEL_LEFT = "left"
+    PANEL_RIGHT = "right"
+
+    THEME_AURORA = "aurora"
+    THEME_MIDNIGHT = "midnight"
+    THEME_SUNSET = "sunset"
+    THEME_CONCOURSE = "concourse"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    description = db.Column(db.Text, nullable=True)
+    theme = db.Column(
+        db.String(32),
+        nullable=False,
+        default=THEME_AURORA,
+        server_default=THEME_AURORA,
+    )
+    canvas_width = db.Column(
+        db.Integer, nullable=False, default=1920, server_default="1920"
+    )
+    canvas_height = db.Column(
+        db.Integer, nullable=False, default=1080, server_default="1080"
+    )
+    menu_columns = db.Column(
+        db.Integer, nullable=False, default=3, server_default="3"
+    )
+    menu_rows = db.Column(
+        db.Integer, nullable=False, default=4, server_default="4"
+    )
+    show_prices = db.Column(
+        db.Boolean, nullable=False, default=True, server_default="1"
+    )
+    show_menu_description = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
+    show_page_indicator = db.Column(
+        db.Boolean, nullable=False, default=True, server_default="1"
+    )
+    brand_label = db.Column(db.String(80), nullable=True)
+    brand_name = db.Column(db.String(120), nullable=True)
+    side_panel_position = db.Column(
+        db.String(16),
+        nullable=False,
+        default=PANEL_NONE,
+        server_default=PANEL_NONE,
+    )
+    side_panel_width_percent = db.Column(
+        db.Integer, nullable=False, default=30, server_default="30"
+    )
+    side_title = db.Column(db.String(120), nullable=True)
+    side_body = db.Column(db.Text, nullable=True)
+    side_image_url = db.Column(db.Text, nullable=True)
+    footer_text = db.Column(db.String(255), nullable=True)
+    archived = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
+    created_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow, server_default=func.now()
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    blocks = relationship(
+        "BoardTemplateBlock",
+        back_populates="board_template",
+        cascade="all, delete-orphan",
+        order_by="BoardTemplateBlock.position.asc(), BoardTemplateBlock.id.asc()",
+    )
+    displays = relationship("Display", back_populates="board_template")
+
+    __table_args__ = (db.Index("ix_signage_board_template_archived", "archived"),)
+
+
+class BoardTemplateBlock(db.Model):
+    __tablename__ = "signage_board_template_block"
+
+    TYPE_MENU = "menu"
+    TYPE_TEXT = "text"
+    TYPE_IMAGE = "image"
+    TYPE_VIDEO = "video"
+
+    id = db.Column(db.Integer, primary_key=True)
+    board_template_id = db.Column(
+        db.Integer,
+        db.ForeignKey("signage_board_template.id"),
+        nullable=False,
+    )
+    position = db.Column(
+        db.Integer, nullable=False, default=0, server_default="0"
+    )
+    block_type = db.Column(
+        db.String(32),
+        nullable=False,
+        default=TYPE_MENU,
+        server_default=TYPE_MENU,
+    )
+    width_units = db.Column(
+        db.Integer, nullable=False, default=6, server_default="6"
+    )
+    title = db.Column(db.String(120), nullable=True)
+    body = db.Column(db.Text, nullable=True)
+    media_url = db.Column(db.Text, nullable=True)
+    menu_columns = db.Column(
+        db.Integer, nullable=False, default=2, server_default="2"
+    )
+    menu_rows = db.Column(
+        db.Integer, nullable=False, default=4, server_default="4"
+    )
+    show_title = db.Column(
+        db.Boolean, nullable=False, default=True, server_default="1"
+    )
+    show_prices = db.Column(
+        db.Boolean, nullable=False, default=True, server_default="1"
+    )
+    show_menu_description = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
+    selected_product_ids = db.Column(db.Text, nullable=True)
+    created_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow, server_default=func.now()
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    board_template = relationship("BoardTemplate", back_populates="blocks")
+
+    __table_args__ = (
+        db.Index(
+            "ix_signage_board_template_block_template_position",
+            "board_template_id",
+            "position",
+        ),
+    )
+
+    @property
+    def selected_product_id_list(self) -> list[int]:
+        if not self.selected_product_ids:
+            return []
+        values: list[int] = []
+        seen: set[int] = set()
+        for raw_value in self.selected_product_ids.split(","):
+            raw_value = raw_value.strip()
+            if not raw_value:
+                continue
+            try:
+                product_id = int(raw_value)
+            except (TypeError, ValueError):
+                continue
+            if product_id in seen:
+                continue
+            seen.add(product_id)
+            values.append(product_id)
+        return values
+
+
 def _generate_display_browser_code() -> str:
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     display_model = globals().get("Display")
@@ -1614,6 +1783,9 @@ class Display(db.Model):
     playlist_override_id = db.Column(
         db.Integer, db.ForeignKey("playlist.id"), nullable=True
     )
+    board_template_id = db.Column(
+        db.Integer, db.ForeignKey("signage_board_template.id"), nullable=True
+    )
     public_token = db.Column(
         db.String(64),
         unique=True,
@@ -1626,6 +1798,19 @@ class Display(db.Model):
         nullable=False,
         default=_generate_display_browser_code,
     )
+    board_columns = db.Column(
+        db.Integer, nullable=False, default=3, server_default="3"
+    )
+    board_rows = db.Column(
+        db.Integer, nullable=False, default=4, server_default="4"
+    )
+    show_prices = db.Column(
+        db.Boolean, nullable=False, default=True, server_default="1"
+    )
+    show_menu_description = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
+    selected_product_ids = db.Column(db.Text, nullable=True)
     activation_code = db.Column(db.String(12), nullable=True, unique=True)
     activation_code_expires_at = db.Column(db.DateTime, nullable=True)
     last_activated_at = db.Column(db.DateTime, nullable=True)
@@ -1652,10 +1837,12 @@ class Display(db.Model):
         back_populates="displays",
         foreign_keys=[playlist_override_id],
     )
+    board_template = relationship("BoardTemplate", back_populates="displays")
 
     __table_args__ = (
         db.Index("ix_signage_display_location_archived", "location_id", "archived"),
         db.Index("ix_signage_display_last_seen_at", "last_seen_at"),
+        db.Index("ix_signage_display_board_template_id", "board_template_id"),
     )
 
     @property
@@ -1665,6 +1852,10 @@ class Display(db.Model):
         if self.location is None:
             return None
         return self.location.default_playlist
+
+    @property
+    def effective_board_template(self) -> Optional[BoardTemplate]:
+        return self.board_template
 
     @property
     def is_online(self) -> bool:
@@ -1684,6 +1875,26 @@ class Display(db.Model):
         if not self.activation_code or self.activation_code_expires_at is None:
             return False
         return self.activation_code_expires_at >= datetime.utcnow()
+
+    @property
+    def selected_product_id_list(self) -> list[int]:
+        if not self.selected_product_ids:
+            return []
+        values: list[int] = []
+        seen: set[int] = set()
+        for raw_value in self.selected_product_ids.split(","):
+            raw_value = raw_value.strip()
+            if not raw_value:
+                continue
+            try:
+                product_id = int(raw_value)
+            except (TypeError, ValueError):
+                continue
+            if product_id in seen:
+                continue
+            seen.add(product_id)
+            values.append(product_id)
+        return values
 
 
 class Invoice(db.Model):

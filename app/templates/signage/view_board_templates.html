@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block content %}
+{% set can_manage_templates = can_access_endpoint('signage.add_board_template', 'GET') %}
+<div class="container my-4">
+    {% include "signage/_nav.html" %}
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h1 class="h3 mb-1">Board Templates</h1>
+            <p class="text-muted mb-0">Create reusable menu board layouts with fixed canvases, block-based regions, branding, and optional legacy side panels.</p>
+        </div>
+        {% if can_manage_templates %}
+        <div>
+            <a href="{{ url_for('signage.add_board_template') }}" class="btn btn-primary">Create Template</a>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if templates %}
+    <div class="table-responsive">
+        <table class="table table-striped align-middle">
+            <thead>
+                <tr>
+                    <th scope="col">Template</th>
+                    <th scope="col">Canvas</th>
+                    <th scope="col">Layout</th>
+                    <th scope="col">Side Panel</th>
+                    <th scope="col">Displays</th>
+                    <th scope="col">Status</th>
+                    <th scope="col" class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for template in templates %}
+                <tr>
+                    <td>
+                        <div class="fw-semibold">{{ template.name }}</div>
+                        <div class="text-muted small">{{ template.description or "No description" }}</div>
+                        <div class="text-muted small mt-1">Theme: {{ template.theme|replace('_', ' ')|title }}</div>
+                    </td>
+                    <td>{{ template.canvas_width }} x {{ template.canvas_height }}</td>
+                    <td>
+                        <div>
+                            {% if template.blocks %}
+                                {{ template.blocks|length }} block{{ "" if template.blocks|length == 1 else "s" }}
+                            {% else %}
+                                {{ template.menu_columns }} columns x {{ template.menu_rows }} rows
+                            {% endif %}
+                        </div>
+                        <div class="text-muted small">
+                            {{ "Prices" if template.show_prices else "No prices" }}
+                            /
+                            {{ "Descriptions" if template.show_menu_description else "No descriptions" }}
+                        </div>
+                    </td>
+                    <td>
+                        {% if template.side_panel_position != 'none' %}
+                        <div>{{ template.side_panel_position|title }} panel</div>
+                        <div class="text-muted small">{{ template.side_panel_width_percent }}% width</div>
+                        {% else %}
+                        <span class="text-muted">None</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ template.displays|length }}</td>
+                    <td>
+                        {% if template.archived %}
+                        <span class="badge text-bg-secondary">Archived</span>
+                        {% else %}
+                        <span class="badge text-bg-success">Active</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-end">
+                        {% if can_manage_templates %}
+                        <div class="d-flex flex-wrap justify-content-end gap-2">
+                            <a href="{{ url_for('signage.edit_board_template', template_id=template.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                            <form method="post" action="{{ url_for('signage.toggle_board_template_archive', template_id=template.id) }}" class="d-inline">
+                                {{ action_form.hidden_tag() }}
+                                <button type="submit" class="btn btn-sm btn-outline-warning">
+                                    {{ "Restore" if template.archived else "Archive" }}
+                                </button>
+                            </form>
+                            <form method="post" action="{{ url_for('signage.delete_board_template', template_id=template.id) }}" class="d-inline">
+                                {{ action_form.hidden_tag() }}
+                                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                            </form>
+                        </div>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="alert alert-info">No board templates have been created yet.</div>
+    {% endif %}
+</div>
+{% endblock %}

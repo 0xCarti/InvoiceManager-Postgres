@@ -239,7 +239,8 @@ def _append_metabase_frame_src(csp: str, site_url: str | None) -> str:
 
 DEFAULT_CSP_TEMPLATE = (
     "default-src 'self'; "
-    "img-src 'self' data:; "
+    "img-src 'self' data: https:; "
+    "media-src 'self' data: https:; "
     "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
     "script-src 'self' https://cdn.jsdelivr.net 'nonce-{nonce}'; "
     "font-src 'self' data:; "

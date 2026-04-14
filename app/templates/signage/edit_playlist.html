@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="container my-4">
+    {% include "signage/_nav.html" %}
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
         <div>
             <h1 class="h3 mb-1">{{ "Edit Playlist" if playlist else "Create Playlist" }}</h1>

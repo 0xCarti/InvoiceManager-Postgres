@@ -40,7 +40,10 @@ from wtforms.validators import (
 )
 from wtforms.widgets import CheckboxInput, ListWidget, TextInput
 
+from app import db
 from app.models import (
+    BoardTemplate,
+    BoardTemplateBlock,
     Department,
     Display,
     Event,
@@ -286,6 +289,21 @@ def load_product_choices():
     return g.product_choices
 
 
+def load_location_menu_product_choices(location_id: int | None):
+    """Return product choices for a location's current menu when available."""
+    if not location_id:
+        return load_product_choices()
+    location = db.session.get(Location, int(location_id))
+    if location is None or location.current_menu is None:
+        return load_product_choices()
+    return [
+        (product.id, product.name)
+        for product in sorted(
+            location.current_menu.products, key=lambda product: (product.name.lower(), product.id)
+        )
+    ] or load_product_choices()
+
+
 def load_menu_choices(include_blank: bool = True):
     """Return menu options for selection fields."""
 
@@ -309,6 +327,22 @@ def load_playlist_choices(include_blank: bool = True):
     ]
     if include_blank:
         return [(0, "No Playlist")] + choices
+    return choices
+
+
+def load_board_template_choices(include_blank: bool = True):
+    """Return board template options for selection fields."""
+
+    templates = BoardTemplate.query.order_by(BoardTemplate.name).all()
+    choices = [
+        (
+            template.id,
+            f"{template.name} (archived)" if template.archived else template.name,
+        )
+        for template in templates
+    ]
+    if include_blank:
+        return [(0, "Use Display Defaults")] + choices
     return choices
 
 
@@ -834,6 +868,31 @@ class DisplayForm(FlaskForm):
         validate_choice=False,
         default=0,
     )
+    board_template_id = SelectField(
+        "Board Template",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    board_columns = IntegerField(
+        "Board Columns",
+        validators=[InputRequired(), NumberRange(min=1, max=6)],
+        default=3,
+    )
+    board_rows = IntegerField(
+        "Rows Per Page",
+        validators=[InputRequired(), NumberRange(min=1, max=8)],
+        default=4,
+    )
+    selected_product_ids = SelectMultipleField(
+        "Visible Products",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+    )
+    show_prices = BooleanField("Show Prices", default=True)
+    show_menu_description = BooleanField("Show Menu Description")
     archived = BooleanField("Archived")
     submit = SubmitField("Save Display")
 
@@ -847,6 +906,14 @@ class DisplayForm(FlaskForm):
         self.playlist_override_id.choices = load_playlist_choices()
         if self.playlist_override_id.data is None:
             self.playlist_override_id.data = 0
+        self.board_template_id.choices = load_board_template_choices()
+        if self.board_template_id.data is None:
+            self.board_template_id.data = 0
+        self.selected_product_ids.choices = load_location_menu_product_choices(
+            self.location_id.data
+        )
+        if self.selected_product_ids.data is None:
+            self.selected_product_ids.data = []
 
     def validate_name(self, field):
         query = Display.query.filter(
@@ -859,6 +926,168 @@ class DisplayForm(FlaskForm):
             raise ValidationError(
                 "A display with this name already exists for the selected location."
             )
+
+
+class BoardTemplateBlockForm(FlaskForm):
+    BLOCK_TYPE_CHOICES = [
+        (BoardTemplateBlock.TYPE_MENU, "Menu Block"),
+        (BoardTemplateBlock.TYPE_TEXT, "Text Block"),
+        (BoardTemplateBlock.TYPE_IMAGE, "Image Block"),
+        (BoardTemplateBlock.TYPE_VIDEO, "Video Block"),
+    ]
+
+    block_type = SelectField(
+        "Block Type",
+        validators=[DataRequired()],
+        choices=BLOCK_TYPE_CHOICES,
+    )
+    width_units = IntegerField(
+        "Width Units",
+        validators=[InputRequired(), NumberRange(min=1, max=12)],
+        default=6,
+    )
+    title = StringField("Title", validators=[Optional(), Length(max=120)])
+    body = TextAreaField("Text", validators=[Optional()])
+    media_url = StringField("Media URL", validators=[Optional(), Length(max=500)])
+    menu_columns = IntegerField(
+        "Menu Columns",
+        validators=[InputRequired(), NumberRange(min=1, max=6)],
+        default=2,
+    )
+    menu_rows = IntegerField(
+        "Rows Per Page",
+        validators=[InputRequired(), NumberRange(min=1, max=8)],
+        default=4,
+    )
+    selected_product_ids = SelectMultipleField(
+        "Menu Products",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+    )
+    show_title = BooleanField("Show Title", default=True)
+    show_prices = BooleanField("Show Prices", default=True)
+    show_menu_description = BooleanField("Show Menu Description")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.selected_product_ids.choices = load_product_choices()
+        if self.selected_product_ids.data is None:
+            self.selected_product_ids.data = []
+
+
+class BoardTemplateForm(FlaskForm):
+    THEME_CHOICES = [
+        (BoardTemplate.THEME_AURORA, "Aurora Blue"),
+        (BoardTemplate.THEME_MIDNIGHT, "Midnight Slate"),
+        (BoardTemplate.THEME_SUNSET, "Sunset Amber"),
+        (BoardTemplate.THEME_CONCOURSE, "Concourse Gold"),
+    ]
+    PANEL_CHOICES = [
+        (BoardTemplate.PANEL_NONE, "No Side Panel"),
+        (BoardTemplate.PANEL_LEFT, "Left Side Panel"),
+        (BoardTemplate.PANEL_RIGHT, "Right Side Panel"),
+    ]
+
+    name = StringField("Template Name", validators=[DataRequired(), Length(max=100)])
+    description = TextAreaField("Description", validators=[Optional()])
+    canvas_width = IntegerField(
+        "Canvas Width",
+        validators=[InputRequired(), NumberRange(min=640, max=7680)],
+        default=1920,
+    )
+    canvas_height = IntegerField(
+        "Canvas Height",
+        validators=[InputRequired(), NumberRange(min=360, max=4320)],
+        default=1080,
+    )
+    theme = SelectField("Theme", validators=[DataRequired()], choices=THEME_CHOICES)
+    brand_label = StringField("Brand Label", validators=[Optional(), Length(max=80)])
+    brand_name = StringField("Brand Name", validators=[Optional(), Length(max=120)])
+    menu_columns = IntegerField(
+        "Menu Columns",
+        validators=[InputRequired(), NumberRange(min=1, max=6)],
+        default=3,
+    )
+    menu_rows = IntegerField(
+        "Rows Per Page",
+        validators=[InputRequired(), NumberRange(min=1, max=8)],
+        default=4,
+    )
+    side_panel_position = SelectField(
+        "Side Panel",
+        validators=[DataRequired()],
+        choices=PANEL_CHOICES,
+    )
+    side_panel_width_percent = IntegerField(
+        "Side Panel Width (%)",
+        validators=[InputRequired(), NumberRange(min=20, max=45)],
+        default=30,
+    )
+    side_title = StringField("Side Panel Title", validators=[Optional(), Length(max=120)])
+    side_body = TextAreaField("Side Panel Text", validators=[Optional()])
+    side_image_url = StringField(
+        "Side Panel Image URL", validators=[Optional(), Length(max=500)]
+    )
+    footer_text = StringField("Footer Text", validators=[Optional(), Length(max=255)])
+    show_prices = BooleanField("Show Prices", default=True)
+    show_menu_description = BooleanField("Show Menu Description")
+    show_page_indicator = BooleanField("Show Page Indicator", default=True)
+    blocks = FieldList(FormField(BoardTemplateBlockForm), min_entries=0)
+    archived = BooleanField("Archived")
+    submit = SubmitField("Save Template")
+
+    def __init__(self, *args, **kwargs):
+        self.obj_id = kwargs.pop("obj_id", None)
+        super().__init__(*args, **kwargs)
+
+    def validate_name(self, field):
+        query = BoardTemplate.query.filter(BoardTemplate.name == field.data)
+        if self.obj_id is not None:
+            query = query.filter(BoardTemplate.id != self.obj_id)
+        if query.first() is not None:
+            raise ValidationError("A board template with this name already exists.")
+
+    def validate(self, **kwargs):
+        valid = super().validate(**kwargs)
+        if not valid:
+            return False
+
+        if len(self.blocks.entries) > 6:
+            self.form_errors.append("Use at most six blocks in one template.")
+            return False
+
+        total_width = 0
+        for block_form in self.blocks.entries:
+            block_type = block_form.block_type.data
+            width_units = int(block_form.width_units.data or 0)
+            total_width += width_units
+
+            if block_type in (
+                BoardTemplateBlock.TYPE_IMAGE,
+                BoardTemplateBlock.TYPE_VIDEO,
+            ) and not (block_form.media_url.data or "").strip():
+                block_form.media_url.errors.append(
+                    "A media URL is required for image and video blocks."
+                )
+                return False
+
+            if block_type == BoardTemplateBlock.TYPE_TEXT and not (
+                (block_form.title.data or "").strip()
+                or (block_form.body.data or "").strip()
+            ):
+                block_form.body.errors.append(
+                    "Text blocks need a title or body."
+                )
+                return False
+
+        if total_width > 12:
+            self.form_errors.append(
+                "Block widths cannot exceed 12 units across the board."
+            )
+            return False
+
+        return True
 
 
 class PurchaseCostForecastForm(FlaskForm):
