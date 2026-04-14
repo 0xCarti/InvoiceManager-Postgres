@@ -185,6 +185,8 @@ def test_short_player_url_loads_display(client, app):
 
     assert response.status_code == 200
     assert b"Drive Thru TV" in response.data
+    assert b"Short URL Menu" in response.data
+    assert b"Fries" in response.data
     assert b"/api/player/short-token/manifest" in response.data
 
 

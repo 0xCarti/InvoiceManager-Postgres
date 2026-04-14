@@ -175,6 +175,10 @@
     </style>
 </head>
 <body>
+    {% set initial_menu = initial_slide.menu if initial_slide else None %}
+    {% set initial_products = initial_slide.products if initial_slide and initial_slide.products else [] %}
+    {% set initial_source = initial_slide.source_type if initial_slide else "" %}
+    {% set initial_duration = initial_slide.duration_seconds if initial_slide else None %}
     <div
         id="signage-player"
         class="player-shell"
@@ -188,24 +192,59 @@
             </div>
             <div class="player-meta">
                 <div id="display-location">{{ display.location.name if display.location else "" }}</div>
-                <div id="playlist-name">Loading playlist...</div>
+                <div id="playlist-name">{{ initial_playlist_name }}</div>
             </div>
         </section>
 
         <section class="menu-panel">
             <div class="menu-panel-header">
-                <div class="player-kicker" id="slide-source">Loading...</div>
-                <h2 class="menu-name" id="menu-name">Loading menu...</h2>
-                <p class="menu-description" id="menu-description"></p>
+                <div class="player-kicker" id="slide-source">
+                    {% if initial_slide %}
+                        {{ "Location Menu" if initial_source == "location_menu" else "Specific Menu" }}
+                    {% else %}
+                        No Slides
+                    {% endif %}
+                </div>
+                <h2 class="menu-name" id="menu-name">
+                    {% if initial_menu %}
+                        {{ initial_menu.name }}
+                    {% else %}
+                        Nothing Scheduled
+                    {% endif %}
+                </h2>
+                <p class="menu-description" id="menu-description">{{ initial_menu.description if initial_menu else "" }}</p>
             </div>
-            <div class="menu-grid" id="menu-grid"></div>
+            <div class="menu-grid" id="menu-grid">
+                {% if initial_products %}
+                    {% for product in initial_products %}
+                    <article class="menu-item">
+                        <div class="menu-item-name">{{ product.name }}</div>
+                        <div class="menu-item-price">${{ "%.2f"|format(product.price or 0) }}</div>
+                    </article>
+                    {% endfor %}
+                {% else %}
+                    <div class="empty-state">
+                        {% if initial_slide %}
+                            No products are available for this menu yet.
+                        {% else %}
+                            No playlist items are available for this display.
+                        {% endif %}
+                    </div>
+                {% endif %}
+            </div>
         </section>
 
         <section class="player-footer">
-            <div class="player-pill" id="slide-timer">Preparing player...</div>
-            <div id="player-status">Waiting for server...</div>
+            <div class="player-pill" id="slide-timer">
+                {% if initial_duration %}
+                    Showing for {{ initial_duration }} seconds
+                {% else %}
+                    Static menu loaded
+                {% endif %}
+            </div>
+            <div id="player-status">Player page loaded</div>
         </section>
     </div>
-    <script src="{{ url_for('static', filename='js/signage_player.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/signage_player.js', v='20260414') }}"></script>
 </body>
 </html>

@@ -104,6 +104,10 @@ def _build_playlist_items(form: PlaylistForm) -> list[PlaylistItem] | None:
 
 
 def _render_player(display: Display):
+    manifest = build_display_manifest(display)
+    slides = manifest.get("slides") or []
+    initial_slide = slides[0] if slides else None
+    initial_playlist_name = (manifest.get("playlist") or {}).get("name") or "Location Menu Fallback"
     return render_template(
         "signage/player.html",
         display=display,
@@ -113,6 +117,8 @@ def _render_player(display: Display):
         heartbeat_url=url_for(
             "signage.player_heartbeat", public_token=display.public_token
         ),
+        initial_slide=initial_slide,
+        initial_playlist_name=initial_playlist_name,
     )
 
 
