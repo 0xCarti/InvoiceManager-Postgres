@@ -17,10 +17,6 @@
         return;
     }
 
-    if (window.bootstrap && window.bootstrap.Modal) {
-        modal = new window.bootstrap.Modal(modalElement);
-    }
-
     modalFields = {
         titleText: modalElement.querySelector("[data-board-block-modal-title]"),
         subtitleText: modalElement.querySelector("[data-board-block-modal-subtitle]"),
@@ -44,6 +40,13 @@
 
     function getRows() {
         return Array.prototype.slice.call(container.querySelectorAll("[data-board-block]"));
+    }
+
+    function ensureModal() {
+        if (!modal && window.bootstrap && window.bootstrap.Modal) {
+            modal = new window.bootstrap.Modal(modalElement);
+        }
+        return modal;
     }
 
     function parseIntSafe(value, fallback) {
@@ -371,13 +374,15 @@
     }
 
     function openRowModal(row) {
-        if (!modal) {
+        var modalInstance;
+        selectRow(row);
+        modalInstance = ensureModal();
+        if (!modalInstance) {
             return;
         }
         modalRow = row;
-        selectRow(row);
         populateModalFromRow(row);
-        modal.show();
+        modalInstance.show();
     }
 
     function moveRowUp(row) {
@@ -729,7 +734,7 @@
             applyModalToRow(modalRow);
             refreshRows();
             selectRow(modalRow);
-            if (modal) {
+            if (ensureModal()) {
                 modal.hide();
             }
         });
