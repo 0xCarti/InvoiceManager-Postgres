@@ -2,10 +2,7 @@
 {% block content %}
 <div class="container my-4">
     <style>
-        .board-editor-shell {
-            background: linear-gradient(145deg, #eef4fb 0%, #d7e5f6 100%);
-        }
-
+        .board-editor-shell { background: linear-gradient(145deg, #eef4fb 0%, #d7e5f6 100%); }
         .board-editor-canvas-wrap {
             position: relative;
             width: 100%;
@@ -22,7 +19,6 @@
                 100% 100%;
             box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
         }
-
         .board-editor-block {
             position: absolute;
             border-radius: 0.95rem;
@@ -33,25 +29,14 @@
             overflow: hidden;
             user-select: none;
         }
-
         .board-editor-block.is-selected {
             border-color: #ffd166;
             box-shadow: 0 0 0 3px rgba(255, 209, 102, 0.2), 0 0.75rem 2rem rgba(0, 0, 0, 0.22);
         }
-
-        .board-editor-block.is-menu {
-            background: linear-gradient(160deg, rgba(16, 52, 86, 0.9), rgba(5, 22, 38, 0.9));
-        }
-
-        .board-editor-block.is-text {
-            background: linear-gradient(160deg, rgba(83, 55, 19, 0.9), rgba(41, 24, 9, 0.92));
-        }
-
+        .board-editor-block.is-menu { background: linear-gradient(160deg, rgba(16, 52, 86, 0.9), rgba(5, 22, 38, 0.9)); }
+        .board-editor-block.is-text { background: linear-gradient(160deg, rgba(83, 55, 19, 0.9), rgba(41, 24, 9, 0.92)); }
         .board-editor-block.is-image,
-        .board-editor-block.is-video {
-            background: linear-gradient(160deg, rgba(68, 17, 57, 0.9), rgba(26, 8, 24, 0.92));
-        }
-
+        .board-editor-block.is-video { background: linear-gradient(160deg, rgba(68, 17, 57, 0.9), rgba(26, 8, 24, 0.92)); }
         .board-editor-block-handle {
             display: flex;
             justify-content: space-between;
@@ -65,25 +50,15 @@
             background: rgba(255, 255, 255, 0.08);
             cursor: move;
         }
-
         .board-editor-block-body {
             padding: 0.65rem;
             display: grid;
             gap: 0.45rem;
             height: calc(100% - 2rem);
+            cursor: pointer;
         }
-
-        .board-editor-block-title {
-            font-size: 0.98rem;
-            font-weight: 700;
-            line-height: 1.1;
-        }
-
-        .board-editor-block-meta {
-            font-size: 0.78rem;
-            color: rgba(245, 247, 251, 0.8);
-        }
-
+        .board-editor-block-title { font-size: 0.98rem; font-weight: 700; line-height: 1.1; }
+        .board-editor-block-meta { font-size: 0.78rem; color: rgba(245, 247, 251, 0.8); }
         .board-editor-block-resize {
             position: absolute;
             right: 0.2rem;
@@ -94,10 +69,21 @@
             background: rgba(255, 209, 102, 0.95);
             cursor: nwse-resize;
         }
-
-        .board-block-row.is-selected {
-            border-color: #ffd166 !important;
-            box-shadow: 0 0 0 0.2rem rgba(255, 209, 102, 0.14);
+        .board-block-list-item {
+            border: 1px solid rgba(33, 37, 41, 0.08);
+            border-radius: 1rem;
+            background: #ffffff;
+            box-shadow: 0 0.5rem 1.5rem rgba(15, 23, 42, 0.06);
+        }
+        .board-block-list-item.is-selected {
+            border-color: #ffd166;
+            box-shadow: 0 0 0 0.2rem rgba(255, 209, 102, 0.16);
+        }
+        .board-block-store { display: none; }
+        .board-block-note {
+            background: rgba(255, 209, 102, 0.12);
+            border: 1px solid rgba(255, 209, 102, 0.32);
+            border-radius: 0.85rem;
         }
     </style>
     {% include "signage/_nav.html" %}
@@ -128,25 +114,19 @@
                 <div class="col-md-6">
                     {{ form.name.label(class="form-label") }}
                     {{ form.name(class="form-control", placeholder="Arena 1080p Board") }}
-                    {% for error in form.name.errors %}
-                    <div class="text-danger small">{{ error }}</div>
-                    {% endfor %}
+                    {% for error in form.name.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-6">
                     {{ form.theme.label(class="form-label") }}
                     {{ form.theme(class="form-select") }}
-                    {% for error in form.theme.errors %}
-                    <div class="text-danger small">{{ error }}</div>
-                    {% endfor %}
+                    {% for error in form.theme.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                 </div>
             </div>
 
             <div class="mt-3">
                 {{ form.description.label(class="form-label") }}
                 {{ form.description(class="form-control", rows=3, placeholder="Optional notes about where this template is used") }}
-                {% for error in form.description.errors %}
-                <div class="text-danger small">{{ error }}</div>
-                {% endfor %}
+                {% for error in form.description.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
             </div>
 
             <hr class="my-4">
@@ -155,220 +135,75 @@
                     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
                         <div>
                             <h2 class="h5 mb-1">Board Canvas</h2>
-                            <p class="text-muted small mb-0">Drag blocks to move them. Drag the gold corner to resize. Blocks snap to a {{ grid_columns }} x {{ grid_rows }} layout grid.</p>
+                            <p class="text-muted small mb-0">Drag blocks to move them. Drag the gold corner to resize. Click a block to edit it in a modal. Blocks snap to a {{ grid_columns }} x {{ grid_rows }} layout grid.</p>
                         </div>
-                        <div class="text-muted small">Stacking follows the block order below.</div>
+                        <div class="text-muted small">Stacking follows the block order in the list below.</div>
                     </div>
-                    <div
-                        id="board-template-canvas"
-                        class="board-editor-canvas-wrap"
-                        data-board-editor-canvas
-                        data-grid-columns="{{ grid_columns }}"
-                        data-grid-rows="{{ grid_rows }}"
-                    ></div>
+                    <div id="board-template-canvas" class="board-editor-canvas-wrap" data-board-editor-canvas data-grid-columns="{{ grid_columns }}" data-grid-rows="{{ grid_rows }}"></div>
                 </div>
             </div>
 
             <hr class="my-4">
-            <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
                 <div>
-                    <h2 class="h5 mb-1">Template Blocks</h2>
-                    <p class="text-muted small mb-0">Use the block settings below for content and data binding. Use the canvas above for positioning and sizing.</p>
+                    <h2 class="h5 mb-1">Blocks</h2>
+                    <p class="text-muted small mb-0">Use the canvas for layout. Use this list for order, editing, and removal.</p>
                 </div>
                 <button type="button" class="btn btn-outline-primary btn-sm" id="add-board-block">Add Block</button>
             </div>
+            <div class="board-block-note p-3 mb-3">
+                <div class="fw-semibold mb-1">Editing Flow</div>
+                <div class="text-muted small mb-0">Click any block on the canvas or choose <span class="fw-semibold">Edit Settings</span> below. When you apply the modal, the canvas updates immediately.</div>
+            </div>
+            <div class="vstack gap-3 mb-4" data-board-block-list></div>
 
-            <div id="board-template-blocks" data-board-blocks data-next-index="{{ form.blocks|length }}">
+            <div id="board-template-blocks" class="board-block-store" data-board-blocks data-next-index="{{ form.blocks|length }}">
                 {% for block_form in form.blocks %}
-                <div class="card border-secondary-subtle shadow-sm mb-3 board-block-row" data-board-block>
-                    <div class="card-body">
-                        {{ block_form.width_units(type="hidden", class="board-block-width-units") }}
-                        {{ block_form.grid_x(class="block-grid-x") }}
-                        {{ block_form.grid_y(class="block-grid-y") }}
-                        {{ block_form.grid_width(class="block-grid-width") }}
-                        {{ block_form.grid_height(class="block-grid-height") }}
-                        <div class="d-flex justify-content-between align-items-start mb-3">
-                            <div>
-                                <div class="fw-semibold" data-block-label>Block {{ loop.index }}</div>
-                                <div class="text-muted small" data-block-coordinates></div>
-                            </div>
-                            <div class="d-flex gap-2">
-                                <button type="button" class="btn btn-sm btn-outline-secondary" data-move-block-up>Up</button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" data-move-block-down>Down</button>
-                                <button type="button" class="btn btn-sm btn-outline-danger" data-remove-board-block>Remove</button>
-                            </div>
-                        </div>
-
-                        <div class="row g-3">
-                            <div class="col-md-4">
-                                {{ block_form.block_type.label(class="form-label") }}
-                                {{ block_form.block_type(class="form-select board-block-type") }}
-                                {% for error in block_form.block_type.errors %}
-                                <div class="text-danger small">{{ error }}</div>
-                                {% endfor %}
-                            </div>
-                            <div class="col-md-8">
-                                {{ block_form.title.label(class="form-label") }}
-                                {{ block_form.title(class="form-control board-block-title-input", placeholder="Optional block title") }}
-                                {% for error in block_form.title.errors %}
-                                <div class="text-danger small">{{ error }}</div>
-                                {% endfor %}
-                            </div>
-                        </div>
-
-                        <div class="row g-3 mt-1 board-block-menu-fields">
-                            <div class="col-md-3">
-                                {{ block_form.menu_columns.label(class="form-label") }}
-                                {{ block_form.menu_columns(class="form-control", min="1", max="6") }}
-                            </div>
-                            <div class="col-md-3">
-                                {{ block_form.menu_rows.label(class="form-label") }}
-                                {{ block_form.menu_rows(class="form-control", min="1", max="8") }}
-                            </div>
-                            <div class="col-md-6">
-                                {{ block_form.selected_product_ids.label(class="form-label") }}
-                                {{ block_form.selected_product_ids(class="form-select", multiple=true, size=6) }}
-                                {% for error in block_form.selected_product_ids.errors %}
-                                <div class="text-danger small">{{ error }}</div>
-                                {% endfor %}
-                            </div>
-                        </div>
-
-                        <div class="mt-3 board-block-body-field">
-                            {{ block_form.body.label(class="form-label") }}
-                            {{ block_form.body(class="form-control board-block-body-input", rows=4, placeholder="Text content or supporting copy") }}
-                            {% for error in block_form.body.errors %}
-                            <div class="text-danger small">{{ error }}</div>
-                            {% endfor %}
-                        </div>
-
-                        <div class="row g-3 mt-1 board-block-media-field">
-                            <div class="col-md-6">
-                                {{ block_form.media_asset_id.label(class="form-label") }}
-                                {{ block_form.media_asset_id(class="form-select board-block-media-asset") }}
-                                {% for error in block_form.media_asset_id.errors %}
-                                <div class="text-danger small">{{ error }}</div>
-                                {% endfor %}
-                            </div>
-                            <div class="col-md-6">
-                                {{ block_form.media_url.label(class="form-label") }}
-                                {{ block_form.media_url(class="form-control board-block-media-url", placeholder="https://example.com/media.jpg or .mp4") }}
-                                <div class="form-text">Media library assets are preferred. External URLs remain supported.</div>
-                                {% for error in block_form.media_url.errors %}
-                                <div class="text-danger small">{{ error }}</div>
-                                {% endfor %}
-                            </div>
-                        </div>
-
-                        <div class="row g-3 mt-1">
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    {{ block_form.show_title(class="form-check-input") }}
-                                    {{ block_form.show_title.label(class="form-check-label") }}
-                                </div>
-                            </div>
-                            <div class="col-md-4 board-block-menu-fields">
-                                <div class="form-check">
-                                    {{ block_form.show_prices(class="form-check-input") }}
-                                    {{ block_form.show_prices.label(class="form-check-label") }}
-                                </div>
-                            </div>
-                            <div class="col-md-4 board-block-menu-fields">
-                                <div class="form-check">
-                                    {{ block_form.show_menu_description(class="form-check-input") }}
-                                    {{ block_form.show_menu_description.label(class="form-check-label") }}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                <div class="board-block-row" data-board-block>
+                    {{ block_form.width_units(type="hidden", class="board-block-width-units") }}
+                    {{ block_form.grid_x(class="block-grid-x") }}
+                    {{ block_form.grid_y(class="block-grid-y") }}
+                    {{ block_form.grid_width(class="block-grid-width") }}
+                    {{ block_form.grid_height(class="block-grid-height") }}
+                    {{ block_form.block_type(class="board-block-type") }}
+                    {{ block_form.title(class="board-block-title-input") }}
+                    {{ block_form.menu_columns(class="board-block-menu-columns") }}
+                    {{ block_form.menu_rows(class="board-block-menu-rows") }}
+                    {{ block_form.selected_product_ids(class="board-block-selected-products", multiple=true) }}
+                    {{ block_form.body(class="board-block-body-input") }}
+                    {{ block_form.media_asset_id(class="board-block-media-asset") }}
+                    {{ block_form.media_url(class="board-block-media-url") }}
+                    {{ block_form.show_title(class="board-block-show-title") }}
+                    {{ block_form.show_prices(class="board-block-show-prices") }}
+                    {{ block_form.show_menu_description(class="board-block-show-menu-description") }}
+                    {% for error in block_form.block_type.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                    {% for error in block_form.title.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                    {% for error in block_form.selected_product_ids.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                    {% for error in block_form.body.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                    {% for error in block_form.media_asset_id.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                    {% for error in block_form.media_url.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                 </div>
                 {% endfor %}
             </div>
 
             <template id="board-block-template">
-                <div class="card border-secondary-subtle shadow-sm mb-3 board-block-row" data-board-block>
-                    <div class="card-body">
-                        {{ item_template_form.width_units(type="hidden", class="board-block-width-units") }}
-                        {{ item_template_form.grid_x(class="block-grid-x") }}
-                        {{ item_template_form.grid_y(class="block-grid-y") }}
-                        {{ item_template_form.grid_width(class="block-grid-width") }}
-                        {{ item_template_form.grid_height(class="block-grid-height") }}
-                        <div class="d-flex justify-content-between align-items-start mb-3">
-                            <div>
-                                <div class="fw-semibold" data-block-label>Block</div>
-                                <div class="text-muted small" data-block-coordinates></div>
-                            </div>
-                            <div class="d-flex gap-2">
-                                <button type="button" class="btn btn-sm btn-outline-secondary" data-move-block-up>Up</button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" data-move-block-down>Down</button>
-                                <button type="button" class="btn btn-sm btn-outline-danger" data-remove-board-block>Remove</button>
-                            </div>
-                        </div>
-
-                        <div class="row g-3">
-                            <div class="col-md-4">
-                                {{ item_template_form.block_type.label(class="form-label") }}
-                                {{ item_template_form.block_type(class="form-select board-block-type") }}
-                            </div>
-                            <div class="col-md-8">
-                                {{ item_template_form.title.label(class="form-label") }}
-                                {{ item_template_form.title(class="form-control board-block-title-input", placeholder="Optional block title") }}
-                            </div>
-                        </div>
-
-                        <div class="row g-3 mt-1 board-block-menu-fields">
-                            <div class="col-md-3">
-                                {{ item_template_form.menu_columns.label(class="form-label") }}
-                                {{ item_template_form.menu_columns(class="form-control", min="1", max="6") }}
-                            </div>
-                            <div class="col-md-3">
-                                {{ item_template_form.menu_rows.label(class="form-label") }}
-                                {{ item_template_form.menu_rows(class="form-control", min="1", max="8") }}
-                            </div>
-                            <div class="col-md-6">
-                                {{ item_template_form.selected_product_ids.label(class="form-label") }}
-                                {{ item_template_form.selected_product_ids(class="form-select", multiple=true, size=6) }}
-                            </div>
-                        </div>
-
-                        <div class="mt-3 board-block-body-field">
-                            {{ item_template_form.body.label(class="form-label") }}
-                            {{ item_template_form.body(class="form-control board-block-body-input", rows=4, placeholder="Text content or supporting copy") }}
-                        </div>
-
-                        <div class="row g-3 mt-1 board-block-media-field">
-                            <div class="col-md-6">
-                                {{ item_template_form.media_asset_id.label(class="form-label") }}
-                                {{ item_template_form.media_asset_id(class="form-select board-block-media-asset") }}
-                            </div>
-                            <div class="col-md-6">
-                                {{ item_template_form.media_url.label(class="form-label") }}
-                                {{ item_template_form.media_url(class="form-control board-block-media-url", placeholder="https://example.com/media.jpg or .mp4") }}
-                                <div class="form-text">Media library assets are preferred. External URLs remain supported.</div>
-                            </div>
-                        </div>
-
-                        <div class="row g-3 mt-1">
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    {{ item_template_form.show_title(class="form-check-input") }}
-                                    {{ item_template_form.show_title.label(class="form-check-label") }}
-                                </div>
-                            </div>
-                            <div class="col-md-4 board-block-menu-fields">
-                                <div class="form-check">
-                                    {{ item_template_form.show_prices(class="form-check-input") }}
-                                    {{ item_template_form.show_prices.label(class="form-check-label") }}
-                                </div>
-                            </div>
-                            <div class="col-md-4 board-block-menu-fields">
-                                <div class="form-check">
-                                    {{ item_template_form.show_menu_description(class="form-check-input") }}
-                                    {{ item_template_form.show_menu_description.label(class="form-check-label") }}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                <div class="board-block-row" data-board-block>
+                    {{ item_template_form.width_units(type="hidden", class="board-block-width-units") }}
+                    {{ item_template_form.grid_x(class="block-grid-x") }}
+                    {{ item_template_form.grid_y(class="block-grid-y") }}
+                    {{ item_template_form.grid_width(class="block-grid-width") }}
+                    {{ item_template_form.grid_height(class="block-grid-height") }}
+                    {{ item_template_form.block_type(class="board-block-type") }}
+                    {{ item_template_form.title(class="board-block-title-input") }}
+                    {{ item_template_form.menu_columns(class="board-block-menu-columns") }}
+                    {{ item_template_form.menu_rows(class="board-block-menu-rows") }}
+                    {{ item_template_form.selected_product_ids(class="board-block-selected-products", multiple=true) }}
+                    {{ item_template_form.body(class="board-block-body-input") }}
+                    {{ item_template_form.media_asset_id(class="board-block-media-asset") }}
+                    {{ item_template_form.media_url(class="board-block-media-url") }}
+                    {{ item_template_form.show_title(class="board-block-show-title") }}
+                    {{ item_template_form.show_prices(class="board-block-show-prices") }}
+                    {{ item_template_form.show_menu_description(class="board-block-show-menu-description") }}
                 </div>
             </template>
 
@@ -378,30 +213,22 @@
                 <div class="col-md-3">
                     {{ form.canvas_width.label(class="form-label") }}
                     {{ form.canvas_width(class="form-control", min="640", max="7680") }}
-                    {% for error in form.canvas_width.errors %}
-                    <div class="text-danger small">{{ error }}</div>
-                    {% endfor %}
+                    {% for error in form.canvas_width.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-3">
                     {{ form.canvas_height.label(class="form-label") }}
                     {{ form.canvas_height(class="form-control", min="360", max="4320") }}
-                    {% for error in form.canvas_height.errors %}
-                    <div class="text-danger small">{{ error }}</div>
-                    {% endfor %}
+                    {% for error in form.canvas_height.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-3">
                     {{ form.menu_columns.label(class="form-label") }}
                     {{ form.menu_columns(class="form-control", min="1", max="6") }}
-                    {% for error in form.menu_columns.errors %}
-                    <div class="text-danger small">{{ error }}</div>
-                    {% endfor %}
+                    {% for error in form.menu_columns.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-3">
                     {{ form.menu_rows.label(class="form-label") }}
                     {{ form.menu_rows(class="form-control", min="1", max="8") }}
-                    {% for error in form.menu_rows.errors %}
-                    <div class="text-danger small">{{ error }}</div>
-                    {% endfor %}
+                    {% for error in form.menu_rows.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                 </div>
             </div>
 
@@ -411,25 +238,19 @@
                 <div class="col-md-4">
                     {{ form.brand_label.label(class="form-label") }}
                     {{ form.brand_label(class="form-control", placeholder="Digital Menu Board") }}
-                    {% for error in form.brand_label.errors %}
-                    <div class="text-danger small">{{ error }}</div>
-                    {% endfor %}
+                    {% for error in form.brand_label.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-8">
                     {{ form.brand_name.label(class="form-label") }}
                     {{ form.brand_name(class="form-control", placeholder="Prairie Grill") }}
-                    {% for error in form.brand_name.errors %}
-                    <div class="text-danger small">{{ error }}</div>
-                    {% endfor %}
+                    {% for error in form.brand_name.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                 </div>
             </div>
 
             <div class="mt-3">
                 {{ form.footer_text.label(class="form-label") }}
                 {{ form.footer_text(class="form-control", placeholder="Optional footer text, promos, or service notes") }}
-                {% for error in form.footer_text.errors %}
-                <div class="text-danger small">{{ error }}</div>
-                {% endfor %}
+                {% for error in form.footer_text.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
             </div>
 
             <hr class="my-4">
@@ -438,64 +259,39 @@
                 <div class="col-md-4">
                     {{ form.side_panel_position.label(class="form-label") }}
                     {{ form.side_panel_position(class="form-select") }}
-                    {% for error in form.side_panel_position.errors %}
-                    <div class="text-danger small">{{ error }}</div>
-                    {% endfor %}
+                    {% for error in form.side_panel_position.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-4">
                     {{ form.side_panel_width_percent.label(class="form-label") }}
                     {{ form.side_panel_width_percent(class="form-control", min="20", max="45") }}
-                    {% for error in form.side_panel_width_percent.errors %}
-                    <div class="text-danger small">{{ error }}</div>
-                    {% endfor %}
+                    {% for error in form.side_panel_width_percent.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-4">
                     {{ form.side_title.label(class="form-label") }}
                     {{ form.side_title(class="form-control", placeholder="Specials") }}
-                    {% for error in form.side_title.errors %}
-                    <div class="text-danger small">{{ error }}</div>
-                    {% endfor %}
+                    {% for error in form.side_title.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                 </div>
             </div>
 
             <div class="mt-3">
                 {{ form.side_body.label(class="form-label") }}
                 {{ form.side_body(class="form-control", rows=4, placeholder="Custom text for promos, hours, combo callouts, or announcements") }}
-                {% for error in form.side_body.errors %}
-                <div class="text-danger small">{{ error }}</div>
-                {% endfor %}
+                {% for error in form.side_body.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
             </div>
 
             <div class="mt-3">
                 {{ form.side_image_url.label(class="form-label") }}
                 {{ form.side_image_url(class="form-control", placeholder="https://example.com/promo.jpg") }}
                 <div class="form-text">Legacy side-panel image. Prefer media blocks for new templates.</div>
-                {% for error in form.side_image_url.errors %}
-                <div class="text-danger small">{{ error }}</div>
-                {% endfor %}
+                {% for error in form.side_image_url.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
             </div>
 
             <hr class="my-4">
             <h2 class="h5 mb-3">Menu Data</h2>
             <div class="row g-3">
-                <div class="col-md-4">
-                    <div class="form-check">
-                        {{ form.show_prices(class="form-check-input") }}
-                        {{ form.show_prices.label(class="form-check-label") }}
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="form-check">
-                        {{ form.show_menu_description(class="form-check-input") }}
-                        {{ form.show_menu_description.label(class="form-check-label") }}
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="form-check">
-                        {{ form.show_page_indicator(class="form-check-input") }}
-                        {{ form.show_page_indicator.label(class="form-check-label") }}
-                    </div>
-                </div>
+                <div class="col-md-4"><div class="form-check">{{ form.show_prices(class="form-check-input") }}{{ form.show_prices.label(class="form-check-label") }}</div></div>
+                <div class="col-md-4"><div class="form-check">{{ form.show_menu_description(class="form-check-input") }}{{ form.show_menu_description.label(class="form-check-label") }}</div></div>
+                <div class="col-md-4"><div class="form-check">{{ form.show_page_indicator(class="form-check-input") }}{{ form.show_page_indicator.label(class="form-check-label") }}</div></div>
             </div>
 
             <div class="form-check mt-4">
@@ -510,5 +306,90 @@
         </div>
     </form>
 </div>
+
+<div class="modal fade" id="board-block-settings-modal" tabindex="-1" aria-labelledby="board-block-settings-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <h2 class="modal-title h5 mb-1" id="board-block-settings-modal-title" data-board-block-modal-title>Block Settings</h2>
+                    <div class="text-muted small" data-board-block-modal-subtitle>Configure the selected block.</div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-danger d-none" data-board-block-modal-errors></div>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label for="modal-block-type" class="form-label">Block Type</label>
+                        {{ item_template_form.block_type(id="modal-block-type", class="form-select", data_modal_block_type="1") }}
+                    </div>
+                    <div class="col-md-8">
+                        <label for="modal-block-title" class="form-label">Title</label>
+                        {{ item_template_form.title(id="modal-block-title", class="form-control", placeholder="Optional block title", data_modal_block_title="1") }}
+                    </div>
+                </div>
+
+                <div class="row g-3 mt-1" data-modal-menu-fields>
+                    <div class="col-md-3">
+                        <label for="modal-block-menu-columns" class="form-label">Menu Columns</label>
+                        {{ item_template_form.menu_columns(id="modal-block-menu-columns", class="form-control", min="1", max="6", data_modal_menu_columns="1") }}
+                    </div>
+                    <div class="col-md-3">
+                        <label for="modal-block-menu-rows" class="form-label">Rows Per Page</label>
+                        {{ item_template_form.menu_rows(id="modal-block-menu-rows", class="form-control", min="1", max="8", data_modal_menu_rows="1") }}
+                    </div>
+                    <div class="col-md-6">
+                        <label for="modal-block-selected-products" class="form-label">Menu Products</label>
+                        {{ item_template_form.selected_product_ids(id="modal-block-selected-products", class="form-select", multiple=true, size=8, data_modal_selected_product_ids="1") }}
+                    </div>
+                </div>
+
+                <div class="mt-3" data-modal-body-field>
+                    <label for="modal-block-body" class="form-label">Text</label>
+                    {{ item_template_form.body(id="modal-block-body", class="form-control", rows=5, placeholder="Text content or supporting copy", data_modal_block_body="1") }}
+                </div>
+
+                <div class="row g-3 mt-1" data-modal-media-fields>
+                    <div class="col-md-6">
+                        <label for="modal-block-media-asset" class="form-label">Media Library Asset</label>
+                        {{ item_template_form.media_asset_id(id="modal-block-media-asset", class="form-select", data_modal_media_asset_id="1") }}
+                    </div>
+                    <div class="col-md-6">
+                        <label for="modal-block-media-url" class="form-label">Media URL</label>
+                        {{ item_template_form.media_url(id="modal-block-media-url", class="form-control", placeholder="https://example.com/media.jpg or .mp4", data_modal_media_url="1") }}
+                        <div class="form-text">Media library assets are preferred. External URLs remain supported.</div>
+                    </div>
+                </div>
+
+                <div class="row g-3 mt-3">
+                    <div class="col-md-4">
+                        <div class="form-check">
+                            {{ item_template_form.show_title(id="modal-block-show-title", class="form-check-input", data_modal_show_title="1") }}
+                            <label class="form-check-label" for="modal-block-show-title">Show Title</label>
+                        </div>
+                    </div>
+                    <div class="col-md-4" data-modal-menu-fields>
+                        <div class="form-check">
+                            {{ item_template_form.show_prices(id="modal-block-show-prices", class="form-check-input", data_modal_show_prices="1") }}
+                            <label class="form-check-label" for="modal-block-show-prices">Show Prices</label>
+                        </div>
+                    </div>
+                    <div class="col-md-4" data-modal-menu-fields>
+                        <div class="form-check">
+                            {{ item_template_form.show_menu_description(id="modal-block-show-description", class="form-check-input", data_modal_show_menu_description="1") }}
+                            <label class="form-check-label" for="modal-block-show-description">Show Menu Description</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" data-board-block-modal-apply>Apply Block Settings</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script src="{{ url_for('static', filename='js/signage_board_template_form.js') }}"></script>
 {% endblock %}

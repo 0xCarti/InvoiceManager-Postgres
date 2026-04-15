@@ -3,14 +3,44 @@
     var addButton = document.getElementById("add-board-block");
     var template = document.getElementById("board-block-template");
     var canvas = document.querySelector("[data-board-editor-canvas]");
+    var blockList = document.querySelector("[data-board-block-list]");
+    var modalElement = document.getElementById("board-block-settings-modal");
     var gridColumns = canvas ? parseInt(canvas.getAttribute("data-grid-columns") || "24", 10) : 24;
     var gridRows = canvas ? parseInt(canvas.getAttribute("data-grid-rows") || "12", 10) : 12;
+    var modal = null;
     var activeRow = null;
+    var modalRow = null;
     var pointerState = null;
+    var modalFields;
 
-    if (!container || !addButton || !template || !canvas) {
+    if (!container || !addButton || !template || !canvas || !blockList || !modalElement) {
         return;
     }
+
+    if (window.bootstrap && window.bootstrap.Modal) {
+        modal = new window.bootstrap.Modal(modalElement);
+    }
+
+    modalFields = {
+        titleText: modalElement.querySelector("[data-board-block-modal-title]"),
+        subtitleText: modalElement.querySelector("[data-board-block-modal-subtitle]"),
+        errors: modalElement.querySelector("[data-board-block-modal-errors]"),
+        typeField: modalElement.querySelector("[data-modal-block-type]"),
+        titleField: modalElement.querySelector("[data-modal-block-title]"),
+        menuColumnsField: modalElement.querySelector("[data-modal-menu-columns]"),
+        menuRowsField: modalElement.querySelector("[data-modal-menu-rows]"),
+        selectedProductsField: modalElement.querySelector("[data-modal-selected-product-ids]"),
+        bodyField: modalElement.querySelector("[data-modal-block-body]"),
+        mediaAssetField: modalElement.querySelector("[data-modal-media-asset-id]"),
+        mediaUrlField: modalElement.querySelector("[data-modal-media-url]"),
+        showTitleField: modalElement.querySelector("[data-modal-show-title]"),
+        showPricesField: modalElement.querySelector("[data-modal-show-prices]"),
+        showMenuDescriptionField: modalElement.querySelector("[data-modal-show-menu-description]"),
+        menuSections: modalElement.querySelectorAll("[data-modal-menu-fields]"),
+        bodySections: modalElement.querySelectorAll("[data-modal-body-field]"),
+        mediaSections: modalElement.querySelectorAll("[data-modal-media-fields]"),
+        applyButton: modalElement.querySelector("[data-board-block-modal-apply]")
+    };
 
     function getRows() {
         return Array.prototype.slice.call(container.querySelectorAll("[data-board-block]"));
@@ -23,6 +53,15 @@
 
     function clamp(value, min, max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    function escapeHtml(value) {
+        return String(value || "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
     }
 
     function blockTypeLabel(blockType) {
@@ -42,7 +81,7 @@
     }
 
     function getField(row, selector) {
-        return row.querySelector(selector);
+        return row ? row.querySelector(selector) : null;
     }
 
     function getBlockState(row) {
@@ -52,6 +91,12 @@
             bodyField: getField(row, ".board-block-body-input"),
             mediaAssetField: getField(row, ".board-block-media-asset"),
             mediaUrlField: getField(row, ".board-block-media-url"),
+            menuColumnsField: getField(row, ".board-block-menu-columns"),
+            menuRowsField: getField(row, ".board-block-menu-rows"),
+            selectedProductsField: getField(row, ".board-block-selected-products"),
+            showTitleField: getField(row, ".board-block-show-title"),
+            showPricesField: getField(row, ".board-block-show-prices"),
+            showMenuDescriptionField: getField(row, ".board-block-show-menu-description"),
             widthUnitsField: getField(row, ".board-block-width-units"),
             gridXField: getField(row, ".block-grid-x"),
             gridYField: getField(row, ".block-grid-y"),
@@ -98,7 +143,6 @@
             fields.gridHeightField.value = String(clampedHeight);
         }
         syncLegacyWidth(row);
-        updateCoordinateSummary(row);
     }
 
     function defaultPlacement(index, blockType) {
@@ -123,50 +167,87 @@
         return placement;
     }
 
-    function updateCoordinateSummary(row) {
-        var values = getGridValues(row);
-        var summary = row.querySelector("[data-block-coordinates]");
-        if (summary) {
-            summary.textContent = (
-                "Position " + values.x + ", " + values.y +
-                " / Size " + values.width + " x " + values.height
-            );
+    function rowHasErrors(row) {
+        return !!row.querySelector(".text-danger");
+    }
+
+    function getRowErrors(row) {
+        var nodes = row.querySelectorAll(".text-danger");
+        var errors = [];
+        var index;
+        var text;
+        for (index = 0; index < nodes.length; index += 1) {
+            text = (nodes[index].textContent || "").replace(/\s+/g, " ").trim();
+            if (text && errors.indexOf(text) === -1) {
+                errors.push(text);
+            }
+        }
+        return errors;
+    }
+
+    function clearRowErrors(row) {
+        var nodes = row.querySelectorAll(".text-danger");
+        var index;
+        for (index = nodes.length - 1; index >= 0; index -= 1) {
+            if (nodes[index].parentNode) {
+                nodes[index].parentNode.removeChild(nodes[index]);
+            }
+        }
+    }
+
+    function getSelectedValues(selectField) {
+        var values = [];
+        var options;
+        var index;
+        if (!selectField) {
+            return values;
+        }
+        options = selectField.options || [];
+        for (index = 0; index < options.length; index += 1) {
+            if (options[index].selected) {
+                values.push(String(options[index].value));
+            }
+        }
+        return values;
+    }
+
+    function setSelectedValues(selectField, values) {
+        var options;
+        var index;
+        var normalized = [];
+        if (!selectField) {
+            return;
+        }
+        options = selectField.options || [];
+        for (index = 0; index < values.length; index += 1) {
+            normalized.push(String(values[index]));
+        }
+        for (index = 0; index < options.length; index += 1) {
+            options[index].selected = normalized.indexOf(String(options[index].value)) !== -1;
+        }
+    }
+
+    function updateModalVisibility() {
+        var blockType = modalFields.typeField ? modalFields.typeField.value : "menu";
+        var index;
+        for (index = 0; index < modalFields.menuSections.length; index += 1) {
+            modalFields.menuSections[index].style.display = blockType === "menu" ? "" : "none";
+        }
+        for (index = 0; index < modalFields.bodySections.length; index += 1) {
+            modalFields.bodySections[index].style.display = blockType === "text" ? "" : "none";
+        }
+        for (index = 0; index < modalFields.mediaSections.length; index += 1) {
+            modalFields.mediaSections[index].style.display = blockType === "image" || blockType === "video" ? "" : "none";
         }
     }
 
     function updateRowState(row) {
-        var fields = getBlockState(row);
-        var blockType = fields.typeField ? fields.typeField.value : "menu";
-        var menuFields = row.querySelectorAll(".board-block-menu-fields");
-        var bodyFields = row.querySelectorAll(".board-block-body-field");
-        var mediaFields = row.querySelectorAll(".board-block-media-field");
-        var index;
-
-        for (index = 0; index < menuFields.length; index += 1) {
-            menuFields[index].style.display = blockType === "menu" ? "" : "none";
-        }
-        for (index = 0; index < bodyFields.length; index += 1) {
-            bodyFields[index].style.display = blockType === "text" ? "" : "none";
-        }
-        for (index = 0; index < mediaFields.length; index += 1) {
-            mediaFields[index].style.display = blockType === "image" || blockType === "video" ? "" : "none";
-        }
-        updateCoordinateSummary(row);
-    }
-
-    function selectRow(row) {
-        var rows = getRows();
-        var index;
-        activeRow = row || null;
-        for (index = 0; index < rows.length; index += 1) {
-            rows[index].classList.toggle("is-selected", rows[index] === activeRow);
-        }
-        renderPreview();
+        syncLegacyWidth(row);
     }
 
     function blockPreviewTitle(row) {
         var fields = getBlockState(row);
-        var title = fields.titleField ? fields.titleField.value.trim() : "";
+        var title = fields.titleField ? fields.titleField.value.replace(/\s+/g, " ").trim() : "";
         if (title) {
             return title;
         }
@@ -180,17 +261,165 @@
             return "Menu data block";
         }
         if (blockType === "text") {
-            return fields.bodyField && fields.bodyField.value.trim()
-                ? fields.bodyField.value.trim().slice(0, 40)
+            return fields.bodyField && fields.bodyField.value.replace(/\s+/g, " ").trim()
+                ? fields.bodyField.value.replace(/\s+/g, " ").trim().slice(0, 48)
                 : "Text and announcements";
         }
         if (fields.mediaAssetField && fields.mediaAssetField.value && fields.mediaAssetField.value !== "0") {
             return "Uses media library asset";
         }
-        if (fields.mediaUrlField && fields.mediaUrlField.value.trim()) {
+        if (fields.mediaUrlField && fields.mediaUrlField.value.replace(/\s+/g, " ").trim()) {
             return "Uses external media URL";
         }
         return "No media selected yet";
+    }
+
+    function formatCoordinates(row) {
+        var values = getGridValues(row);
+        return "Position " + values.x + ", " + values.y + " / Size " + values.width + " x " + values.height;
+    }
+
+    function renderModalErrors(row) {
+        var errors = row ? getRowErrors(row) : [];
+        var html = "";
+        var index;
+        if (!modalFields.errors) {
+            return;
+        }
+        if (!errors.length) {
+            modalFields.errors.classList.add("d-none");
+            modalFields.errors.innerHTML = "";
+            return;
+        }
+        html = "<ul class=\"mb-0\">";
+        for (index = 0; index < errors.length; index += 1) {
+            html += "<li>" + escapeHtml(errors[index]) + "</li>";
+        }
+        html += "</ul>";
+        modalFields.errors.innerHTML = html;
+        modalFields.errors.classList.remove("d-none");
+    }
+
+    function renderBoardState() {
+        renderPreview();
+        renderBlockList();
+    }
+
+    function selectRow(row) {
+        activeRow = row || null;
+        renderBoardState();
+    }
+
+    function populateModalFromRow(row) {
+        var fields = getBlockState(row);
+        modalFields.typeField.value = fields.typeField ? fields.typeField.value : "menu";
+        modalFields.titleField.value = fields.titleField ? fields.titleField.value : "";
+        modalFields.menuColumnsField.value = fields.menuColumnsField ? fields.menuColumnsField.value : "2";
+        modalFields.menuRowsField.value = fields.menuRowsField ? fields.menuRowsField.value : "4";
+        modalFields.bodyField.value = fields.bodyField ? fields.bodyField.value : "";
+        modalFields.mediaAssetField.value = fields.mediaAssetField ? fields.mediaAssetField.value : "0";
+        modalFields.mediaUrlField.value = fields.mediaUrlField ? fields.mediaUrlField.value : "";
+        modalFields.showTitleField.checked = !!(fields.showTitleField && fields.showTitleField.checked);
+        modalFields.showPricesField.checked = !!(fields.showPricesField && fields.showPricesField.checked);
+        modalFields.showMenuDescriptionField.checked = !!(fields.showMenuDescriptionField && fields.showMenuDescriptionField.checked);
+        setSelectedValues(modalFields.selectedProductsField, getSelectedValues(fields.selectedProductsField));
+        if (modalFields.titleText) {
+            modalFields.titleText.textContent = blockPreviewTitle(row) + " Settings";
+        }
+        if (modalFields.subtitleText) {
+            modalFields.subtitleText.textContent = blockTypeLabel(modalFields.typeField.value) + " - " + formatCoordinates(row);
+        }
+        updateModalVisibility();
+        renderModalErrors(row);
+    }
+
+    function applyModalToRow(row) {
+        var fields = getBlockState(row);
+        if (fields.typeField) {
+            fields.typeField.value = modalFields.typeField.value;
+        }
+        if (fields.titleField) {
+            fields.titleField.value = modalFields.titleField.value;
+        }
+        if (fields.menuColumnsField) {
+            fields.menuColumnsField.value = modalFields.menuColumnsField.value;
+        }
+        if (fields.menuRowsField) {
+            fields.menuRowsField.value = modalFields.menuRowsField.value;
+        }
+        if (fields.bodyField) {
+            fields.bodyField.value = modalFields.bodyField.value;
+        }
+        if (fields.mediaAssetField) {
+            fields.mediaAssetField.value = modalFields.mediaAssetField.value;
+        }
+        if (fields.mediaUrlField) {
+            fields.mediaUrlField.value = modalFields.mediaUrlField.value;
+        }
+        if (fields.showTitleField) {
+            fields.showTitleField.checked = !!modalFields.showTitleField.checked;
+        }
+        if (fields.showPricesField) {
+            fields.showPricesField.checked = !!modalFields.showPricesField.checked;
+        }
+        if (fields.showMenuDescriptionField) {
+            fields.showMenuDescriptionField.checked = !!modalFields.showMenuDescriptionField.checked;
+        }
+        setSelectedValues(fields.selectedProductsField, getSelectedValues(modalFields.selectedProductsField));
+        clearRowErrors(row);
+        updateRowState(row);
+    }
+
+    function openRowModal(row) {
+        if (!modal) {
+            return;
+        }
+        modalRow = row;
+        selectRow(row);
+        populateModalFromRow(row);
+        modal.show();
+    }
+
+    function moveRowUp(row) {
+        var previous = row.previousElementSibling;
+        if (!previous) {
+            return;
+        }
+        container.insertBefore(row, previous);
+        refreshRows();
+        selectRow(row);
+    }
+
+    function moveRowDown(row) {
+        var next = row.nextElementSibling;
+        if (!next) {
+            return;
+        }
+        container.insertBefore(next, row);
+        refreshRows();
+        selectRow(row);
+    }
+
+    function removeRow(row) {
+        var rows = getRows();
+        var index = rows.indexOf(row);
+        var nextActive = null;
+        if (index > 0) {
+            nextActive = rows[index - 1];
+        } else if (rows.length > 1) {
+            nextActive = rows[1];
+        }
+        if (row.parentNode) {
+            row.parentNode.removeChild(row);
+        }
+        refreshRows();
+        if (nextActive && getRows().indexOf(nextActive) !== -1) {
+            selectRow(nextActive);
+        } else if (getRows().length) {
+            selectRow(getRows()[0]);
+        } else {
+            selectRow(null);
+        }
     }
 
     function startPointerInteraction(row, mode, event) {
@@ -232,26 +461,14 @@
         if (pointerState.mode === "move") {
             nextX = pointerState.startValues.x + deltaColumns;
             nextY = pointerState.startValues.y + deltaRows;
-            writeGridValues(
-                pointerState.row,
-                nextX,
-                nextY,
-                pointerState.startValues.width,
-                pointerState.startValues.height
-            );
+            writeGridValues(pointerState.row, nextX, nextY, pointerState.startValues.width, pointerState.startValues.height);
         } else {
             nextWidth = pointerState.startValues.width + deltaColumns;
             nextHeight = pointerState.startValues.height + deltaRows;
-            writeGridValues(
-                pointerState.row,
-                pointerState.startValues.x,
-                pointerState.startValues.y,
-                nextWidth,
-                nextHeight
-            );
+            writeGridValues(pointerState.row, pointerState.startValues.x, pointerState.startValues.y, nextWidth, nextHeight);
         }
 
-        renderPreview();
+        renderBoardState();
     }
 
     function stopPointerInteraction() {
@@ -290,14 +507,10 @@
             block.style.top = (((values.y - 1) / gridRows) * 100) + "%";
             block.style.width = ((values.width / gridColumns) * 100) + "%";
             block.style.height = ((values.height / gridRows) * 100) + "%";
-            block.setAttribute("data-row-index", String(index));
 
             handle = document.createElement("div");
             handle.className = "board-editor-block-handle";
-            handle.innerHTML = (
-                "<span>" + blockTypeLabel(fields.typeField ? fields.typeField.value : "menu") + "</span>" +
-                "<span>" + values.width + " x " + values.height + "</span>"
-            );
+            handle.innerHTML = "<span>" + blockTypeLabel(fields.typeField ? fields.typeField.value : "menu") + "</span><span>" + values.width + " x " + values.height + "</span>";
             handle.addEventListener("pointerdown", function (targetRow) {
                 return function (event) {
                     event.preventDefault();
@@ -307,13 +520,10 @@
 
             body = document.createElement("div");
             body.className = "board-editor-block-body";
-            body.innerHTML = (
-                '<div class="board-editor-block-title">' + blockPreviewTitle(row) + "</div>" +
-                '<div class="board-editor-block-meta">' + blockPreviewMeta(row) + "</div>"
-            );
+            body.innerHTML = '<div class="board-editor-block-title">' + escapeHtml(blockPreviewTitle(row)) + "</div><div class=\"board-editor-block-meta\">" + escapeHtml(blockPreviewMeta(row)) + "</div>";
             body.addEventListener("click", function (targetRow) {
                 return function () {
-                    selectRow(targetRow);
+                    openRowModal(targetRow);
                 };
             }(row));
 
@@ -333,130 +543,149 @@
         }
     }
 
+    function renderBlockList() {
+        var rows = getRows();
+        var index;
+        var row;
+        var item;
+        var values;
+        var title;
+        var actionRow;
+        var moveUpButton;
+        var moveDownButton;
+        var editButton;
+        var removeButton;
+        var fields;
+
+        blockList.innerHTML = "";
+        for (index = 0; index < rows.length; index += 1) {
+            row = rows[index];
+            values = getGridValues(row);
+            title = blockPreviewTitle(row);
+            fields = getBlockState(row);
+
+            item = document.createElement("div");
+            item.className = "board-block-list-item p-3";
+            if (row === activeRow) {
+                item.className += " is-selected";
+            }
+
+            item.innerHTML =
+                '<div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-start gap-3">' +
+                    '<div>' +
+                        '<div class="d-flex flex-wrap align-items-center gap-2 mb-1">' +
+                            '<span class="badge text-bg-dark">Block ' + String(index + 1) + "</span>" +
+                            '<span class="badge text-bg-secondary">' + escapeHtml(blockTypeLabel(fields.typeField ? fields.typeField.value : "menu")) + "</span>" +
+                            (rowHasErrors(row) ? '<span class="badge text-bg-danger">Needs Attention</span>' : "") +
+                        "</div>" +
+                        '<div class="fw-semibold">' + escapeHtml(title) + "</div>" +
+                        '<div class="text-muted small">' + escapeHtml(blockPreviewMeta(row)) + "</div>" +
+                        '<div class="text-muted small mt-1">Grid ' + values.x + ", " + values.y + " / " + values.width + " x " + values.height + "</div>" +
+                    "</div>" +
+                "</div>";
+
+            actionRow = document.createElement("div");
+            actionRow.className = "d-flex flex-wrap gap-2 mt-3";
+
+            editButton = document.createElement("button");
+            editButton.type = "button";
+            editButton.className = "btn btn-outline-primary btn-sm";
+            editButton.textContent = "Edit Settings";
+            editButton.addEventListener("click", function (targetRow) {
+                return function (event) {
+                    event.stopPropagation();
+                    openRowModal(targetRow);
+                };
+            }(row));
+
+            moveUpButton = document.createElement("button");
+            moveUpButton.type = "button";
+            moveUpButton.className = "btn btn-outline-secondary btn-sm";
+            moveUpButton.textContent = "Up";
+            moveUpButton.disabled = index === 0;
+            moveUpButton.addEventListener("click", function (targetRow) {
+                return function (event) {
+                    event.stopPropagation();
+                    moveRowUp(targetRow);
+                };
+            }(row));
+
+            moveDownButton = document.createElement("button");
+            moveDownButton.type = "button";
+            moveDownButton.className = "btn btn-outline-secondary btn-sm";
+            moveDownButton.textContent = "Down";
+            moveDownButton.disabled = index === rows.length - 1;
+            moveDownButton.addEventListener("click", function (targetRow) {
+                return function (event) {
+                    event.stopPropagation();
+                    moveRowDown(targetRow);
+                };
+            }(row));
+
+            removeButton = document.createElement("button");
+            removeButton.type = "button";
+            removeButton.className = "btn btn-outline-danger btn-sm";
+            removeButton.textContent = "Remove";
+            removeButton.addEventListener("click", function (targetRow) {
+                return function (event) {
+                    event.stopPropagation();
+                    removeRow(targetRow);
+                };
+            }(row));
+
+            item.addEventListener("click", function (targetRow) {
+                return function () {
+                    selectRow(targetRow);
+                };
+            }(row));
+
+            actionRow.appendChild(editButton);
+            actionRow.appendChild(moveUpButton);
+            actionRow.appendChild(moveDownButton);
+            actionRow.appendChild(removeButton);
+            item.appendChild(actionRow);
+            blockList.appendChild(item);
+        }
+
+        if (!rows.length) {
+            blockList.innerHTML = '<div class="border rounded-4 p-4 text-muted small">No blocks yet. Add one to start laying out the board.</div>';
+        }
+    }
+
     function reindexAttributes(row, index) {
         var fields;
-        var labels;
-        var rowTitle;
         var regex = /blocks-(?:__prefix__|\d+)-/g;
         var replacement = "blocks-" + String(index) + "-";
         var fieldIndex;
 
-        rowTitle = row.querySelector("[data-block-label]");
-        if (rowTitle) {
-            rowTitle.textContent = "Block " + String(index + 1);
-        }
-
-        fields = row.querySelectorAll("[name], [id]");
+        fields = row.querySelectorAll("[name], [id], label[for]");
         for (fieldIndex = 0; fieldIndex < fields.length; fieldIndex += 1) {
             if (fields[fieldIndex].getAttribute("name")) {
-                fields[fieldIndex].setAttribute(
-                    "name",
-                    fields[fieldIndex].getAttribute("name").replace(regex, replacement)
-                );
+                fields[fieldIndex].setAttribute("name", fields[fieldIndex].getAttribute("name").replace(regex, replacement));
             }
             if (fields[fieldIndex].getAttribute("id")) {
-                fields[fieldIndex].setAttribute(
-                    "id",
-                    fields[fieldIndex].getAttribute("id").replace(regex, replacement)
-                );
+                fields[fieldIndex].setAttribute("id", fields[fieldIndex].getAttribute("id").replace(regex, replacement));
             }
-        }
-
-        labels = row.querySelectorAll("label[for]");
-        for (fieldIndex = 0; fieldIndex < labels.length; fieldIndex += 1) {
-            labels[fieldIndex].setAttribute(
-                "for",
-                labels[fieldIndex].getAttribute("for").replace(regex, replacement)
-            );
+            if (fields[fieldIndex].getAttribute("for")) {
+                fields[fieldIndex].setAttribute("for", fields[fieldIndex].getAttribute("for").replace(regex, replacement));
+            }
         }
     }
 
     function refreshRows() {
         var rows = getRows();
         var index;
-        var moveUp;
-        var moveDown;
 
         for (index = 0; index < rows.length; index += 1) {
             reindexAttributes(rows[index], index);
             updateRowState(rows[index]);
-            moveUp = rows[index].querySelector("[data-move-block-up]");
-            moveDown = rows[index].querySelector("[data-move-block-down]");
-            if (moveUp) {
-                moveUp.disabled = index === 0;
-            }
-            if (moveDown) {
-                moveDown.disabled = index === rows.length - 1;
-            }
         }
 
         if (activeRow && rows.indexOf(activeRow) === -1) {
             activeRow = rows.length ? rows[0] : null;
         }
         container.setAttribute("data-next-index", String(rows.length));
-        renderPreview();
-    }
-
-    function bindLivePreview(row) {
-        row.addEventListener("input", function () {
-            updateRowState(row);
-            renderPreview();
-        });
-        row.addEventListener("change", function () {
-            updateRowState(row);
-            renderPreview();
-        });
-        row.addEventListener("click", function () {
-            selectRow(row);
-        });
-    }
-
-    function bindRow(row) {
-        var blockTypeField = row.querySelector(".board-block-type");
-        var removeButton = row.querySelector("[data-remove-board-block]");
-        var moveUpButton = row.querySelector("[data-move-block-up]");
-        var moveDownButton = row.querySelector("[data-move-block-down]");
-
-        if (blockTypeField) {
-            blockTypeField.addEventListener("change", function () {
-                updateRowState(row);
-                renderPreview();
-            });
-        }
-
-        if (removeButton) {
-            removeButton.addEventListener("click", function () {
-                if (row.parentNode) {
-                    row.parentNode.removeChild(row);
-                }
-                refreshRows();
-            });
-        }
-
-        if (moveUpButton) {
-            moveUpButton.addEventListener("click", function () {
-                var previous = row.previousElementSibling;
-                if (!previous) {
-                    return;
-                }
-                container.insertBefore(row, previous);
-                refreshRows();
-            });
-        }
-
-        if (moveDownButton) {
-            moveDownButton.addEventListener("click", function () {
-                var next = row.nextElementSibling;
-                if (!next) {
-                    return;
-                }
-                container.insertBefore(next, row);
-                refreshRows();
-            });
-        }
-
-        bindLivePreview(row);
-        updateRowState(row);
+        renderBoardState();
     }
 
     function seedNewRowLayout(row, index) {
@@ -478,26 +707,59 @@
             return;
         }
         container.appendChild(newRow);
-        bindRow(newRow);
         seedNewRowLayout(newRow, nextIndex);
-        selectRow(newRow);
         refreshRows();
+        openRowModal(newRow);
+    });
+
+    if (modalFields.typeField) {
+        modalFields.typeField.addEventListener("change", function () {
+            updateModalVisibility();
+            if (modalRow && modalFields.subtitleText) {
+                modalFields.subtitleText.textContent = blockTypeLabel(modalFields.typeField.value) + " - " + formatCoordinates(modalRow);
+            }
+        });
+    }
+
+    if (modalFields.applyButton) {
+        modalFields.applyButton.addEventListener("click", function () {
+            if (!modalRow) {
+                return;
+            }
+            applyModalToRow(modalRow);
+            refreshRows();
+            selectRow(modalRow);
+            if (modal) {
+                modal.hide();
+            }
+        });
+    }
+
+    modalElement.addEventListener("hidden.bs.modal", function () {
+        modalRow = null;
+        renderModalErrors(null);
     });
 
     Array.prototype.forEach.call(getRows(), function (row, index) {
-        bindRow(row);
         if (!getField(row, ".block-grid-x").value) {
             seedNewRowLayout(row, index);
         } else {
             syncLegacyWidth(row);
-            updateCoordinateSummary(row);
         }
     });
 
     if (getRows().length) {
         selectRow(getRows()[0]);
     } else {
-        renderPreview();
+        renderBoardState();
     }
     refreshRows();
+
+    Array.prototype.some.call(getRows(), function (row) {
+        if (rowHasErrors(row)) {
+            openRowModal(row);
+            return true;
+        }
+        return false;
+    });
 }());
