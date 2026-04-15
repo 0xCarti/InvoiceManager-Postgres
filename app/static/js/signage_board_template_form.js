@@ -12,6 +12,8 @@
     var modalRow = null;
     var pointerState = null;
     var modalFields;
+    var fallbackModalBackdrop = null;
+    var fallbackModalBound = false;
 
     if (!container || !addButton || !template || !canvas || !blockList || !modalElement) {
         return;
@@ -42,9 +44,62 @@
         return Array.prototype.slice.call(container.querySelectorAll("[data-board-block]"));
     }
 
+    function createFallbackModal() {
+        if (fallbackModalBound) {
+            return modal;
+        }
+
+        modalElement.style.display = "none";
+
+        modalElement.addEventListener("click", function (event) {
+            if (event.target === modalElement || event.target.closest("[data-bs-dismiss]")) {
+                if (modal) {
+                    modal.hide();
+                }
+            }
+        });
+
+        document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape" && modalElement.classList.contains("show") && modal) {
+                modal.hide();
+            }
+        });
+
+        fallbackModalBound = true;
+        modal = {
+            show: function () {
+                if (!fallbackModalBackdrop) {
+                    fallbackModalBackdrop = document.createElement("div");
+                    fallbackModalBackdrop.className = "modal-backdrop fade show";
+                }
+                document.body.appendChild(fallbackModalBackdrop);
+                document.body.classList.add("modal-open");
+                modalElement.style.display = "block";
+                modalElement.removeAttribute("aria-hidden");
+                modalElement.setAttribute("aria-modal", "true");
+                modalElement.classList.add("show");
+            },
+            hide: function () {
+                modalElement.classList.remove("show");
+                modalElement.style.display = "none";
+                modalElement.setAttribute("aria-hidden", "true");
+                modalElement.removeAttribute("aria-modal");
+                document.body.classList.remove("modal-open");
+                if (fallbackModalBackdrop && fallbackModalBackdrop.parentNode) {
+                    fallbackModalBackdrop.parentNode.removeChild(fallbackModalBackdrop);
+                }
+                modalElement.dispatchEvent(new Event("hidden.bs.modal"));
+            }
+        };
+        return modal;
+    }
+
     function ensureModal() {
         if (!modal && window.bootstrap && window.bootstrap.Modal) {
             modal = new window.bootstrap.Modal(modalElement);
+        }
+        if (!modal) {
+            return createFallbackModal();
         }
         return modal;
     }
