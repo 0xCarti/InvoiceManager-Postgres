@@ -58,6 +58,7 @@ from app.models import (
     PlaylistItem,
     Product,
     ShiftPosition,
+    SignageMediaAsset,
     User,
     UserDepartmentMembership,
     Vendor,
@@ -343,6 +344,33 @@ def load_board_template_choices(include_blank: bool = True):
     ]
     if include_blank:
         return [(0, "Use Display Defaults")] + choices
+    return choices
+
+
+def load_signage_media_asset_choices(
+    include_blank: bool = True,
+    *,
+    media_type: str | None = None,
+):
+    """Return signage media asset options for selection fields."""
+
+    query = SignageMediaAsset.query.order_by(SignageMediaAsset.created_at.desc())
+    if media_type in {SignageMediaAsset.TYPE_IMAGE, SignageMediaAsset.TYPE_VIDEO}:
+        query = query.filter_by(media_type=media_type)
+    assets = query.all()
+    choices = [
+        (
+            asset.id,
+            (
+                f"{asset.display_name} ({asset.media_type})"
+                if asset.name and asset.name != asset.original_filename
+                else asset.display_name
+            ),
+        )
+        for asset in assets
+    ]
+    if include_blank:
+        return [(0, "Use External URL")] + choices
     return choices
 
 
@@ -946,8 +974,19 @@ class BoardTemplateBlockForm(FlaskForm):
         validators=[InputRequired(), NumberRange(min=1, max=12)],
         default=6,
     )
+    grid_x = HiddenField("Grid X", default="1")
+    grid_y = HiddenField("Grid Y", default="1")
+    grid_width = HiddenField("Grid Width", default="12")
+    grid_height = HiddenField("Grid Height", default="10")
     title = StringField("Title", validators=[Optional(), Length(max=120)])
     body = TextAreaField("Text", validators=[Optional()])
+    media_asset_id = SelectField(
+        "Media Library Asset",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
     media_url = StringField("Media URL", validators=[Optional(), Length(max=500)])
     menu_columns = IntegerField(
         "Menu Columns",
@@ -974,6 +1013,35 @@ class BoardTemplateBlockForm(FlaskForm):
         self.selected_product_ids.choices = load_product_choices()
         if self.selected_product_ids.data is None:
             self.selected_product_ids.data = []
+        self.media_asset_id.choices = load_signage_media_asset_choices()
+        if self.media_asset_id.data is None:
+            self.media_asset_id.data = 0
+
+
+class SignageMediaUploadForm(FlaskForm):
+    name = StringField("Asset Name", validators=[Optional(), Length(max=120)])
+    file = FileField(
+        "Media File",
+        validators=[
+            FileRequired(),
+            FileAllowed(
+                {
+                    "jpg",
+                    "jpeg",
+                    "png",
+                    "gif",
+                    "webp",
+                    "svg",
+                    "mp4",
+                    "webm",
+                    "mov",
+                    "m4v",
+                },
+                "Only image or video files are allowed.",
+            ),
+        ],
+    )
+    submit = SubmitField("Upload Asset")
 
 
 class BoardTemplateForm(FlaskForm):
@@ -1057,20 +1125,62 @@ class BoardTemplateForm(FlaskForm):
             self.form_errors.append("Use at most six blocks in one template.")
             return False
 
-        total_width = 0
         for block_form in self.blocks.entries:
             block_type = block_form.block_type.data
-            width_units = int(block_form.width_units.data or 0)
-            total_width += width_units
+            try:
+                grid_x = int(block_form.grid_x.data or 0)
+                grid_y = int(block_form.grid_y.data or 0)
+                grid_width = int(block_form.grid_width.data or 0)
+                grid_height = int(block_form.grid_height.data or 0)
+            except (TypeError, ValueError):
+                self.form_errors.append(
+                    "Each block needs a valid position and size on the board."
+                )
+                return False
+
+            if (
+                grid_x < 1
+                or grid_y < 1
+                or grid_width < 1
+                or grid_height < 1
+                or grid_x + grid_width - 1 > BoardTemplate.GRID_COLUMNS
+                or grid_y + grid_height - 1 > BoardTemplate.GRID_ROWS
+            ):
+                self.form_errors.append(
+                    "Blocks must stay within the board canvas."
+                )
+                return False
+
+            width_units = max(
+                1,
+                min(12, int(round(float(grid_width) / 2.0))),
+            )
+            block_form.width_units.data = width_units
+
+            media_asset_id = int(block_form.media_asset_id.data or 0)
+            asset = None
+            if media_asset_id:
+                asset = db.session.get(SignageMediaAsset, media_asset_id)
+                if asset is None:
+                    block_form.media_asset_id.errors.append(
+                        "Selected media asset is no longer available."
+                    )
+                    return False
 
             if block_type in (
                 BoardTemplateBlock.TYPE_IMAGE,
                 BoardTemplateBlock.TYPE_VIDEO,
-            ) and not (block_form.media_url.data or "").strip():
-                block_form.media_url.errors.append(
-                    "A media URL is required for image and video blocks."
-                )
-                return False
+            ):
+                if not media_asset_id and not (block_form.media_url.data or "").strip():
+                    block_form.media_url.errors.append(
+                        "Choose a media asset or provide an external media URL."
+                    )
+                    return False
+                if asset is not None and asset.media_type != block_type:
+                    block_form.media_asset_id.errors.append(
+                        "The selected asset type does not match this block type."
+                    )
+                    return False
 
             if block_type == BoardTemplateBlock.TYPE_TEXT and not (
                 (block_form.title.data or "").strip()
@@ -1080,12 +1190,6 @@ class BoardTemplateForm(FlaskForm):
                     "Text blocks need a title or body."
                 )
                 return False
-
-        if total_width > 12:
-            self.form_errors.append(
-                "Block widths cannot exceed 12 units across the board."
-            )
-            return False
 
         return True
 

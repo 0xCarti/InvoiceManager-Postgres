@@ -317,12 +317,16 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "signage.view_board_templates": requirement(
         any_of=("signage.view", "signage.manage_displays")
     ),
+    "signage.view_signage_media_assets": requirement(
+        any_of=("signage.view", "signage.manage_displays")
+    ),
     "signage.add_board_template": requirement(any_of=("signage.manage_displays",)),
     "signage.edit_board_template": requirement(any_of=("signage.manage_displays",)),
     "signage.toggle_board_template_archive": requirement(
         any_of=("signage.manage_displays",)
     ),
     "signage.delete_board_template": requirement(any_of=("signage.manage_displays",)),
+    "signage.delete_signage_media": requirement(any_of=("signage.manage_displays",)),
     "customer.view_customers": requirement(any_of=("customers.view",)),
     "customer.create_customer": requirement(any_of=("customers.create",)),
     "customer.edit_customer": requirement(any_of=("customers.edit",)),
@@ -593,6 +597,9 @@ ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] =
             "purchase_invoices.view",
             "invoices.view",
         )
+    ),
+    ("signage.view_signage_media_assets", "POST"): requirement(
+        any_of=("signage.manage_displays",)
     ),
     ("item.bulk_update_items", "GET"): requirement(any_of=("items.bulk_update",)),
     ("item.bulk_update_items", "POST"): requirement(any_of=("items.bulk_update",)),

@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container my-4">
+    {% include "signage/_nav.html" %}
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h1 class="h3 mb-1">Media Library</h1>
+            <p class="text-muted mb-0">Upload reusable image and video assets for menu boards, then assign them to board blocks.</p>
+        </div>
+    </div>
+
+    <form
+        method="post"
+        enctype="multipart/form-data"
+        class="card shadow-sm mb-4"
+        id="signage-media-upload-form"
+    >
+        <div class="card-body">
+            {{ form.hidden_tag() }}
+            <div id="signage-media-upload-error" class="alert alert-danger d-none" role="alert"></div>
+            <div class="row g-3">
+                <div class="col-md-4">
+                    {{ form.name.label(class="form-label") }}
+                    {{ form.name(class="form-control", placeholder="Optional asset name") }}
+                    {% for error in form.name.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-md-8">
+                    {{ form.file.label(class="form-label") }}
+                    <div
+                        id="signage-media-dropzone"
+                        class="border border-2 border-secondary rounded p-4 text-center bg-light"
+                        role="button"
+                        tabindex="0"
+                        aria-describedby="signage-media-help"
+                    >
+                        <p class="mb-2">Drag and drop an image or video here, or browse to select one.</p>
+                        <p class="text-muted mb-3" id="signage-media-help">Supported formats: JPG, PNG, GIF, WEBP, SVG, MP4, WEBM, MOV, and M4V.</p>
+                        <button class="btn btn-outline-secondary" type="button" id="signage-media-browse-btn">Choose File</button>
+                        <div class="mt-2">
+                            <span class="text-muted" id="signage-media-file-name">No file chosen</span>
+                        </div>
+                    </div>
+                    {{ form.file(id="signage-media-file-input", class="form-control mt-3 d-none") }}
+                    {% for error in form.file.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="mt-3">
+                {{ form.submit(class="btn btn-primary") }}
+            </div>
+        </div>
+    </form>
+
+    {% if assets %}
+    <div class="row g-3">
+        {% for entry in assets %}
+        {% set asset = entry.asset %}
+        <div class="col-md-6 col-xl-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-body d-flex flex-column gap-3">
+                    <div class="d-flex justify-content-between align-items-start gap-3">
+                        <div>
+                            <div class="fw-semibold">{{ asset.display_name }}</div>
+                            <div class="text-muted small">{{ asset.original_filename }}</div>
+                        </div>
+                        <span class="badge {% if asset.media_type == 'image' %}text-bg-primary{% else %}text-bg-dark{% endif %}">
+                            {{ asset.media_type|title }}
+                        </span>
+                    </div>
+
+                    <div class="border rounded overflow-hidden bg-light" style="aspect-ratio: 16 / 9;">
+                        {% if asset.media_type == 'image' %}
+                        <img src="{{ entry.public_url }}" alt="" class="w-100 h-100 object-fit-cover">
+                        {% else %}
+                        <video src="{{ entry.public_url }}" class="w-100 h-100 object-fit-cover" muted controls playsinline></video>
+                        {% endif %}
+                    </div>
+
+                    <div class="small text-muted">
+                        <div>Used by {{ asset.blocks|length }} block{{ "" if asset.blocks|length == 1 else "s" }}</div>
+                        <div>{{ (asset.file_size_bytes / 1024)|round(1) }} KB</div>
+                    </div>
+
+                    <div>
+                        <label class="form-label small text-muted mb-1">Player URL</label>
+                        <input type="text" class="form-control form-control-sm" readonly value="{{ request.url_root[:-1] }}{{ entry.public_url }}">
+                    </div>
+
+                    <div class="mt-auto d-flex justify-content-end">
+                        <form method="post" action="{{ url_for('signage.delete_signage_media', asset_id=asset.id) }}">
+                            {{ action_form.hidden_tag() }}
+                            <button
+                                type="submit"
+                                class="btn btn-sm btn-outline-danger"
+                                {% if asset.blocks %}disabled{% endif %}
+                            >
+                                Delete
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="alert alert-info">No media assets have been uploaded yet.</div>
+    {% endif %}
+</div>
+<script src="{{ url_for('static', filename='js/signage_media_upload.js') }}"></script>
+{% endblock %}

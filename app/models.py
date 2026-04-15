@@ -1605,6 +1605,8 @@ class BoardTemplate(db.Model):
     THEME_MIDNIGHT = "midnight"
     THEME_SUNSET = "sunset"
     THEME_CONCOURSE = "concourse"
+    GRID_COLUMNS = 24
+    GRID_ROWS = 12
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False, unique=True)
@@ -1690,6 +1692,11 @@ class BoardTemplateBlock(db.Model):
         db.ForeignKey("signage_board_template.id"),
         nullable=False,
     )
+    media_asset_id = db.Column(
+        db.Integer,
+        db.ForeignKey("signage_media_asset.id"),
+        nullable=True,
+    )
     position = db.Column(
         db.Integer, nullable=False, default=0, server_default="0"
     )
@@ -1705,6 +1712,18 @@ class BoardTemplateBlock(db.Model):
     title = db.Column(db.String(120), nullable=True)
     body = db.Column(db.Text, nullable=True)
     media_url = db.Column(db.Text, nullable=True)
+    grid_x = db.Column(
+        db.Integer, nullable=False, default=1, server_default="1"
+    )
+    grid_y = db.Column(
+        db.Integer, nullable=False, default=1, server_default="1"
+    )
+    grid_width = db.Column(
+        db.Integer, nullable=False, default=12, server_default="12"
+    )
+    grid_height = db.Column(
+        db.Integer, nullable=False, default=10, server_default="10"
+    )
     menu_columns = db.Column(
         db.Integer, nullable=False, default=2, server_default="2"
     )
@@ -1733,6 +1752,7 @@ class BoardTemplateBlock(db.Model):
     )
 
     board_template = relationship("BoardTemplate", back_populates="blocks")
+    media_asset = relationship("SignageMediaAsset", back_populates="blocks")
 
     __table_args__ = (
         db.Index(
@@ -1740,6 +1760,7 @@ class BoardTemplateBlock(db.Model):
             "board_template_id",
             "position",
         ),
+        db.Index("ix_signage_board_template_block_media_asset_id", "media_asset_id"),
     )
 
     @property
@@ -1761,6 +1782,54 @@ class BoardTemplateBlock(db.Model):
             seen.add(product_id)
             values.append(product_id)
         return values
+
+
+class SignageMediaAsset(db.Model):
+    __tablename__ = "signage_media_asset"
+
+    TYPE_IMAGE = "image"
+    TYPE_VIDEO = "video"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=True)
+    original_filename = db.Column(db.String(255), nullable=False)
+    media_type = db.Column(db.String(16), nullable=False)
+    content_type = db.Column(db.String(120), nullable=True)
+    file_size_bytes = db.Column(
+        db.Integer, nullable=False, default=0, server_default="0"
+    )
+    sha256 = db.Column(db.String(64), nullable=False)
+    storage_path = db.Column(db.String(1024), nullable=False)
+    uploaded_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    created_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow, server_default=func.now()
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    uploader = relationship("User", foreign_keys=[uploaded_by])
+    blocks = relationship("BoardTemplateBlock", back_populates="media_asset")
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "media_type IN ('image', 'video')",
+            name="ck_signage_media_asset_media_type",
+        ),
+        db.Index("ix_signage_media_asset_media_type", "media_type"),
+        db.Index("ix_signage_media_asset_uploaded_by", "uploaded_by"),
+        db.Index("ix_signage_media_asset_sha256", "sha256"),
+    )
+
+    @property
+    def display_name(self) -> str:
+        if self.name:
+            return self.name
+        return self.original_filename
 
 
 def _generate_display_browser_code() -> str:

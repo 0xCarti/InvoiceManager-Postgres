@@ -142,11 +142,27 @@
     function buildLayoutSummary(layout) {
         var blockCount = isArray(layout && layout.blocks) ? layout.blocks.length : 0;
         if (layout && layout.uses_blocks && blockCount) {
-            return String(blockCount) + " blocks / 12-unit board";
+            return (
+                String(blockCount) +
+                " blocks / " +
+                String(layout.grid_columns || 24) +
+                " x " +
+                String(layout.grid_rows || 12) +
+                " grid"
+            );
         }
         return (
             "Columns " + String(layout && layout.board_columns || 3) +
             " / Rows " + String(layout && layout.board_rows || 4)
+        );
+    }
+
+    function blockPositionStyle(block) {
+        return (
+            '--block-x:' + String(Math.max(Number(block.grid_x || 1), 1)) + ";" +
+            '--block-y:' + String(Math.max(Number(block.grid_y || 1), 1)) + ";" +
+            '--block-width:' + String(Math.max(Number(block.grid_width || 12), 1)) + ";" +
+            '--block-height:' + String(Math.max(Number(block.grid_height || 4), 1)) + ";"
         );
     }
 
@@ -255,8 +271,8 @@
         var product;
 
         html += (
-            '<section class="board-block" data-block-type="menu" style="--block-span:' +
-            String(Math.max(Number(block.width_units || 6), 1)) +
+            '<section class="board-block" data-block-type="menu" style="' +
+            blockPositionStyle(block) +
             ';">'
         );
         if (block.show_title && title) {
@@ -300,8 +316,8 @@
         var title = block.title || "";
 
         html += (
-            '<section class="board-block" data-block-type="text" style="--block-span:' +
-            String(Math.max(Number(block.width_units || 6), 1)) +
+            '<section class="board-block" data-block-type="text" style="' +
+            blockPositionStyle(block) +
             ';">'
         );
         if (block.show_title && title) {
@@ -318,8 +334,8 @@
         var title = block.title || "";
 
         html += (
-            '<section class="board-block" data-block-type="image" style="--block-span:' +
-            String(Math.max(Number(block.width_units || 6), 1)) +
+            '<section class="board-block" data-block-type="image" style="' +
+            blockPositionStyle(block) +
             ';">'
         );
         if (block.show_title && title) {
@@ -344,8 +360,8 @@
         var title = block.title || "";
 
         html += (
-            '<section class="board-block" data-block-type="video" style="--block-span:' +
-            String(Math.max(Number(block.width_units || 6), 1)) +
+            '<section class="board-block" data-block-type="video" style="' +
+            blockPositionStyle(block) +
             ';">'
         );
         if (block.show_title && title) {

@@ -18,6 +18,7 @@ from app.models import (
     PlaylistItem,
     Product,
 )
+from app.services.signage_media import signage_media_public_url
 
 DISPLAY_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
@@ -70,7 +71,9 @@ def _display_query_options():
         .selectinload(Playlist.items)
         .selectinload(PlaylistItem.menu)
         .selectinload(Menu.products),
-        selectinload(Display.board_template).selectinload(BoardTemplate.blocks),
+        selectinload(Display.board_template)
+        .selectinload(BoardTemplate.blocks)
+        .selectinload(BoardTemplateBlock.media_asset),
     )
 
 
@@ -174,6 +177,8 @@ def resolve_display_layout(display: Display) -> dict[str, Any]:
             "name": template.name if template is not None else "",
             "theme": template.theme if template is not None else BoardTemplate.THEME_AURORA,
         },
+        "grid_columns": BoardTemplate.GRID_COLUMNS,
+        "grid_rows": BoardTemplate.GRID_ROWS,
         "canvas_width": _positive_int(
             template.canvas_width if template is not None else 1920, 1920
         ),
@@ -240,7 +245,12 @@ def resolve_display_layout(display: Display) -> dict[str, Any]:
                     "width_units": _positive_int(block.width_units, 6),
                     "title": (block.title or "").strip(),
                     "body": (block.body or "").strip(),
-                    "media_url": (block.media_url or "").strip(),
+                    "media_asset_id": block.media_asset_id,
+                    "media_url": _resolve_block_media_url(block),
+                    "grid_x": _positive_int(block.grid_x, 1),
+                    "grid_y": _positive_int(block.grid_y, 1),
+                    "grid_width": _positive_int(block.grid_width, 12),
+                    "grid_height": _positive_int(block.grid_height, 10),
                     "menu_columns": _positive_int(block.menu_columns, 2),
                     "menu_rows": _positive_int(block.menu_rows, 4),
                     "show_title": bool(block.show_title),
@@ -337,6 +347,12 @@ def _resolve_products_for_selection(
 
 def _resolve_display_products(display: Display, menu: Menu | None) -> list[Product]:
     return _resolve_products_for_selection(menu, display.selected_product_id_list)
+
+
+def _resolve_block_media_url(block: BoardTemplateBlock) -> str:
+    if block.media_asset is not None:
+        return signage_media_public_url(block.media_asset)
+    return (block.media_url or "").strip()
 
 
 def _paginate_products(
@@ -441,7 +457,12 @@ def _build_template_block_slides(
             "width_units": max(int(block.width_units or 0), 1),
             "title": (block.title or "").strip(),
             "body": (block.body or "").strip(),
-            "media_url": (block.media_url or "").strip(),
+            "media_asset_id": block.media_asset_id,
+            "media_url": _resolve_block_media_url(block),
+            "grid_x": max(int(block.grid_x or 0), 1),
+            "grid_y": max(int(block.grid_y or 0), 1),
+            "grid_width": max(int(block.grid_width or 0), 1),
+            "grid_height": max(int(block.grid_height or 0), 1),
             "show_title": bool(block.show_title),
             "show_prices": bool(block.show_prices),
             "show_menu_description": bool(block.show_menu_description),

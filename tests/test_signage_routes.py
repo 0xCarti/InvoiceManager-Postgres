@@ -1,4 +1,6 @@
+import io
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from werkzeug.security import generate_password_hash
 
@@ -12,6 +14,7 @@ from app.models import (
     Playlist,
     PlaylistItem,
     Product,
+    SignageMediaAsset,
     User,
 )
 from tests.permission_helpers import grant_signage_permissions
@@ -27,6 +30,25 @@ def _create_menu(name: str, product_names: list[str]) -> Menu:
     db.session.add(menu)
     db.session.flush()
     return menu
+
+
+def _create_signage_media_asset(app, *, filename: str, content: bytes, media_type: str) -> SignageMediaAsset:
+    upload_dir = Path(app.config["UPLOAD_FOLDER"]) / "signage_media"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    storage_path = upload_dir / filename
+    storage_path.write_bytes(content)
+    asset = SignageMediaAsset(
+        name=filename,
+        original_filename=filename,
+        media_type=media_type,
+        content_type="image/png" if media_type == SignageMediaAsset.TYPE_IMAGE else "video/mp4",
+        file_size_bytes=len(content),
+        sha256="test-" + filename,
+        storage_path=str(storage_path),
+    )
+    db.session.add(asset)
+    db.session.flush()
+    return asset
 
 
 def test_display_manifest_inherits_location_playlist_and_menu(client, app):
@@ -225,6 +247,13 @@ def test_board_template_blocks_render_menu_text_image_and_video(client, app):
             "Board Blocks",
             ["Burger", "Fries", "Nachos", "Pretzel"],
         )
+        image_asset = _create_signage_media_asset(
+            app,
+            filename="promo.png",
+            content=b"png-data",
+            media_type=SignageMediaAsset.TYPE_IMAGE,
+        )
+        image_asset_id = image_asset.id
         template = BoardTemplate(
             name="Block Layout",
             theme=BoardTemplate.THEME_AURORA,
@@ -237,6 +266,10 @@ def test_board_template_blocks_render_menu_text_image_and_video(client, app):
                 position=0,
                 block_type=BoardTemplateBlock.TYPE_MENU,
                 width_units=6,
+                grid_x=1,
+                grid_y=1,
+                grid_width=12,
+                grid_height=12,
                 title="Featured Snacks",
                 menu_columns=1,
                 menu_rows=2,
@@ -248,6 +281,10 @@ def test_board_template_blocks_render_menu_text_image_and_video(client, app):
                 position=1,
                 block_type=BoardTemplateBlock.TYPE_TEXT,
                 width_units=2,
+                grid_x=13,
+                grid_y=1,
+                grid_width=4,
+                grid_height=5,
                 title="Specials",
                 body="Add a drink for $2.00",
                 show_title=True,
@@ -256,14 +293,22 @@ def test_board_template_blocks_render_menu_text_image_and_video(client, app):
                 position=2,
                 block_type=BoardTemplateBlock.TYPE_IMAGE,
                 width_units=2,
+                grid_x=17,
+                grid_y=1,
+                grid_width=8,
+                grid_height=5,
                 title="Combo Poster",
-                media_url="https://example.com/promo.jpg",
+                media_asset=image_asset,
                 show_title=True,
             ),
             BoardTemplateBlock(
                 position=3,
                 block_type=BoardTemplateBlock.TYPE_VIDEO,
                 width_units=2,
+                grid_x=13,
+                grid_y=6,
+                grid_width=12,
+                grid_height=7,
                 title="Ad Loop",
                 media_url="https://example.com/promo.mp4",
                 show_title=True,
@@ -291,6 +336,8 @@ def test_board_template_blocks_render_menu_text_image_and_video(client, app):
         BoardTemplateBlock.TYPE_IMAGE,
         BoardTemplateBlock.TYPE_VIDEO,
     ]
+    assert payload["layout"]["blocks"][0]["grid_x"] == 1
+    assert payload["layout"]["blocks"][0]["grid_width"] == 12
     assert len(payload["slides"]) == 2
     assert payload["slides"][0]["type"] == "board"
     assert payload["slides"][0]["summary_title"] == "Board Blocks"
@@ -305,7 +352,9 @@ def test_board_template_blocks_render_menu_text_image_and_video(client, app):
         "Pretzel",
     ]
     assert payload["slides"][0]["blocks"][1]["body"] == "Add a drink for $2.00"
-    assert payload["slides"][0]["blocks"][2]["media_url"] == "https://example.com/promo.jpg"
+    assert payload["slides"][0]["blocks"][2]["media_url"].endswith(
+        f"/signage/media/{image_asset_id}/file/promo.png"
+    )
     assert payload["slides"][0]["blocks"][3]["media_url"] == "https://example.com/promo.mp4"
 
     player_response = client.get("/s/BLK234")
@@ -313,7 +362,10 @@ def test_board_template_blocks_render_menu_text_image_and_video(client, app):
     assert player_response.status_code == 200
     assert b"Featured Snacks" in player_response.data
     assert b"Add a drink for $2.00" in player_response.data
-    assert b"https://example.com/promo.jpg" in player_response.data
+    assert (
+        f"/signage/media/{image_asset_id}/file/promo.png".encode("utf-8")
+        in player_response.data
+    )
     assert b"https://example.com/promo.mp4" in player_response.data
 
 
@@ -527,8 +579,13 @@ def test_signage_user_can_create_board_template(client, app):
                 "show_page_indicator": "y",
                 "blocks-0-block_type": BoardTemplateBlock.TYPE_MENU,
                 "blocks-0-width_units": "8",
+                "blocks-0-grid_x": "1",
+                "blocks-0-grid_y": "1",
+                "blocks-0-grid_width": "16",
+                "blocks-0-grid_height": "10",
                 "blocks-0-title": "Entrees",
                 "blocks-0-body": "",
+                "blocks-0-media_asset_id": "0",
                 "blocks-0-media_url": "",
                 "blocks-0-menu_columns": "2",
                 "blocks-0-menu_rows": "4",
@@ -537,8 +594,13 @@ def test_signage_user_can_create_board_template(client, app):
                 "blocks-0-show_menu_description": "",
                 "blocks-1-block_type": BoardTemplateBlock.TYPE_TEXT,
                 "blocks-1-width_units": "4",
+                "blocks-1-grid_x": "17",
+                "blocks-1-grid_y": "1",
+                "blocks-1-grid_width": "8",
+                "blocks-1-grid_height": "10",
                 "blocks-1-title": "Announcements",
                 "blocks-1-body": "Two-for-one special after 7 PM",
+                "blocks-1-media_asset_id": "0",
                 "blocks-1-media_url": "",
                 "blocks-1-menu_columns": "2",
                 "blocks-1-menu_rows": "4",
@@ -559,7 +621,85 @@ def test_signage_user_can_create_board_template(client, app):
             BoardTemplateBlock.TYPE_MENU,
             BoardTemplateBlock.TYPE_TEXT,
         ]
+        assert template.blocks[0].grid_x == 1
+        assert template.blocks[0].grid_width == 16
         assert template.blocks[1].body == "Two-for-one special after 7 PM"
+
+
+def test_signage_user_can_upload_media_asset(client, app):
+    with app.app_context():
+        user = User(
+            email="signage-media@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add(user)
+        db.session.commit()
+        grant_signage_permissions(user)
+
+    with client:
+        login(client, "signage-media@example.com", "pass")
+        response = client.post(
+            "/signage/media",
+            data={
+                "name": "Combo Poster",
+                "file": (io.BytesIO(b"png-data"), "poster.png"),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    with app.app_context():
+        asset = SignageMediaAsset.query.filter_by(original_filename="poster.png").first()
+        assert asset is not None
+        assert asset.media_type == SignageMediaAsset.TYPE_IMAGE
+        assert Path(asset.storage_path).exists()
+
+
+def test_signage_media_delete_blocked_when_template_uses_asset(client, app):
+    with app.app_context():
+        asset = _create_signage_media_asset(
+            app,
+            filename="locked.png",
+            content=b"png-data",
+            media_type=SignageMediaAsset.TYPE_IMAGE,
+        )
+        template = BoardTemplate(name="Locked Asset Board")
+        template.blocks = [
+            BoardTemplateBlock(
+                position=0,
+                block_type=BoardTemplateBlock.TYPE_IMAGE,
+                title="Poster",
+                media_asset=asset,
+                grid_x=1,
+                grid_y=1,
+                grid_width=8,
+                grid_height=8,
+            )
+        ]
+        user = User(
+            email="signage-media-delete@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add_all([template, user])
+        db.session.commit()
+        grant_signage_permissions(user)
+        asset_id = asset.id
+
+    with client:
+        login(client, "signage-media-delete@example.com", "pass")
+        response = client.post(
+            f"/signage/media/{asset_id}/delete",
+            data={},
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"still used by a board template" in response.data
+    with app.app_context():
+        assert db.session.get(SignageMediaAsset, asset_id) is not None
 
 
 def test_menu_delete_blocked_when_used_by_playlist(client, app):

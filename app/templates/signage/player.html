@@ -317,13 +317,15 @@
             min-height: 100%;
             padding: 1rem 1.15rem 1.15rem;
             display: grid;
-            grid-template-columns: repeat(12, minmax(0, 1fr));
+            grid-template-columns: repeat(24, minmax(0, 1fr));
+            grid-template-rows: repeat(12, minmax(0, 1fr));
             gap: 0.85rem;
             overflow: hidden;
         }
 
         .board-block {
-            grid-column: span var(--block-span, 6);
+            grid-column: var(--block-x, 1) / span var(--block-width, 6);
+            grid-row: var(--block-y, 1) / span var(--block-height, 4);
             min-width: 0;
             min-height: 0;
             overflow: hidden;
@@ -461,7 +463,7 @@
                 <section
                     class="board-block"
                     data-block-type="{{ block.type }}"
-                    style="--block-span: {{ block.width_units or 6 }};"
+                    style="--block-x: {{ block.grid_x or 1 }}; --block-y: {{ block.grid_y or 1 }}; --block-width: {{ block.grid_width or 12 }}; --block-height: {{ block.grid_height or 4 }};"
                 >
                     {% if block.show_title and block_title %}
                     <div class="player-kicker">{{ block.type|title }} Block</div>
@@ -582,7 +584,7 @@
                     <div class="player-kicker">Board Canvas {{ initial_layout.canvas_width or 1920 }} x {{ initial_layout.canvas_height or 1080 }}</div>
                     <div class="player-meta" id="layout-summary">
                         {% if initial_layout.uses_blocks %}
-                            {{ initial_layout.blocks|length }} blocks / 12-unit board
+                            {{ initial_layout.blocks|length }} blocks / {{ initial_layout.grid_columns or 24 }} x {{ initial_layout.grid_rows or 12 }} grid
                         {% else %}
                             Columns {{ initial_layout.board_columns or 3 }} / Rows {{ initial_layout.board_rows or 4 }}
                         {% endif %}

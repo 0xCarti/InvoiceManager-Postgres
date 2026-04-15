@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime
 
 from flask import (
@@ -10,9 +11,10 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_from_directory,
     url_for,
 )
-from flask_login import login_required
+from flask_login import current_user, login_required
 from sqlalchemy.orm import selectinload
 
 from app import db
@@ -23,6 +25,7 @@ from app.forms import (
     DisplayForm,
     PlaylistForm,
     PlaylistItemForm,
+    SignageMediaUploadForm,
 )
 from app.models import (
     BoardTemplate,
@@ -32,6 +35,12 @@ from app.models import (
     Menu,
     Playlist,
     PlaylistItem,
+    SignageMediaAsset,
+)
+from app.services.signage_media import (
+    delete_signage_media_asset,
+    persist_signage_media_upload,
+    signage_media_public_url,
 )
 from app.services.signage import (
     build_display_manifest,
@@ -82,6 +91,10 @@ def _ensure_board_template_block_rows(form: BoardTemplateForm) -> None:
         {
             "block_type": BoardTemplateBlock.TYPE_MENU,
             "width_units": 8,
+            "grid_x": "1",
+            "grid_y": "1",
+            "grid_width": "16",
+            "grid_height": "10",
             "title": "Menu",
             "menu_columns": 2,
             "menu_rows": 4,
@@ -94,6 +107,10 @@ def _ensure_board_template_block_rows(form: BoardTemplateForm) -> None:
         {
             "block_type": BoardTemplateBlock.TYPE_TEXT,
             "width_units": 4,
+            "grid_x": "17",
+            "grid_y": "1",
+            "grid_width": "8",
+            "grid_height": "10",
             "title": "Promotions",
             "body": "Add combo callouts, announcements, or custom copy here.",
             "show_title": True,
@@ -113,8 +130,13 @@ def _populate_board_template_form(
             {
                 "block_type": block.block_type,
                 "width_units": block.width_units,
+                "grid_x": block.grid_x,
+                "grid_y": block.grid_y,
+                "grid_width": block.grid_width,
+                "grid_height": block.grid_height,
                 "title": block.title or "",
                 "body": block.body or "",
+                "media_asset_id": block.media_asset_id or 0,
                 "media_url": block.media_url or "",
                 "menu_columns": block.menu_columns,
                 "menu_rows": block.menu_rows,
@@ -194,9 +216,14 @@ def _build_board_template_blocks(
             position=index,
             block_type=block_form.block_type.data,
             width_units=block_form.width_units.data,
+            media_asset_id=int(block_form.media_asset_id.data or 0) or None,
             title=block_form.title.data,
             body=block_form.body.data,
             media_url=block_form.media_url.data,
+            grid_x=int(block_form.grid_x.data or 1),
+            grid_y=int(block_form.grid_y.data or 1),
+            grid_width=int(block_form.grid_width.data or 12),
+            grid_height=int(block_form.grid_height.data or 10),
             menu_columns=block_form.menu_columns.data,
             menu_rows=block_form.menu_rows.data,
             show_title=block_form.show_title.data,
@@ -234,6 +261,13 @@ def _render_player(display: Display):
 def _serialize_selected_product_ids(product_ids: list[int] | None) -> str | None:
     values = [str(int(product_id)) for product_id in (product_ids or []) if int(product_id) > 0]
     return ",".join(values) if values else None
+
+
+def _board_editor_context():
+    return {
+        "grid_columns": BoardTemplate.GRID_COLUMNS,
+        "grid_rows": BoardTemplate.GRID_ROWS,
+    }
 
 
 @signage.route("/signage/displays")
@@ -538,6 +572,83 @@ def view_board_templates():
     )
 
 
+@signage.route("/signage/media", methods=["GET", "POST"])
+@login_required
+def view_signage_media_assets():
+    form = SignageMediaUploadForm()
+    if form.validate_on_submit():
+        try:
+            asset = persist_signage_media_upload(
+                form.file.data,
+                asset_name=form.name.data,
+                uploaded_by_id=getattr(current_user, "id", None),
+            )
+        except ValueError as exc:
+            flash(str(exc), "danger")
+        else:
+            log_activity(f"Uploaded signage media asset {asset.display_name}")
+            flash("Media asset uploaded successfully.", "success")
+            return redirect(url_for("signage.view_signage_media_assets"))
+
+    assets = (
+        SignageMediaAsset.query.options(selectinload(SignageMediaAsset.blocks))
+        .order_by(SignageMediaAsset.created_at.desc(), SignageMediaAsset.id.desc())
+        .all()
+    )
+    asset_rows = [
+        {
+            "asset": asset,
+            "public_url": signage_media_public_url(asset),
+        }
+        for asset in assets
+    ]
+    action_form = CSRFOnlyForm()
+    return render_template(
+        "signage/view_media_assets.html",
+        form=form,
+        assets=asset_rows,
+        action_form=action_form,
+    )
+
+
+@signage.route("/signage/media/<int:asset_id>/delete", methods=["POST"])
+@login_required
+def delete_signage_media(asset_id: int):
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Unable to validate delete request.", "danger")
+        return redirect(url_for("signage.view_signage_media_assets"))
+    asset = (
+        SignageMediaAsset.query.options(selectinload(SignageMediaAsset.blocks))
+        .filter_by(id=asset_id)
+        .first()
+    )
+    if asset is None:
+        abort(404)
+    if asset.blocks:
+        flash("Media asset is still used by a board template and cannot be deleted.", "danger")
+        return redirect(url_for("signage.view_signage_media_assets"))
+    asset_name = asset.display_name
+    delete_signage_media_asset(asset)
+    log_activity(f"Deleted signage media asset {asset_name}")
+    flash("Media asset deleted successfully.", "success")
+    return redirect(url_for("signage.view_signage_media_assets"))
+
+
+@signage.route("/signage/media/<int:asset_id>/file/<path:filename>")
+def signage_media_file(asset_id: int, filename: str):
+    asset = db.session.get(SignageMediaAsset, asset_id)
+    if asset is None or not asset.storage_path or not os.path.exists(asset.storage_path):
+        abort(404)
+    return send_from_directory(
+        os.path.dirname(asset.storage_path),
+        os.path.basename(asset.storage_path),
+        mimetype=asset.content_type or None,
+        max_age=3600,
+        download_name=asset.original_filename,
+    )
+
+
 @signage.route("/signage/board-templates/add", methods=["GET", "POST"])
 @login_required
 def add_board_template():
@@ -576,6 +687,7 @@ def add_board_template():
         form=form,
         board_template=None,
         item_template_form=BoardTemplateBlockForm(prefix="blocks-__prefix__"),
+        **_board_editor_context(),
     )
 
 
@@ -625,6 +737,7 @@ def edit_board_template(template_id: int):
         form=form,
         board_template=board_template,
         item_template_form=BoardTemplateBlockForm(prefix="blocks-__prefix__"),
+        **_board_editor_context(),
     )
 
 
