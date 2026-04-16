@@ -46,7 +46,7 @@
         <div class="page-header-stack mb-2">
             <div>
                 <h4 class="mb-0">Items</h4>
-                <p class="mb-0 small text-muted">Name search keeps you in item entry. Barcode scans jump to Qty, then back to the next scan row. Vendor SKU is optional on the PO and required when receiving.</p>
+                <p class="mb-0 small text-muted">New purchase orders start as Requested. Name search keeps you in item entry. Barcode scans jump to Qty, then back to the next scan row. Vendor SKU is optional on the PO and required when receiving.</p>
             </div>
             <div class="mobile-inline-actions">
                 <button type="button" class="btn btn-secondary purchase-order-quick-add" data-role="purchase-order-add-item">Add Item</button>
@@ -68,7 +68,6 @@
                 <input id="items-{{ loop.index0 }}-item-label" type="text" name="items-{{ loop.index0 }}-item-label" class="form-control item-search" placeholder="Search for an item" autocomplete="off" value="{{ input_value }}">
                 {{ item.item(class="item-id-field") }}
                 {{ item.cost(class="item-cost-field") }}
-                {{ item.vendor_sku(class="vendor-sku-field") }}
                 {{ item.vendor_description(class="vendor-description-field") }}
                 {{ item.pack_size(class="vendor-pack-size-field") }}
                 <input type="hidden" name="items-{{ loop.index0 }}-position" class="item-position" value="{{ item.position.data or loop.index0 }}">

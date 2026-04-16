@@ -181,6 +181,9 @@ def test_purchase_and_receive(client, app):
             ).count()
             == 1
         )
+        po = db.session.get(PurchaseOrder, po_id)
+        assert po is not None
+        assert po.status == PurchaseOrder.STATUS_RECEIVED
 
 
 def test_receive_form_includes_department_defaults(client, app):
@@ -218,6 +221,61 @@ def test_receive_form_includes_department_defaults(client, app):
         assert resp.status_code == 200
         page = resp.get_data(as_text=True)
         assert f'"Kitchen": {default_location_id}' in page
+
+
+def test_purchase_order_can_be_marked_ordered_and_filtered(client, app):
+    email, vendor_id, item_id, _, unit_id = setup_purchase(app)
+
+    with client:
+        login(client, email, "pass")
+        client.post(
+            "/purchase_orders/create",
+            data={
+                "vendor": vendor_id,
+                "order_date": "2024-04-01",
+                "expected_date": "2024-04-02",
+                "items-0-item": item_id,
+                "items-0-unit": unit_id,
+                "items-0-quantity": 2,
+            },
+            follow_redirects=True,
+        )
+
+    with app.app_context():
+        po = PurchaseOrder.query.first()
+        assert po is not None
+        assert po.status == PurchaseOrder.STATUS_REQUESTED
+        po_id = po.id
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            f"/purchase_orders/{po_id}/mark_ordered",
+            data={"next": "/purchase_orders"},
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+        assert b"Purchase order marked as ordered." in resp.data
+
+        ordered_resp = client.get(
+            "/purchase_orders", query_string={"status": "ordered"}
+        )
+        assert ordered_resp.status_code == 200
+        ordered_page = ordered_resp.get_data(as_text=True)
+        assert f'data-id="{po_id}"' in ordered_page
+
+        requested_resp = client.get(
+            "/purchase_orders", query_string={"status": "requested"}
+        )
+        assert requested_resp.status_code == 200
+        requested_page = requested_resp.get_data(as_text=True)
+        assert f'data-id="{po_id}"' not in requested_page
+
+    with app.app_context():
+        po = db.session.get(PurchaseOrder, po_id)
+        assert po is not None
+        assert po.status == PurchaseOrder.STATUS_ORDERED
+        assert po.received is False
 
 
 def test_purchase_order_item_filter(client, app):
@@ -853,7 +911,9 @@ def test_invoice_moves_and_reverse(client, app):
     with app.app_context():
         inv = PurchaseInvoice.query.first()
         assert round(inv.total, 2) == 10.10
-        assert db.session.get(PurchaseOrder, po_id).received
+        po = db.session.get(PurchaseOrder, po_id)
+        assert po.received
+        assert po.status == PurchaseOrder.STATUS_RECEIVED
         inv_id = inv.id
 
     with client:
@@ -874,7 +934,9 @@ def test_invoice_moves_and_reverse(client, app):
 
     with app.app_context():
         assert PurchaseInvoice.query.get(inv_id) is None
-        assert not db.session.get(PurchaseOrder, po_id).received
+        po = db.session.get(PurchaseOrder, po_id)
+        assert not po.received
+        assert po.status == PurchaseOrder.STATUS_ORDERED
         item = db.session.get(Item, item_id)
         assert item.quantity == 0
         assert item.cost == 0
@@ -2055,6 +2117,7 @@ def test_edit_purchase_order_rejects_invalid_rows_without_destroying_items(
     with app.app_context():
         po = PurchaseOrder.query.first()
         assert po is not None
+        assert po.status == PurchaseOrder.STATUS_REQUESTED
         po_id = po.id
         original_items = [
             (line.item_id, line.unit_id, float(line.quantity)) for line in po.items
@@ -2245,6 +2308,7 @@ def test_receive_invoice_requires_vendor_sku(client, app):
         po = db.session.get(PurchaseOrder, po_id)
         assert po is not None
         assert po.received is False
+        assert po.status == PurchaseOrder.STATUS_REQUESTED
 
 
 def test_view_purchase_orders_rejects_invalid_date_filters(client, app):

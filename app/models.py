@@ -2104,6 +2104,10 @@ class ProductRecipeItem(db.Model):
 
 
 class PurchaseOrder(db.Model):
+    STATUS_REQUESTED = "requested"
+    STATUS_ORDERED = "ordered"
+    STATUS_RECEIVED = "received"
+
     id = db.Column(db.Integer, primary_key=True)
     vendor_id = db.Column(
         db.Integer, db.ForeignKey("vendor.id"), nullable=False
@@ -2115,6 +2119,12 @@ class PurchaseOrder(db.Model):
     expected_date = db.Column(db.Date, nullable=False)
     expected_total_cost = db.Column(db.Float, nullable=True)
     delivery_charge = db.Column(db.Float, nullable=False, default=0.0)
+    status = db.Column(
+        db.String(20),
+        nullable=False,
+        default=STATUS_REQUESTED,
+        server_default=STATUS_REQUESTED,
+    )
     received = db.Column(db.Boolean, default=False, nullable=False)
     items = relationship(
         "PurchaseOrderItem",
@@ -2123,6 +2133,38 @@ class PurchaseOrder(db.Model):
         order_by="PurchaseOrderItem.position",
     )
     vendor = relationship("Vendor", backref="purchase_orders")
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "status IN ('requested', 'ordered', 'received')",
+            name="ck_purchase_order_status",
+        ),
+        db.Index("ix_purchase_order_status", "status"),
+    )
+
+    @property
+    def purchase_status(self) -> str:
+        if self.received or self.status == self.STATUS_RECEIVED:
+            return self.STATUS_RECEIVED
+        if self.status == self.STATUS_ORDERED:
+            return self.STATUS_ORDERED
+        return self.STATUS_REQUESTED
+
+    @property
+    def purchase_status_label(self) -> str:
+        return self.purchase_status.title()
+
+    @property
+    def purchase_status_badge_class(self) -> str:
+        return {
+            self.STATUS_REQUESTED: "text-bg-secondary",
+            self.STATUS_ORDERED: "text-bg-primary",
+            self.STATUS_RECEIVED: "text-bg-success",
+        }.get(self.purchase_status, "text-bg-secondary")
+
+    @property
+    def can_mark_ordered(self) -> bool:
+        return not self.received and self.purchase_status == self.STATUS_REQUESTED
 
 
 class PurchaseOrderItem(db.Model):

@@ -76,6 +76,7 @@ def merge_purchase_orders(
         position_map, aggregated_items = _aggregate_items(target_order, source_orders)
 
         target_order.delivery_charge = _combined_delivery(target_order, source_orders)
+        target_order.status = _merged_status(target_order, source_orders)
 
         for item in list(target_order.items):
             db.session.delete(item)
@@ -127,13 +128,19 @@ def _aggregate_items(
     order_priority.update({order.id: index for index, order in enumerate(source_orders)})
 
     grouped: Dict[
-        Tuple[int | None, int | None, int | None, float | None],
+        Tuple[int | None, int | None, int | None, float | None, str | None],
         Dict[str, object],
     ] = {}
 
     for order in all_orders:
         for item in order.items:
-            key = (item.item_id, item.unit_id, item.product_id, item.unit_cost)
+            key = (
+                item.item_id,
+                item.unit_id,
+                item.product_id,
+                item.unit_cost,
+                item.vendor_sku,
+            )
             record = grouped.setdefault(key, {"quantity": 0.0, "items": [], "sample": item})
             record["quantity"] = float(record["quantity"]) + float(item.quantity)
             record["items"].append((order.id, item.position))
@@ -158,6 +165,7 @@ def _aggregate_items(
                 product_id=sample_item.product_id,
                 unit_id=sample_item.unit_id,
                 item_id=sample_item.item_id,
+                vendor_sku=sample_item.vendor_sku,
                 quantity=info["quantity"],
                 unit_cost=sample_item.unit_cost,
             )
@@ -175,6 +183,17 @@ def _combined_delivery(
     return (target_order.delivery_charge or 0.0) + sum(
         source.delivery_charge or 0.0 for source in source_orders
     )
+
+
+def _merged_status(
+    target_order: PurchaseOrder, source_orders: Sequence[PurchaseOrder]
+) -> str:
+    statuses = [target_order.purchase_status] + [
+        source.purchase_status for source in source_orders
+    ]
+    if PurchaseOrder.STATUS_ORDERED in statuses:
+        return PurchaseOrder.STATUS_ORDERED
+    return PurchaseOrder.STATUS_REQUESTED
 
 
 def _archive_source_items(source_orders: Sequence[PurchaseOrder]) -> None:

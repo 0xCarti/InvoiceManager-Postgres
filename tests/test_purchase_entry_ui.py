@@ -12,16 +12,21 @@ def gl_codes():
 
 
 def test_purchase_order_templates_expose_fast_add_actions():
-    for relative_path in (
-        "app/templates/purchase_orders/create_purchase_order.html",
-        "app/templates/purchase_orders/edit_purchase_order.html",
-    ):
-        content = (ROOT / relative_path).read_text(encoding="utf-8")
+    create_content = (
+        ROOT / "app/templates/purchase_orders/create_purchase_order.html"
+    ).read_text(encoding="utf-8")
+    edit_content = (
+        ROOT / "app/templates/purchase_orders/edit_purchase_order.html"
+    ).read_text(encoding="utf-8")
+
+    for content in (create_content, edit_content):
         assert content.count('data-role="purchase-order-add-item"') >= 2
         assert (
             "Name search keeps you in item entry. Barcode scans jump to Qty, then back to the next scan row."
             in content
         )
+
+    assert "New purchase orders start as Requested." in create_content
 
 
 def test_purchase_order_templates_expose_vendor_sku_field():
@@ -31,8 +36,8 @@ def test_purchase_order_templates_expose_vendor_sku_field():
     ):
         content = (ROOT / relative_path).read_text(encoding="utf-8")
         assert "Vendor SKU is optional on the PO and required when receiving." in content
+        assert content.count('placeholder="Vendor SKU"') == 1
         assert 'class="form-control vendor-sku-field"' in content
-        assert 'placeholder="Vendor SKU"' in content
 
 
 def test_purchase_order_form_script_keeps_a_ready_blank_row():

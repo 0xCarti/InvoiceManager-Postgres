@@ -6,6 +6,7 @@
 {% set can_view_purchase_recommendations = can_access_endpoint('purchase.purchase_order_recommendations') %}
 {% set can_merge_purchase_orders = can_access_endpoint('purchase.merge_purchase_orders_route', 'POST') %}
 {% set can_edit_purchase_orders = can_access_endpoint('purchase.edit_purchase_order') %}
+{% set can_mark_purchase_orders = can_access_endpoint('purchase.mark_purchase_order_ordered', 'POST') %}
 {% set can_receive_purchase_invoices = can_access_endpoint('purchase.receive_invoice') %}
 {% set can_delete_purchase_orders = can_access_endpoint('purchase.delete_purchase_order', 'POST') %}
 {% set can_view_purchase_cost_forecast = can_access_endpoint('report.purchase_cost_forecast') %}
@@ -157,7 +158,7 @@
                     <div class="form-check">
                         <input class="form-check-input column-toggle" type="checkbox" id="toggle-po-column-received"
                             data-column-target="col-po-received" checked>
-                        <label class="form-check-label" for="toggle-po-column-received">Received</label>
+                        <label class="form-check-label" for="toggle-po-column-received">Status</label>
                     </div>
                     <div class="form-check">
                         <input class="form-check-input column-toggle" type="checkbox" id="toggle-po-column-item-count"
@@ -221,8 +222,10 @@
         <div class="mb-3">
             <label for="status" class="form-label">Status</label>
             <select id="status" name="status" class="form-select">
-                <option value="pending" {% if status == 'pending' %}selected{% endif %}>Pending</option>
-                <option value="completed" {% if status == 'completed' %}selected{% endif %}>Completed</option>
+                <option value="open" {% if status == 'open' %}selected{% endif %}>Open</option>
+                <option value="requested" {% if status == 'requested' %}selected{% endif %}>Requested</option>
+                <option value="ordered" {% if status == 'ordered' %}selected{% endif %}>Ordered</option>
+                <option value="received" {% if status == 'received' %}selected{% endif %}>Received</option>
                 <option value="all" {% if status == 'all' %}selected{% endif %}>All</option>
             </select>
         </div>
@@ -240,7 +243,7 @@
         </div>
     {% endcall %}
 
-    {% if selected_vendor or start_date or end_date or status != 'pending' or selected_items %}
+    {% if selected_vendor or start_date or end_date or status != 'open' or selected_items %}
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
         <span class="text-muted small">Active filters:</span>
         {% if selected_vendor %}
@@ -249,8 +252,8 @@
         {% if start_date or end_date %}
         <span class="badge rounded-pill text-bg-light border">Date: {{ start_date or '...' }} - {{ end_date or '...' }}</span>
         {% endif %}
-        {% if status != 'pending' %}
-        <span class="badge rounded-pill text-bg-light border">Status: {% if status == 'completed' %}Completed{% elif status == 'all' %}All{% else %}Pending{% endif %}</span>
+        {% if status != 'open' %}
+        <span class="badge rounded-pill text-bg-light border">Status: {% if status == 'requested' %}Requested{% elif status == 'ordered' %}Ordered{% elif status == 'received' %}Received{% elif status == 'all' %}All{% else %}Open{% endif %}</span>
         {% endif %}
         {% if selected_items %}
         <span class="badge rounded-pill text-bg-light border">
@@ -267,7 +270,7 @@
     <table class="table sortable table-mobile-card" id="purchase-orders-table">
         <thead>
             <tr>
-                <th class="text-center">Select (pending)</th>
+                <th class="text-center">Select (open)</th>
                 <th class="col-po-id" data-type="number">ID</th>
                 <th class="col-po-vendor">Vendor</th>
                 <th class="col-po-vendor-name">Vendor (Recorded)</th>
@@ -277,7 +280,7 @@
                 <th class="col-po-expected-date">Expected Date</th>
                 <th class="col-po-expected-total" data-type="number">Expected Total</th>
                 <th class="col-po-delivery" data-type="number">Delivery</th>
-                <th class="col-po-received">Received</th>
+                <th class="col-po-received">Status</th>
                 <th class="col-po-item-count" data-type="number">Item Count</th>
                 <th class="col-po-items">Line Items</th>
                 <th class="col-po-user" data-type="number">Created By</th>
@@ -315,7 +318,9 @@
                     {% endif %}
                 </td>
                 <td class="col-po-delivery" data-sort-value="{{ '%.6f'|format(order.delivery_charge or 0) }}">{{ '%.2f'|format(order.delivery_charge or 0) }}</td>
-                <td class="col-po-received" data-sort-value="{{ '1' if order.received else '0' }}">{{ 'Yes' if order.received else 'No' }}</td>
+                <td class="col-po-received" data-sort-value="{{ order.purchase_status }}">
+                    <span class="badge {{ order.purchase_status_badge_class }}">{{ order.purchase_status_label }}</span>
+                </td>
                 {% set order_item_count = order.items | length %}
                 <td class="col-po-item-count" data-sort-value="{{ order_item_count }}">{{ order_item_count }}</td>
                 <td class="col-po-items text-wrap">
@@ -346,6 +351,13 @@
                     <div class="mobile-actions mobile-card-actions">
                         <a href="{{ url_for('notes.entity_notes', entity_type='purchase_order', entity_id=order.id) }}" class="btn btn-sm btn-outline-secondary">Notes</a>
                         {% if not order.received %}
+                        {% if order.can_mark_ordered and can_mark_purchase_orders %}
+                        <form action="{{ url_for('purchase.mark_purchase_order_ordered', po_id=order.id) }}" method="post" class="d-inline">
+                            {{ mark_ordered_form.hidden_tag() }}
+                            <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+                            <button type="submit" class="btn btn-sm btn-outline-primary">Mark Ordered</button>
+                        </form>
+                        {% endif %}
                         {% if can_edit_purchase_orders %}
                         <a href="{{ url_for('purchase.edit_purchase_order', po_id=order.id) }}" class="btn btn-sm btn-primary">Edit</a>
                         {% endif %}
@@ -359,7 +371,7 @@
                         </form>
                         {% endif %}
                         {% else %}
-                        <span class="badge text-bg-success">Received</span>
+                        <span class="badge {{ order.purchase_status_badge_class }}">{{ order.purchase_status_label }}</span>
                         {% endif %}
                     </div>
                 </td>

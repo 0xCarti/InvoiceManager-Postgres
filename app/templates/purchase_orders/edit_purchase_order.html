@@ -2,8 +2,23 @@
 {% block content %}
 {% set can_quick_add_items = can_access_endpoint('item.quick_add_item', 'POST') %}
 {% set can_manage_item_units = can_access_endpoint('item.item_units', 'POST') %}
+{% set can_mark_purchase_orders = can_access_endpoint('purchase.mark_purchase_order_ordered', 'POST') %}
 <div class="container mt-4">
-    <h2>Edit Purchase Order</h2>
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mb-3">
+        <div>
+            <h2 class="mb-1">Edit Purchase Order</h2>
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <span class="badge {{ po.purchase_status_badge_class }}">{{ po.purchase_status_label }}</span>
+                {% if po.can_mark_ordered and can_mark_purchase_orders %}
+                <form method="POST" action="{{ url_for('purchase.mark_purchase_order_ordered', po_id=po.id) }}" class="d-inline">
+                    {{ mark_ordered_form.hidden_tag() }}
+                    <input type="hidden" name="next" value="{{ url_for('purchase.edit_purchase_order', po_id=po.id) }}">
+                    <button type="submit" class="btn btn-sm btn-outline-primary">Mark Ordered</button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
     <form method="POST">
         {{ form.hidden_tag() }}
         <div class="form-group">
@@ -55,7 +70,6 @@
                 <input id="items-{{ loop.index0 }}-item-label" type="text" name="items-{{ loop.index0 }}-item-label" class="form-control item-search" placeholder="Search for an item" autocomplete="off" value="{{ input_value }}">
                 {{ item.item(class="item-id-field") }}
                 {{ item.cost(class="item-cost-field") }}
-                {{ item.vendor_sku(class="vendor-sku-field") }}
                 {{ item.vendor_description(class="vendor-description-field") }}
                 {{ item.pack_size(class="vendor-pack-size-field") }}
                 <input type="hidden" name="items-{{ loop.index0 }}-position" class="item-position" value="{{ item.position.data or loop.index0 }}">

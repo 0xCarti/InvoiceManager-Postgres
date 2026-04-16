@@ -259,4 +259,5 @@ def test_recommendations_route_json_and_seed(client, app):
         po = PurchaseOrder.query.order_by(PurchaseOrder.id.desc()).first()
         assert po is not None
         assert po.received is False
+        assert po.status == PurchaseOrder.STATUS_REQUESTED
         assert po.items[0].quantity == pytest.approx(override_qty)

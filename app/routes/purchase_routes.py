@@ -81,6 +81,24 @@ purchase = Blueprint("purchase", __name__)
 _PURCHASE_UPLOAD_SESSION_KEY = "purchase_order_upload"
 
 
+def _normalize_purchase_order_filter_status(value: str | None) -> str:
+    normalized = (value or "open").strip().lower()
+    legacy_map = {
+        "pending": "open",
+        "completed": "received",
+    }
+    normalized = legacy_map.get(normalized, normalized)
+    if normalized not in {"open", "requested", "ordered", "received", "all"}:
+        return "open"
+    return normalized
+
+
+def _purchase_redirect_target(next_url: str | None, fallback_endpoint: str):
+    if next_url and next_url.startswith("/") and not next_url.startswith("//"):
+        return redirect(next_url)
+    return redirect(url_for(fallback_endpoint))
+
+
 def _duplicate_blocker_destination(category: str) -> dict[str, str]:
     if category == "producer_address":
         return {
@@ -608,10 +626,11 @@ def view_purchase_orders():
 
     delete_form = DeleteForm()
     merge_form = PurchaseOrderMergeForm()
+    mark_ordered_form = DeleteForm()
     page = request.args.get("page", 1, type=int)
     per_page = get_per_page()
     vendor_id = request.args.get("vendor_id", type=int)
-    status = request.args.get("status", "pending")
+    status = _normalize_purchase_order_filter_status(request.args.get("status"))
     start_date_str = request.args.get("start_date")
     end_date_str = request.args.get("end_date")
     raw_item_ids = request.args.getlist("item_id")
@@ -653,9 +672,19 @@ def view_purchase_orders():
 
     query = PurchaseOrder.query
 
-    if status == "pending":
+    if status == "open":
         query = query.filter_by(received=False)
-    elif status == "completed":
+    elif status == "requested":
+        query = query.filter(
+            PurchaseOrder.received.is_(False),
+            PurchaseOrder.status == PurchaseOrder.STATUS_REQUESTED,
+        )
+    elif status == "ordered":
+        query = query.filter(
+            PurchaseOrder.received.is_(False),
+            PurchaseOrder.status == PurchaseOrder.STATUS_ORDERED,
+        )
+    elif status == "received":
         query = query.filter_by(received=True)
 
     if item_ids:
@@ -700,6 +729,7 @@ def view_purchase_orders():
         orders=orders,
         delete_form=delete_form,
         merge_form=merge_form,
+        mark_ordered_form=mark_ordered_form,
         vendors=vendors,
         upload_vendors=upload_vendors,
         vendor_id=vendor_id,
@@ -1187,6 +1217,7 @@ def create_purchase_order():
                 expected_date=form.expected_date.data,
                 expected_total_cost=expected_total,
                 delivery_charge=form.delivery_charge.data or 0.0,
+                status=PurchaseOrder.STATUS_REQUESTED,
             )
             db.session.add(po)
             db.session.flush()
@@ -1414,6 +1445,7 @@ def edit_purchase_order(po_id):
         flash("Received purchase orders cannot be edited.", "error")
         return redirect(url_for("purchase.view_purchase_orders"))
     form = PurchaseOrderForm()
+    mark_ordered_form = DeleteForm()
     if po.vendor_id and po.vendor_id not in {choice[0] for choice in form.vendor.choices}:
         archived_vendor_label = po.vendor_name or f"Archived Vendor #{po.vendor_id}"
         form.vendor.choices.append((po.vendor_id, archived_vendor_label))
@@ -1548,9 +1580,38 @@ def edit_purchase_order(po_id):
         "purchase_orders/edit_purchase_order.html",
         form=form,
         po=po,
+        mark_ordered_form=mark_ordered_form,
         gl_codes=codes,
         item_lookup=item_lookup,
     )
+
+
+@purchase.route("/purchase_orders/<int:po_id>/mark_ordered", methods=["POST"])
+@login_required
+def mark_purchase_order_ordered(po_id):
+    form = DeleteForm()
+    if not form.validate_on_submit():
+        abort(400)
+
+    po = db.session.get(PurchaseOrder, po_id)
+    if po is None:
+        abort(404)
+
+    next_url = request.form.get("next")
+    if po.received:
+        flash("Received purchase orders cannot be marked as ordered.", "error")
+        return _purchase_redirect_target(next_url, "purchase.view_purchase_orders")
+
+    if po.can_mark_ordered:
+        po.status = PurchaseOrder.STATUS_ORDERED
+        db.session.add(po)
+        db.session.commit()
+        log_activity(f"Marked purchase order {po.id} as ordered")
+        flash("Purchase order marked as ordered.", "success")
+    else:
+        flash("This purchase order is already marked as ordered.", "info")
+
+    return _purchase_redirect_target(next_url, "purchase.view_purchase_orders")
 
 
 @purchase.route("/purchase_orders/<int:po_id>/delete", methods=["POST"])
@@ -1891,6 +1952,7 @@ def receive_invoice(po_id):
             item_obj.cost = weighted_cost
             db.session.add(item_obj)
         po.received = True
+        po.status = PurchaseOrder.STATUS_RECEIVED
         db.session.add(po)
         if draft:
             db.session.delete(draft)
@@ -2306,6 +2368,7 @@ def reverse_purchase_invoice(invoice_id):
     PurchaseInvoiceItem.query.filter_by(invoice_id=invoice.id).delete()
     db.session.delete(invoice)
     po.received = False
+    po.status = PurchaseOrder.STATUS_ORDERED
     db.session.commit()
     flash("Invoice reversed successfully", "success")
     return redirect(url_for("purchase.view_purchase_orders"))
