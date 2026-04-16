@@ -2940,7 +2940,13 @@ class Setting(db.Model):
 
     RECEIVE_LOCATION_SETTING = "PURCHASE_RECEIVE_LOCATION_DEFAULTS"
     PURCHASE_IMPORT_VENDORS = "PURCHASE_IMPORT_VENDORS"
+    POS_SALES_IMPORT_INTERVAL = "POS_SALES_IMPORT_INTERVAL"
     MENU_FEED_API_TOKEN = "MENU_FEED_API_TOKEN"
+    POS_SALES_IMPORT_INTERVAL_UNITS = ("hour", "day", "week")
+    DEFAULT_POS_SALES_IMPORT_INTERVAL = {
+        "value": 1,
+        "unit": "day",
+    }
     DEFAULT_PURCHASE_IMPORT_VENDORS = [
         "SYSCO",
         "PRATTS",
@@ -3026,6 +3032,64 @@ class Setting(db.Model):
             db.session.add(setting)
 
         setting.value = json.dumps(cleaned)
+        return setting
+
+    @classmethod
+    def get_pos_sales_import_interval(cls) -> dict[str, object]:
+        """Return the configured POS sales import lookback interval."""
+
+        setting = cls.query.filter_by(name=cls.POS_SALES_IMPORT_INTERVAL).first()
+        default_value = int(cls.DEFAULT_POS_SALES_IMPORT_INTERVAL["value"])
+        default_unit = str(cls.DEFAULT_POS_SALES_IMPORT_INTERVAL["unit"])
+        if setting is None or not setting.value:
+            return {"value": default_value, "unit": default_unit}
+
+        try:
+            payload = json.loads(setting.value)
+        except (TypeError, ValueError):
+            return {"value": default_value, "unit": default_unit}
+        if not isinstance(payload, dict):
+            return {"value": default_value, "unit": default_unit}
+
+        try:
+            value = int(payload.get("value", default_value))
+        except (TypeError, ValueError):
+            value = default_value
+        if value < 1:
+            value = default_value
+
+        unit = str(payload.get("unit", default_unit) or default_unit).strip().lower()
+        if unit not in cls.POS_SALES_IMPORT_INTERVAL_UNITS:
+            unit = default_unit
+
+        return {"value": value, "unit": unit}
+
+    @classmethod
+    def set_pos_sales_import_interval(cls, *, value: int, unit: str):
+        """Persist the POS sales import lookback interval."""
+
+        try:
+            cleaned_value = int(value)
+        except (TypeError, ValueError):
+            cleaned_value = int(cls.DEFAULT_POS_SALES_IMPORT_INTERVAL["value"])
+        if cleaned_value < 1:
+            cleaned_value = int(cls.DEFAULT_POS_SALES_IMPORT_INTERVAL["value"])
+
+        cleaned_unit = str(unit or "").strip().lower()
+        if cleaned_unit not in cls.POS_SALES_IMPORT_INTERVAL_UNITS:
+            cleaned_unit = str(cls.DEFAULT_POS_SALES_IMPORT_INTERVAL["unit"])
+
+        setting = cls.query.filter_by(name=cls.POS_SALES_IMPORT_INTERVAL).first()
+        if setting is None:
+            setting = cls(name=cls.POS_SALES_IMPORT_INTERVAL)
+            db.session.add(setting)
+
+        setting.value = json.dumps(
+            {
+                "value": cleaned_value,
+                "unit": cleaned_unit,
+            }
+        )
         return setting
 
     @classmethod

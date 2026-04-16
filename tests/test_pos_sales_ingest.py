@@ -1,7 +1,14 @@
-from pathlib import Path
 from decimal import Decimal
+from datetime import datetime, timezone as dt_timezone
+from pathlib import Path
 
-from app.models import PosSalesImport, PosSalesImportLocation, PosSalesImportRow, db
+from app.models import (
+    PosSalesImport,
+    PosSalesImportLocation,
+    PosSalesImportRow,
+    Setting,
+    db,
+)
 from app.services import pos_sales_ingest
 from app.services.pos_sales_ingest import ingest_pos_sales_attachment
 from app.utils.pos_import import parse_terminal_sales_email_rows
@@ -33,6 +40,36 @@ def test_ingest_pos_sales_attachment_is_idempotent_for_duplicate_message_and_att
         assert second_duplicate is True
         assert first.id == second.id
         assert PosSalesImport.query.count() == 1
+
+
+def test_default_sales_import_date_uses_configured_lookback_interval(app):
+    with app.app_context():
+        Setting.set_pos_sales_import_interval(value=1, unit="day")
+        db.session.commit()
+        app.config["DEFAULT_TIMEZONE"] = "America/Winnipeg"
+        app.config["POS_SALES_IMPORT_INTERVAL_VALUE"] = 1
+        app.config["POS_SALES_IMPORT_INTERVAL_UNIT"] = "day"
+
+        inferred_date = pos_sales_ingest._default_sales_import_date(
+            datetime(2026, 4, 16, 6, 0, tzinfo=dt_timezone.utc)
+        )
+
+        assert inferred_date.isoformat() == "2026-04-15"
+
+
+def test_default_sales_import_date_falls_back_to_saved_setting(app):
+    with app.app_context():
+        Setting.set_pos_sales_import_interval(value=6, unit="hour")
+        db.session.commit()
+        app.config["DEFAULT_TIMEZONE"] = "America/Winnipeg"
+        app.config.pop("POS_SALES_IMPORT_INTERVAL_VALUE", None)
+        app.config.pop("POS_SALES_IMPORT_INTERVAL_UNIT", None)
+
+        inferred_date = pos_sales_ingest._default_sales_import_date(
+            datetime(2026, 4, 16, 11, 0, tzinfo=dt_timezone.utc)
+        )
+
+        assert inferred_date.isoformat() == "2026-04-16"
 
 
 def test_parse_rows_compute_unit_price_using_net_inc_plus_abs_discount():

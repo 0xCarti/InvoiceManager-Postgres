@@ -2414,6 +2414,18 @@ class SettingsForm(FlaskForm):
             ("year", "Year"),
         ],
     )
+    pos_sales_import_interval_value = IntegerField(
+        "POS Sales Import Lookback",
+        validators=[DataRequired(), NumberRange(min=1)],
+    )
+    pos_sales_import_interval_unit = SelectField(
+        "POS Sales Import Unit",
+        choices=[
+            ("hour", "Hour"),
+            ("day", "Day"),
+            ("week", "Week"),
+        ],
+    )
     max_backups = IntegerField(
         "Max Stored Backups",
         validators=[DataRequired(), NumberRange(min=1)],

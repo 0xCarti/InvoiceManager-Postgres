@@ -17,6 +17,7 @@ from app.models import (
     PosSalesImportLocation,
     PosSalesImportRow,
     Product,
+    Setting,
     TerminalSaleLocationAlias,
     TerminalSaleProductAlias,
     db,
@@ -36,15 +37,38 @@ from app.utils.pos_import import (
 )
 
 
-def _default_sales_import_date():
-    """Return the prior local day in the app's configured time zone."""
+def _get_pos_sales_import_interval() -> tuple[int, str]:
+    """Return the configured lookback interval for POS sales imports."""
+
+    config_value = current_app.config.get("POS_SALES_IMPORT_INTERVAL_VALUE")
+    config_unit = current_app.config.get("POS_SALES_IMPORT_INTERVAL_UNIT")
+    if config_value is not None and config_unit in Setting.POS_SALES_IMPORT_INTERVAL_UNITS:
+        try:
+            cleaned_value = int(config_value)
+        except (TypeError, ValueError):
+            cleaned_value = 0
+        if cleaned_value >= 1:
+            return cleaned_value, str(config_unit)
+
+    interval = Setting.get_pos_sales_import_interval()
+    return int(interval["value"]), str(interval["unit"])
+
+
+def _default_sales_import_date(received_at: datetime | None = None):
+    """Infer the business date for an imported POS sales file."""
 
     tz_name = current_app.config.get("DEFAULT_TIMEZONE") or "UTC"
     try:
         tz = ZoneInfo(tz_name)
     except Exception:
         tz = ZoneInfo("UTC")
-    return (datetime.now(dt_timezone.utc).astimezone(tz).date() - timedelta(days=1))
+    interval_value, interval_unit = _get_pos_sales_import_interval()
+    reference_time = received_at or datetime.now(dt_timezone.utc)
+    if reference_time.tzinfo is None:
+        reference_time = reference_time.replace(tzinfo=dt_timezone.utc)
+    local_reference = reference_time.astimezone(tz)
+    delta_kwargs = {f"{interval_unit}s": interval_value}
+    return (local_reference - timedelta(**delta_kwargs)).date()
 
 
 def _parse_rows(filepath: str, extension: str) -> list[dict]:
@@ -340,13 +364,15 @@ def ingest_pos_sales_attachment(
     if not persisted_path.exists():
         persisted_path.write_bytes(content)
 
+    received_at = datetime.utcnow()
     sales_import = PosSalesImport(
         source_provider=source_provider,
         message_id=source_message_id,
         attachment_filename=filename,
         attachment_sha256=attachment_sha256,
         attachment_storage_path=str(persisted_path),
-        sales_date=_default_sales_import_date(),
+        sales_date=_default_sales_import_date(received_at),
+        received_at=received_at,
         status="pending",
     )
     db.session.add(sales_import)
@@ -381,7 +407,8 @@ def ingest_pos_sales_attachment(
             attachment_filename=filename,
             attachment_sha256=attachment_sha256,
             attachment_storage_path=str(persisted_path),
-            sales_date=_default_sales_import_date(),
+            sales_date=_default_sales_import_date(received_at),
+            received_at=received_at,
             status="failed",
             failure_reason="Unable to parse POS spreadsheet attachment.",
         )

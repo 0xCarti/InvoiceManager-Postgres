@@ -29,6 +29,8 @@ def test_admin_can_update_settings(client, app):
                 "auto_backup_enabled": "y",
                 "auto_backup_interval_value": "2",
                 "auto_backup_interval_unit": "week",
+                "pos_sales_import_interval_value": "6",
+                "pos_sales_import_interval_unit": "hour",
                 "max_backups": "5",
                 "enable_sysco_imports": "y",
                 "enable_manitoba_liquor_imports": "y",
@@ -63,6 +65,8 @@ def test_admin_can_update_settings(client, app):
             name="AUTO_BACKUP_INTERVAL_UNIT"
         ).first()
         assert interval_unit.value == "week"
+        pos_sales_interval = Setting.get_pos_sales_import_interval()
+        assert pos_sales_interval == {"value": 6, "unit": "hour"}
         max_setting = Setting.query.filter_by(name="MAX_BACKUPS").first()
         assert max_setting.value == "5"
         conversion_setting = Setting.query.filter_by(
@@ -83,6 +87,8 @@ def test_admin_can_update_settings(client, app):
         assert app.config["AUTO_BACKUP_ENABLED"] is True
         assert app.config["AUTO_BACKUP_INTERVAL_VALUE"] == 2
         assert app.config["AUTO_BACKUP_INTERVAL_UNIT"] == "week"
+        assert app.config["POS_SALES_IMPORT_INTERVAL_VALUE"] == 6
+        assert app.config["POS_SALES_IMPORT_INTERVAL_UNIT"] == "hour"
         assert app.config["AUTO_BACKUP_INTERVAL"] == 2 * UNIT_SECONDS["week"]
         assert app.config["MAX_BACKUPS"] == 5
         assert app.config["BASE_UNIT_CONVERSIONS"] == mapping
@@ -132,6 +138,8 @@ def test_auto_backup_thread_uses_real_app(client, app, monkeypatch):
                 "auto_backup_enabled": "y",
                 "auto_backup_interval_value": "1",
                 "auto_backup_interval_unit": "day",
+                "pos_sales_import_interval_value": "1",
+                "pos_sales_import_interval_unit": "day",
                 "max_backups": "3",
                 "enable_sysco_imports": "y",
                 "convert_ounce": "gram",

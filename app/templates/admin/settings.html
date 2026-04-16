@@ -26,6 +26,28 @@
             {{ form.default_timezone.label }}
             {{ form.default_timezone(class='form-control', disabled=not can_manage_settings) }}
         </div>
+        <div class="mt-4">
+            <h3>POS Sales Imports</h3>
+            <p class="text-muted">
+                The app uses this lookback interval and the file received time in the default timezone to infer the business date for each imported POS sales file. For your current setup, use <strong>1 Day</strong>.
+            </p>
+            <div class="row g-2">
+                <div class="col-md-6">
+                    {{ form.pos_sales_import_interval_value.label }}
+                    {{ form.pos_sales_import_interval_value(class='form-control', type='text', inputmode='text', disabled=not can_manage_settings, **{'data-numeric-input': '1', 'autocapitalize': 'off', 'autocorrect': 'off', 'spellcheck': 'false'}) }}
+                    {% if form.pos_sales_import_interval_value.errors %}
+                        <div class="text-danger small">{{ form.pos_sales_import_interval_value.errors[0] }}</div>
+                    {% endif %}
+                </div>
+                <div class="col-md-6">
+                    {{ form.pos_sales_import_interval_unit.label }}
+                    {{ form.pos_sales_import_interval_unit(class='form-select', disabled=not can_manage_settings) }}
+                    {% if form.pos_sales_import_interval_unit.errors %}
+                        <div class="text-danger small">{{ form.pos_sales_import_interval_unit.errors[0] }}</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
         <div class="form-check form-switch mt-2">
             {{ form.auto_backup_enabled(class='form-check-input', disabled=not can_manage_settings) }}
             {{ form.auto_backup_enabled.label(class='form-check-label') }}

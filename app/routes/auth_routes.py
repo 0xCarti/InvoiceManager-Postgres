@@ -2238,6 +2238,7 @@ def settings():
     conversion_mapping = parse_conversion_setting(conversions_setting.value)
     receive_defaults = Setting.get_receive_location_defaults()
     enabled_import_vendors = Setting.get_enabled_purchase_import_vendors()
+    pos_sales_import_interval = Setting.get_pos_sales_import_interval()
     retail_pop_price_value = retail_pop_price_setting.value or "0"
     try:
         retail_pop_price_decimal = Decimal(retail_pop_price_value)
@@ -2250,6 +2251,8 @@ def settings():
         auto_backup_enabled=auto_setting.value == "1",
         auto_backup_interval_value=int(interval_value_setting.value),
         auto_backup_interval_unit=interval_unit_setting.value,
+        pos_sales_import_interval_value=int(pos_sales_import_interval["value"]),
+        pos_sales_import_interval_unit=str(pos_sales_import_interval["unit"]),
         max_backups=int(max_backups_setting.value),
         base_unit_mapping=conversion_mapping,
         receive_location_defaults=receive_defaults,
@@ -2315,6 +2318,10 @@ def settings():
             retail_pop_price_setting.value = format(
                 form.retail_pop_price.data, ".2f"
             )
+        Setting.set_pos_sales_import_interval(
+            value=form.pos_sales_import_interval_value.data,
+            unit=form.pos_sales_import_interval_unit.data,
+        )
         Setting.set_enabled_purchase_import_vendors(enabled_import_vendors)
         Setting.set_receive_location_defaults(receive_location_updates)
         db.session.commit()
@@ -2333,6 +2340,12 @@ def settings():
         )
         current_app.config["AUTO_BACKUP_INTERVAL_UNIT"] = (
             form.auto_backup_interval_unit.data
+        )
+        current_app.config["POS_SALES_IMPORT_INTERVAL_VALUE"] = (
+            form.pos_sales_import_interval_value.data
+        )
+        current_app.config["POS_SALES_IMPORT_INTERVAL_UNIT"] = (
+            form.pos_sales_import_interval_unit.data
         )
         current_app.config["MAX_BACKUPS"] = form.max_backups.data
         current_app.config["AUTO_BACKUP_INTERVAL"] = (
