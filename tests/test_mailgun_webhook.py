@@ -203,3 +203,35 @@ def test_mailgun_webhook_rejects_oversized_attachment(client, app):
 
     assert response.status_code == 413
     assert response.get_json()["error"] == "attachment_too_large"
+
+
+def test_mailgun_webhook_ignores_empty_sales_attachment(client, app, monkeypatch):
+    app.config.update(
+        {
+            "MAILGUN_WEBHOOK_SIGNING_KEY": "secret-key",
+            "MAILGUN_ALLOWED_SENDER_DOMAINS": "example.com",
+            "MAILGUN_ALLOWED_ATTACHMENT_EXTENSIONS": "xls,xlsx",
+        }
+    )
+    monkeypatch.setattr(
+        "app.routes.mailgun_routes.ingest_pos_sales_attachment",
+        lambda **kwargs: (None, False),
+    )
+
+    data = _payload("secret-key")
+    data["attachment-1"] = (io.BytesIO(b"empty report"), "empty_sales.xls")
+
+    response = client.post(
+        "/webhooks/mailgun/inbound", data=data, content_type="multipart/form-data"
+    )
+
+    assert response.status_code == 202
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["imports"] == []
+    assert payload["ignored"] == [
+        {"filename": "empty_sales.xls", "reason": "empty_sales_file"}
+    ]
+
+    with app.app_context():
+        assert PosSalesImport.query.count() == 0

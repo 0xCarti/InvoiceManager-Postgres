@@ -129,3 +129,38 @@ def test_poll_once_allows_exact_sender_or_domain_match(app, monkeypatch, tmp_pat
 
     with app.app_context():
         assert PosSalesImport.query.count() == 2
+
+
+def test_poll_once_acknowledges_empty_sales_attachment_without_counting_error(
+    app, monkeypatch, tmp_path
+):
+    message = PollMessage(
+        message_id="<poll-test-empty-sales>",
+        sender="reports@example.com",
+        ack_token="uid-empty",
+        attachments=[PollAttachment(filename="empty_sales.xls", content=b"empty")],
+    )
+    provider = _StubProvider([message])
+
+    app.config.update(
+        {
+            "POS_IMPORT_INGEST_MODE": "poll",
+            "MAILGUN_INBOUND_STORAGE_DIR": str(tmp_path / "mailgun_staging"),
+            "MAILGUN_ALLOWED_SENDER_DOMAINS": "example.com",
+        }
+    )
+
+    monkeypatch.setattr(pos_sales_polling, "_build_provider", lambda _app: provider)
+    monkeypatch.setattr(
+        pos_sales_polling,
+        "ingest_pos_sales_attachment",
+        lambda **kwargs: (None, False),
+    )
+
+    result = pos_sales_polling.run_pos_sales_mailbox_poll_once(app)
+
+    assert result == {"messages": 1, "imports": 0, "duplicates": 0, "errors": 0}
+    assert provider.ack_tokens == ["uid-empty"]
+
+    with app.app_context():
+        assert PosSalesImport.query.count() == 0

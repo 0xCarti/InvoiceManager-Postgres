@@ -72,6 +72,30 @@ def test_default_sales_import_date_falls_back_to_saved_setting(app):
         assert inferred_date.isoformat() == "2026-04-16"
 
 
+def test_ingest_pos_sales_attachment_ignores_files_with_no_locations_or_sales(
+    app, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        pos_sales_ingest,
+        "iter_pos_excel_rows",
+        lambda filepath, extension: iter([]),
+    )
+
+    with app.app_context():
+        sales_import, duplicate = ingest_pos_sales_attachment(
+            source_provider="mailgun",
+            source_message_id="<empty-sales-message>",
+            filename="empty_sales.xls",
+            content=b"placeholder spreadsheet bytes",
+            storage_dir=tmp_path / "mailgun_staging",
+        )
+
+        assert sales_import is None
+        assert duplicate is False
+        assert PosSalesImport.query.count() == 0
+        assert list((tmp_path / "mailgun_staging").glob("*")) == []
+
+
 def test_parse_rows_compute_unit_price_using_net_inc_plus_abs_discount():
     rows = [
         ["MAIN STAND", "", "", "", "", "", "", "", ""],

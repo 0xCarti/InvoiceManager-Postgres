@@ -296,13 +296,15 @@ def run_pos_sales_mailbox_poll_once(app) -> dict[str, int]:
                     )
                     continue
                 try:
-                    _, duplicate = ingest_pos_sales_attachment(
+                    sales_import, duplicate = ingest_pos_sales_attachment(
                         source_provider=f"poll:{provider.provider_name}",
                         source_message_id=message.message_id,
                         filename=attachment.filename,
                         content=attachment.content,
                         storage_dir=storage_root,
                     )
+                    if sales_import is None:
+                        continue
                     if duplicate:
                         result["duplicates"] += 1
                     else:

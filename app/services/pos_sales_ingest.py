@@ -37,6 +37,10 @@ from app.utils.pos_import import (
 )
 
 
+class EmptyPosSalesImportError(ValueError):
+    """Raised when an attachment contains no usable POS sales data."""
+
+
 def _get_pos_sales_import_interval() -> tuple[int, str]:
     """Return the configured lookback interval for POS sales imports."""
 
@@ -225,6 +229,11 @@ def stage_pos_sales_import(
 
     parsed_rows = _parse_rows(filepath, extension)
     grouped = group_terminal_sales_rows(parsed_rows)
+    has_sales_rows = any(not entry.get("is_location_total") for entry in parsed_rows)
+    if not grouped or not has_sales_rows:
+        raise EmptyPosSalesImportError(
+            "Attachment does not contain any POS locations or sales rows."
+        )
 
     location_aliases = {
         alias.normalized_name: alias.location_id
@@ -346,11 +355,12 @@ def ingest_pos_sales_attachment(
     filename: str,
     content: bytes,
     storage_dir: str | Path,
-) -> tuple[PosSalesImport, bool]:
+ ) -> tuple[PosSalesImport | None, bool]:
     """Persist and stage a single POS sales attachment.
 
-    Returns ``(sales_import, duplicate)`` where ``duplicate`` indicates an existing
-    idempotent import record was reused.
+    Returns ``(sales_import, duplicate)``. ``sales_import`` is ``None`` when the
+    attachment is ignored because it contains no locations or sales rows. In that
+    case ``duplicate`` is always ``False``.
     """
 
     extension = Path(filename).suffix.lower()
@@ -399,6 +409,21 @@ def ingest_pos_sales_attachment(
             f"Received POS sales import {sales_import.id} via {source_provider}"
         )
         return sales_import, False
+    except EmptyPosSalesImportError:
+        db.session.rollback()
+        try:
+            if persisted_path.exists():
+                persisted_path.unlink()
+        except OSError:
+            current_app.logger.warning(
+                "Unable to delete ignored empty POS sales attachment %s",
+                persisted_path,
+            )
+        log_activity(
+            "Ignored POS sales import attachment with no locations or sales "
+            f"via {source_provider} ({filename})."
+        )
+        return None, False
     except Exception:
         db.session.rollback()
         failure = PosSalesImport(

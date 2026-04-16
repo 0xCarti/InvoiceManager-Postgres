@@ -113,6 +113,8 @@ def inbound_mailgun():
     storage_dir.mkdir(parents=True, exist_ok=True)
 
     imported = []
+    ignored = []
+    handled_attachment = False
     for upload in request.files.values():
         filename = secure_filename(upload.filename or "")
         if not filename:
@@ -135,6 +137,7 @@ def inbound_mailgun():
             continue
         if len(content) > max_attachment_bytes:
             return jsonify({"ok": False, "error": "attachment_too_large"}), 413
+        handled_attachment = True
 
         message_id = _message_id()
         try:
@@ -145,6 +148,14 @@ def inbound_mailgun():
                 content=content,
                 storage_dir=storage_dir,
             )
+            if sales_import is None:
+                ignored.append(
+                    {
+                        "filename": filename,
+                        "reason": "empty_sales_file",
+                    }
+                )
+                continue
             imported.append({"id": sales_import.id, "duplicate": duplicate})
             if duplicate:
                 log_activity(
@@ -154,7 +165,10 @@ def inbound_mailgun():
         except Exception:
             return jsonify({"ok": False, "error": "parse_failed"}), 422
 
-    if not imported:
+    if not imported and not handled_attachment:
         return jsonify({"ok": False, "error": "missing_attachment"}), 400
 
-    return jsonify({"ok": True, "imports": imported}), 202
+    response_payload = {"ok": True, "imports": imported}
+    if ignored:
+        response_payload["ignored"] = ignored
+    return jsonify(response_payload), 202
