@@ -93,6 +93,120 @@ _STAND_SHEET_FIELDS = (
     "closing_count",
 )
 
+_TERMINAL_SALES_CONFLICT_GUIDANCE = (
+    "POS sales imports do not include timestamps, so one location can only be "
+    "balanced against one event per day. If the same physical location reopens "
+    "later that day, combine those sessions into one event in the app."
+)
+
+
+def _format_date_span(start_date, end_date):
+    """Return a compact date range label."""
+
+    if start_date == end_date:
+        return start_date.isoformat()
+    return f"{start_date.isoformat()} to {end_date.isoformat()}"
+
+
+def _find_terminal_sales_event_location_conflicts(
+    *,
+    start_date,
+    end_date,
+    location_ids,
+    exclude_event_id=None,
+):
+    """Return overlapping event/location assignments that POS sales cannot split."""
+
+    unique_location_ids = sorted({loc_id for loc_id in location_ids or [] if loc_id})
+    if (
+        not unique_location_ids
+        or start_date is None
+        or end_date is None
+        or start_date > end_date
+    ):
+        return []
+
+    query = (
+        db.session.query(Event, EventLocation.location_id, Location.name)
+        .join(EventLocation, EventLocation.event_id == Event.id)
+        .join(Location, Location.id == EventLocation.location_id)
+        .filter(EventLocation.location_id.in_(unique_location_ids))
+        .filter(Event.start_date <= end_date, Event.end_date >= start_date)
+        .order_by(Location.name.asc(), Event.start_date.asc(), Event.name.asc())
+    )
+    if exclude_event_id is not None:
+        query = query.filter(Event.id != exclude_event_id)
+
+    conflicts = []
+    for event_obj, location_id, location_name in query.all():
+        overlap_start = max(start_date, event_obj.start_date)
+        overlap_end = min(end_date, event_obj.end_date)
+        conflicts.append(
+            {
+                "event_id": event_obj.id,
+                "event_name": event_obj.name,
+                "location_id": location_id,
+                "location_name": location_name,
+                "event_start_date": event_obj.start_date,
+                "event_end_date": event_obj.end_date,
+                "overlap_start_date": overlap_start,
+                "overlap_end_date": overlap_end,
+            }
+        )
+    return conflicts
+
+
+def _terminal_sales_conflicts_for_event(event_obj: Event):
+    """Return overlapping location assignments for the given event."""
+
+    location_ids = [event_location.location_id for event_location in event_obj.locations]
+    return _find_terminal_sales_event_location_conflicts(
+        start_date=event_obj.start_date,
+        end_date=event_obj.end_date,
+        location_ids=location_ids,
+        exclude_event_id=event_obj.id,
+    )
+
+
+def _group_terminal_sales_conflicts_by_location(conflicts):
+    """Return event-location conflicts grouped by location ID."""
+
+    grouped: dict[int, list[dict]] = {}
+    for conflict in conflicts:
+        grouped.setdefault(conflict["location_id"], []).append(conflict)
+    return grouped
+
+
+def _build_terminal_sales_conflict_message(conflicts):
+    """Return a user-facing explanation for ambiguous POS assignment conflicts."""
+
+    if not conflicts:
+        return _TERMINAL_SALES_CONFLICT_GUIDANCE
+
+    detail_parts = []
+    for conflict in conflicts[:3]:
+        detail_parts.append(
+            '%s overlaps with event "%s" on %s'
+            % (
+                conflict["location_name"],
+                conflict["event_name"],
+                _format_date_span(
+                    conflict["overlap_start_date"],
+                    conflict["overlap_end_date"],
+                ),
+            )
+        )
+
+    if len(conflicts) > 3:
+        detail_parts.append(f"{len(conflicts) - 3} more conflict(s)")
+
+    return (
+        "POS sales cannot be split across multiple events for the same location "
+        "on the same day because imported sales do not include timestamps. "
+        f"{'; '.join(detail_parts)}. Combine the events in the app or remove "
+        "the overlapping location."
+    )
+
 
 def suggest_terminal_sales_location_mapping(
     open_locations: list[EventLocation],
@@ -1011,7 +1125,11 @@ def create_event():
         log_activity(f"Created event {ev.id}")
         flash("Event created")
         return redirect(url_for("event.view_events"))
-    return render_template("events/create_event.html", form=form)
+    return render_template(
+        "events/create_event.html",
+        form=form,
+        terminal_sales_conflict_guidance=_TERMINAL_SALES_CONFLICT_GUIDANCE,
+    )
 
 
 @event.route("/events/filter", methods=["POST"])
@@ -1056,6 +1174,22 @@ def edit_event(event_id):
         abort(404)
     form = EventForm(obj=ev)
     if form.validate_on_submit():
+        conflicts = _find_terminal_sales_event_location_conflicts(
+            start_date=form.start_date.data,
+            end_date=form.end_date.data,
+            location_ids=[event_location.location_id for event_location in ev.locations],
+            exclude_event_id=ev.id,
+        )
+        if conflicts:
+            message = _build_terminal_sales_conflict_message(conflicts)
+            form.start_date.errors.append(message)
+            return render_template(
+                "events/edit_event.html",
+                form=form,
+                event=ev,
+                terminal_sales_conflict_guidance=_TERMINAL_SALES_CONFLICT_GUIDANCE,
+                terminal_sales_conflicts=_terminal_sales_conflicts_for_event(ev),
+            )
         ev.name = form.name.data
         ev.start_date = form.start_date.data
         ev.end_date = form.end_date.data
@@ -1065,7 +1199,13 @@ def edit_event(event_id):
         log_activity(f"Edited event {ev.id}")
         flash("Event updated")
         return redirect(url_for("event.view_events"))
-    return render_template("events/edit_event.html", form=form, event=ev)
+    return render_template(
+        "events/edit_event.html",
+        form=form,
+        event=ev,
+        terminal_sales_conflict_guidance=_TERMINAL_SALES_CONFLICT_GUIDANCE,
+        terminal_sales_conflicts=_terminal_sales_conflicts_for_event(ev),
+    )
 
 
 @event.route("/events/<int:event_id>/delete", methods=["POST"])
@@ -1100,6 +1240,7 @@ def view_event(event_id):
     ]
     confirmed_sales = _calculate_confirmed_sales_summary(ev)
     physical_terminal_variance = _calculate_physical_vs_terminal_variance(ev)
+    terminal_sales_conflicts = _terminal_sales_conflicts_for_event(ev)
     return render_template(
         "events/view_event.html",
         event=ev,
@@ -1107,6 +1248,11 @@ def view_event(event_id):
         opening_form=opening_form,
         confirmed_sales=confirmed_sales,
         physical_terminal_variance=physical_terminal_variance,
+        terminal_sales_conflict_guidance=_TERMINAL_SALES_CONFLICT_GUIDANCE,
+        terminal_sales_conflicts=terminal_sales_conflicts,
+        terminal_sales_conflicts_by_location=_group_terminal_sales_conflicts_by_location(
+            terminal_sales_conflicts
+        ),
         undo_confirm_form_factory=EventLocationUndoConfirmForm,
     )
 
@@ -1366,6 +1512,21 @@ def add_location(event_id):
         return redirect(url_for("event.view_event", event_id=event_id))
     if form.validate_on_submit():
         selected_ids = form.location_id.data
+        conflicts = _find_terminal_sales_event_location_conflicts(
+            start_date=ev.start_date,
+            end_date=ev.end_date,
+            location_ids=selected_ids,
+            exclude_event_id=event_id,
+        )
+        if conflicts:
+            message = _build_terminal_sales_conflict_message(conflicts)
+            form.location_id.errors.append(message)
+            return render_template(
+                "events/add_location.html",
+                form=form,
+                event=ev,
+                terminal_sales_conflict_guidance=_TERMINAL_SALES_CONFLICT_GUIDANCE,
+            )
         event_locations = []
         for location_id in selected_ids:
             event_location = EventLocation(
@@ -1392,7 +1553,12 @@ def add_location(event_id):
             else "Location assigned"
         )
         return redirect(url_for("event.view_event", event_id=event_id))
-    return render_template("events/add_location.html", form=form, event=ev)
+    return render_template(
+        "events/add_location.html",
+        form=form,
+        event=ev,
+        terminal_sales_conflict_guidance=_TERMINAL_SALES_CONFLICT_GUIDANCE,
+    )
 
 
 @event.route(
@@ -1404,6 +1570,15 @@ def add_terminal_sale(event_id, el_id):
     el = db.session.get(EventLocation, el_id)
     if el is None or el.event_id != event_id:
         abort(404)
+    conflicts = _find_terminal_sales_event_location_conflicts(
+        start_date=el.event.start_date,
+        end_date=el.event.end_date,
+        location_ids=[el.location_id],
+        exclude_event_id=event_id,
+    )
+    if conflicts:
+        flash(_build_terminal_sales_conflict_message(conflicts), "warning")
+        return redirect(url_for("event.view_event", event_id=event_id))
     if el.event.closed:
         flash("This location is closed and cannot accept new sales.")
         return redirect(url_for("event.view_event", event_id=event_id))
@@ -1704,6 +1879,10 @@ def upload_terminal_sales(event_id):
     ev = db.session.get(Event, event_id)
     if ev is None:
         abort(404)
+    conflicts = _terminal_sales_conflicts_for_event(ev)
+    if conflicts:
+        flash(_build_terminal_sales_conflict_message(conflicts), "warning")
+        return redirect(url_for("event.view_event", event_id=event_id))
 
     form = TerminalSalesUploadForm()
     product_form = ProductWithRecipeForm()

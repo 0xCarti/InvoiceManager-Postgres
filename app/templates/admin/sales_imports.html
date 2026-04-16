@@ -40,6 +40,7 @@
                     <tr>
                         <th>ID</th>
                         <th>Received</th>
+                        <th>Sales Date</th>
                         <th>Status</th>
                         <th>Source</th>
                         <th>Attachment</th>
@@ -60,6 +61,13 @@
                             {{ import.received_at.strftime('%Y-%m-%d %H:%M') }}
                             {% else %}
                             <span class="text-muted">Unknown</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if import.sales_date %}
+                            {{ import.sales_date.isoformat() }}
+                            {% else %}
+                            <span class="text-danger">Missing</span>
                             {% endif %}
                         </td>
                         <td><span class="badge bg-light text-dark border text-capitalize">{{ import.status|replace('_', ' ') }}</span></td>

@@ -4,6 +4,18 @@
 <div class="row justify-content-center">
     <div class="col-12 col-lg-8">
         <h2 class="h3 mb-3">Create Event</h2>
+        <div class="alert alert-info" role="alert">
+            {{ terminal_sales_conflict_guidance }}
+        </div>
+        {% if form.errors %}
+        <div class="alert alert-warning" role="alert">
+            {% for messages in form.errors.values() %}
+                {% for message in messages %}
+                <div>{{ message }}</div>
+                {% endfor %}
+            {% endfor %}
+        </div>
+        {% endif %}
         <form method="post" class="card">
             <div class="card-body">
                 {{ form.csrf_token }}

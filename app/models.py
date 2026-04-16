@@ -2692,6 +2692,11 @@ class PosSalesImport(db.Model):
     attachment_filename = db.Column(db.String(255), nullable=False)
     attachment_sha256 = db.Column(db.String(64), nullable=False)
     attachment_storage_path = db.Column(db.String(1024), nullable=True)
+    sales_date = db.Column(
+        db.Date,
+        nullable=True,
+        default=lambda: (datetime.utcnow() - timedelta(days=1)).date(),
+    )
     received_at = db.Column(
         db.DateTime,
         nullable=False,
@@ -2758,6 +2763,7 @@ class PosSalesImport(db.Model):
         ),
         db.Index("ix_pos_sales_import_status_received_at", "status", "received_at"),
         db.Index("ix_pos_sales_import_received_at", "received_at"),
+        db.Index("ix_pos_sales_import_sales_date", "sales_date"),
         db.Index("ix_pos_sales_import_approved_by", "approved_by", "approved_at"),
         db.Index("ix_pos_sales_import_reversed_by", "reversed_by", "reversed_at"),
         db.Index("ix_pos_sales_import_deleted_by", "deleted_by", "deleted_at"),
@@ -2776,6 +2782,9 @@ class PosSalesImportLocation(db.Model):
     source_location_name = db.Column(db.String(255), nullable=False)
     normalized_location_name = db.Column(db.String(255), nullable=False)
     location_id = db.Column(db.Integer, db.ForeignKey("location.id"), nullable=True)
+    event_location_id = db.Column(
+        db.Integer, db.ForeignKey("event_location.id"), nullable=True
+    )
     total_quantity = db.Column(db.Float, nullable=False, default=0.0, server_default="0.0")
     net_inc = db.Column(db.Float, nullable=False, default=0.0, server_default="0.0")
     discounts_abs = db.Column(db.Float, nullable=False, default=0.0, server_default="0.0")
@@ -2783,6 +2792,7 @@ class PosSalesImportLocation(db.Model):
     parse_index = db.Column(db.Integer, nullable=False)
     approval_batch_id = db.Column(db.String(64), nullable=True)
     reversal_batch_id = db.Column(db.String(64), nullable=True)
+    approval_metadata = db.Column(db.Text, nullable=True)
     created_at = db.Column(
         db.DateTime,
         nullable=False,
@@ -2799,6 +2809,7 @@ class PosSalesImportLocation(db.Model):
 
     sales_import = relationship("PosSalesImport", back_populates="locations")
     location = relationship("Location")
+    event_location = relationship("EventLocation")
     rows = relationship(
         "PosSalesImportRow",
         back_populates="import_location",
@@ -2811,6 +2822,7 @@ class PosSalesImportLocation(db.Model):
         db.Index("ix_pos_sales_import_location_import", "import_id"),
         db.Index("ix_pos_sales_import_location_normalized", "normalized_location_name"),
         db.Index("ix_pos_sales_import_location_location_id", "location_id"),
+        db.Index("ix_pos_sales_import_location_event_location_id", "event_location_id"),
         db.Index("ix_pos_sales_import_location_approval_batch", "approval_batch_id"),
         db.Index("ix_pos_sales_import_location_reversal_batch", "reversal_batch_id"),
     )

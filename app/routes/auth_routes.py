@@ -6,7 +6,7 @@ import platform
 import re
 import subprocess
 import uuid
-from datetime import datetime
+from datetime import date as date_cls, datetime, time
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import urlparse
@@ -59,6 +59,9 @@ from app.forms import (
 from app.models import (
     ActivityLog,
     Customer,
+    Event,
+    EventLocation,
+    EventLocationTerminalSalesSummary,
     GLCode,
     Location,
     Invoice,
@@ -72,6 +75,7 @@ from app.models import (
     ProductRecipeItem,
     Product,
     Setting,
+    TerminalSale,
     TerminalSaleLocationAlias,
     TerminalSaleProductAlias,
     VendorItemAlias,
@@ -2514,8 +2518,11 @@ def sales_imports():
     imports = query.limit(200).all()
     status_changed = False
     for import_record in imports:
+        assignment_changed = _sync_sales_import_event_assignments(import_record)
         issue_state = _refresh_sales_import_mapping_status(import_record)
-        status_changed = status_changed or issue_state["status_changed"]
+        status_changed = (
+            status_changed or assignment_changed or issue_state["status_changed"]
+        )
         actionable_issue_count = (
             issue_state["issue_count"]
             if import_record.status in {"pending", "needs_mapping"}
@@ -2566,6 +2573,409 @@ def _write_sales_import_row_metadata(
     row: PosSalesImportRow, payload: dict[str, Any]
 ) -> None:
     row.approval_metadata = json.dumps(payload) if payload else None
+
+
+def _parse_sales_import_location_metadata(
+    location_import: PosSalesImportLocation,
+) -> dict[str, Any]:
+    if not location_import.approval_metadata:
+        return {}
+    try:
+        payload = json.loads(location_import.approval_metadata)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return payload
+
+
+def _write_sales_import_location_metadata(
+    location_import: PosSalesImportLocation, payload: dict[str, Any]
+) -> None:
+    location_import.approval_metadata = json.dumps(payload) if payload else None
+
+
+def _format_sales_import_event_label(event_location: EventLocation) -> str:
+    event_obj = event_location.event
+    location_obj = event_location.location
+    if event_obj is None:
+        return location_obj.name if location_obj is not None else f"Event location #{event_location.id}"
+    date_label = (
+        event_obj.start_date.isoformat()
+        if event_obj.start_date == event_obj.end_date
+        else f"{event_obj.start_date.isoformat()} to {event_obj.end_date.isoformat()}"
+    )
+    location_label = location_obj.name if location_obj is not None else "Unknown location"
+    return f"{event_obj.name} | {location_label} | {date_label}"
+
+
+def _load_sales_import_event_candidates(
+    sales_import: PosSalesImport,
+) -> dict[int, list[EventLocation]]:
+    candidate_lookup: dict[int, list[EventLocation]] = {}
+    if sales_import.sales_date is None:
+        return candidate_lookup
+
+    location_ids = sorted(
+        {
+            import_location.location_id
+            for import_location in sales_import.locations
+            if import_location.location_id is not None
+        }
+    )
+    if not location_ids:
+        return candidate_lookup
+
+    candidate_rows = (
+        EventLocation.query.options(
+            selectinload(EventLocation.event),
+            selectinload(EventLocation.location),
+        )
+        .join(Event, Event.id == EventLocation.event_id)
+        .filter(EventLocation.location_id.in_(location_ids))
+        .filter(Event.closed.is_(False))
+        .filter(Event.start_date <= sales_import.sales_date)
+        .filter(Event.end_date >= sales_import.sales_date)
+        .order_by(
+            EventLocation.location_id.asc(),
+            Event.start_date.asc(),
+            Event.end_date.asc(),
+            Event.id.asc(),
+        )
+        .all()
+    )
+
+    for candidate in candidate_rows:
+        candidate_lookup.setdefault(candidate.location_id, []).append(candidate)
+    return candidate_lookup
+
+
+def _sync_sales_import_event_assignments(
+    sales_import: PosSalesImport,
+    *,
+    candidate_lookup: dict[int, list[EventLocation]] | None = None,
+) -> bool:
+    if sales_import.status not in {"pending", "needs_mapping"}:
+        return False
+
+    candidate_lookup = (
+        candidate_lookup
+        if candidate_lookup is not None
+        else _load_sales_import_event_candidates(sales_import)
+    )
+    changed = False
+
+    for import_location in sales_import.locations:
+        if import_location.location_id is None or sales_import.sales_date is None:
+            if import_location.event_location_id is not None:
+                import_location.event_location_id = None
+                import_location.event_location = None
+                changed = True
+            continue
+
+        candidates = candidate_lookup.get(import_location.location_id, [])
+        if len(candidates) != 1:
+            if import_location.event_location_id is not None:
+                import_location.event_location_id = None
+                import_location.event_location = None
+                changed = True
+            continue
+
+        matched_event_location = candidates[0]
+        candidate_id = matched_event_location.id
+        if import_location.event_location_id != candidate_id:
+            import_location.event_location_id = candidate_id
+            changed = True
+        if import_location.event_location is not matched_event_location:
+            import_location.event_location = matched_event_location
+
+    return changed
+
+
+def _build_sales_import_event_assignment_state(
+    sales_import: PosSalesImport,
+    *,
+    candidate_lookup: dict[int, list[EventLocation]] | None = None,
+) -> dict[str, Any]:
+    candidate_lookup = (
+        candidate_lookup
+        if candidate_lookup is not None
+        else _load_sales_import_event_candidates(sales_import)
+    )
+
+    unresolved_event_location_ids: set[int] = set()
+    conflicting_event_location_ids: set[int] = set()
+    direct_inventory_only_location_ids: set[int] = set()
+    candidate_event_locations_by_import_location: dict[int, list[EventLocation]] = {}
+    event_assignment_messages: dict[int, list[str]] = {}
+
+    for import_location in sales_import.locations:
+        messages: list[str] = []
+        candidates = (
+            candidate_lookup.get(import_location.location_id, [])
+            if import_location.location_id is not None
+            else []
+        )
+        candidate_event_locations_by_import_location[import_location.id] = candidates
+
+        if import_location.location_id is None:
+            event_assignment_messages[import_location.id] = messages
+            continue
+
+        if sales_import.sales_date is None:
+            unresolved_event_location_ids.add(import_location.id)
+            messages.append(
+                "Sales date is not set. Save the sales date before approval so the app can determine whether this location belongs to an event."
+            )
+            event_assignment_messages[import_location.id] = messages
+            continue
+
+        if not candidates:
+            direct_inventory_only_location_ids.add(import_location.id)
+            messages.append(
+                "No open event matches this location on the sales date. Approval will apply directly to location inventory."
+            )
+            event_assignment_messages[import_location.id] = messages
+            continue
+
+        if len(candidates) > 1:
+            unresolved_event_location_ids.add(import_location.id)
+            conflicting_event_location_ids.add(import_location.id)
+            messages.append(
+                "Multiple open events match this location and sales date. Imported sales cannot be split without timestamps, so combine or fix those events before approval."
+            )
+            event_assignment_messages[import_location.id] = messages
+            continue
+
+        selected_event = candidates[0]
+        if import_location.event_location_id != selected_event.id:
+            unresolved_event_location_ids.add(import_location.id)
+            messages.append(
+                "A matching event was found, but the assignment has not been synced yet. Refresh the page or save another mapping change before approval."
+            )
+        else:
+            messages.append(
+                f"Sales will post to {_format_sales_import_event_label(selected_event)}."
+            )
+
+        event_assignment_messages[import_location.id] = messages
+
+    return {
+        "candidate_event_locations_by_import_location": candidate_event_locations_by_import_location,
+        "conflicting_event_location_ids": conflicting_event_location_ids,
+        "direct_inventory_only_location_ids": direct_inventory_only_location_ids,
+        "event_assignment_messages": event_assignment_messages,
+        "unresolved_event_location_ids": unresolved_event_location_ids,
+    }
+
+
+def _serialize_event_location_sales_state(
+    event_location: EventLocation | None,
+) -> dict[str, Any]:
+    if event_location is None:
+        return {"terminal_sales": [], "summary": None}
+
+    terminal_sales = []
+    for sale in event_location.terminal_sales:
+        terminal_sales.append(
+            {
+                "product_id": sale.product_id,
+                "quantity": float(sale.quantity or 0.0),
+                "sold_at": sale.sold_at.isoformat() if sale.sold_at else None,
+            }
+        )
+
+    summary_payload = None
+    if event_location.terminal_sales_summary is not None:
+        summary_payload = {
+            "source_location": event_location.terminal_sales_summary.source_location,
+            "total_quantity": event_location.terminal_sales_summary.total_quantity,
+            "total_amount": event_location.terminal_sales_summary.total_amount,
+            "variance_details": event_location.terminal_sales_summary.variance_details,
+        }
+
+    return {
+        "terminal_sales": terminal_sales,
+        "summary": summary_payload,
+    }
+
+
+def _restore_event_location_sales_state(
+    event_location_id: int,
+    snapshot: dict[str, Any] | None,
+) -> None:
+    TerminalSale.query.filter_by(event_location_id=event_location_id).delete(
+        synchronize_session=False
+    )
+    EventLocationTerminalSalesSummary.query.filter_by(
+        event_location_id=event_location_id
+    ).delete(synchronize_session=False)
+    db.session.flush()
+
+    if not snapshot:
+        return
+
+    for sale_payload in snapshot.get("terminal_sales", []):
+        sold_at_value = sale_payload.get("sold_at")
+        sold_at = None
+        if isinstance(sold_at_value, str):
+            try:
+                sold_at = datetime.fromisoformat(sold_at_value)
+            except ValueError:
+                sold_at = None
+        db.session.add(
+            TerminalSale(
+                event_location_id=event_location_id,
+                product_id=sale_payload.get("product_id"),
+                quantity=float(sale_payload.get("quantity") or 0.0),
+                sold_at=sold_at or datetime.utcnow(),
+            )
+        )
+
+    summary_payload = snapshot.get("summary")
+    if isinstance(summary_payload, dict):
+        db.session.add(
+            EventLocationTerminalSalesSummary(
+                event_location_id=event_location_id,
+                source_location=summary_payload.get("source_location"),
+                total_quantity=coerce_float(summary_payload.get("total_quantity")),
+                total_amount=coerce_float(summary_payload.get("total_amount")),
+                variance_details=summary_payload.get("variance_details"),
+            )
+        )
+
+
+def _build_event_linked_sales_application_payload(
+    sales_import: PosSalesImport,
+    import_locations: list[PosSalesImportLocation],
+    row_review_data: dict[int, dict[str, Any]],
+) -> dict[str, Any]:
+    aggregated_sales: dict[int, dict[str, Any]] = {}
+    source_location_names: list[str] = []
+    skipped_rows: list[dict[str, Any]] = []
+    total_quantity = 0.0
+    total_amount = 0.0
+
+    sales_date_value = sales_import.sales_date
+    sold_at = (
+        datetime.combine(sales_date_value, time(hour=12))
+        if isinstance(sales_date_value, date_cls)
+        else datetime.utcnow()
+    )
+
+    for import_location in import_locations:
+        source_name = (import_location.source_location_name or "").strip()
+        if source_name and source_name not in source_location_names:
+            source_location_names.append(source_name)
+        total_quantity += float(import_location.total_quantity or 0.0)
+        total_amount += float(import_location.computed_total or 0.0)
+
+        for row in import_location.rows:
+            row_review = row_review_data.get(row.id, {})
+            if row_review.get("is_active") and row.product_id is not None:
+                payload = aggregated_sales.setdefault(
+                    row.product_id,
+                    {
+                        "product_id": row.product_id,
+                        "quantity": 0.0,
+                        "sold_at": sold_at,
+                    },
+                )
+                payload["quantity"] += float(row.quantity or 0.0)
+                continue
+
+            if row_review.get("is_skipped"):
+                file_price = coerce_float(row.computed_unit_price)
+                skipped_rows.append(
+                    {
+                        "product_name": row.source_product_name,
+                        "quantity": float(row.quantity or 0.0),
+                        "file_amount": float(row.computed_line_total or 0.0),
+                        "file_prices": [file_price] if file_price is not None else [],
+                        "sales_location": source_name or None,
+                    }
+                )
+
+    variance_details = None
+    if skipped_rows:
+        variance_details = {
+            "products": [],
+            "price_mismatches": [],
+            "menu_issues": [],
+            "unmapped_products": skipped_rows,
+        }
+
+    return {
+        "terminal_sales": list(aggregated_sales.values()),
+        "summary": {
+            "source_location": ", ".join(source_location_names) or None,
+            "total_quantity": total_quantity,
+            "total_amount": total_amount,
+            "variance_details": variance_details,
+        },
+    }
+
+
+def _apply_event_linked_sales_payload(
+    event_location: EventLocation,
+    payload: dict[str, Any],
+) -> None:
+    _restore_event_location_sales_state(event_location.id, None)
+
+    location_obj = event_location.location
+    for sale_payload in payload.get("terminal_sales", []):
+        product_id = sale_payload.get("product_id")
+        if product_id is None:
+            continue
+        product = db.session.get(Product, product_id)
+        if product is None:
+            continue
+        if location_obj is not None and product not in location_obj.products:
+            location_obj.products.append(product)
+            for recipe_item in product.recipe_items:
+                if not recipe_item.countable or recipe_item.item_id is None:
+                    continue
+                record = LocationStandItem.query.filter_by(
+                    location_id=location_obj.id,
+                    item_id=recipe_item.item_id,
+                ).first()
+                if record is None:
+                    db.session.add(
+                        LocationStandItem(
+                            location_id=location_obj.id,
+                            item_id=recipe_item.item_id,
+                            expected_count=0.0,
+                            purchase_gl_code_id=(
+                                recipe_item.item.purchase_gl_code_id
+                                if recipe_item.item is not None
+                                else None
+                            ),
+                        )
+                    )
+        db.session.add(
+            TerminalSale(
+                event_location_id=event_location.id,
+                product_id=product.id,
+                quantity=float(sale_payload.get("quantity") or 0.0),
+                sold_at=sale_payload.get("sold_at") or datetime.utcnow(),
+            )
+        )
+
+    summary_payload = payload.get("summary") or {}
+    has_summary_values = any(
+        summary_payload.get(key) is not None
+        for key in ("source_location", "total_quantity", "total_amount", "variance_details")
+    )
+    if has_summary_values:
+        db.session.add(
+            EventLocationTerminalSalesSummary(
+                event_location_id=event_location.id,
+                source_location=summary_payload.get("source_location"),
+                total_quantity=coerce_float(summary_payload.get("total_quantity")),
+                total_amount=coerce_float(summary_payload.get("total_amount")),
+                variance_details=summary_payload.get("variance_details"),
+            )
+        )
 
 
 def _normalize_sales_import_price_action(raw_value: Any) -> str | None:
@@ -2730,14 +3140,25 @@ def _collect_sales_import_issue_state(
     import_record: PosSalesImport,
 ) -> dict[str, Any]:
     review_context = _build_sales_import_review_context(import_record)
+    event_assignment_state = _build_sales_import_event_assignment_state(
+        import_record
+    )
     unresolved_location_count = len(review_context["unresolved_location_ids"])
     unresolved_row_count = len(review_context["unresolved_row_ids"])
     unresolved_price_count = len(review_context["unresolved_price_row_ids"])
+    unresolved_event_location_count = len(
+        event_assignment_state["unresolved_event_location_ids"]
+    )
     errors: list[str] = []
     if unresolved_location_count:
         errors.append(
             f"{unresolved_location_count} import location"
             f"{'s are' if unresolved_location_count != 1 else ' is'} unresolved."
+        )
+    if unresolved_event_location_count:
+        errors.append(
+            f"{unresolved_event_location_count} import location"
+            f"{'s need' if unresolved_event_location_count != 1 else ' needs'} event assignment."
         )
     if unresolved_row_count:
         errors.append(
@@ -2751,11 +3172,14 @@ def _collect_sales_import_issue_state(
         )
     return {
         "review_context": review_context,
+        "event_assignment_state": event_assignment_state,
         "unresolved_location_count": unresolved_location_count,
+        "unresolved_event_location_count": unresolved_event_location_count,
         "unresolved_row_count": unresolved_row_count,
         "unresolved_price_count": unresolved_price_count,
         "issue_count": (
             unresolved_location_count
+            + unresolved_event_location_count
             + unresolved_row_count
             + unresolved_price_count
         ),
@@ -2769,7 +3193,11 @@ def _refresh_sales_import_mapping_status(
     issue_state = _collect_sales_import_issue_state(import_record)
     next_status = (
         "needs_mapping"
-        if issue_state["unresolved_location_count"] or issue_state["unresolved_row_count"]
+        if (
+            issue_state["unresolved_location_count"]
+            or issue_state["unresolved_event_location_count"]
+            or issue_state["unresolved_row_count"]
+        )
         else "pending"
     )
     status_changed = False
@@ -2836,6 +3264,21 @@ def _approve_sales_import(import_id: int) -> bool:
                 .selectinload(PosSalesImportRow.product)
                 .selectinload(Product.recipe_items)
                 .selectinload(ProductRecipeItem.item),
+                selectinload(PosSalesImport.locations).selectinload(
+                    PosSalesImportLocation.location
+                ),
+                selectinload(PosSalesImport.locations)
+                .selectinload(PosSalesImportLocation.event_location)
+                .selectinload(EventLocation.event),
+                selectinload(PosSalesImport.locations)
+                .selectinload(PosSalesImportLocation.event_location)
+                .selectinload(EventLocation.location),
+                selectinload(PosSalesImport.locations)
+                .selectinload(PosSalesImportLocation.event_location)
+                .selectinload(EventLocation.terminal_sales),
+                selectinload(PosSalesImport.locations)
+                .selectinload(PosSalesImportLocation.event_location)
+                .selectinload(EventLocation.terminal_sales_summary),
             )
             .filter(PosSalesImport.id == import_id)
             .first()
@@ -2844,6 +3287,12 @@ def _approve_sales_import(import_id: int) -> bool:
             flash("The requested import could not be found.", "danger")
             return False
 
+        if locked_import.status in {"pending", "needs_mapping"}:
+            _sync_sales_import_event_assignments(locked_import)
+            issue_state = _refresh_sales_import_mapping_status(locked_import)
+        else:
+            issue_state = _collect_sales_import_issue_state(locked_import)
+
         if locked_import.status != "pending":
             flash(
                 "Import approval is only allowed while the import status is Pending.",
@@ -2851,7 +3300,6 @@ def _approve_sales_import(import_id: int) -> bool:
             )
             return False
 
-        issue_state = _collect_sales_import_issue_state(locked_import)
         if issue_state["errors"]:
             flash(
                 "Approval blocked: resolve mappings and price review issues before approval.",
@@ -2883,7 +3331,75 @@ def _approve_sales_import(import_id: int) -> bool:
                 continue
             product.price = selected_price
 
+        event_linked_groups: dict[int, list[PosSalesImportLocation]] = {}
+        event_snapshots: dict[int, dict[str, Any]] = {}
         for import_location in locked_import.locations:
+            if import_location.event_location_id is None:
+                continue
+            event_linked_groups.setdefault(
+                import_location.event_location_id, []
+            ).append(import_location)
+            if import_location.event_location_id not in event_snapshots:
+                event_snapshots[import_location.event_location_id] = (
+                    _serialize_event_location_sales_state(
+                        import_location.event_location
+                    )
+                )
+
+        for event_location_id, grouped_locations in event_linked_groups.items():
+            event_location = next(
+                (
+                    location.event_location
+                    for location in grouped_locations
+                    if location.event_location is not None
+                ),
+                None,
+            )
+            if event_location is None:
+                continue
+
+            payload = _build_event_linked_sales_application_payload(
+                locked_import,
+                grouped_locations,
+                row_review_data,
+            )
+            _apply_event_linked_sales_payload(event_location, payload)
+
+            for import_location in grouped_locations:
+                import_location.approval_batch_id = approval_batch_id
+                location_metadata = _parse_sales_import_location_metadata(
+                    import_location
+                )
+                location_metadata["approval_batch_id"] = approval_batch_id
+                location_metadata["approved_at"] = approval_time.isoformat()
+                location_metadata["mode"] = "event_location"
+                location_metadata["event_location_id"] = event_location_id
+                location_metadata["previous_state"] = event_snapshots.get(
+                    event_location_id
+                )
+                location_metadata["applied_summary"] = payload.get("summary")
+                _write_sales_import_location_metadata(
+                    import_location, location_metadata
+                )
+
+                for row in import_location.rows:
+                    row_review = row_review_data.get(row.id, {})
+                    if row.product_id is None or not row_review.get("is_active"):
+                        continue
+                    row.approval_batch_id = approval_batch_id
+                    metadata = _parse_sales_import_row_metadata(row)
+                    metadata["approval_batch_id"] = approval_batch_id
+                    metadata["approved_at"] = approval_time.isoformat()
+                    metadata["target"] = {
+                        "mode": "event_location",
+                        "event_location_id": event_location_id,
+                    }
+                    _write_sales_import_row_metadata(row, metadata)
+                    row_change_count += 1
+
+        for import_location in locked_import.locations:
+            if import_location.event_location_id is not None:
+                continue
             active_rows = [
                 row
                 for row in import_location.rows
@@ -2978,11 +3494,13 @@ def _approve_sales_import(import_id: int) -> bool:
         locked_import.approved_at = approval_time
         locked_import.approval_batch_id = approval_batch_id
         db.session.commit()
-        flash(
-            f"Import approved. Applied inventory updates for {row_change_count} row"
-            f"{'s' if row_change_count != 1 else ''}.",
-            "success",
-        )
+        success_message = "Import approved."
+        if row_change_count:
+            success_message += (
+                f" Applied mapped sales for {row_change_count} row"
+                f"{'s' if row_change_count != 1 else ''}."
+            )
+        flash(success_message, "success")
         log_activity(
             f"Approved POS sales import {locked_import.id} "
             f"(batch {approval_batch_id})"
@@ -3065,6 +3583,12 @@ def sales_import_detail(import_id: int):
             .selectinload(PosSalesImportLocation.rows)
             .selectinload(PosSalesImportRow.product),
             selectinload(PosSalesImport.locations).selectinload(PosSalesImportLocation.location),
+            selectinload(PosSalesImport.locations)
+            .selectinload(PosSalesImportLocation.event_location)
+            .selectinload(EventLocation.event),
+            selectinload(PosSalesImport.locations)
+            .selectinload(PosSalesImportLocation.event_location)
+            .selectinload(EventLocation.location),
             selectinload(PosSalesImport.approver),
             selectinload(PosSalesImport.reverser),
             selectinload(PosSalesImport.deleter),
@@ -3142,11 +3666,35 @@ def sales_import_detail(import_id: int):
 
         return changed
 
+    def _sync_detail_review_state() -> dict[str, Any]:
+        assignment_changed = _sync_sales_import_event_assignments(sales_import)
+        issue_state = _refresh_sales_import_mapping_status(sales_import)
+        issue_state["assignment_changed"] = assignment_changed
+        return issue_state
+
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()
         selected_location_id = request.form.get("selected_location_id", type=int)
 
-        if action == "map_location":
+        if action == "save_sales_date":
+            raw_sales_date = (request.form.get("sales_date") or "").strip()
+            if not raw_sales_date:
+                flash("Select the sales date before saving.", "warning")
+            else:
+                try:
+                    sales_import.sales_date = date_cls.fromisoformat(raw_sales_date)
+                except ValueError:
+                    flash("Enter a valid sales date before saving.", "warning")
+                else:
+                    _sync_detail_review_state()
+                    db.session.commit()
+                    flash("Sales date saved.", "success")
+                    log_activity(
+                        f"Saved sales date for POS sales import {sales_import.id}: "
+                        f"{sales_import.sales_date.isoformat()}"
+                    )
+
+        elif action == "map_location":
             location_import_id = request.form.get("location_import_id", type=int)
             target_location_id = request.form.get("target_location_id", type=int)
             location_record = next(
@@ -3176,6 +3724,7 @@ def sales_import_detail(import_id: int):
                 else:
                     alias.source_name = location_record.source_location_name
                     alias.location_id = target_location_id
+                _sync_detail_review_state()
                 db.session.commit()
                 flash("Location mapping saved.", "success")
                 log_activity(
@@ -3221,6 +3770,7 @@ def sales_import_detail(import_id: int):
                 else:
                     alias.source_name = location_record.source_location_name
                     alias.location_id = created_location.id
+                _sync_detail_review_state()
                 db.session.commit()
                 flash("Location created and mapping saved.", "success")
                 log_activity(
@@ -3263,6 +3813,7 @@ def sales_import_detail(import_id: int):
                 else:
                     alias.source_name = row_record.source_product_name
                     alias.product_id = target_product_id
+                _sync_detail_review_state()
                 db.session.commit()
                 flash("Product mapping saved.", "success")
                 log_activity(
@@ -3347,6 +3898,7 @@ def sales_import_detail(import_id: int):
                 review["updated_by"] = current_user.id
                 payload["review"] = review
                 _write_sales_import_row_metadata(row_record, payload)
+                _sync_detail_review_state()
                 db.session.commit()
 
                 if resolution == "skip":
@@ -3367,7 +3919,13 @@ def sales_import_detail(import_id: int):
                 )
 
         elif action == "refresh_auto_mapping":
-            if _apply_auto_mappings():
+            auto_mapping_changed = _apply_auto_mappings()
+            issue_state = _sync_detail_review_state()
+            if (
+                auto_mapping_changed
+                or issue_state["assignment_changed"]
+                or issue_state["status_changed"]
+            ):
                 db.session.commit()
                 flash("Applied latest automatic mappings.", "success")
                 log_activity(f"Refreshed automatic mappings for POS sales import {sales_import.id}")
@@ -3400,6 +3958,15 @@ def sales_import_detail(import_id: int):
                         selectinload(PosSalesImport.locations).selectinload(
                             PosSalesImportLocation.rows
                         ),
+                        selectinload(PosSalesImport.locations).selectinload(
+                            PosSalesImportLocation.event_location
+                        ).selectinload(EventLocation.event),
+                        selectinload(PosSalesImport.locations).selectinload(
+                            PosSalesImportLocation.event_location
+                        ).selectinload(EventLocation.terminal_sales),
+                        selectinload(PosSalesImport.locations).selectinload(
+                            PosSalesImportLocation.event_location
+                        ).selectinload(EventLocation.terminal_sales_summary),
                         selectinload(PosSalesImport.rows),
                     )
                     .filter(PosSalesImport.id == sales_import.id)
@@ -3433,8 +4000,65 @@ def sales_import_detail(import_id: int):
                 reversal_time = datetime.utcnow()
                 reversal_batch_id = f"pos-import-reverse-{locked_import.id}-{uuid.uuid4().hex[:12]}"
                 row_change_count = 0
+                restored_event_location_ids: set[int] = set()
 
                 for import_location in locked_import.locations:
+                    location_metadata = _parse_sales_import_location_metadata(
+                        import_location
+                    )
+                    if location_metadata.get("mode") == "event_location":
+                        import_location.reversal_batch_id = reversal_batch_id
+                        event_location_id = (
+                            location_metadata.get("event_location_id")
+                            or import_location.event_location_id
+                        )
+                        skipped_closed_event_restore = False
+                        if event_location_id and event_location_id not in restored_event_location_ids:
+                            event_location = import_location.event_location
+                            if (
+                                event_location is not None
+                                and event_location.event is not None
+                                and event_location.event.closed
+                            ):
+                                skipped_closed_event_restore = True
+                            else:
+                                _restore_event_location_sales_state(
+                                    event_location_id,
+                                    location_metadata.get("previous_state"),
+                                )
+                            restored_event_location_ids.add(event_location_id)
+
+                        location_metadata["reversal"] = {
+                            "reversal_batch_id": reversal_batch_id,
+                            "reversed_at": reversal_time.isoformat(),
+                            "reversed_by": current_user.id,
+                            "reason": reversal_reason,
+                            "mode": "event_location",
+                            "event_location_id": event_location_id,
+                            "skipped_closed_event_restore": skipped_closed_event_restore,
+                        }
+                        _write_sales_import_location_metadata(
+                            import_location, location_metadata
+                        )
+
+                        for row in import_location.rows:
+                            if not row.approval_batch_id:
+                                continue
+                            row.reversal_batch_id = reversal_batch_id
+                            metadata = _parse_sales_import_row_metadata(row)
+                            metadata["reversal"] = {
+                                "reversal_batch_id": reversal_batch_id,
+                                "reversed_at": reversal_time.isoformat(),
+                                "reversed_by": current_user.id,
+                                "reason": reversal_reason,
+                                "mode": "event_location",
+                                "event_location_id": event_location_id,
+                                "skipped_closed_event_restore": skipped_closed_event_restore,
+                            }
+                            row.approval_metadata = json.dumps(metadata)
+                            row_change_count += 1
+                        continue
+
                     if import_location.approval_batch_id:
                         import_location.reversal_batch_id = reversal_batch_id
                     for row in import_location.rows:
@@ -3532,11 +4156,13 @@ def sales_import_detail(import_id: int):
                 locked_import.reversal_batch_id = reversal_batch_id
                 locked_import.reversal_reason = reversal_reason
                 db.session.commit()
-                flash(
-                    f"Import reversal complete. Reversed inventory updates for {row_change_count} row"
-                    f"{'s' if row_change_count != 1 else ''}.",
-                    "success",
-                )
+                success_message = "Import reversal complete."
+                if row_change_count:
+                    success_message += (
+                        f" Reversed approved sales rows for {row_change_count} row"
+                        f"{'s' if row_change_count != 1 else ''}."
+                    )
+                flash(success_message, "success")
                 log_activity(
                     f"Reversed POS sales import {locked_import.id} "
                     f"(batch {reversal_batch_id}) with reason: {reversal_reason}"
@@ -3599,10 +4225,11 @@ def sales_import_detail(import_id: int):
             )
         )
 
-    issue_state = _refresh_sales_import_mapping_status(sales_import)
-    if issue_state["status_changed"]:
+    issue_state = _sync_detail_review_state()
+    if issue_state["assignment_changed"] or issue_state["status_changed"]:
         db.session.commit()
     unresolved_location_count = issue_state["unresolved_location_count"]
+    unresolved_event_location_count = issue_state["unresolved_event_location_count"]
     unresolved_row_count = issue_state["unresolved_row_count"]
 
     review_context = issue_state["review_context"]
@@ -3612,10 +4239,32 @@ def sales_import_detail(import_id: int):
     unresolved_location_ids = review_context["unresolved_location_ids"]
     unresolved_row_ids = review_context["unresolved_row_ids"]
     unresolved_price_row_ids = review_context["unresolved_price_row_ids"]
+    event_assignment_state = issue_state["event_assignment_state"]
+    unresolved_event_location_ids = event_assignment_state[
+        "unresolved_event_location_ids"
+    ]
+    conflicting_event_location_ids = event_assignment_state[
+        "conflicting_event_location_ids"
+    ]
+    direct_inventory_only_location_ids = event_assignment_state[
+        "direct_inventory_only_location_ids"
+    ]
+    event_assignment_messages = event_assignment_state["event_assignment_messages"]
+    candidate_event_locations_by_import_location = event_assignment_state[
+        "candidate_event_locations_by_import_location"
+    ]
+    event_assignment_labels = {
+        location.id: _format_sales_import_event_label(location.event_location)
+        for location in sales_import.locations
+        if location.event_location is not None
+    }
 
     location_issue_counts: dict[int, int] = {}
     for location in sales_import.locations:
         location_issue_counts[location.id] = int(location.id in unresolved_location_ids)
+        location_issue_counts[location.id] += int(
+            location.id in unresolved_event_location_ids
+        )
         location_issue_counts[location.id] += sum(
             1 for row in location.rows if row.id in unresolved_row_ids
         )
@@ -3666,6 +4315,8 @@ def sales_import_detail(import_id: int):
         errors: list[str] = []
         if location.id in review_context["unresolved_location_ids"]:
             errors.append("Location is not mapped.")
+        if location.id in unresolved_event_location_ids:
+            errors.extend(event_assignment_messages.get(location.id, []))
         location_errors[location.id] = errors
 
         for row in location.rows:
@@ -3707,7 +4358,13 @@ def sales_import_detail(import_id: int):
         row_errors=row_errors,
         locations=Location.query.order_by(Location.name).all(),
         products=Product.query.order_by(Product.name).all(),
+        candidate_event_locations_by_import_location=candidate_event_locations_by_import_location,
+        conflicting_event_location_ids=conflicting_event_location_ids,
+        direct_inventory_only_location_ids=direct_inventory_only_location_ids,
+        event_assignment_labels=event_assignment_labels,
+        event_assignment_messages=event_assignment_messages,
         unresolved_location_count=unresolved_location_count,
+        unresolved_event_location_count=unresolved_event_location_count,
         unresolved_row_count=unresolved_row_count,
         unresolved_price_count=unresolved_price_count,
         reversal_warnings=reversal_warnings,

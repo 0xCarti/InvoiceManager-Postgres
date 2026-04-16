@@ -4,6 +4,30 @@
 <div class="row justify-content-center">
     <div class="col-12 col-lg-8">
         <h2 class="h3 mb-3">Edit Event</h2>
+        <div class="alert alert-info" role="alert">
+            {{ terminal_sales_conflict_guidance }}
+        </div>
+        {% if terminal_sales_conflicts %}
+        <div class="alert alert-warning" role="alert">
+            <div class="fw-semibold mb-1">This event already overlaps another event on the same location/day.</div>
+            {% for conflict in terminal_sales_conflicts %}
+            <div>
+                {{ conflict.location_name }} overlaps with
+                <a href="{{ url_for('event.view_event', event_id=conflict.event_id) }}">{{ conflict.event_name }}</a>
+                on {{ conflict.overlap_start_date }}{% if conflict.overlap_start_date != conflict.overlap_end_date %} to {{ conflict.overlap_end_date }}{% endif %}.
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if form.errors %}
+        <div class="alert alert-warning" role="alert">
+            {% for messages in form.errors.values() %}
+                {% for message in messages %}
+                <div>{{ message }}</div>
+                {% endfor %}
+            {% endfor %}
+        </div>
+        {% endif %}
         <form method="post" class="card">
             <div class="card-body">
                 {{ form.csrf_token }}

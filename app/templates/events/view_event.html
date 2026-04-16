@@ -28,6 +28,19 @@
             {% if physical_terminal_variance is not none %}${{ '{:,.2f}'.format(physical_terminal_variance) }}{% else %}Not available{% endif %}
         </span>
     </div>
+    {% if terminal_sales_conflicts %}
+    <div class="alert alert-warning" role="alert">
+        <div class="fw-semibold mb-1">Terminal sales assignment conflict</div>
+        <div class="mb-2">{{ terminal_sales_conflict_guidance }}</div>
+        {% for conflict in terminal_sales_conflicts %}
+        <div>
+            {{ conflict.location_name }} also belongs to
+            <a href="{{ url_for('event.view_event', event_id=conflict.event_id) }}">{{ conflict.event_name }}</a>
+            on {{ conflict.overlap_start_date }}{% if conflict.overlap_start_date != conflict.overlap_end_date %} to {{ conflict.overlap_end_date }}{% endif %}.
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
     <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 mb-3">
         {% if not event.closed %}
         <a class="btn btn-primary" href="{{ url_for('event.add_location', event_id=event.id) }}">Add Location</a>
@@ -116,6 +129,11 @@
                         <td class="text-break">
                             {% if el.location %}
                                 <a href="{{ url_for('locations.edit_location', location_id=el.location_id, next=request.full_path) }}">{{ el.location.name }}</a>
+                                {% if terminal_sales_conflicts_by_location.get(el.location_id) %}
+                                    <div class="text-danger small mt-1">
+                                        POS sales overlap another event on the same day.
+                                    </div>
+                                {% endif %}
                                 {% if el.notes %}
                                     <div class="text-muted small mt-1" style="white-space: pre-wrap;">{{ el.notes }}</div>
                                 {% endif %}

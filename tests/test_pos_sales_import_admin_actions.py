@@ -1,9 +1,12 @@
 import os
+from datetime import date as date_cls
 
 import pytest
 
 from app import db
 from app.models import (
+    Event,
+    EventLocation,
     Location,
     PosSalesImport,
     PosSalesImportLocation,
@@ -154,6 +157,7 @@ def test_mapping_resolution_create_or_map_flow_updates_rows_and_aliases(client, 
 @pytest.mark.parametrize(
     "action,data",
     [
+        ("save_sales_date", {"sales_date": "2026-04-15"}),
         ("map_location", {"location_import_id": 1, "target_location_id": 1}),
         ("create_location", {"location_import_id": 1, "new_location_name": "Created"}),
         ("map_product", {"row_id": 1, "target_product_id": 1}),
@@ -227,6 +231,7 @@ def test_sales_import_and_terminal_mapping_actions_require_csrf(client, app):
         csrf_token = extract_csrf_token(detail_page)
 
         action_payloads = [
+            {"action": "save_sales_date", "sales_date": "2026-04-15"},
             {"action": "map_location", "location_import_id": location_import_id, "target_location_id": location_id},
             {"action": "create_location", "location_import_id": location_import_id, "new_location_name": "CSRF Created Stand"},
             {"action": "map_product", "row_id": row_id, "target_product_id": product_id},
@@ -270,3 +275,68 @@ def test_sales_import_and_terminal_mapping_actions_require_csrf(client, app):
             follow_redirects=False,
         )
         assert allowed_list.status_code in {302, 303}
+
+
+def test_saving_sales_date_auto_assigns_matching_event_location(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    import_id, location_import_id, _ = _seed_import_with_unresolved_rows(
+        app, message_id="msg-save-sales-date"
+    )
+
+    with app.app_context():
+        import_record = db.session.get(PosSalesImport, import_id)
+        import_record.sales_date = None
+        mapped_location = Location(name="North Stand")
+        event = Event(
+            name="North Stand Event",
+            start_date=date_cls(2026, 4, 15),
+            end_date=date_cls(2026, 4, 15),
+        )
+        db.session.add_all([mapped_location, event])
+        db.session.flush()
+        event_location = EventLocation(
+            event_id=event.id,
+            location_id=mapped_location.id,
+        )
+        db.session.add(event_location)
+        db.session.flush()
+        mapped_location_id = mapped_location.id
+        event_location_id = event_location.id
+        db.session.commit()
+
+    with client:
+        login(client, admin_email, admin_pass)
+
+        map_location_response = client.post(
+            f"/controlpanel/sales-imports/{import_id}",
+            data={
+                "action": "map_location",
+                "location_import_id": location_import_id,
+                "target_location_id": mapped_location_id,
+            },
+            follow_redirects=True,
+        )
+        assert map_location_response.status_code == 200
+        assert b"Location mapping saved" in map_location_response.data
+
+        save_date_response = client.post(
+            f"/controlpanel/sales-imports/{import_id}",
+            data={
+                "action": "save_sales_date",
+                "sales_date": "2026-04-15",
+                "selected_location_id": location_import_id,
+            },
+            follow_redirects=True,
+        )
+        assert save_date_response.status_code == 200
+        assert b"Sales date saved" in save_date_response.data
+        assert b"This import location is linked to an event location" in save_date_response.data
+        assert b"North Stand Event" in save_date_response.data
+
+    with app.app_context():
+        import_record = db.session.get(PosSalesImport, import_id)
+        location_record = db.session.get(PosSalesImportLocation, location_import_id)
+
+        assert import_record.sales_date.isoformat() == "2026-04-15"
+        assert location_record.event_location_id == event_location_id

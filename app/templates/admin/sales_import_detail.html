@@ -9,6 +9,12 @@
         <p class="text-muted mb-0">
             Status: {{ sales_import.status|replace('_', ' ')|title }}
             &middot; Source: {{ sales_import.source_provider }}
+            &middot; Sales Date:
+            {% if sales_import.sales_date %}
+            {{ sales_import.sales_date.isoformat() }}
+            {% else %}
+            Missing
+            {% endif %}
         </p>
         {% if sales_import.reversed_at %}
         <p class="text-muted mb-0 small">
@@ -31,7 +37,7 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="action" value="approve_import">
             <input type="hidden" name="selected_location_id" value="{{ selected_location.id if selected_location else '' }}">
-            <button type="submit" class="btn btn-success btn-sm" {% if unresolved_location_count or unresolved_row_count or unresolved_price_count or sales_import.status != 'pending' %}disabled{% endif %}>
+            <button type="submit" class="btn btn-success btn-sm" {% if unresolved_location_count or unresolved_event_location_count or unresolved_row_count or unresolved_price_count or sales_import.status != 'pending' %}disabled{% endif %}>
                 Approve Import
             </button>
         </form>
@@ -66,11 +72,55 @@
     </div>
 </div>
 
-{% if unresolved_location_count or unresolved_row_count or unresolved_price_count %}
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="row g-2 align-items-end">
+            <div class="col-lg-6">
+                <div class="fw-semibold">Sales Date</div>
+                <div class="small text-muted">
+                    The app uses the sales date plus the mapped location to decide whether imported sales should post into an event location for stand-sheet balancing.
+                </div>
+            </div>
+            <div class="col-lg-6">
+                {% if can_manage_sales_imports %}
+                <form method="post" class="row g-2 align-items-end">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" value="save_sales_date">
+                    <input type="hidden" name="selected_location_id" value="{{ selected_location.id if selected_location else '' }}">
+                    <div class="col-sm-8">
+                        <label class="form-label mb-1" for="sales_date">Sales date</label>
+                        <input
+                            type="date"
+                            id="sales_date"
+                            name="sales_date"
+                            class="form-control"
+                            value="{{ sales_import.sales_date.isoformat() if sales_import.sales_date else '' }}"
+                            required
+                        >
+                    </div>
+                    <div class="col-sm-4">
+                        <button type="submit" class="btn btn-outline-primary w-100">Save Date</button>
+                    </div>
+                </form>
+                {% else %}
+                <div class="border rounded p-2">
+                    <div class="small text-muted">Sales date</div>
+                    <div class="fw-semibold">
+                        {{ sales_import.sales_date.isoformat() if sales_import.sales_date else 'Missing' }}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if unresolved_location_count or unresolved_event_location_count or unresolved_row_count or unresolved_price_count %}
 <div class="alert alert-warning">
     <div class="fw-semibold">Approval blocked while unresolved review items remain.</div>
     <div class="small">
         Unresolved locations: {{ unresolved_location_count }}
+        &middot; Event routing: {{ unresolved_event_location_count }}
         &middot; Unresolved product rows: {{ unresolved_row_count }}
         &middot; Unresolved price rows: {{ unresolved_price_count }}
     </div>
@@ -134,6 +184,19 @@
                             <div class="fw-semibold">{{ location.source_location_name }}</div>
                             <div class="small {% if selected_location and selected_location.id == location.id %}text-white-50{% else %}text-muted{% endif %}">
                                 Mapped: {{ location.location.name if location.location else 'Unmapped' }}
+                            </div>
+                            <div class="small {% if selected_location and selected_location.id == location.id %}text-white-50{% else %}text-muted{% endif %}">
+                                {% if event_assignment_labels.get(location.id) %}
+                                Event: {{ event_assignment_labels.get(location.id) }}
+                                {% elif location.id in direct_inventory_only_location_ids %}
+                                Event: Direct inventory only
+                                {% elif location.id in conflicting_event_location_ids %}
+                                Event: Conflict needs fix
+                                {% elif sales_import.sales_date %}
+                                Event: Waiting on routing
+                                {% else %}
+                                Event: Sales date required
+                                {% endif %}
                             </div>
                         </div>
                         <span class="badge {% if location_issue_counts.get(location.id, 0) > 0 %}bg-danger text-white{% else %}bg-success text-white{% endif %}">
@@ -211,6 +274,58 @@
                     </form>
                 </div>
                 {% endif %}
+                <div class="border rounded p-3 mb-3">
+                    <div class="fw-semibold mb-2">Event Routing</div>
+                    {% if selected_location.location_id is none %}
+                    <div class="text-muted small">
+                        Map this import location to an app location first. Event routing is calculated from the mapped location and sales date.
+                    </div>
+                    {% elif selected_location.id in conflicting_event_location_ids %}
+                    <div class="alert alert-warning py-2 mb-2">
+                        <div class="fw-semibold small">This location cannot be approved yet.</div>
+                        <div class="small">
+                            Multiple open events use this same location on {{ sales_import.sales_date.isoformat() if sales_import.sales_date else 'the selected date' }}. Imported sales cannot be split without timestamps, so those events need to be combined or corrected first.
+                        </div>
+                    </div>
+                    {% if candidate_event_locations_by_import_location.get(selected_location.id) %}
+                    <div class="small text-muted mb-1">Conflicting events</div>
+                    <ul class="small mb-0">
+                        {% for candidate in candidate_event_locations_by_import_location.get(selected_location.id, []) %}
+                        <li>
+                            {{ candidate.event.name if candidate.event else ('Event #' ~ candidate.event_id) }}
+                            {% if candidate.location %}&middot; {{ candidate.location.name }}{% endif %}
+                            {% if candidate.event %}
+                            &middot;
+                            {% if candidate.event.start_date == candidate.event.end_date %}
+                            {{ candidate.event.start_date.isoformat() }}
+                            {% else %}
+                            {{ candidate.event.start_date.isoformat() }} to {{ candidate.event.end_date.isoformat() }}
+                            {% endif %}
+                            {% endif %}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% endif %}
+                    {% elif event_assignment_labels.get(selected_location.id) %}
+                    <div class="alert alert-success py-2 mb-0">
+                        <div class="small fw-semibold">This import location is linked to an event location.</div>
+                        <div class="small">{{ event_assignment_labels.get(selected_location.id) }}</div>
+                    </div>
+                    {% elif selected_location.id in direct_inventory_only_location_ids %}
+                    <div class="alert alert-info py-2 mb-0">
+                        <div class="small fw-semibold">No event match was found.</div>
+                        <div class="small">Approval will apply these sales directly to location inventory instead of an event stand sheet.</div>
+                    </div>
+                    {% else %}
+                    <div class="alert alert-warning py-2 mb-0">
+                        <ul class="mb-0 small">
+                            {% for message in event_assignment_messages.get(selected_location.id, []) %}
+                            <li>{{ message }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                </div>
                 <div class="row g-2">
                     <div class="col-sm-6 col-md-3"><div class="border rounded p-2"><div class="small text-muted">Quantity</div><div class="fw-semibold">{{ '%.2f'|format(selected_location.total_quantity) }}</div></div></div>
                     <div class="col-sm-6 col-md-3"><div class="border rounded p-2"><div class="small text-muted">Net (Inc)</div><div class="fw-semibold">{{ '%.2f'|format(selected_location.net_inc) }}</div></div></div>

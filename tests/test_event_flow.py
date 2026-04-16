@@ -142,6 +142,61 @@ def setup_event_env(app, base_unit="each"):
         return user.email, loc.id, product.id, item.id
 
 
+def setup_event_overlap_env(
+    app,
+    *,
+    email,
+    location_name,
+    first_event_name,
+    first_start,
+    first_end,
+    second_event_name,
+    second_start,
+    second_end,
+    attach_second_location=True,
+):
+    with app.app_context():
+        user = User(
+            email=email,
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        location = Location(name=location_name)
+        first_event = Event(
+            name=first_event_name,
+            start_date=first_start,
+            end_date=first_end,
+            event_type="inventory",
+        )
+        second_event = Event(
+            name=second_event_name,
+            start_date=second_start,
+            end_date=second_end,
+            event_type="inventory",
+        )
+        db.session.add_all([user, location, first_event, second_event])
+        db.session.flush()
+
+        db.session.add(EventLocation(event_id=first_event.id, location_id=location.id))
+        second_el = None
+        if attach_second_location:
+            second_el = EventLocation(
+                event_id=second_event.id,
+                location_id=location.id,
+            )
+            db.session.add(second_el)
+
+        db.session.commit()
+        grant_event_permissions(user)
+        return {
+            "email": user.email,
+            "location_id": location.id,
+            "first_event_id": first_event.id,
+            "second_event_id": second_event.id,
+            "second_event_location_id": second_el.id if second_el is not None else None,
+        }
+
+
 def _build_inline_image_pdf(
     lines: list[str],
     include_image_terminator: bool = True,
@@ -354,6 +409,157 @@ def test_event_lifecycle(client, app):
         assert lsi is None
         assert (
             TerminalSale.query.filter_by(event_location_id=elid).count() == 0
+        )
+
+
+def test_add_location_blocks_overlapping_same_day_assignment(client, app):
+    env = setup_event_overlap_env(
+        app,
+        email="location-conflict@example.com",
+        location_name="North Stand",
+        first_event_name="Morning Event",
+        first_start=date(2026, 1, 10),
+        first_end=date(2026, 1, 10),
+        second_event_name="Evening Event",
+        second_start=date(2026, 1, 10),
+        second_end=date(2026, 1, 10),
+        attach_second_location=False,
+    )
+
+    with client:
+        login(client, env["email"], "pass")
+        response = client.post(
+            f"/events/{env['second_event_id']}/add_location",
+            data={"location_id": env["location_id"]},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"North Stand overlaps with event" in response.data
+        assert b"Morning Event" in response.data
+        assert b"Combine the events in the app" in response.data
+
+    with app.app_context():
+        assert (
+            EventLocation.query.filter_by(
+                event_id=env["second_event_id"],
+                location_id=env["location_id"],
+            ).count()
+            == 0
+        )
+
+
+def test_add_location_allows_same_location_on_different_days(client, app):
+    env = setup_event_overlap_env(
+        app,
+        email="location-ok@example.com",
+        location_name="North Stand",
+        first_event_name="Morning Event",
+        first_start=date(2026, 1, 10),
+        first_end=date(2026, 1, 10),
+        second_event_name="Evening Event",
+        second_start=date(2026, 1, 11),
+        second_end=date(2026, 1, 11),
+        attach_second_location=False,
+    )
+
+    with client:
+        login(client, env["email"], "pass")
+        response = client.post(
+            f"/events/{env['second_event_id']}/add_location",
+            data={"location_id": env["location_id"]},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Location assigned" in response.data
+
+    with app.app_context():
+        assert (
+            EventLocation.query.filter_by(
+                event_id=env["second_event_id"],
+                location_id=env["location_id"],
+            ).count()
+            == 1
+        )
+
+
+def test_edit_event_blocks_overlapping_dates_for_existing_location(client, app):
+    env = setup_event_overlap_env(
+        app,
+        email="edit-conflict@example.com",
+        location_name="North Stand",
+        first_event_name="Morning Event",
+        first_start=date(2026, 1, 10),
+        first_end=date(2026, 1, 10),
+        second_event_name="Evening Event",
+        second_start=date(2026, 1, 11),
+        second_end=date(2026, 1, 11),
+        attach_second_location=True,
+    )
+
+    with client:
+        login(client, env["email"], "pass")
+        response = client.post(
+            f"/events/{env['second_event_id']}/edit",
+            data={
+                "name": "Evening Event",
+                "start_date": "2026-01-10",
+                "end_date": "2026-01-10",
+                "event_type": "inventory",
+                "estimated_sales": "",
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"North Stand overlaps with event" in response.data
+        assert b"Morning Event" in response.data
+        assert b"Combine the events in the app" in response.data
+
+    with app.app_context():
+        second_event = db.session.get(Event, env["second_event_id"])
+        assert second_event.start_date == date(2026, 1, 11)
+        assert second_event.end_date == date(2026, 1, 11)
+
+
+def test_conflicting_event_warns_and_blocks_sales_entry(client, app):
+    env = setup_event_overlap_env(
+        app,
+        email="sales-conflict@example.com",
+        location_name="North Stand",
+        first_event_name="Morning Event",
+        first_start=date(2026, 1, 10),
+        first_end=date(2026, 1, 10),
+        second_event_name="Evening Event",
+        second_start=date(2026, 1, 10),
+        second_end=date(2026, 1, 10),
+        attach_second_location=True,
+    )
+
+    with client:
+        login(client, env["email"], "pass")
+
+        event_response = client.get(f"/events/{env['second_event_id']}")
+        assert event_response.status_code == 200
+        assert b"Terminal sales assignment conflict" in event_response.data
+        assert b"POS sales overlap another event on the same day." in event_response.data
+
+        upload_response = client.get(
+            f"/events/{env['second_event_id']}/sales/upload",
+            follow_redirects=True,
+        )
+        assert upload_response.status_code == 200
+        assert (
+            b"POS sales cannot be split across multiple events for the same location"
+            in upload_response.data
+        )
+
+        manual_response = client.get(
+            f"/events/{env['second_event_id']}/locations/{env['second_event_location_id']}/sales/add",
+            follow_redirects=True,
+        )
+        assert manual_response.status_code == 200
+        assert (
+            b"POS sales cannot be split across multiple events for the same location"
+            in manual_response.data
         )
 
 

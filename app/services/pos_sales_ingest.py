@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+from datetime import datetime, timedelta, timezone as dt_timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from flask import current_app
 from sqlalchemy.exc import IntegrityError
@@ -32,6 +34,17 @@ from app.utils.pos_import import (
     parse_terminal_sales_number,
     terminal_sales_cell_is_blank,
 )
+
+
+def _default_sales_import_date():
+    """Return the prior local day in the app's configured time zone."""
+
+    tz_name = current_app.config.get("DEFAULT_TIMEZONE") or "UTC"
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo("UTC")
+    return (datetime.now(dt_timezone.utc).astimezone(tz).date() - timedelta(days=1))
 
 
 def _parse_rows(filepath: str, extension: str) -> list[dict]:
@@ -333,6 +346,7 @@ def ingest_pos_sales_attachment(
         attachment_filename=filename,
         attachment_sha256=attachment_sha256,
         attachment_storage_path=str(persisted_path),
+        sales_date=_default_sales_import_date(),
         status="pending",
     )
     db.session.add(sales_import)
@@ -367,6 +381,7 @@ def ingest_pos_sales_attachment(
             attachment_filename=filename,
             attachment_sha256=attachment_sha256,
             attachment_storage_path=str(persisted_path),
+            sales_date=_default_sales_import_date(),
             status="failed",
             failure_reason="Unable to parse POS spreadsheet attachment.",
         )
