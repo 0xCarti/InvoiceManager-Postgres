@@ -33,6 +33,7 @@
         <thead>
             <tr>
                 <th>Item</th>
+                <th>Vendor SKU</th>
                 <th>Unit</th>
                 <th>Qty</th>
                 <th>Cost</th>
@@ -45,6 +46,7 @@
         {% for it in invoice.items %}
             <tr>
                 <td>{{ it.item.name if it.item else it.item_name }}</td>
+                <td>{{ it.vendor_sku or '' }}</td>
                 <td>
                     {% if it.unit %}{{ it.unit.name }}{% else %}{{ it.unit_name }}{% endif %}
                 </td>

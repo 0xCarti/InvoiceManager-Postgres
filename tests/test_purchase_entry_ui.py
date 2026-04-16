@@ -46,3 +46,12 @@ def test_receive_invoice_template_shows_inline_deposit_field():
     assert 'placeholder="Deposit"' in content
     assert "Add container deposit" not in content
     assert "toggle-deposit" not in content
+
+
+def test_receive_invoice_template_exposes_vendor_sku_field():
+    content = (
+        ROOT / "app/templates/purchase_orders/receive_invoice.html"
+    ).read_text(encoding="utf-8")
+    assert "Vendor SKU can stay blank while the purchase order is saved" in content
+    assert 'class="form-control vendor-sku"' in content
+    assert 'placeholder="Vendor SKU"' in content

@@ -21,6 +21,7 @@ from app import db
 from app.forms import (
     BulkItemUpdateForm,
     CSRFOnlyForm,
+    DeleteForm,
     ImportItemsForm,
     ItemForm,
 )
@@ -42,6 +43,7 @@ from app.models import (
     Transfer,
     TransferItem,
     Vendor,
+    VendorItemAlias,
 )
 from app.utils.activity import log_activity
 from app.utils.filter_state import (
@@ -134,6 +136,24 @@ def _sync_item_barcodes(item, barcode_values):
     ItemBarcode.query.filter_by(item_id=item.id).delete()
     for code in barcode_values[1:]:
         db.session.add(ItemBarcode(item_id=item.id, code=code))
+
+
+def _load_item_vendor_aliases(item_id: int) -> list[VendorItemAlias]:
+    return (
+        VendorItemAlias.query.options(
+            selectinload(VendorItemAlias.vendor),
+            selectinload(VendorItemAlias.item_unit),
+        )
+        .join(Vendor, Vendor.id == VendorItemAlias.vendor_id)
+        .filter(VendorItemAlias.item_id == item_id)
+        .order_by(
+            Vendor.first_name,
+            Vendor.last_name,
+            VendorItemAlias.vendor_sku,
+            VendorItemAlias.vendor_description,
+        )
+        .all()
+    )
 
 
 @item.route("/items")
@@ -645,6 +665,8 @@ def view_item(item_id):
     item_obj = db.session.get(Item, item_id)
     if item_obj is None:
         abort(404)
+    vendor_aliases = _load_item_vendor_aliases(item_id)
+    vendor_alias_delete_form = DeleteForm()
     purchase_page = request.args.get("purchase_page", 1, type=int)
     sales_page = request.args.get("sales_page", 1, type=int)
     transfer_page = request.args.get("transfer_page", 1, type=int)
@@ -683,6 +705,8 @@ def view_item(item_id):
     return render_template(
         "items/view_item.html",
         item=item_obj,
+        vendor_aliases=vendor_aliases,
+        vendor_alias_delete_form=vendor_alias_delete_form,
         purchase_items=purchase_items,
         sales_items=sales_items,
         transfer_items=transfer_items,
@@ -887,6 +911,8 @@ def edit_item(item_id):
     item = db.session.get(Item, item_id)
     if item is None:
         abort(404)
+    vendor_aliases = _load_item_vendor_aliases(item.id)
+    vendor_alias_delete_form = DeleteForm()
     location_stand_items = (
         LocationStandItem.query.join(Location)
         .options(
@@ -929,6 +955,8 @@ def edit_item(item_id):
                     "items/item_form.html",
                     form=form,
                     item=item,
+                    vendor_aliases=vendor_aliases,
+                    vendor_alias_delete_form=vendor_alias_delete_form,
                     recipe_product_items=recipe_product_items,
                 )
                 return jsonify({"success": False, "form_html": form_html})
@@ -945,6 +973,8 @@ def edit_item(item_id):
                 location_stand_items=location_stand_items,
                 purchase_gl_codes=purchase_gl_codes,
                 recipe_product_items=recipe_product_items,
+                vendor_aliases=vendor_aliases,
+                vendor_alias_delete_form=vendor_alias_delete_form,
             )
         if barcode_errors or _apply_barcode_conflicts(
             form, barcode_values, current_item_id=item.id
@@ -957,6 +987,8 @@ def edit_item(item_id):
                     location_stand_items=location_stand_items,
                     purchase_gl_codes=purchase_gl_codes,
                     recipe_product_items=recipe_product_items,
+                    vendor_aliases=vendor_aliases,
+                    vendor_alias_delete_form=vendor_alias_delete_form,
                 )
                 return jsonify({"success": False, "form_html": form_html})
             return render_template(
@@ -967,6 +999,8 @@ def edit_item(item_id):
                 location_stand_items=location_stand_items,
                 purchase_gl_codes=purchase_gl_codes,
                 recipe_product_items=recipe_product_items,
+                vendor_aliases=vendor_aliases,
+                vendor_alias_delete_form=vendor_alias_delete_form,
             )
         item.name = form.name.data
         item.base_unit = form.base_unit.data
@@ -1028,6 +1062,8 @@ def edit_item(item_id):
                 location_stand_items=location_stand_items,
                 purchase_gl_codes=purchase_gl_codes,
                 recipe_product_items=recipe_product_items,
+                vendor_aliases=vendor_aliases,
+                vendor_alias_delete_form=vendor_alias_delete_form,
             )
             return jsonify({"success": False, "form_html": form_html})
         return render_template(
@@ -1037,6 +1073,8 @@ def edit_item(item_id):
             location_stand_items=location_stand_items,
             purchase_gl_codes=purchase_gl_codes,
             recipe_product_items=recipe_product_items,
+            vendor_aliases=vendor_aliases,
+            vendor_alias_delete_form=vendor_alias_delete_form,
         )
     return render_template(
         "items/item_form_page.html",
@@ -1046,6 +1084,8 @@ def edit_item(item_id):
         location_stand_items=location_stand_items,
         purchase_gl_codes=purchase_gl_codes,
         recipe_product_items=recipe_product_items,
+        vendor_aliases=vendor_aliases,
+        vendor_alias_delete_form=vendor_alias_delete_form,
     )
 
 

@@ -1,11 +1,15 @@
+from werkzeug.security import generate_password_hash
+
 from app import db
-from app.models import Item, ItemUnit, Vendor
+from app.models import Item, ItemUnit, User, Vendor, VendorItemAlias
 from app.services.purchase_imports import (
     ParsedPurchaseLine,
     normalize_vendor_alias_text,
     resolve_vendor_purchase_lines,
     update_or_create_vendor_alias,
 )
+from tests.permission_helpers import grant_permissions
+from tests.utils import extract_csrf_token, login
 
 
 def test_resolve_vendor_purchase_lines_uses_sku_alias(app):
@@ -78,3 +82,132 @@ def test_resolve_vendor_purchase_lines_matches_description(app):
         assert resolved[0].item_id == item.id
         assert resolved[0].unit_id == unit.id
         assert resolved[0].cost == alias.default_cost
+
+
+def test_update_vendor_alias_keeps_existing_sku_when_new_sku_is_seen(app):
+    with app.app_context():
+        vendor = Vendor(first_name="History", last_name="Vendor")
+        item = Item(name="Roma Tomatoes", base_unit="ea", cost=0.0)
+        unit = ItemUnit(item=item, name="Case", factor=1, receiving_default=True)
+        db.session.add_all([vendor, item, unit])
+        db.session.flush()
+
+        first_alias = update_or_create_vendor_alias(
+            vendor=vendor,
+            item_id=item.id,
+            item_unit_id=unit.id,
+            vendor_sku="OLD-100",
+            vendor_description="Roma Tomatoes 25lb",
+            pack_size="25 lb",
+            default_cost=21.0,
+        )
+        db.session.add(first_alias)
+        db.session.commit()
+
+        second_alias = update_or_create_vendor_alias(
+            vendor=vendor,
+            item_id=item.id,
+            item_unit_id=unit.id,
+            vendor_sku="NEW-200",
+            vendor_description="Roma Tomatoes 25lb",
+            pack_size="25 lb",
+            default_cost=23.5,
+        )
+        db.session.add(second_alias)
+        db.session.commit()
+
+        aliases = VendorItemAlias.query.filter_by(
+            vendor_id=vendor.id, item_id=item.id
+        ).all()
+        assert {alias.vendor_sku for alias in aliases} == {"OLD-100", "NEW-200"}
+        assert (
+            VendorItemAlias.query.filter_by(
+                vendor_id=vendor.id,
+                normalized_description=normalize_vendor_alias_text(
+                    "Roma Tomatoes 25lb"
+                ),
+            ).count()
+            == 1
+        )
+
+        resolved = resolve_vendor_purchase_lines(
+            vendor,
+            [
+                ParsedPurchaseLine(
+                    vendor_sku="NEW-200",
+                    vendor_description="Roma Tomatoes 25lb",
+                    pack_size="25 lb",
+                    quantity=1,
+                    unit_cost=None,
+                ),
+                ParsedPurchaseLine(
+                    vendor_sku=None,
+                    vendor_description="Roma Tomatoes 25lb",
+                    pack_size="25 lb",
+                    quantity=1,
+                    unit_cost=None,
+                ),
+            ],
+        )
+        assert [line.item_id for line in resolved] == [item.id, item.id]
+
+
+def test_vendor_alias_save_redirects_back_to_return_url(client, app):
+    with app.app_context():
+        vendor = Vendor(first_name="Route", last_name="Vendor")
+        item = Item(name="Route Item", base_unit="ea", cost=0.0)
+        unit = ItemUnit(
+            item=item,
+            name="Case",
+            factor=1,
+            receiving_default=True,
+            transfer_default=True,
+        )
+        user = User(
+            email="vendor-alias-manager@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add_all([vendor, item, unit, user])
+        db.session.commit()
+        grant_permissions(
+            user,
+            "vendor_item_aliases.manage",
+            group_name="Vendor Alias Managers",
+            description="Can manage vendor aliases.",
+        )
+        item_id = item.id
+        vendor_id = vendor.id
+        unit_id = unit.id
+
+    with client:
+        login(client, "vendor-alias-manager@example.com", "pass")
+        response = client.get(
+            f"/controlpanel/vendor-item-aliases?item_id={item_id}&next=/items/{item_id}"
+        )
+        token = extract_csrf_token(response)
+        save = client.post(
+            f"/controlpanel/vendor-item-aliases?item_id={item_id}&next=/items/{item_id}",
+            data={
+                "csrf_token": token,
+                "return_to": f"/items/{item_id}",
+                "vendor_id": vendor_id,
+                "vendor_sku": "ROUTE-1",
+                "vendor_description": "Route Managed Alias",
+                "pack_size": "10 lb",
+                "item_id": item_id,
+                "item_unit_id": unit_id,
+                "default_cost": "12.50",
+            },
+            follow_redirects=False,
+        )
+
+    assert save.status_code == 302
+    assert save.headers["Location"].endswith(f"/items/{item_id}")
+
+    with app.app_context():
+        alias = VendorItemAlias.query.filter_by(
+            vendor_id=vendor_id, item_id=item_id, vendor_sku="ROUTE-1"
+        ).first()
+        assert alias is not None
+        assert alias.vendor_description == "Route Managed Alias"

@@ -6,6 +6,26 @@
         <a class="btn btn-outline-secondary" href="{{ url_for('notes.entity_notes', entity_type='item', entity_id=item.id) }}">View Notes</a>
     </div>
     <p><strong>Base Unit:</strong> {{ item.base_unit }}</p>
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+                <div>
+                    <h3 class="h5 mb-1">Vendor SKU Mappings</h3>
+                    <p class="text-muted mb-0">Use these records to trace this item back to vendor catalog products during audits or reordering.</p>
+                </div>
+                {% if can_access_endpoint('admin.vendor_item_aliases', 'POST') %}
+                <a
+                    class="btn btn-outline-primary"
+                    href="{{ url_for('admin.vendor_item_aliases', item_id=item.id, next=url_for('item.view_item', item_id=item.id)) }}"
+                >Add Vendor SKU</a>
+                {% endif %}
+            </div>
+            {% set item_ref = item %}
+            {% set return_url = url_for('item.view_item', item_id=item.id) %}
+            {% set empty_message = 'No vendor SKU mappings have been saved for this item yet.' %}
+            {% include 'items/_vendor_alias_table.html' %}
+        </div>
+    </div>
     <div class="row">
         <div class="col-12">
             <h4>Recent Purchase Invoices</h4>

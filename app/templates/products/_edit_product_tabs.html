@@ -3,6 +3,8 @@
 {% set is_default_tabs = tabs_id == 'productEditTabs' %}
 {% set details_tab_id = 'product-details-tab' if is_default_tabs else tabs_id ~ '-details-tab' %}
 {% set details_panel_id = 'product-details' if is_default_tabs else tabs_id ~ '-details' %}
+{% set vendor_tab_id = 'product-vendor-skus-tab' if is_default_tabs else tabs_id ~ '-vendor-skus-tab' %}
+{% set vendor_panel_id = 'product-vendor-skus' if is_default_tabs else tabs_id ~ '-vendor-skus' %}
 {% set terminal_tab_id = 'terminal-sales-tab' if is_default_tabs else tabs_id ~ '-terminal-sales-tab' %}
 {% set terminal_panel_id = 'terminal-sales' if is_default_tabs else tabs_id ~ '-terminal-sales' %}
 {% set can_remove_terminal_sale_aliases = can_access_endpoint('product.remove_terminal_sale_alias', 'POST') %}
@@ -14,6 +16,11 @@
                 aria-controls="{{ details_panel_id }}" aria-selected="true">Details</button>
         </li>
         <li class="nav-item" role="presentation">
+            <button class="nav-link" id="{{ vendor_tab_id }}" data-bs-toggle="tab"
+                data-bs-target="#{{ vendor_panel_id }}" type="button" role="tab"
+                aria-controls="{{ vendor_panel_id }}" aria-selected="false">Vendor SKUs</button>
+        </li>
+        <li class="nav-item" role="presentation">
             <button class="nav-link" id="{{ terminal_tab_id }}" data-bs-toggle="tab"
                 data-bs-target="#{{ terminal_panel_id }}" type="button" role="tab"
                 aria-controls="{{ terminal_panel_id }}" aria-selected="false">Terminal Sales Mappings</button>
@@ -23,6 +30,48 @@
         <div class="tab-pane fade show active" id="{{ details_panel_id }}" role="tabpanel"
             aria-labelledby="{{ details_tab_id }}">
             {% include 'products/_create_product_form.html' %}
+        </div>
+        <div class="tab-pane fade" id="{{ vendor_panel_id }}" role="tabpanel"
+            aria-labelledby="{{ vendor_tab_id }}">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <div>
+                    <h3 class="h5 mb-1">Recipe Item Vendor SKUs</h3>
+                    <p class="text-muted mb-0">This summarizes the vendor catalog mappings attached to the items in this recipe.</p>
+                </div>
+            </div>
+            {% if vendor_alias_groups %}
+                <div class="vstack gap-4">
+                    {% for group in vendor_alias_groups %}
+                    <section>
+                        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-2">
+                            <div>
+                                <h4 class="h6 mb-1">
+                                    {% if can_access_endpoint('item.view_item', 'GET') %}
+                                    <a href="{{ url_for('item.view_item', item_id=group.item.id) }}">{{ group.item.name }}</a>
+                                    {% else %}
+                                    {{ group.item.name }}
+                                    {% endif %}
+                                </h4>
+                                <p class="text-muted small mb-0">{{ group.aliases|length }} vendor mapping{{ '' if group.aliases|length == 1 else 's' }}</p>
+                            </div>
+                            {% if can_access_endpoint('admin.vendor_item_aliases', 'POST') %}
+                            <a
+                                class="btn btn-sm btn-outline-primary"
+                                href="{{ url_for('admin.vendor_item_aliases', item_id=group.item.id, next=url_for('product.edit_product', product_id=product_id)) }}"
+                            >Add Mapping</a>
+                            {% endif %}
+                        </div>
+                        {% set item_ref = group.item %}
+                        {% set vendor_aliases = group.aliases %}
+                        {% set return_url = url_for('product.edit_product', product_id=product_id) %}
+                        {% set empty_message = 'No vendor SKU mappings have been saved for this recipe item yet.' %}
+                        {% include 'items/_vendor_alias_table.html' %}
+                    </section>
+                    {% endfor %}
+                </div>
+            {% else %}
+            <p class="text-muted mb-0">This product does not have any recipe items yet.</p>
+            {% endif %}
         </div>
         <div class="tab-pane fade" id="{{ terminal_panel_id }}" role="tabpanel"
             aria-labelledby="{{ terminal_tab_id }}">

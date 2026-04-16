@@ -744,6 +744,33 @@
             }
             itemCol.appendChild(costInput);
 
+            const vendorSkuInput = document.createElement("input");
+            vendorSkuInput.type = "hidden";
+            vendorSkuInput.name = `items-${index}-vendor_sku`;
+            vendorSkuInput.classList.add("vendor-sku-field");
+            if (options.vendorSku) {
+                vendorSkuInput.value = options.vendorSku;
+            }
+            itemCol.appendChild(vendorSkuInput);
+
+            const vendorDescriptionInput = document.createElement("input");
+            vendorDescriptionInput.type = "hidden";
+            vendorDescriptionInput.name = `items-${index}-vendor_description`;
+            vendorDescriptionInput.classList.add("vendor-description-field");
+            if (options.vendorDescription) {
+                vendorDescriptionInput.value = options.vendorDescription;
+            }
+            itemCol.appendChild(vendorDescriptionInput);
+
+            const packSizeInput = document.createElement("input");
+            packSizeInput.type = "hidden";
+            packSizeInput.name = `items-${index}-pack_size`;
+            packSizeInput.classList.add("vendor-pack-size-field");
+            if (options.packSize) {
+                packSizeInput.value = options.packSize;
+            }
+            itemCol.appendChild(packSizeInput);
+
             const positionInput = document.createElement("input");
             positionInput.type = "hidden";
             positionInput.name = `items-${index}-position`;

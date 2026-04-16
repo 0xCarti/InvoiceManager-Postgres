@@ -3725,9 +3725,38 @@ def sales_import_detail(import_id: int):
 @login_required
 def vendor_item_aliases(alias_id: int | None = None):
     """Allow admins to manage vendor item alias mappings."""
+
+    def _safe_local_return_url(value: str | None) -> str | None:
+        candidate = (value or "").strip().replace("\\", "")
+        if not candidate:
+            return None
+        parsed = urlparse(candidate)
+        if parsed.scheme or parsed.netloc or not candidate.startswith("/"):
+            return None
+        return candidate
+
     alias_obj = db.session.get(VendorItemAlias, alias_id) if alias_id else None
     form = VendorItemAliasForm(obj=alias_obj)
     delete_form = DeleteForm()
+    if request.method == "GET":
+        form.return_to.data = (
+            _safe_local_return_url(request.args.get("next")) or ""
+        )
+        if alias_obj is None:
+            requested_item_id = request.args.get("item_id", type=int)
+            valid_item_ids = {choice[0] for choice in form.item_id.choices}
+            if requested_item_id in valid_item_ids:
+                form.item_id.data = requested_item_id
+
+            requested_vendor_id = request.args.get("vendor_id", type=int)
+            valid_vendor_ids = {choice[0] for choice in form.vendor_id.choices}
+            if requested_vendor_id in valid_vendor_ids:
+                form.vendor_id.data = requested_vendor_id
+
+            requested_unit_id = request.args.get("item_unit_id", type=int)
+            valid_unit_ids = {choice[0] for choice in form.item_unit_id.choices}
+            if requested_unit_id in valid_unit_ids:
+                form.item_unit_id.data = requested_unit_id
 
     aliases = (
         VendorItemAlias.query.options(
@@ -3784,7 +3813,10 @@ def vendor_item_aliases(alias_id: int | None = None):
             f"Saved vendor alias for vendor {vendor.first_name} {vendor.last_name}"
         )
         flash("Vendor alias saved successfully.", "success")
-        return redirect(url_for("admin.vendor_item_aliases"))
+        return redirect(
+            _safe_local_return_url(form.return_to.data)
+            or url_for("admin.vendor_item_aliases")
+        )
 
     return render_template(
         "admin/vendor_item_aliases.html",
@@ -3804,18 +3836,30 @@ def vendor_item_aliases(alias_id: int | None = None):
 )
 @login_required
 def delete_vendor_item_alias(alias_id: int):
+    def _safe_local_return_url(value: str | None) -> str | None:
+        candidate = (value or "").strip().replace("\\", "")
+        if not candidate:
+            return None
+        parsed = urlparse(candidate)
+        if parsed.scheme or parsed.netloc or not candidate.startswith("/"):
+            return None
+        return candidate
+
+    redirect_target = _safe_local_return_url(request.args.get("next")) or url_for(
+        "admin.vendor_item_aliases"
+    )
     form = DeleteForm()
     if not form.validate_on_submit():
         flash("Unable to process the delete request.", "danger")
-        return redirect(url_for("admin.vendor_item_aliases"))
+        return redirect(redirect_target)
 
     alias = db.session.get(VendorItemAlias, alias_id)
     if alias is None:
         flash("Vendor alias not found.", "warning")
-        return redirect(url_for("admin.vendor_item_aliases"))
+        return redirect(redirect_target)
 
     db.session.delete(alias)
     db.session.commit()
     log_activity("Deleted a vendor item alias via admin panel")
     flash("Vendor alias deleted.", "success")
-    return redirect(url_for("admin.vendor_item_aliases"))
+    return redirect(redirect_target)

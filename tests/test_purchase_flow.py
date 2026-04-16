@@ -160,6 +160,7 @@ def test_purchase_and_receive(client, app):
                 "items-0-unit": unit_id,
                 "items-0-quantity": 3,
                 "items-0-cost": 2.5,
+                "items-0-vendor_sku": "SKU-0",
                 "items-0-location_id": 0,
             },
             follow_redirects=True,
@@ -350,6 +351,7 @@ def test_item_cost_visible_on_items_page(client, app):
                 "items-0-unit": unit_id,
                 "items-0-quantity": 3,
                 "items-0-cost": 2.5,
+                "items-0-vendor_sku": "SKU-0",
                 "items-0-location_id": 0,
             },
             follow_redirects=True,
@@ -519,11 +521,13 @@ def test_receive_invoice_line_locations(client, app):
                 "items-0-unit": unit1_id,
                 "items-0-quantity": 5,
                 "items-0-cost": 1.5,
+                "items-0-vendor_sku": "SKU-0",
                 "items-0-location_id": 0,
                 "items-1-item": item2_id,
                 "items-1-unit": unit2_id,
                 "items-1-quantity": 7,
                 "items-1-cost": 2.0,
+                "items-1-vendor_sku": "SKU-1",
                 "items-1-location_id": loc_secondary_id,
             },
             follow_redirects=True,
@@ -623,6 +627,7 @@ def test_receive_prefills_items_and_return(client, app):
                 "items-0-unit": unit_id,
                 "items-0-quantity": -3,
                 "items-0-cost": 1.5,
+                "items-0-vendor_sku": "SKU-0",
             },
             follow_redirects=True,
         )
@@ -671,6 +676,38 @@ def test_receive_invoice_prefills_unit(client, app):
         resp = client.get(f"/purchase_orders/{po_id}/receive")
         assert resp.status_code == 200
         assert f'data-selected="{case_unit_id}"' in resp.get_data(as_text=True)
+
+
+def test_receive_invoice_prefills_vendor_sku_from_purchase_order(client, app):
+    email, vendor_id, item_id, _, unit_id = setup_purchase(app)
+
+    with client:
+        login(client, email, "pass")
+        client.post(
+            "/purchase_orders/create",
+            data={
+                "vendor": vendor_id,
+                "order_date": "2023-04-01",
+                "expected_date": "2023-04-05",
+                "items-0-item": item_id,
+                "items-0-unit": unit_id,
+                "items-0-vendor_sku": "PO-SKU-1",
+                "items-0-quantity": 3,
+            },
+            follow_redirects=True,
+        )
+
+    with app.app_context():
+        po = PurchaseOrder.query.first()
+        assert po is not None
+        assert po.items[0].vendor_sku == "PO-SKU-1"
+        po_id = po.id
+
+    with client:
+        login(client, email, "pass")
+        resp = client.get(f"/purchase_orders/{po_id}/receive")
+        assert resp.status_code == 200
+        assert extract_input_value(resp.get_data(as_text=True), "items-0-vendor_sku") == "PO-SKU-1"
 
 
 def test_edit_purchase_order_prefills_unit(client, app):
@@ -808,6 +845,7 @@ def test_invoice_moves_and_reverse(client, app):
                 "items-0-unit": unit_id,
                 "items-0-quantity": 3,
                 "items-0-cost": 2.5,
+                "items-0-vendor_sku": "SKU-0",
             },
             follow_redirects=True,
         )
@@ -883,6 +921,7 @@ def test_reverse_invoice_prefills_form(client, app):
         "items-0-unit": unit_id,
         "items-0-quantity": 3,
         "items-0-cost": 2.5,
+        "items-0-vendor_sku": "SKU-0",
         "items-0-location_id": 0,
         "items-0-gl_code": 0,
     }
@@ -916,6 +955,7 @@ def test_reverse_invoice_prefills_form(client, app):
         assert data["gst"] == pytest.approx(0.25)
         assert data["delivery_charge"] == pytest.approx(5.75)
         assert data["items"][0]["cost"] == pytest.approx(2.5)
+        assert data["items"][0]["vendor_sku"] == "SKU-0"
 
     with client:
         login(client, email, "pass")
@@ -928,6 +968,7 @@ def test_reverse_invoice_prefills_form(client, app):
         assert float(extract_input_value(page, "delivery_charge")) == pytest.approx(5.75)
         assert float(extract_input_value(page, "items-0-cost")) == pytest.approx(2.5)
         assert float(extract_input_value(page, "items-0-quantity")) == pytest.approx(3)
+        assert extract_input_value(page, "items-0-vendor_sku") == "SKU-0"
         assert extract_selected_option(page, "location_id") == str(location_id)
         assert extract_selected_option(page, "department") == "Kitchen"
 
@@ -988,6 +1029,7 @@ def test_receive_invoice_base_unit_cost(client, app):
                 "items-0-unit": case_unit_id,
                 "items-0-quantity": 1,
                 "items-0-cost": 24,
+                "items-0-vendor_sku": "SKU-0",
             },
             follow_redirects=True,
         )
@@ -1041,6 +1083,7 @@ def test_case_item_cost_visible_on_items_page(client, app):
                 "items-0-unit": case_unit_id,
                 "items-0-quantity": 1,
                 "items-0-cost": 24,
+                "items-0-vendor_sku": "SKU-0",
             },
             follow_redirects=True,
         )
@@ -1087,6 +1130,7 @@ def test_item_cost_is_average(client, app):
                 "items-0-unit": unit_id,
                 "items-0-quantity": 2,
                 "items-0-cost": 2,
+                "items-0-vendor_sku": "SKU-0",
             },
             follow_redirects=True,
         )
@@ -1126,6 +1170,7 @@ def test_item_cost_is_average(client, app):
                 "items-0-unit": unit_id,
                 "items-0-quantity": 2,
                 "items-0-cost": 4,
+                "items-0-vendor_sku": "SKU-0",
             },
             follow_redirects=True,
         )
@@ -1174,6 +1219,7 @@ def test_item_cost_average_uses_location_counts(client, app):
                 "items-0-unit": unit_id,
                 "items-0-quantity": 2,
                 "items-0-cost": 2,
+                "items-0-vendor_sku": "SKU-0",
             },
             follow_redirects=True,
         )
@@ -1217,6 +1263,7 @@ def test_item_cost_average_uses_location_counts(client, app):
                 "items-0-unit": unit_id,
                 "items-0-quantity": 2,
                 "items-0-cost": 4,
+                "items-0-vendor_sku": "SKU-0",
             },
             follow_redirects=True,
         )
@@ -1264,6 +1311,7 @@ def test_item_cost_average_visible_on_items_page(client, app):
                 "items-0-unit": unit_id,
                 "items-0-quantity": 2,
                 "items-0-cost": 2,
+                "items-0-vendor_sku": "SKU-0",
             },
             follow_redirects=True,
         )
@@ -1301,6 +1349,7 @@ def test_item_cost_average_visible_on_items_page(client, app):
                 "items-0-unit": unit_id,
                 "items-0-quantity": 2,
                 "items-0-cost": 4,
+                "items-0-vendor_sku": "SKU-0",
             },
             follow_redirects=True,
         )
@@ -1346,6 +1395,7 @@ def test_weighted_cost_saved_with_case_unit(client, app):
                 "items-0-unit": case_unit_id,
                 "items-0-quantity": 1,
                 "items-0-cost": 24,
+                "items-0-vendor_sku": "SKU-0",
             },
             follow_redirects=True,
         )
@@ -1388,6 +1438,7 @@ def test_weighted_cost_saved_with_case_unit(client, app):
                 "items-0-unit": case_unit_id,
                 "items-0-quantity": 2,
                 "items-0-cost": 12,
+                "items-0-vendor_sku": "SKU-0",
             },
             follow_redirects=True,
         )
@@ -1437,6 +1488,7 @@ def test_reverse_invoice_restores_previous_cost(client, app):
                 "items-0-unit": unit_id,
                 "items-0-quantity": 2,
                 "items-0-cost": 2,
+                "items-0-vendor_sku": "SKU-0",
             },
             follow_redirects=True,
         )
@@ -1474,6 +1526,7 @@ def test_reverse_invoice_restores_previous_cost(client, app):
                 "items-0-unit": unit_id,
                 "items-0-quantity": 2,
                 "items-0-cost": 4,
+                "items-0-vendor_sku": "SKU-0",
             },
             follow_redirects=True,
         )
@@ -1571,6 +1624,7 @@ def test_invoice_retains_item_and_unit_names_after_unit_removed(client, app):
                 "items-0-unit": unit_id,
                 "items-0-quantity": 2,
                 "items-0-cost": 1.5,
+                "items-0-vendor_sku": "SKU-0",
             },
             follow_redirects=True,
         )
@@ -2072,6 +2126,7 @@ def test_received_purchase_orders_cannot_be_edited(client, app):
                 "items-0-unit": unit_id,
                 "items-0-quantity": 2,
                 "items-0-cost": 3,
+                "items-0-vendor_sku": "SKU-0",
             },
             follow_redirects=True,
         )
@@ -2116,6 +2171,7 @@ def test_receive_invoice_rejects_duplicate_receive(client, app):
         "items-0-unit": unit_id,
         "items-0-quantity": 2,
         "items-0-cost": 3,
+        "items-0-vendor_sku": "SKU-0",
     }
 
     with client:
@@ -2134,6 +2190,61 @@ def test_receive_invoice_rejects_duplicate_receive(client, app):
 
     with app.app_context():
         assert PurchaseInvoice.query.filter_by(purchase_order_id=po_id).count() == 1
+
+
+def test_receive_invoice_requires_vendor_sku(client, app):
+    email, vendor_id, item_id, location_id, unit_id = setup_purchase(app)
+
+    with client:
+        login(client, email, "pass")
+        client.post(
+            "/purchase_orders/create",
+            data={
+                "vendor": vendor_id,
+                "order_date": "2024-03-01",
+                "expected_date": "2024-03-02",
+                "items-0-item": item_id,
+                "items-0-unit": unit_id,
+                "items-0-quantity": 2,
+            },
+            follow_redirects=True,
+        )
+
+    with app.app_context():
+        po = PurchaseOrder.query.first()
+        assert po is not None
+        po_id = po.id
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            f"/purchase_orders/{po_id}/receive",
+            data={
+                "received_date": "2024-03-03",
+                "gst": 0,
+                "pst": 0,
+                "delivery_charge": 0,
+                "location_id": location_id,
+                "items-0-item": item_id,
+                "items-0-unit": unit_id,
+                "items-0-quantity": 2,
+                "items-0-cost": 3,
+                "items-0-location_id": 0,
+            },
+            follow_redirects=True,
+        )
+
+    assert resp.status_code == 200
+    assert (
+        b"Each populated invoice row must include a vendor SKU before receiving the invoice."
+        in resp.data
+    )
+
+    with app.app_context():
+        assert PurchaseInvoice.query.filter_by(purchase_order_id=po_id).count() == 0
+        po = db.session.get(PurchaseOrder, po_id)
+        assert po is not None
+        assert po.received is False
 
 
 def test_view_purchase_orders_rejects_invalid_date_filters(client, app):
@@ -2231,6 +2342,7 @@ def test_view_purchase_invoices_filters_by_line_location(client, app):
                 "items-0-unit": unit_id,
                 "items-0-quantity": 2,
                 "items-0-cost": 3,
+                "items-0-vendor_sku": "SKU-0",
                 "items-0-location_id": secondary_id,
             },
             follow_redirects=True,
@@ -2295,10 +2407,12 @@ def test_reverse_invoice_same_item_lines_restore_original_cost(client, app):
                 "items-0-unit": unit_id,
                 "items-0-quantity": 1,
                 "items-0-cost": 10,
+                "items-0-vendor_sku": "SKU-0",
                 "items-1-item": item_id,
                 "items-1-unit": unit_id,
                 "items-1-quantity": 1,
                 "items-1-cost": 12,
+                "items-1-vendor_sku": "SKU-1",
             },
             follow_redirects=True,
         )

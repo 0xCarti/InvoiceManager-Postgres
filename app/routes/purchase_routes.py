@@ -60,6 +60,7 @@ from app.utils.filter_state import (
 )
 from app.services.purchase_imports import (
     CSVImportError,
+    find_preferred_vendor_alias,
     parse_purchase_order_csv,
     resolve_vendor_purchase_lines,
     serialize_parsed_line,
@@ -355,6 +356,11 @@ def _collect_purchase_order_item_entries(form_data):
     for index in _iter_form_item_indexes(form_data):
         item_id = form_data.get(f"items-{index}-item", type=int)
         unit_id = form_data.get(f"items-{index}-unit", type=int)
+        vendor_sku = (form_data.get(f"items-{index}-vendor_sku") or "").strip() or None
+        vendor_description = (
+            form_data.get(f"items-{index}-vendor_description") or ""
+        ).strip() or None
+        pack_size = (form_data.get(f"items-{index}-pack_size") or "").strip() or None
         quantity = coerce_float(form_data.get(f"items-{index}-quantity"), default=None)
         unit_cost = coerce_float(form_data.get(f"items-{index}-cost"), default=None)
         position = form_data.get(f"items-{index}-position", type=int)
@@ -378,6 +384,9 @@ def _collect_purchase_order_item_entries(form_data):
             {
                 "item_id": item_id,
                 "unit_id": unit_id,
+                "vendor_sku": vendor_sku,
+                "vendor_description": vendor_description,
+                "pack_size": pack_size,
                 "quantity": quantity,
                 "unit_cost": unit_cost,
                 "position": position,
@@ -400,11 +409,17 @@ def _collect_purchase_order_item_entries(form_data):
 def _collect_receive_invoice_item_entries(form_data):
     item_entries = []
     has_incomplete_rows = False
+    has_missing_vendor_skus = False
     fallback_counter = 0
 
     for index in _iter_form_item_indexes(form_data):
         item_id = form_data.get(f"items-{index}-item", type=int)
         unit_id = form_data.get(f"items-{index}-unit", type=int)
+        vendor_sku = (form_data.get(f"items-{index}-vendor_sku") or "").strip() or None
+        vendor_description = (
+            form_data.get(f"items-{index}-vendor_description") or ""
+        ).strip() or None
+        pack_size = (form_data.get(f"items-{index}-pack_size") or "").strip() or None
         quantity = coerce_float(form_data.get(f"items-{index}-quantity"), default=None)
         cost = coerce_float(form_data.get(f"items-{index}-cost"), default=None)
         container_deposit_raw = coerce_float(
@@ -419,6 +434,7 @@ def _collect_receive_invoice_item_entries(form_data):
 
         has_row_data = bool(
             item_id
+            or vendor_sku
             or unit_id
             or quantity is not None
             or cost is not None
@@ -432,11 +448,17 @@ def _collect_receive_invoice_item_entries(form_data):
         if not item_id or quantity is None or cost is None:
             has_incomplete_rows = True
             continue
+        if not vendor_sku:
+            has_missing_vendor_skus = True
+            continue
 
         item_entries.append(
             {
                 "item_id": item_id,
                 "unit_id": unit_id,
+                "vendor_sku": vendor_sku,
+                "vendor_description": vendor_description,
+                "pack_size": pack_size,
                 "quantity": quantity,
                 "cost": abs(cost),
                 "container_deposit": (
@@ -461,7 +483,48 @@ def _collect_receive_invoice_item_entries(form_data):
             entry["fallback"],
         )
     )
-    return item_entries, has_incomplete_rows
+    return item_entries, has_incomplete_rows, has_missing_vendor_skus
+
+
+def _sync_vendor_alias_for_purchase_entry(
+    *,
+    vendor: Vendor | None,
+    entry: dict,
+    default_cost: float | None,
+):
+    if vendor is None or not entry.get("item_id"):
+        return
+
+    vendor_sku = entry.get("vendor_sku")
+    vendor_description = entry.get("vendor_description")
+    pack_size = entry.get("pack_size")
+    item_unit_id = entry.get("unit_id")
+
+    if not vendor_description or not pack_size:
+        preferred_alias = find_preferred_vendor_alias(
+            vendor=vendor,
+            item_id=entry.get("item_id"),
+            item_unit_id=item_unit_id,
+        )
+        if preferred_alias is not None:
+            if not vendor_description:
+                vendor_description = preferred_alias.vendor_description
+            if not pack_size:
+                pack_size = preferred_alias.pack_size
+
+    if not vendor_sku and not vendor_description:
+        return
+
+    alias = update_or_create_vendor_alias(
+        vendor=vendor,
+        item_id=entry["item_id"],
+        item_unit_id=item_unit_id,
+        vendor_sku=vendor_sku,
+        vendor_description=vendor_description,
+        pack_size=pack_size,
+        default_cost=default_cost,
+    )
+    db.session.add(alias)
 
 
 def _validate_json_csrf(payload: dict | None) -> None:
@@ -1026,6 +1089,7 @@ def create_purchase_order():
                     break
                 form.items[idx].item.data = entry.get("item_id")
                 form.items[idx].unit.data = entry.get("unit_id")
+                form.items[idx].vendor_sku.data = entry.get("vendor_sku")
                 form.items[idx].quantity.data = entry.get("quantity")
                 form.items[idx].cost.data = entry.get("cost")
                 form.items[idx].position.data = idx
@@ -1067,6 +1131,11 @@ def create_purchase_order():
                     break
                 form.items[idx].item.data = parsed_item.get("item_id")
                 form.items[idx].unit.data = parsed_item.get("unit_id")
+                form.items[idx].vendor_sku.data = parsed_item.get("vendor_sku")
+                form.items[idx].vendor_description.data = parsed_item.get(
+                    "vendor_description"
+                )
+                form.items[idx].pack_size.data = parsed_item.get("pack_size")
                 form.items[idx].quantity.data = parsed_item.get("quantity")
                 form.items[idx].cost.data = parsed_item.get("cost")
                 form.items[idx].position.data = idx
@@ -1127,10 +1196,16 @@ def create_purchase_order():
                         purchase_order_id=po.id,
                         item_id=entry["item_id"],
                         unit_id=entry["unit_id"],
+                        vendor_sku=entry["vendor_sku"],
                         quantity=entry["quantity"],
                         unit_cost=entry.get("unit_cost"),
                         position=order_index,
                     )
+                )
+                _sync_vendor_alias_for_purchase_entry(
+                    vendor=vendor_record,
+                    entry=entry,
+                    default_cost=entry.get("unit_cost"),
                 )
 
             db.session.commit()
@@ -1397,10 +1472,16 @@ def edit_purchase_order(po_id):
                         purchase_order_id=po.id,
                         item_id=entry["item_id"],
                         unit_id=entry["unit_id"],
+                        vendor_sku=entry["vendor_sku"],
                         quantity=entry["quantity"],
                         unit_cost=unit_cost,
                         position=order_index,
                     )
+                )
+                _sync_vendor_alias_for_purchase_entry(
+                    vendor=vendor_record,
+                    entry=entry,
+                    default_cost=unit_cost,
                 )
 
             db.session.commit()
@@ -1417,12 +1498,25 @@ def edit_purchase_order(po_id):
             form.expected_total_cost.data = po.expected_total_cost
         form.delivery_charge.data = po.delivery_charge
         form.items.min_entries = max(1, len(po.items))
+        vendor_record = db.session.get(Vendor, po.vendor_id) if po.vendor_id else None
         for i, poi in enumerate(po.items):
             if len(form.items) <= i:
                 form.items.append_entry()
         for i, poi in enumerate(po.items):
+            preferred_alias = find_preferred_vendor_alias(
+                vendor=vendor_record,
+                item_id=poi.item_id,
+                item_unit_id=poi.unit_id,
+            )
             form.items[i].item.data = poi.item_id
             form.items[i].unit.data = poi.unit_id
+            form.items[i].vendor_sku.data = poi.vendor_sku
+            form.items[i].vendor_description.data = (
+                preferred_alias.vendor_description if preferred_alias else None
+            )
+            form.items[i].pack_size.data = (
+                preferred_alias.pack_size if preferred_alias else None
+            )
             form.items[i].quantity.data = poi.quantity
             form.items[i].cost.data = poi.unit_cost
             form.items[i].position.data = poi.position
@@ -1493,11 +1587,13 @@ def receive_invoice(po_id):
         flash("This purchase order has already been received.", "error")
         return redirect(url_for("purchase.view_purchase_invoices"))
     form = ReceiveInvoiceForm()
+    vendor_record = db.session.get(Vendor, po.vendor_id) if po.vendor_id else None
     gl_code_choices = load_purchase_gl_code_choices()
     department_defaults = Setting.get_receive_location_defaults()
     draft = PurchaseInvoiceDraft.query.filter_by(purchase_order_id=po.id).first()
     draft_data = draft.data if draft else None
     if request.method == "GET":
+        po_items_by_position = {poi.position: poi for poi in po.items}
         prefill_items = []
         if draft_data:
             prefill_items = draft_data.get("items", []) or []
@@ -1506,6 +1602,7 @@ def receive_invoice(po_id):
                 {
                     "item_id": poi.item_id,
                     "unit_id": poi.unit_id,
+                    "vendor_sku": poi.vendor_sku,
                     "quantity": poi.quantity,
                     "position": poi.position,
                     "gl_code_id": None,
@@ -1576,8 +1673,23 @@ def receive_invoice(po_id):
         for index, item_data in enumerate(prefill_items):
             if index >= len(form.items):
                 break
+            preferred_alias = find_preferred_vendor_alias(
+                vendor=vendor_record,
+                item_id=item_data.get("item_id"),
+                item_unit_id=item_data.get("unit_id"),
+            )
+            po_item = po_items_by_position.get(item_data.get("position"))
             form.items[index].item.data = item_data.get("item_id")
             form.items[index].unit.data = item_data.get("unit_id")
+            form.items[index].vendor_sku.data = item_data.get("vendor_sku") or (
+                po_item.vendor_sku if po_item else None
+            )
+            form.items[index].vendor_description.data = item_data.get(
+                "vendor_description"
+            ) or (preferred_alias.vendor_description if preferred_alias else None)
+            form.items[index].pack_size.data = item_data.get("pack_size") or (
+                preferred_alias.pack_size if preferred_alias else None
+            )
             if item_data.get("quantity") is not None:
                 form.items[index].quantity.data = item_data.get("quantity")
             if item_data.get("cost") is not None:
@@ -1592,12 +1704,26 @@ def receive_invoice(po_id):
             location_value = item_data.get("location_id")
             form.items[index].location_id.data = location_value or 0
     if form.validate_on_submit():
-        item_entries, has_incomplete_rows = _collect_receive_invoice_item_entries(
-            request.form
-        )
+        (
+            item_entries,
+            has_incomplete_rows,
+            has_missing_vendor_skus,
+        ) = _collect_receive_invoice_item_entries(request.form)
         if has_incomplete_rows:
             flash(
                 "Each populated invoice row must include an item, quantity, and cost.",
+                "error",
+            )
+            return render_template(
+                "purchase_orders/receive_invoice.html",
+                form=form,
+                po=po,
+                gl_code_choices=gl_code_choices,
+                department_defaults=department_defaults,
+            )
+        if has_missing_vendor_skus:
+            flash(
+                "Each populated invoice row must include a vendor SKU before receiving the invoice.",
                 "error",
             )
             return render_template(
@@ -1702,6 +1828,7 @@ def receive_invoice(po_id):
                     unit_id=unit_obj.id if unit_obj else None,
                     item_name=item_obj.name if item_obj else "",
                     unit_name=unit_obj.name if unit_obj else None,
+                    vendor_sku=entry["vendor_sku"],
                     quantity=quantity,
                     cost=cost,
                     container_deposit=container_deposit,
@@ -1710,6 +1837,11 @@ def receive_invoice(po_id):
                     purchase_gl_code_id=entry["gl_code_id"],
                     location_id=entry["location_id"],
                 )
+            )
+            _sync_vendor_alias_for_purchase_entry(
+                vendor=vendor_record,
+                entry=entry,
+                default_cost=cost,
             )
 
             if item_obj:
@@ -2091,6 +2223,7 @@ def reverse_purchase_invoice(invoice_id):
             {
                 "item_id": inv_item.item_id,
                 "unit_id": inv_item.unit_id,
+                "vendor_sku": inv_item.vendor_sku,
                 "quantity": inv_item.quantity,
                 "cost": inv_item.cost,
                 "container_deposit": inv_item.container_deposit,

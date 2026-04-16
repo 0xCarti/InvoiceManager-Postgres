@@ -1,7 +1,15 @@
 from werkzeug.security import generate_password_hash
 
 from app import db
-from app.models import Item, ItemUnit, Product, ProductRecipeItem, User
+from app.models import (
+    Item,
+    ItemUnit,
+    Product,
+    ProductRecipeItem,
+    User,
+    Vendor,
+    VendorItemAlias,
+)
 from tests.permission_helpers import make_super_admin
 from tests.utils import login
 
@@ -131,6 +139,49 @@ def test_edit_product_recipe_on_edit_page(client, app):
         ri = product.recipe_items[0]
         assert ri.item_id == item2_id
         assert ri.quantity == 4
+
+
+def test_edit_product_page_shows_recipe_item_vendor_skus(client, app):
+    email, item1_id, _, unit1_id, _ = setup_user_and_items(app)
+    with app.app_context():
+        product = Product(name="Bundled Flour", price=9.0, cost=2.0)
+        vendor = Vendor(first_name="North", last_name="Supply")
+        db.session.add_all([product, vendor])
+        db.session.commit()
+        db.session.add(
+            ProductRecipeItem(
+                product_id=product.id,
+                item_id=item1_id,
+                unit_id=unit1_id,
+                quantity=1,
+                countable=False,
+            )
+        )
+        db.session.add(
+            VendorItemAlias(
+                vendor_id=vendor.id,
+                item_id=item1_id,
+                item_unit_id=unit1_id,
+                vendor_sku="FLOUR-50",
+                vendor_description="Strong Baker Flour",
+                normalized_description="strong baker flour",
+                pack_size="50 lb",
+                default_cost=24.5,
+            )
+        )
+        db.session.commit()
+        product_id = product.id
+
+    with client:
+        login(client, email, "pass")
+        response = client.get(f"/products/{product_id}/edit")
+
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "Vendor SKUs" in page
+    assert "FLOUR-50" in page
+    assert "Strong Baker Flour" in page
+    assert "North Supply" in page
 
 
 def test_recipe_accepts_integer_quantity(client, app):

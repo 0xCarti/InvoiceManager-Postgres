@@ -2035,6 +2035,15 @@ class ImportForm(FlaskForm):
 class POItemForm(FlaskForm):
     item = HiddenField("Item")
     cost = HiddenField("Cost")
+    vendor_sku = HiddenField(
+        "Vendor SKU", validators=[Optional(), Length(max=100)]
+    )
+    vendor_description = HiddenField(
+        "Vendor Description", validators=[Optional(), Length(max=255)]
+    )
+    pack_size = HiddenField(
+        "Pack Size", validators=[Optional(), Length(max=100)]
+    )
     product = SelectField(
         "Product", coerce=int, validators=[Optional()], validate_choice=False
     )
@@ -2119,11 +2128,22 @@ class VendorItemAliasResolutionForm(FlaskForm):
 
 class InvoiceItemReceiveForm(FlaskForm):
     item = SelectField("Item", coerce=int)
+    vendor_sku = StringField(
+        "Vendor SKU",
+        validators=[Optional(), Length(max=100)],
+        render_kw={"autocomplete": "off"},
+    )
+    vendor_description = HiddenField(
+        "Vendor Description", validators=[Optional(), Length(max=255)]
+    )
+    pack_size = HiddenField(
+        "Pack Size", validators=[Optional(), Length(max=100)]
+    )
     unit = SelectField(
         "Unit", coerce=int, validators=[Optional()], validate_choice=False
     )
-    quantity = DecimalField("Quantity", validators=[InputRequired()])
-    cost = DecimalField("Cost", validators=[InputRequired()])
+    quantity = DecimalField("Quantity", validators=[Optional()])
+    cost = DecimalField("Cost", validators=[Optional()])
     container_deposit = DecimalField(
         "Container Deposit", validators=[Optional()], default=0
     )
@@ -2199,6 +2219,7 @@ class VendorItemAliasForm(FlaskForm):
         "Default Unit", coerce=int, validators=[Optional()], validate_choice=False
     )
     default_cost = DecimalField("Default Cost", validators=[Optional()])
+    return_to = HiddenField()
     submit = SubmitField("Save Alias")
 
     def __init__(self, *args, **kwargs):

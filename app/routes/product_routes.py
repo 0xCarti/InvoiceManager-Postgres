@@ -37,6 +37,8 @@ from app.models import (
     InvoiceProduct,
     TerminalSale,
     TerminalSaleProductAlias,
+    Vendor,
+    VendorItemAlias,
 )
 from app.utils.activity import log_activity
 from app.utils.filter_state import (
@@ -335,6 +337,47 @@ def _map_product_to_sales_import(import_record, row_record, product_id: int) -> 
     else:
         alias.source_name = row_record.source_product_name
         alias.product_id = product_id
+
+
+def _build_product_vendor_alias_groups(product_obj: Product) -> list[dict[str, object]]:
+    item_order: list[int] = []
+    items_by_id: dict[int, Item] = {}
+    for recipe_item in product_obj.recipe_items:
+        if recipe_item.item_id is None or recipe_item.item is None:
+            continue
+        if recipe_item.item_id in items_by_id:
+            continue
+        item_order.append(recipe_item.item_id)
+        items_by_id[recipe_item.item_id] = recipe_item.item
+
+    aliases_by_item_id: dict[int, list[VendorItemAlias]] = {}
+    if item_order:
+        vendor_aliases = (
+            VendorItemAlias.query.options(
+                selectinload(VendorItemAlias.vendor),
+                selectinload(VendorItemAlias.item_unit),
+            )
+            .join(Vendor, Vendor.id == VendorItemAlias.vendor_id)
+            .filter(VendorItemAlias.item_id.in_(item_order))
+            .order_by(
+                VendorItemAlias.item_id,
+                Vendor.first_name,
+                Vendor.last_name,
+                VendorItemAlias.vendor_sku,
+                VendorItemAlias.vendor_description,
+            )
+            .all()
+        )
+        for alias in vendor_aliases:
+            aliases_by_item_id.setdefault(alias.item_id, []).append(alias)
+
+    return [
+        {
+            "item": items_by_id[item_id],
+            "aliases": aliases_by_item_id.get(item_id, []),
+        }
+        for item_id in item_order
+    ]
 
 
 @product.route("/products/bulk-update", methods=["GET", "POST"])
@@ -900,12 +943,14 @@ def edit_product(product_id):
     else:
         print(form.errors)
         print(form.cost.data)
+    vendor_alias_groups = _build_product_vendor_alias_groups(product)
     form_action = url_for("product.edit_product", product_id=product.id)
     if is_ajax:
         modal_html = render_template(
             "products/_edit_product_tabs.html",
             form=form,
             product_id=product.id,
+            vendor_alias_groups=vendor_alias_groups,
             terminal_sale_aliases=product.terminal_sale_aliases,
             alias_delete_form=DeleteForm(),
             form_action=form_action,
@@ -920,6 +965,7 @@ def edit_product(product_id):
         "products/edit_product.html",
         form=form,
         product_id=product.id,
+        vendor_alias_groups=vendor_alias_groups,
         terminal_sale_aliases=product.terminal_sale_aliases,
         alias_delete_form=DeleteForm(),
     )

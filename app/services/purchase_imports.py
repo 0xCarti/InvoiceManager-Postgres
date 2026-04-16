@@ -3,6 +3,7 @@ import datetime
 from dataclasses import dataclass
 from typing import IO, Iterable, List, Optional
 
+from app import db
 from werkzeug.datastructures import FileStorage
 
 from app.models import Item, Vendor, VendorItemAlias
@@ -556,6 +557,34 @@ def normalize_vendor_alias_text(value: str | None) -> str:
     return normalize_pos_alias(value or "")
 
 
+def find_preferred_vendor_alias(
+    *,
+    vendor: Vendor | None,
+    item_id: int | None,
+    item_unit_id: int | None,
+) -> VendorItemAlias | None:
+    if vendor is None or not item_id:
+        return None
+
+    aliases = VendorItemAlias.query.filter_by(
+        vendor_id=vendor.id, item_id=item_id
+    ).all()
+    if not aliases:
+        return None
+
+    def _alias_rank(alias: VendorItemAlias):
+        updated_at = alias.updated_at or alias.created_at or datetime.datetime.min
+        return (
+            1 if item_unit_id and alias.item_unit_id == item_unit_id else 0,
+            1 if alias.normalized_description else 0,
+            1 if alias.item_unit_id is None else 0,
+            updated_at,
+            alias.id or 0,
+        )
+
+    return max(aliases, key=_alias_rank)
+
+
 def update_or_create_vendor_alias(
     *,
     vendor: Vendor,
@@ -568,18 +597,63 @@ def update_or_create_vendor_alias(
 ) -> VendorItemAlias:
     normalized_description = normalize_vendor_alias_text(vendor_description or vendor_sku)
 
-    alias = None
+    alias_by_sku = None
     if vendor_sku:
-        alias = VendorItemAlias.query.filter_by(
+        alias_by_sku = VendorItemAlias.query.filter_by(
             vendor_id=vendor.id, vendor_sku=vendor_sku
         ).first()
-    if alias is None and normalized_description:
-        alias = VendorItemAlias.query.filter_by(
+    alias_by_description = None
+    if normalized_description:
+        alias_by_description = VendorItemAlias.query.filter_by(
             vendor_id=vendor.id, normalized_description=normalized_description
         ).first()
-    if alias is None:
-        alias = VendorItemAlias(vendor_id=vendor.id)
 
+    alias = alias_by_sku
+    if alias is not None:
+        alias.vendor_sku = vendor_sku or None
+        alias.vendor_description = vendor_description or vendor_sku or alias.vendor_description
+        if alias_by_description is None or alias_by_description.id == alias.id:
+            alias.normalized_description = normalized_description or None
+        alias.pack_size = pack_size or None
+        alias.item_id = item_id
+        alias.item_unit_id = item_unit_id
+        alias.default_cost = default_cost
+        return alias
+
+    if alias_by_description is not None:
+        alias_by_description.vendor_description = (
+            vendor_description or vendor_sku or alias_by_description.vendor_description
+        )
+        alias_by_description.normalized_description = normalized_description or None
+        alias_by_description.pack_size = pack_size or None
+        alias_by_description.item_id = item_id
+        alias_by_description.item_unit_id = item_unit_id
+        alias_by_description.default_cost = default_cost
+
+        if (
+            vendor_sku
+            and alias_by_description.vendor_sku
+            and alias_by_description.vendor_sku != vendor_sku
+        ):
+            alias = VendorItemAlias(vendor_id=vendor.id)
+            alias.vendor_sku = vendor_sku
+            alias.vendor_description = (
+                vendor_description
+                or alias_by_description.vendor_description
+                or vendor_sku
+            )
+            alias.normalized_description = None
+            alias.pack_size = pack_size or alias_by_description.pack_size
+            alias.item_id = item_id
+            alias.item_unit_id = item_unit_id
+            alias.default_cost = default_cost
+            db.session.add(alias)
+            return alias
+
+        alias_by_description.vendor_sku = vendor_sku or None
+        return alias_by_description
+
+    alias = VendorItemAlias(vendor_id=vendor.id)
     alias.vendor_sku = vendor_sku or None
     alias.vendor_description = vendor_description or vendor_sku
     alias.normalized_description = normalized_description or None

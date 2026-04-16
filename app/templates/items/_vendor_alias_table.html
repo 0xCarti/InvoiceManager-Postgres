@@ -1,0 +1,74 @@
+{% set vendor_aliases = vendor_aliases | default([]) %}
+{% set item_ref = item_ref | default(None) %}
+{% set return_url = return_url | default(None) %}
+{% set empty_message = empty_message | default('No vendor SKU mappings saved yet.') %}
+{% set vendor_alias_delete_form = vendor_alias_delete_form | default(alias_delete_form | default(None)) %}
+{% set can_manage_vendor_aliases = can_access_endpoint('admin.vendor_item_aliases', 'POST') %}
+{% set can_view_vendor_aliases_admin = can_access_endpoint('admin.vendor_item_aliases', 'GET') %}
+{% set show_actions = can_manage_vendor_aliases or can_view_vendor_aliases_admin %}
+{% if vendor_aliases %}
+<div class="table-responsive">
+    <table class="table table-striped align-middle">
+        <thead>
+            <tr>
+                <th scope="col">Vendor</th>
+                <th scope="col">SKU</th>
+                <th scope="col">Vendor Description</th>
+                <th scope="col">Pack/Size</th>
+                <th scope="col">Unit</th>
+                <th scope="col">Default Cost</th>
+                {% if show_actions %}
+                <th scope="col" class="text-end">Actions</th>
+                {% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for alias in vendor_aliases %}
+            <tr>
+                <td>{{ alias.vendor.first_name }} {{ alias.vendor.last_name }}</td>
+                <td>{{ alias.vendor_sku or '-' }}</td>
+                <td class="text-wrap">{{ alias.vendor_description or '-' }}</td>
+                <td>{{ alias.pack_size or '-' }}</td>
+                <td>{{ alias.item_unit.name if alias.item_unit else 'Receiving default' }}</td>
+                <td>
+                    {% if alias.default_cost is not none %}
+                        ${{ '%.2f'|format(alias.default_cost) }}
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                {% if show_actions %}
+                <td class="text-end">
+                    {% if can_manage_vendor_aliases %}
+                    <div class="d-flex gap-2 justify-content-end">
+                        <a
+                            class="btn btn-sm btn-outline-primary"
+                            href="{{ url_for('admin.vendor_item_aliases', alias_id=alias.id, next=return_url) }}"
+                        >Edit</a>
+                        {% if vendor_alias_delete_form is defined and vendor_alias_delete_form %}
+                        <form method="post" action="{{ url_for('admin.delete_vendor_item_alias', alias_id=alias.id, next=return_url) }}">
+                            {{ vendor_alias_delete_form.hidden_tag() }}
+                            <button
+                                type="submit"
+                                class="btn btn-sm btn-outline-danger"
+                                data-confirm-message="Delete this vendor SKU mapping?"
+                            >Delete</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                    {% elif can_view_vendor_aliases_admin %}
+                    <a
+                        class="btn btn-sm btn-outline-secondary"
+                        href="{{ url_for('admin.vendor_item_aliases', alias_id=alias.id, next=return_url) }}"
+                    >View</a>
+                    {% endif %}
+                </td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p class="text-muted mb-0">{{ empty_message }}</p>
+{% endif %}

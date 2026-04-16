@@ -18,6 +18,7 @@ from app.models import (
     TransferItem,
     User,
     Vendor,
+    VendorItemAlias,
 )
 from tests.permission_helpers import grant_item_workflow_permissions
 from tests.utils import login
@@ -45,6 +46,18 @@ def setup_history(app):
         po = PurchaseOrder(vendor_id=vendor.id, user_id=user.id, vendor_name="Vend Or", order_date=date.today(), expected_date=date.today(), delivery_charge=0, received=True)
         db.session.add(po)
         db.session.commit()
+        db.session.add(
+            VendorItemAlias(
+                vendor_id=vendor.id,
+                item_id=item.id,
+                item_unit_id=unit.id,
+                vendor_sku="VEN-100",
+                vendor_description="Widget Master Case",
+                normalized_description="widget master case",
+                pack_size="12 each",
+                default_cost=18.5,
+            )
+        )
         pi = PurchaseInvoice(purchase_order_id=po.id, user_id=user.id, location_id=loc1.id, vendor_name="Vend Or", location_name=loc1.name, received_date=date.today(), invoice_number="PI1", gst=0, pst=0, delivery_charge=0)
         pii = PurchaseInvoiceItem(invoice=pi, item=item, item_name=item.name, unit=unit, unit_name=unit.name, quantity=5, cost=2.5)
         inv = Invoice(id="INV1", user_id=user.id, customer_id=customer.id)
@@ -69,3 +82,5 @@ def test_item_detail_page(client, app):
         assert inv_id in page
         assert str(transfer_id) in page
         assert "WidgetProd" in page
+        assert "VEN-100" in page
+        assert "Widget Master Case" in page

@@ -18,6 +18,7 @@
         }
 
         .item-row .quantity-col,
+        .item-row .vendor-sku-col,
         .item-row .cost-col,
         .item-row .deposit-col {
             flex: 1 1 140px;
@@ -37,6 +38,7 @@
             .item-row .item-col,
             .item-row .unit-col,
             .item-row .quantity-col,
+            .item-row .vendor-sku-col,
             .item-row .cost-col,
             .item-row .line-total-col {
                 flex: 0 0 100%;
@@ -91,11 +93,14 @@
             {{ form.invoice_number(class="form-control narrow-field") }}
         </div>
         <h4>Items</h4>
+        <p class="text-muted small">Vendor SKU can stay blank while the purchase order is saved, but each received line must have one before finalizing this invoice.</p>
         <div id="items">
         {% for item in form.items %}
         <div class="row g-2 item-row mb-2 align-items-center">
             <div class="col item-col">
                 {{ item.item(class="form-control item-select") }}
+                {{ item.vendor_description(class="vendor-description-field") }}
+                {{ item.pack_size(class="vendor-pack-size-field") }}
                 <input type="hidden" name="items-{{ loop.index0 }}-position" class="item-position" value="{{ item.position.data or loop.index0 }}">
             </div>
             <div class="col-auto unit-col">
@@ -108,6 +113,10 @@
             <div class="col quantity-col">
                 <label class="form-label mb-1 d-md-none" for="{{ item.quantity.id }}">Qty</label>
                 {{ item.quantity(class="form-control quantity", placeholder="Qty") }}
+            </div>
+            <div class="col vendor-sku-col">
+                <label class="form-label mb-1 d-md-none" for="{{ item.vendor_sku.id }}">Vendor SKU</label>
+                {{ item.vendor_sku(class="form-control vendor-sku", placeholder="Vendor SKU") }}
             </div>
             <div class="col cost-col">
                 <label class="form-label mb-1 d-md-none" for="{{ item.cost.id }}">Cost</label>
@@ -212,12 +221,18 @@
         row.innerHTML = `
             <div class="col item-col">
                 <select name="items-${index}-item" id="items-${index}-item" class="form-control item-select">${itemOptions}</select>
+                <input type="hidden" name="items-${index}-vendor_description" id="items-${index}-vendor_description" class="vendor-description-field" value="">
+                <input type="hidden" name="items-${index}-pack_size" id="items-${index}-pack_size" class="vendor-pack-size-field" value="">
                 <input type="hidden" name="items-${index}-position" class="item-position" value="">
             </div>
             <div class="col-auto unit-col"><select name="items-${index}-unit" id="items-${index}-unit" class="form-control unit-select" data-selected=""></select></div>
             <div class="col quantity-col">
                 <label class="form-label mb-1 d-md-none" for="items-${index}-quantity">Qty</label>
                 <input type="text" name="items-${index}-quantity" id="items-${index}-quantity" class="form-control quantity" placeholder="Qty" inputmode="text" data-numeric-input="1">
+            </div>
+            <div class="col vendor-sku-col">
+                <label class="form-label mb-1 d-md-none" for="items-${index}-vendor_sku">Vendor SKU</label>
+                <input type="text" name="items-${index}-vendor_sku" id="items-${index}-vendor_sku" class="form-control vendor-sku" placeholder="Vendor SKU" autocomplete="off">
             </div>
             <div class="col cost-col">
                 <label class="form-label mb-1 d-md-none" for="items-${index}-cost">Cost</label>

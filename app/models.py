@@ -2140,6 +2140,7 @@ class PurchaseOrderItem(db.Model):
         db.Integer, db.ForeignKey("item_unit.id"), nullable=True
     )
     item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=True)
+    vendor_sku = db.Column(db.String(100), nullable=True)
     quantity = db.Column(db.Float, nullable=False)
     unit_cost = db.Column(db.Float, nullable=True)
     product = relationship("Product")
@@ -2204,6 +2205,7 @@ class PurchaseInvoiceItem(db.Model):
     )
     item_name = db.Column(db.String(100), nullable=False)
     unit_name = db.Column(db.String(50), nullable=True)
+    vendor_sku = db.Column(db.String(100), nullable=True)
     quantity = db.Column(db.Float, nullable=False)
     cost = db.Column(db.Float, nullable=False)
     container_deposit = db.Column(
