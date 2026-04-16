@@ -2035,8 +2035,10 @@ class ImportForm(FlaskForm):
 class POItemForm(FlaskForm):
     item = HiddenField("Item")
     cost = HiddenField("Cost")
-    vendor_sku = HiddenField(
-        "Vendor SKU", validators=[Optional(), Length(max=100)]
+    vendor_sku = StringField(
+        "Vendor SKU",
+        validators=[Optional(), Length(max=100)],
+        render_kw={"autocomplete": "off"},
     )
     vendor_description = HiddenField(
         "Vendor Description", validators=[Optional(), Length(max=255)]

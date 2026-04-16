@@ -46,7 +46,7 @@
         <div class="page-header-stack mb-2">
             <div>
                 <h4 class="mb-0">Items</h4>
-                <p class="mb-0 small text-muted">Name search keeps you in item entry. Barcode scans jump to Qty, then back to the next scan row.</p>
+                <p class="mb-0 small text-muted">Name search keeps you in item entry. Barcode scans jump to Qty, then back to the next scan row. Vendor SKU is optional on the PO and required when receiving.</p>
             </div>
             <div class="mobile-inline-actions">
                 <button type="button" class="btn btn-secondary purchase-order-quick-add" data-role="purchase-order-add-item">Add Item</button>
@@ -87,7 +87,11 @@
                     {% endif %}
                 </div>
             </div>
-            <div class="col-4 col-md-2 purchase-order-quantity-column">
+            <div class="col-12 col-md-2 purchase-order-sku-column">
+                <label class="form-label form-label-sm mb-1" for="{{ item.vendor_sku.id }}">Vendor SKU</label>
+                {{ item.vendor_sku(class="form-control vendor-sku-field", placeholder="Vendor SKU") }}
+            </div>
+            <div class="col-4 col-md-1 purchase-order-quantity-column">
                 <label class="form-label form-label-sm mb-1 d-md-none" for="{{ item.quantity.id }}">Qty</label>
                 {{ item.quantity(class="form-control quantity") }}
             </div>

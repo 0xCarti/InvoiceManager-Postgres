@@ -24,6 +24,17 @@ def test_purchase_order_templates_expose_fast_add_actions():
         )
 
 
+def test_purchase_order_templates_expose_vendor_sku_field():
+    for relative_path in (
+        "app/templates/purchase_orders/create_purchase_order.html",
+        "app/templates/purchase_orders/edit_purchase_order.html",
+    ):
+        content = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert "Vendor SKU is optional on the PO and required when receiving." in content
+        assert 'class="form-control vendor-sku-field"' in content
+        assert 'placeholder="Vendor SKU"' in content
+
+
 def test_purchase_order_form_script_keeps_a_ready_blank_row():
     content = (
         ROOT / "app/static/js/purchase_order_form.js"
@@ -36,6 +47,7 @@ def test_purchase_order_form_script_keeps_a_ready_blank_row():
     assert 'entryMode: getSelectionMode(firstOption)' in content
     assert 'event.key === "Enter"' in content
     assert "ensureTrailingBlankRow();" in content
+    assert 'vendorSkuLabel.textContent = "Vendor SKU";' in content
 
 
 def test_receive_invoice_template_shows_inline_deposit_field():

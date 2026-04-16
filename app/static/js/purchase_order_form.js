@@ -744,15 +744,6 @@
             }
             itemCol.appendChild(costInput);
 
-            const vendorSkuInput = document.createElement("input");
-            vendorSkuInput.type = "hidden";
-            vendorSkuInput.name = `items-${index}-vendor_sku`;
-            vendorSkuInput.classList.add("vendor-sku-field");
-            if (options.vendorSku) {
-                vendorSkuInput.value = options.vendorSku;
-            }
-            itemCol.appendChild(vendorSkuInput);
-
             const vendorDescriptionInput = document.createElement("input");
             vendorDescriptionInput.type = "hidden";
             vendorDescriptionInput.name = `items-${index}-vendor_description`;
@@ -863,10 +854,34 @@
             }
             unitCol.appendChild(unitWrapper);
 
+            const vendorSkuCol = document.createElement("div");
+            vendorSkuCol.classList.add(
+                "col-12",
+                "col-md-2",
+                "purchase-order-sku-column"
+            );
+            const vendorSkuLabel = document.createElement("label");
+            vendorSkuLabel.classList.add("form-label", "form-label-sm", "mb-1");
+            const vendorSkuInputId = `items-${index}-vendor_sku`;
+            vendorSkuLabel.setAttribute("for", vendorSkuInputId);
+            vendorSkuLabel.textContent = "Vendor SKU";
+            vendorSkuCol.appendChild(vendorSkuLabel);
+            const vendorSkuInput = document.createElement("input");
+            vendorSkuInput.type = "text";
+            vendorSkuInput.name = `items-${index}-vendor_sku`;
+            vendorSkuInput.classList.add("form-control", "vendor-sku-field");
+            vendorSkuInput.id = vendorSkuInputId;
+            vendorSkuInput.placeholder = "Vendor SKU";
+            vendorSkuInput.autocomplete = "off";
+            if (options.vendorSku) {
+                vendorSkuInput.value = options.vendorSku;
+            }
+            vendorSkuCol.appendChild(vendorSkuInput);
+
             const quantityCol = document.createElement("div");
             quantityCol.classList.add(
                 "col-4",
-                "col-md-2",
+                "col-md-1",
                 "purchase-order-quantity-column"
             );
             const quantityLabel = document.createElement("label");
@@ -931,6 +946,7 @@
                 itemCol,
                 glCodeCol,
                 unitCol,
+                vendorSkuCol,
                 quantityCol,
                 actionsCol
             );

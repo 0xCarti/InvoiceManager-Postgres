@@ -369,6 +369,7 @@ def _collect_purchase_order_item_entries(form_data):
         has_row_data = bool(
             item_id
             or item_label
+            or vendor_sku
             or unit_id
             or quantity is not None
             or unit_cost is not None
