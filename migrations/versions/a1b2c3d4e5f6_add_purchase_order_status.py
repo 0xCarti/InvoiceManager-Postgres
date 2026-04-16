@@ -32,7 +32,16 @@ def upgrade():
         )
         batch_op.create_index("ix_purchase_order_status", ["status"], unique=False)
 
-    op.execute("UPDATE purchase_order SET status = 'received' WHERE received = 1")
+    purchase_order = sa.table(
+        "purchase_order",
+        sa.column("status", sa.String(length=20)),
+        sa.column("received", sa.Boolean()),
+    )
+    op.execute(
+        purchase_order.update()
+        .where(purchase_order.c.received.is_(True))
+        .values(status="received")
+    )
 
 
 def downgrade():
