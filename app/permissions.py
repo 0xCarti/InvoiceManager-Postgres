@@ -135,6 +135,7 @@ PERMISSION_DEFINITIONS: tuple[PermissionDefinition, ...] = (
     _perm("purchase_orders.view", "purchase_orders", "View Purchase Orders", "View purchase orders."),
     _perm("purchase_orders.create", "purchase_orders", "Create Purchase Orders", "Create purchase orders."),
     _perm("purchase_orders.edit", "purchase_orders", "Edit Purchase Orders", "Edit purchase orders."),
+    _perm("purchase_orders.mark_ordered", "purchase_orders", "Mark Purchase Orders Ordered", "Move requested purchase orders into the ordered phase."),
     _perm("purchase_orders.delete", "purchase_orders", "Delete Purchase Orders", "Delete purchase orders."),
     _perm("purchase_orders.merge", "purchase_orders", "Merge Purchase Orders", "Merge purchase orders."),
     _perm("purchase_orders.upload", "purchase_orders", "Upload Purchase Orders", "Upload purchase orders from files."),
@@ -799,6 +800,10 @@ ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] =
     ("admin.vendor_item_aliases", "GET"): requirement(any_of=("vendor_item_aliases.view", "vendor_item_aliases.manage")),
     ("admin.vendor_item_aliases", "POST"): requirement(any_of=("vendor_item_aliases.manage",)),
     ("admin.delete_vendor_item_alias", "POST"): requirement(any_of=("vendor_item_aliases.manage",)),
+    ("purchase.mark_purchase_order_ordered", "POST"): requirement(
+        any_of=("purchase_orders.mark_ordered", "purchase_orders.edit"),
+        all_of=("purchase_orders.view",),
+    ),
     ("admin.permission_groups", "GET"): requirement(any_of=("permission_groups.view", "permission_groups.manage")),
     ("admin.create_permission_group", "GET"): requirement(any_of=("permission_groups.manage",)),
     ("admin.create_permission_group", "POST"): requirement(any_of=("permission_groups.manage",)),

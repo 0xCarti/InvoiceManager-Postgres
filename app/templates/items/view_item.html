@@ -1,11 +1,13 @@
 {% extends 'base.html' %}
 {% block content %}
+{% set can_view_vendor_aliases = can_access_endpoint('admin.vendor_item_aliases', 'GET') %}
 <div class="container mt-5">
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
         <h2 class="mb-0">{{ item.name }}</h2>
         <a class="btn btn-outline-secondary" href="{{ url_for('notes.entity_notes', entity_type='item', entity_id=item.id) }}">View Notes</a>
     </div>
     <p><strong>Base Unit:</strong> {{ item.base_unit }}</p>
+    {% if can_view_vendor_aliases %}
     <div class="card mb-4">
         <div class="card-body">
             <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
@@ -26,6 +28,7 @@
             {% include 'items/_vendor_alias_table.html' %}
         </div>
     </div>
+    {% endif %}
     <div class="row">
         <div class="col-12">
             <h4>Recent Purchase Invoices</h4>

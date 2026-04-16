@@ -665,7 +665,12 @@ def view_item(item_id):
     item_obj = db.session.get(Item, item_id)
     if item_obj is None:
         abort(404)
-    vendor_aliases = _load_item_vendor_aliases(item_id)
+    can_view_vendor_aliases = current_user.can_access_endpoint(
+        "admin.vendor_item_aliases", "GET"
+    )
+    vendor_aliases = (
+        _load_item_vendor_aliases(item_id) if can_view_vendor_aliases else []
+    )
     vendor_alias_delete_form = DeleteForm()
     purchase_page = request.args.get("purchase_page", 1, type=int)
     sales_page = request.args.get("sales_page", 1, type=int)
@@ -911,7 +916,12 @@ def edit_item(item_id):
     item = db.session.get(Item, item_id)
     if item is None:
         abort(404)
-    vendor_aliases = _load_item_vendor_aliases(item.id)
+    can_view_vendor_aliases = current_user.can_access_endpoint(
+        "admin.vendor_item_aliases", "GET"
+    )
+    vendor_aliases = (
+        _load_item_vendor_aliases(item.id) if can_view_vendor_aliases else []
+    )
     vendor_alias_delete_form = DeleteForm()
     location_stand_items = (
         LocationStandItem.query.join(Location)

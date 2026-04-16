@@ -211,3 +211,67 @@ def test_vendor_alias_save_redirects_back_to_return_url(client, app):
         ).first()
         assert alias is not None
         assert alias.vendor_description == "Route Managed Alias"
+
+
+def test_vendor_alias_list_filters_by_vendor_item_and_query(client, app):
+    with app.app_context():
+        vendor_a = Vendor(first_name="Alpha", last_name="Foods")
+        vendor_b = Vendor(first_name="Beta", last_name="Foods")
+        item_a = Item(name="Tomatoes", base_unit="ea", cost=0.0)
+        item_b = Item(name="Onions", base_unit="ea", cost=0.0)
+        user = User(
+            email="vendor-alias-filter@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add_all([vendor_a, vendor_b, item_a, item_b, user])
+        db.session.flush()
+        db.session.add_all(
+            [
+                VendorItemAlias(
+                    vendor_id=vendor_a.id,
+                    item_id=item_a.id,
+                    vendor_sku="ALPHA-1",
+                    vendor_description="Roma Tomatoes",
+                    normalized_description="roma tomatoes",
+                    pack_size="25 lb",
+                ),
+                VendorItemAlias(
+                    vendor_id=vendor_b.id,
+                    item_id=item_b.id,
+                    vendor_sku="BETA-9",
+                    vendor_description="Yellow Onions",
+                    normalized_description="yellow onions",
+                    pack_size="10 lb",
+                ),
+            ]
+        )
+        db.session.commit()
+        grant_permissions(
+            user,
+            "vendor_item_aliases.view",
+            group_name="Vendor Alias Filter Viewers",
+            description="Can view filtered vendor alias listings.",
+        )
+        vendor_a_id = vendor_a.id
+        item_a_id = item_a.id
+
+    with client:
+        login(client, "vendor-alias-filter@example.com", "pass")
+        response = client.get(
+            "/controlpanel/vendor-item-aliases",
+            query_string={
+                "filter_vendor_id": vendor_a_id,
+                "filter_item_id": item_a_id,
+                "filter_query": "roma",
+            },
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "Roma Tomatoes" in page
+    assert "ALPHA-1" in page
+    assert "Yellow Onions" not in page
+    assert "BETA-9" not in page
+    assert "Showing 1 of 2 alias mappings." in page

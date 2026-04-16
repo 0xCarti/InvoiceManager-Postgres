@@ -244,6 +244,7 @@ def test_view_only_purchase_order_page_hides_manage_actions(client, app):
         assert "Forecast Purchase Costs" not in html
         assert "/purchase_orders/edit/" not in html
         assert f"/purchase_orders/{workflow['purchase_order_id']}/receive" not in html
+        assert "Mark Ordered" not in html
 
 
 def test_purchase_order_create_page_hides_item_management_helpers_without_item_permissions(

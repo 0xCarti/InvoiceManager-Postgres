@@ -65,6 +65,21 @@ def test_user_can_access_endpoint_requires_matching_permission():
         DummyUser("communications.view"),
         "communication.message_detail",
     )
+    assert not user_can_access_endpoint(
+        DummyUser("purchase_orders.view"),
+        "purchase.mark_purchase_order_ordered",
+        "POST",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("purchase_orders.view", "purchase_orders.mark_ordered"),
+        "purchase.mark_purchase_order_ordered",
+        "POST",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("purchase_orders.view", "purchase_orders.edit"),
+        "purchase.mark_purchase_order_ordered",
+        "POST",
+    )
 
 
 def test_super_admin_bypasses_endpoint_permission_checks():

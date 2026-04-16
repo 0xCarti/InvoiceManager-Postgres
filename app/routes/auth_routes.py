@@ -23,7 +23,7 @@ from flask import (
     url_for,
 )
 from flask_login import current_user, login_required, login_user, logout_user
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import selectinload
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
@@ -3738,9 +3738,20 @@ def vendor_item_aliases(alias_id: int | None = None):
     alias_obj = db.session.get(VendorItemAlias, alias_id) if alias_id else None
     form = VendorItemAliasForm(obj=alias_obj)
     delete_form = DeleteForm()
+    filter_vendor_id = request.args.get("filter_vendor_id", type=int)
+    filter_item_id = request.args.get("filter_item_id", type=int)
+    filter_query = (request.args.get("filter_query") or "").strip()
+    list_filter_args: dict[str, object] = {}
+    if filter_vendor_id:
+        list_filter_args["filter_vendor_id"] = filter_vendor_id
+    if filter_item_id:
+        list_filter_args["filter_item_id"] = filter_item_id
+    if filter_query:
+        list_filter_args["filter_query"] = filter_query
+    list_return_url = url_for("admin.vendor_item_aliases", **list_filter_args)
     if request.method == "GET":
         form.return_to.data = (
-            _safe_local_return_url(request.args.get("next")) or ""
+            _safe_local_return_url(request.args.get("next")) or list_return_url
         )
         if alias_obj is None:
             requested_item_id = request.args.get("item_id", type=int)
@@ -3758,21 +3769,49 @@ def vendor_item_aliases(alias_id: int | None = None):
             if requested_unit_id in valid_unit_ids:
                 form.item_unit_id.data = requested_unit_id
 
-    aliases = (
+    aliases_query = (
         VendorItemAlias.query.options(
             selectinload(VendorItemAlias.vendor),
             selectinload(VendorItemAlias.item),
             selectinload(VendorItemAlias.item_unit),
         )
-        .order_by(VendorItemAlias.vendor_id, VendorItemAlias.vendor_sku)
-        .all()
+        .join(Vendor, Vendor.id == VendorItemAlias.vendor_id)
     )
+    total_alias_count = aliases_query.count()
+    if filter_vendor_id:
+        aliases_query = aliases_query.filter(VendorItemAlias.vendor_id == filter_vendor_id)
+    if filter_item_id:
+        aliases_query = aliases_query.filter(VendorItemAlias.item_id == filter_item_id)
+    if filter_query:
+        aliases_query = aliases_query.filter(
+            or_(
+                build_text_match_predicate(
+                    VendorItemAlias.vendor_sku, filter_query, "contains"
+                ),
+                build_text_match_predicate(
+                    VendorItemAlias.vendor_description, filter_query, "contains"
+                ),
+                build_text_match_predicate(
+                    VendorItemAlias.pack_size, filter_query, "contains"
+                ),
+            )
+        )
+    aliases = (
+        aliases_query.order_by(
+            Vendor.first_name,
+            Vendor.last_name,
+            VendorItemAlias.vendor_sku,
+            VendorItemAlias.vendor_description,
+        ).all()
+    )
+    filter_vendors = Vendor.query.order_by(Vendor.first_name, Vendor.last_name).all()
+    filter_items = Item.query.order_by(Item.name).all()
 
     if form.validate_on_submit():
         vendor = db.session.get(Vendor, form.vendor_id.data)
         if not vendor:
             flash("Select a valid vendor before saving the alias.", "danger")
-            return redirect(url_for("admin.vendor_item_aliases"))
+            return redirect(list_return_url)
 
         unit_id = form.item_unit_id.data or None
         if unit_id == 0:
@@ -3815,7 +3854,7 @@ def vendor_item_aliases(alias_id: int | None = None):
         flash("Vendor alias saved successfully.", "success")
         return redirect(
             _safe_local_return_url(form.return_to.data)
-            or url_for("admin.vendor_item_aliases")
+            or list_return_url
         )
 
     return render_template(
@@ -3824,6 +3863,14 @@ def vendor_item_aliases(alias_id: int | None = None):
         delete_form=delete_form,
         aliases=aliases,
         editing_alias=alias_obj,
+        filter_vendors=filter_vendors,
+        filter_items=filter_items,
+        filter_vendor_id=filter_vendor_id,
+        filter_item_id=filter_item_id,
+        filter_query=filter_query,
+        filters_active=bool(filter_vendor_id or filter_item_id or filter_query),
+        total_alias_count=total_alias_count,
+        list_return_url=list_return_url,
         can_manage_vendor_item_aliases=current_user.has_permission(
             "vendor_item_aliases.manage"
         ),

@@ -943,7 +943,12 @@ def edit_product(product_id):
     else:
         print(form.errors)
         print(form.cost.data)
-    vendor_alias_groups = _build_product_vendor_alias_groups(product)
+    can_view_vendor_aliases = current_user.can_access_endpoint(
+        "admin.vendor_item_aliases", "GET"
+    )
+    vendor_alias_groups = (
+        _build_product_vendor_alias_groups(product) if can_view_vendor_aliases else []
+    )
     form_action = url_for("product.edit_product", product_id=product.id)
     if is_ajax:
         modal_html = render_template(

@@ -20,11 +20,11 @@ from app.models import (
     Vendor,
     VendorItemAlias,
 )
-from tests.permission_helpers import grant_item_workflow_permissions
+from tests.permission_helpers import grant_item_workflow_permissions, grant_permissions
 from tests.utils import login
 
 
-def setup_history(app):
+def setup_history(app, *, include_vendor_alias_permission: bool = True):
     with app.app_context():
         user = User(
             email="hist@example.com",
@@ -43,6 +43,13 @@ def setup_history(app):
         db.session.add_all([user, customer, vendor, item, unit, loc1, loc2, product, pri])
         db.session.commit()
         grant_item_workflow_permissions(user)
+        if include_vendor_alias_permission:
+            grant_permissions(
+                user,
+                "vendor_item_aliases.view",
+                group_name=f"Item Alias View {user.email}",
+                description="Can view vendor alias details from item pages.",
+            )
         po = PurchaseOrder(vendor_id=vendor.id, user_id=user.id, vendor_name="Vend Or", order_date=date.today(), expected_date=date.today(), delivery_charge=0, received=True)
         db.session.add(po)
         db.session.commit()
@@ -84,3 +91,16 @@ def test_item_detail_page(client, app):
         assert "WidgetProd" in page
         assert "VEN-100" in page
         assert "Widget Master Case" in page
+
+
+def test_item_detail_page_hides_vendor_aliases_without_permission(client, app):
+    email, item_id, *_ = setup_history(app, include_vendor_alias_permission=False)
+
+    with client:
+        login(client, email, "pass")
+        resp = client.get(f"/items/{item_id}")
+
+    assert resp.status_code == 200
+    page = resp.get_data(as_text=True)
+    assert "Vendor SKU Mappings" not in page
+    assert "VEN-100" not in page

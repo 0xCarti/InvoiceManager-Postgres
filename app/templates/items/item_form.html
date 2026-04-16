@@ -8,6 +8,7 @@
 {% set recipe_product_items = recipe_product_items | default([]) %}
 {% set vendor_aliases = vendor_aliases | default([]) %}
 {% set show_location_tab = current_item is not none %}
+{% set can_view_vendor_aliases = can_access_endpoint('admin.vendor_item_aliases', 'GET') %}
 {% set default_gl = current_item.purchase_gl_code if current_item else None %}
 {% set details_content %}
     <div class="row">
@@ -120,11 +121,13 @@
             <button class="nav-link" id="item-location-gl-tab" data-bs-toggle="tab" data-bs-target="#item-location-gl"
                     type="button" role="tab" aria-controls="item-location-gl" aria-selected="false">Location GL Codes</button>
         </li>
+        {% if can_view_vendor_aliases %}
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="item-vendor-aliases-tab" data-bs-toggle="tab"
                     data-bs-target="#item-vendor-aliases" type="button" role="tab"
                     aria-controls="item-vendor-aliases" aria-selected="false">Vendor SKUs</button>
         </li>
+        {% endif %}
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="item-recipe-products-tab" data-bs-toggle="tab"
                     data-bs-target="#item-recipe-products" type="button" role="tab"
@@ -183,6 +186,7 @@
                 </table>
             </div>
         </div>
+        {% if can_view_vendor_aliases %}
         <div class="tab-pane fade" id="item-vendor-aliases" role="tabpanel" aria-labelledby="item-vendor-aliases-tab">
             <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
                 <div>
@@ -201,6 +205,7 @@
             {% set empty_message = 'No vendor SKU mappings have been saved for this item yet.' %}
             {% include 'items/_vendor_alias_table.html' %}
         </div>
+        {% endif %}
         <div class="tab-pane fade" id="item-recipe-products" role="tabpanel" aria-labelledby="item-recipe-products-tab">
             <div class="table-responsive">
                 <table class="table align-middle">

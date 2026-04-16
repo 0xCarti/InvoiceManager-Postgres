@@ -20,8 +20,8 @@
                         {{ 'Alias Details' if editing_alias else 'Alias Details' }}
                     {% endif %}
                 </span>
-                {% if editing_alias and can_manage_vendor_item_aliases %}
-                <a href="{{ url_for('admin.vendor_item_aliases') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+                {% if editing_alias %}
+                <a href="{{ list_return_url }}" class="btn btn-sm btn-outline-secondary">{{ 'Clear' if can_manage_vendor_item_aliases else 'Back to List' }}</a>
                 {% endif %}
             </div>
             <div class="card-body">
@@ -95,11 +95,46 @@
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span>Saved Aliases</span>
-                {% if aliases %}
-                <span class="badge bg-secondary">{{ aliases|length }}</span>
-                {% endif %}
+                <span class="badge bg-secondary">
+                    {{ aliases|length }}{% if filters_active %} / {{ total_alias_count }}{% endif %}
+                </span>
             </div>
             <div class="card-body">
+                <form method="get" class="row g-2 align-items-end mb-3">
+                    <div class="col-12 col-md-4">
+                        <label for="filter-vendor-id" class="form-label">Vendor</label>
+                        <select id="filter-vendor-id" name="filter_vendor_id" class="form-select">
+                            <option value="">All vendors</option>
+                            {% for vendor in filter_vendors %}
+                            <option value="{{ vendor.id }}" {% if filter_vendor_id == vendor.id %}selected{% endif %}>{{ vendor.first_name }} {{ vendor.last_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <label for="filter-item-id" class="form-label">Item</label>
+                        <select id="filter-item-id" name="filter_item_id" class="form-select">
+                            <option value="">All items</option>
+                            {% for item in filter_items %}
+                            <option value="{{ item.id }}" {% if filter_item_id == item.id %}selected{% endif %}>{{ item.name }}{% if item.archived %} (Archived){% endif %}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <label for="filter-query" class="form-label">SKU / Description</label>
+                        <input id="filter-query" name="filter_query" class="form-control" value="{{ filter_query }}" placeholder="Search SKU, description, or pack size">
+                    </div>
+                    <div class="col-12 d-flex flex-wrap gap-2">
+                        <button type="submit" class="btn btn-outline-primary">Apply Filters</button>
+                        {% if filters_active %}
+                        <a href="{{ url_for('admin.vendor_item_aliases') }}" class="btn btn-outline-secondary">Reset</a>
+                        {% endif %}
+                    </div>
+                </form>
+                {% if filters_active %}
+                <p class="text-muted small">
+                    Showing {{ aliases|length }} of {{ total_alias_count }} alias mapping{{ '' if total_alias_count == 1 else 's' }}.
+                </p>
+                {% endif %}
                 {% if aliases %}
                 <div class="d-lg-none vstack gap-3">
                     {% for alias in aliases %}
@@ -130,9 +165,9 @@
                                 </dd>
                             </dl>
                             <div class="vstack gap-2">
-                                <a class="btn btn-sm btn-outline-primary w-100" href="{{ url_for('admin.vendor_item_aliases', alias_id=alias.id) }}">{{ 'Edit' if can_manage_vendor_item_aliases else 'View' }}</a>
+                                <a class="btn btn-sm btn-outline-primary w-100" href="{{ url_for('admin.vendor_item_aliases', alias_id=alias.id, next=list_return_url) }}">{{ 'Edit' if can_manage_vendor_item_aliases else 'View' }}</a>
                                 {% if can_manage_vendor_item_aliases %}
-                                <form method="post" action="{{ url_for('admin.delete_vendor_item_alias', alias_id=alias.id) }}">
+                                <form method="post" action="{{ url_for('admin.delete_vendor_item_alias', alias_id=alias.id, next=list_return_url) }}">
                                     {{ delete_form.hidden_tag() }}
                                     <button type="submit" class="btn btn-sm btn-danger w-100" data-confirm-message="Delete this alias?">Delete</button>
                                 </form>
@@ -174,9 +209,9 @@
                                 </td>
                                 <td class="text-end">
                                     <div class="d-flex gap-2 justify-content-end">
-                                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.vendor_item_aliases', alias_id=alias.id) }}">{{ 'Edit' if can_manage_vendor_item_aliases else 'View' }}</a>
+                                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.vendor_item_aliases', alias_id=alias.id, next=list_return_url) }}">{{ 'Edit' if can_manage_vendor_item_aliases else 'View' }}</a>
                                         {% if can_manage_vendor_item_aliases %}
-                                        <form method="post" action="{{ url_for('admin.delete_vendor_item_alias', alias_id=alias.id) }}">
+                                        <form method="post" action="{{ url_for('admin.delete_vendor_item_alias', alias_id=alias.id, next=list_return_url) }}">
                                             {{ delete_form.hidden_tag() }}
                                             <button type="submit" class="btn btn-sm btn-danger" data-confirm-message="Delete this alias?">Delete</button>
                                         </form>

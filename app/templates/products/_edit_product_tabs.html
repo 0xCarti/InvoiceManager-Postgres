@@ -8,6 +8,7 @@
 {% set terminal_tab_id = 'terminal-sales-tab' if is_default_tabs else tabs_id ~ '-terminal-sales-tab' %}
 {% set terminal_panel_id = 'terminal-sales' if is_default_tabs else tabs_id ~ '-terminal-sales' %}
 {% set can_remove_terminal_sale_aliases = can_access_endpoint('product.remove_terminal_sale_alias', 'POST') %}
+{% set can_view_vendor_aliases = can_access_endpoint('admin.vendor_item_aliases', 'GET') %}
 <div class="product-edit-sections" data-role="product-edit-tabs">
     <ul class="nav nav-tabs mt-4" id="{{ tabs_id }}" role="tablist">
         <li class="nav-item" role="presentation">
@@ -15,11 +16,13 @@
                 data-bs-target="#{{ details_panel_id }}" type="button" role="tab"
                 aria-controls="{{ details_panel_id }}" aria-selected="true">Details</button>
         </li>
+        {% if can_view_vendor_aliases %}
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="{{ vendor_tab_id }}" data-bs-toggle="tab"
                 data-bs-target="#{{ vendor_panel_id }}" type="button" role="tab"
                 aria-controls="{{ vendor_panel_id }}" aria-selected="false">Vendor SKUs</button>
         </li>
+        {% endif %}
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="{{ terminal_tab_id }}" data-bs-toggle="tab"
                 data-bs-target="#{{ terminal_panel_id }}" type="button" role="tab"
@@ -31,6 +34,7 @@
             aria-labelledby="{{ details_tab_id }}">
             {% include 'products/_create_product_form.html' %}
         </div>
+        {% if can_view_vendor_aliases %}
         <div class="tab-pane fade" id="{{ vendor_panel_id }}" role="tabpanel"
             aria-labelledby="{{ vendor_tab_id }}">
             <div class="d-flex justify-content-between align-items-center mb-3">
@@ -73,6 +77,7 @@
             <p class="text-muted mb-0">This product does not have any recipe items yet.</p>
             {% endif %}
         </div>
+        {% endif %}
         <div class="tab-pane fade" id="{{ terminal_panel_id }}" role="tabpanel"
             aria-labelledby="{{ terminal_tab_id }}">
             <div class="d-flex justify-content-between align-items-center mb-3">
