@@ -448,6 +448,21 @@ def test_admin_can_assign_permission_group_to_super_admin_via_access_page(client
         ]
 
 
+def test_admin_users_page_shows_invite_form_guidance(client, app):
+    with client:
+        login(client, "admin@example.com", "adminpass")
+        response = client.get("/controlpanel/users", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert (
+        b"Send a setup email and pre-assign access before the user signs in."
+        in response.data
+    )
+    assert (
+        b"Users can be invited without access and updated later." in response.data
+    )
+
+
 def test_login_inactive_user(client, app):
     with app.app_context():
         user = User(

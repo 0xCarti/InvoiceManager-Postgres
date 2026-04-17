@@ -16,7 +16,9 @@ from app.models import (
     TerminalSaleProductAlias,
     User,
 )
+from tests.permission_helpers import grant_permissions
 from tests.utils import extract_csrf_token, login
+from werkzeug.security import generate_password_hash
 
 
 def _seed_import_with_unresolved_rows(app, *, message_id: str = "msg-map-1"):
@@ -340,3 +342,82 @@ def test_saving_sales_date_auto_assigns_matching_event_location(client, app):
 
         assert import_record.sales_date.isoformat() == "2026-04-15"
         assert location_record.event_location_id == event_location_id
+
+
+def test_sales_import_detail_hides_create_location_without_locations_create_permission(
+    client, app
+):
+    import_id, _, _ = _seed_import_with_unresolved_rows(
+        app, message_id="msg-create-location-ui"
+    )
+
+    with app.app_context():
+        user = User(
+            email="sales-import-reviewer@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add(user)
+        db.session.commit()
+        grant_permissions(
+            user,
+            "sales_imports.manage",
+            group_name="Sales Import Reviewers",
+            description="Can manage sales imports without creating locations.",
+        )
+
+    with client:
+        login(client, "sales-import-reviewer@example.com", "pass")
+        response = client.get(
+            f"/controlpanel/sales-imports/{import_id}",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"Resolve location mapping" in response.data
+    assert b"Save Mapping" in response.data
+    assert b"Or create new location" not in response.data
+    assert b"Create + Map" not in response.data
+
+
+def test_sales_import_create_location_requires_locations_create_permission(
+    client, app
+):
+    import_id, location_import_id, _ = _seed_import_with_unresolved_rows(
+        app, message_id="msg-create-location-permission"
+    )
+
+    with app.app_context():
+        user = User(
+            email="sales-import-blocked@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add(user)
+        db.session.commit()
+        grant_permissions(
+            user,
+            "sales_imports.manage",
+            group_name="Sales Import Managers Without Location Create",
+            description="Can review imports but cannot create locations.",
+        )
+
+    with client:
+        login(client, "sales-import-blocked@example.com", "pass")
+        detail_page = client.get(f"/controlpanel/sales-imports/{import_id}")
+        csrf_token = extract_csrf_token(detail_page, required=False)
+        response = client.post(
+            f"/controlpanel/sales-imports/{import_id}",
+            data={
+                "action": "create_location",
+                "location_import_id": location_import_id,
+                "new_location_name": "Blocked Created Stand",
+                "csrf_token": csrf_token,
+            },
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 403
+
+    with app.app_context():
+        assert Location.query.filter_by(name="Blocked Created Stand").first() is None

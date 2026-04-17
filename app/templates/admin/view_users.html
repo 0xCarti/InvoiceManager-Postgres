@@ -2,7 +2,14 @@
 {% from 'macros/column_visibility.html' import column_visibility_dropdown %}
 
 {% block content %}
-<div class="container mt-4">
+<style nonce="{{ csp_nonce }}">
+@media (min-width: 992px) {
+    .invite-user-card .invite-submit-row {
+        min-height: 100%;
+    }
+}
+</style>
+<div class="container mt-5 mobile-list-page">
     {% set can_manage_users = has_permission('users.manage') %}
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
         <div>
@@ -20,35 +27,52 @@
     </div>
 
     {% if can_manage_users %}
-    <div class="card mb-3">
+    <div class="card invite-user-card mb-4 shadow-sm">
+        <div class="card-header bg-light border-0 py-3">
+            <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-start gap-3">
+                <div>
+                    <h3 class="h5 mb-1">Invite User</h3>
+                    <p class="text-muted mb-0">Send a setup email and pre-assign access before the user signs in.</p>
+                </div>
+                <div class="small text-muted">
+                    Re-sending a pending invite refreshes the setup link and updates its assigned groups.
+                </div>
+            </div>
+        </div>
         <div class="card-body">
-            <h3 class="h6 mb-3">Invite User</h3>
-            <form action="{{ url_for('admin.users') }}" method="post" class="row g-3">
+            <form action="{{ url_for('admin.users') }}" method="post" class="row g-3 align-items-start">
                 {{ invite_form.hidden_tag() }}
-                <div class="col-12 col-lg-4">
+                <div class="col-12 col-xl-4">
                     {{ invite_form.email.label(class_='form-label') }}
-                    {{ invite_form.email(class_='form-control' ~ (' is-invalid' if invite_form.email.errors else ''), placeholder='Email') }}
+                    {{ invite_form.email(class_='form-control' ~ (' is-invalid' if invite_form.email.errors else ''), placeholder='name@example.com', autocomplete='email') }}
                     {% for error in invite_form.email.errors %}
                     <div class="invalid-feedback d-block">{{ error }}</div>
                     {% endfor %}
+                    <div class="form-text">The invite email is sent to this address and used as the user login.</div>
                 </div>
-                <div class="col-12 col-lg-3">
+                <div class="col-12 col-md-6 col-xl-3">
                     {{ invite_form.display_name.label(class_='form-label') }}
-                    {{ invite_form.display_name(class_='form-control' ~ (' is-invalid' if invite_form.display_name.errors else ''), placeholder='Optional name') }}
+                    {{ invite_form.display_name(class_='form-control' ~ (' is-invalid' if invite_form.display_name.errors else ''), placeholder='Optional display name', autocomplete='name') }}
                     {% for error in invite_form.display_name.errors %}
                     <div class="invalid-feedback d-block">{{ error }}</div>
                     {% endfor %}
+                    <div class="form-text">Shown in user lists and pickers instead of the raw email when provided.</div>
                 </div>
-                <div class="col-12 col-lg-3">
+                <div class="col-12 col-xl-5">
                     {{ invite_form.group_ids.label(class_='form-label') }}
                     {{ invite_form.group_ids(class_='form-select' ~ (' is-invalid' if invite_form.group_ids.errors else ''), multiple=true) }}
                     {% for error in invite_form.group_ids.errors %}
                     <div class="invalid-feedback d-block">{{ error }}</div>
                     {% endfor %}
-                    <div class="form-text">Leave blank to invite the user with no permission groups until you assign access. Sending the same email again will re-send any still-pending invite and update its groups.</div>
+                    <div class="form-text">Leave blank to invite the user with no permission groups until you assign access.</div>
                 </div>
-                <div class="col-12 col-lg-2 d-flex align-items-end">
-                    <button type="submit" class="btn btn-primary w-100">{{ invite_form.submit.label.text }}</button>
+                <div class="col-12">
+                    <div class="border rounded-3 bg-light px-3 py-3 invite-submit-row d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
+                        <div class="small text-muted">
+                            Users can be invited without access and updated later. Pending invites can also be re-sent from the list below.
+                        </div>
+                        <button type="submit" class="btn btn-primary">{{ invite_form.submit.label.text }}</button>
+                    </div>
                 </div>
             </form>
         </div>

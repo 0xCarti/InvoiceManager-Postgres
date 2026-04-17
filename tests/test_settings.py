@@ -2,7 +2,8 @@ import os
 from threading import Event
 
 from app import db
-from app.models import Setting, User
+from app.models import ActivityLog, Setting, User
+from app.utils.activity import flush_activity_logs
 from app.utils.backup import UNIT_SECONDS
 from app.utils.units import parse_conversion_setting
 from tests.permission_helpers import grant_permissions
@@ -92,6 +93,13 @@ def test_admin_can_update_settings(client, app):
         assert app.config["AUTO_BACKUP_INTERVAL"] == 2 * UNIT_SECONDS["week"]
         assert app.config["MAX_BACKUPS"] == 5
         assert app.config["BASE_UNIT_CONVERSIONS"] == mapping
+        flush_activity_logs()
+        activities = [row.activity for row in ActivityLog.query.order_by(ActivityLog.id).all()]
+        assert any(
+            "Updated settings:" in activity
+            and "POS sales import cadence" in activity
+            for activity in activities
+        )
 
 
 def test_auto_backup_thread_uses_real_app(client, app, monkeypatch):

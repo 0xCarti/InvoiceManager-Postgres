@@ -1,110 +1,272 @@
 {% extends "base.html" %}
+{% from "macros/column_visibility.html" import column_visibility_dropdown %}
+{% from "macros/filter_modal.html" import filter_modal %}
+
 {% block content %}
 {% set can_manage_sales_imports = has_permission('sales_imports.manage') %}
-<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-    <div>
-        <h1 class="mb-1">Sales Imports</h1>
-        <p class="text-muted mb-0">Review staged POS sales imports and their current workflow status.</p>
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .mobile-list-page .mobile-toolbar,
+    .mobile-list-page .mobile-pagination-controls {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .mobile-list-page .mobile-toolbar > *,
+    .mobile-list-page .mobile-toolbar .btn,
+    .mobile-list-page .mobile-toolbar .dropdown,
+    .mobile-list-page .mobile-toolbar .dropdown > .btn,
+    .mobile-list-page .mobile-pagination-controls > *,
+    .mobile-list-page .mobile-pagination-controls form,
+    .mobile-list-page .mobile-pagination-controls .pagination {
+        width: 100%;
+    }
+    .mobile-list-page .mobile-table-wrap .table {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+    .mobile-list-page .mobile-table-wrap .table th,
+    .mobile-list-page .mobile-table-wrap .table td {
+        white-space: normal !important;
+        vertical-align: top;
+    }
+    .mobile-list-page .mobile-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .375rem;
+    }
+    .mobile-list-page .mobile-actions .btn,
+    .mobile-list-page .mobile-actions form {
+        margin: 0 !important;
+    }
+}
+</style>
+<div class="container mt-5 mobile-list-page">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Sales Imports</h2>
+            <p class="text-muted mb-0">Review staged POS sales imports, event routing, and approval readiness.</p>
+        </div>
     </div>
-</div>
 
-<div class="card mb-4">
-    <div class="card-body">
-        <form method="get" class="row g-2 align-items-end">
-            <div class="col-sm-4 col-md-3">
-                <label class="form-label" for="status">Status</label>
-                <select class="form-select" id="status" name="status">
-                    <option value="">All statuses</option>
-                    {% for status in available_statuses %}
-                    <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status|replace('_', ' ') }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-auto">
-                <button type="submit" class="btn btn-primary">Filter</button>
-            </div>
-        </form>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3 mobile-toolbar">
+        <div class="dropdown d-md-none">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                More actions
+            </button>
+            <ul class="dropdown-menu">
+                <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</button></li>
+            </ul>
+        </div>
+        <div>
+            {{ column_visibility_dropdown(
+                table_id='sales-imports-table',
+                storage_key='salesImportsTableColumnVisibility',
+                columns=[
+                    {'id': 'toggle-import-id', 'target': 'col-import-id', 'label': 'Import', 'checked': True},
+                    {'id': 'toggle-import-status', 'target': 'col-import-status', 'label': 'Status', 'checked': True},
+                    {'id': 'toggle-import-dates', 'target': 'col-import-dates', 'label': 'Dates', 'checked': True},
+                    {'id': 'toggle-import-source', 'target': 'col-import-source', 'label': 'Source', 'checked': True},
+                    {'id': 'toggle-import-attachment', 'target': 'col-import-attachment', 'label': 'Attachment', 'checked': True},
+                    {'id': 'toggle-import-counts', 'target': 'col-import-counts', 'label': 'Summary', 'checked': True},
+                    {'id': 'toggle-import-actions', 'target': 'col-import-actions', 'label': 'Actions', 'checked': True},
+                ]
+            ) }}
+        </div>
+        <button type="button" class="btn btn-outline-secondary d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#filterModal">
+            Filters
+        </button>
     </div>
-</div>
 
-<div class="card">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <span>Imports</span>
-        <span class="badge bg-secondary">{{ imports|length }}</span>
+    {% if search_query or status_filter %}
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="text-muted small">Active filters:</span>
+        {% if search_query %}
+        <span class="badge rounded-pill text-bg-light border">Search: {{ search_query }}</span>
+        {% endif %}
+        {% if status_filter %}
+        <span class="badge rounded-pill text-bg-light border">Status: {{ status_filter|replace('_', ' ')|title }}</span>
+        {% endif %}
     </div>
-    <div class="card-body p-0">
-        {% if imports %}
-        <div class="table-responsive">
-            <table class="table table-sm table-striped mb-0 align-middle">
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Received</th>
-                        <th>Sales Date</th>
-                        <th>Status</th>
-                        <th>Source</th>
-                        <th>Attachment</th>
-                        <th class="text-end">Issues</th>
-                        <th class="text-end">Locations</th>
-                        <th class="text-end">Rows (excl. totals)</th>
-                        {% if can_manage_sales_imports %}
-                        <th class="text-end">Actions</th>
-                        {% endif %}
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for import in imports %}
-                    <tr>
-                        <td><a href="{{ url_for('admin.sales_import_detail', import_id=import.id) }}">#{{ import.id }}</a></td>
-                        <td>
+    {% endif %}
+
+    {% if imports.items %}
+    <div class="table-responsive mobile-table-wrap">
+        <table class="table sortable align-middle" id="sales-imports-table">
+            <thead>
+                <tr>
+                    <th scope="col" class="col-import-id">Import</th>
+                    <th scope="col" class="col-import-status">Status</th>
+                    <th scope="col" class="col-import-dates">Dates</th>
+                    <th scope="col" class="col-import-source">Source</th>
+                    <th scope="col" class="col-import-attachment">Attachment</th>
+                    <th scope="col" class="col-import-counts">Summary</th>
+                    <th scope="col" class="col-import-actions" data-sortable="false">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for import in imports.items %}
+                <tr>
+                    <td class="col-import-id">
+                        <div class="fw-semibold">
+                            <a href="{{ url_for('admin.sales_import_detail', import_id=import.id) }}">#{{ import.id }}</a>
+                        </div>
+                        <div class="small text-muted">
+                            {% if import.locations|length == 1 %}
+                            1 import location
+                            {% else %}
+                            {{ import.locations|length }} import locations
+                            {% endif %}
+                        </div>
+                    </td>
+                    <td class="col-import-status">
+                        <span class="badge {% if import.status == 'approved' %}text-bg-success{% elif import.status == 'needs_mapping' %}text-bg-warning{% elif import.status == 'failed' %}text-bg-danger{% elif import.status == 'reversed' %}text-bg-secondary{% else %}text-bg-primary{% endif %}">
+                            {{ import.status|replace('_', ' ')|title }}
+                        </span>
+                        <div class="small mt-2">
+                            {% if import.issue_count %}
+                            <span class="text-warning">{{ import.issue_count }} issue{% if import.issue_count != 1 %}s{% endif %} blocking approval</span>
+                            {% else %}
+                            <span class="text-muted">No open approval issues</span>
+                            {% endif %}
+                        </div>
+                    </td>
+                    <td class="col-import-dates">
+                        <div>
+                            <div class="small text-muted">Received</div>
                             {% if import.received_at %}
                             {{ import.received_at.strftime('%Y-%m-%d %H:%M') }}
                             {% else %}
                             <span class="text-muted">Unknown</span>
                             {% endif %}
-                        </td>
-                        <td>
+                        </div>
+                        <div class="mt-2">
+                            <div class="small text-muted">Sales Date</div>
                             {% if import.sales_date %}
                             {{ import.sales_date.isoformat() }}
                             {% else %}
                             <span class="text-danger">Missing</span>
                             {% endif %}
-                        </td>
-                        <td><span class="badge bg-light text-dark border text-capitalize">{{ import.status|replace('_', ' ') }}</span></td>
-                        <td>{{ import.source_provider or 'Unknown' }}</td>
-                        <td class="text-break">{{ import.attachment_filename }}</td>
-                        <td class="text-end">
-                            {% if import.issue_count %}
-                            <span class="badge bg-warning text-dark">{{ import.issue_count }}</span>
+                        </div>
+                    </td>
+                    <td class="col-import-source">
+                        <div>{{ import.source_provider or 'Unknown' }}</div>
+                        <div class="small text-muted text-break">
+                            {% if import.message_id %}
+                            {{ import.message_id }}
                             {% else %}
-                            <span>0</span>
+                            No message ID
                             {% endif %}
-                        </td>
-                        <td class="text-end">{{ import.locations|length }}</td>
-                        <td class="text-end">{{ import.rows|length }}</td>
-                        {% if can_manage_sales_imports %}
-                        <td class="text-end">
-                            {% if import.can_direct_approve %}
-                            <form method="post" class="d-inline">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                <input type="hidden" name="action" value="approve_import">
-                                <input type="hidden" name="import_id" value="{{ import.id }}">
-                                <input type="hidden" name="status" value="{{ status_filter }}">
-                                <button type="submit" class="btn btn-success btn-sm">Approve</button>
-                            </form>
-                            {% else %}
-                            <span class="text-muted">-</span>
-                            {% endif %}
-                        </td>
+                        </div>
+                    </td>
+                    <td class="col-import-attachment">
+                        <div class="fw-semibold text-break">{{ import.attachment_filename }}</div>
+                        {% if not import.sales_date %}
+                        <div class="small text-muted mt-1">Open the import to confirm or override the inferred sales date.</div>
                         {% endif %}
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <p class="text-muted p-3 mb-0">No sales imports found for the selected filter.</p>
-        {% endif %}
+                    </td>
+                    <td class="col-import-counts">
+                        <div class="small">Locations: <span class="fw-semibold">{{ import.locations|length }}</span></div>
+                        <div class="small">Rows: <span class="fw-semibold">{{ import.rows|length }}</span></div>
+                        <div class="small">
+                            Issues:
+                            {% if import.issue_count %}
+                            <span class="fw-semibold text-warning">{{ import.issue_count }}</span>
+                            {% else %}
+                            <span class="fw-semibold">0</span>
+                            {% endif %}
+                        </div>
+                    </td>
+                    <td class="col-import-actions">
+                        <div class="mobile-actions">
+                            <a href="{{ url_for('admin.sales_import_detail', import_id=import.id) }}" class="btn btn-sm btn-outline-primary">Review</a>
+                            {% if can_manage_sales_imports %}
+                                {% if import.can_direct_approve %}
+                                <form method="post" class="d-inline">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="action" value="approve_import">
+                                    <input type="hidden" name="import_id" value="{{ import.id }}">
+                                    <input type="hidden" name="status" value="{{ status_filter }}">
+                                    <input type="hidden" name="search" value="{{ search_query }}">
+                                    <input type="hidden" name="page" value="{{ imports.page }}">
+                                    <input type="hidden" name="per_page" value="{{ per_page }}">
+                                    <button type="submit" class="btn btn-sm btn-success">Approve</button>
+                                </form>
+                                {% else %}
+                                <span class="small text-muted align-self-center">Needs review</span>
+                                {% endif %}
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
+
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3 mobile-pagination-controls">
+        <nav aria-label="Sales import pagination">
+            <ul class="pagination mb-0">
+                <li class="page-item {% if not imports.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('admin.sales_imports', page=imports.prev_num if imports.has_prev else 1, **pagination_args) }}"{% if not imports.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link">Page {{ imports.page }} of {{ imports.pages }}</span>
+                </li>
+                <li class="page-item {% if not imports.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('admin.sales_imports', page=imports.next_num if imports.has_next else imports.pages or 1, **pagination_args) }}"{% if not imports.has_next %} tabindex="-1" aria-disabled="true"{% endif %}>Next</a>
+                </li>
+            </ul>
+        </nav>
+        <form method="get" class="d-flex align-items-center gap-2">
+            {% for key, values in request.args.lists() %}
+                {% if key not in ['page', 'per_page'] %}
+                    {% for value in values %}
+                        <input type="hidden" name="{{ key }}" value="{{ value }}">
+                    {% endfor %}
+                {% endif %}
+            {% endfor %}
+            <input type="hidden" name="page" value="1">
+            <label for="sales-imports-per-page" class="form-label mb-0">Rows per page</label>
+            <select id="sales-imports-per-page" name="per_page" class="form-select js-auto-submit">
+                {% for option in PAGINATION_SIZES %}
+                    <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+    {% else %}
+    <div class="border rounded-3 p-4 bg-light text-muted">
+        No sales imports found for the selected filter.
+    </div>
+    {% endif %}
 </div>
+
+{% call filter_modal(
+    'filterModal',
+    'Filters',
+    form_id='filter-form',
+    form_action=url_for('admin.sales_imports'),
+    method='get',
+    reset_url=url_for('admin.sales_imports'),
+    dialog_class='modal-lg',
+    scope=request.endpoint,
+    save_defaults=True
+) %}
+    <div class="row g-3">
+        <div class="col-md-6">
+            <label for="search" class="form-label">Search</label>
+            <input type="text" id="search" name="search" class="form-control" placeholder="Attachment, message ID, or source" value="{{ search_query or '' }}">
+        </div>
+        <div class="col-md-6">
+            <label for="status" class="form-label">Status</label>
+            <select class="form-select" id="status" name="status">
+                <option value="">All statuses</option>
+                {% for status in available_statuses %}
+                <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status|replace('_', ' ')|title }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+{% endcall %}
 {% endblock %}

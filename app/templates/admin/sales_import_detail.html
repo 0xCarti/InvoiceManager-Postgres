@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 {% set can_manage_sales_imports = has_permission('sales_imports.manage') %}
+{% set can_create_locations = can_access_endpoint('locations.add_location', 'POST') %}
 {% set can_create_products = can_access_endpoint('product.create_product') %}
 {% set can_create_and_map = can_manage_sales_imports and can_create_products %}
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
@@ -259,6 +260,7 @@
                             <button type="submit" class="btn btn-primary btn-sm w-100">Save Mapping</button>
                         </div>
                     </form>
+                    {% if can_create_locations %}
                     <form method="post" class="row g-2 align-items-end">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="action" value="create_location">
@@ -272,6 +274,7 @@
                             <button type="submit" class="btn btn-outline-primary btn-sm w-100">Create + Map</button>
                         </div>
                     </form>
+                    {% endif %}
                 </div>
                 {% endif %}
                 <div class="border rounded p-3 mb-3">

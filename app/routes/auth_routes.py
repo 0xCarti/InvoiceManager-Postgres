@@ -116,6 +116,7 @@ from app.utils.filter_state import (
     normalize_filters,
 )
 from app.utils.numeric import coerce_float
+from app.utils.pagination import build_pagination_args, get_per_page
 from app.utils.units import (
     DEFAULT_BASE_UNIT_CONVERSIONS,
     get_allowed_target_units,
@@ -2239,6 +2240,24 @@ def settings():
     receive_defaults = Setting.get_receive_location_defaults()
     enabled_import_vendors = Setting.get_enabled_purchase_import_vendors()
     pos_sales_import_interval = Setting.get_pos_sales_import_interval()
+    settings_snapshot = {
+        "gst_number": gst_setting.value or "",
+        "default_timezone": tz_setting.value or "UTC",
+        "auto_backup_enabled": auto_setting.value == "1",
+        "auto_backup_interval": (
+            int(interval_value_setting.value),
+            interval_unit_setting.value,
+        ),
+        "pos_sales_import_interval": (
+            int(pos_sales_import_interval["value"]),
+            str(pos_sales_import_interval["unit"]),
+        ),
+        "max_backups": int(max_backups_setting.value),
+        "base_unit_mapping": dict(conversion_mapping),
+        "retail_pop_price": retail_pop_price_setting.value or "",
+        "purchase_import_vendors": list(enabled_import_vendors),
+        "receive_location_defaults": dict(receive_defaults),
+    }
     retail_pop_price_value = retail_pop_price_setting.value or "0"
     try:
         retail_pop_price_decimal = Decimal(retail_pop_price_value)
@@ -2301,23 +2320,63 @@ def settings():
             if field.data:
                 receive_location_updates[department] = field.data
 
-        gst_setting.value = form.gst_number.data or ""
-        tz_setting.value = form.default_timezone.data or "UTC"
-        auto_setting.value = "1" if form.auto_backup_enabled.data else "0"
+        new_gst_number = form.gst_number.data or ""
+        new_default_timezone = form.default_timezone.data or "UTC"
+        new_auto_backup_enabled = bool(form.auto_backup_enabled.data)
+        new_auto_backup_interval = (
+            form.auto_backup_interval_value.data,
+            form.auto_backup_interval_unit.data,
+        )
+        new_pos_sales_import_interval = (
+            form.pos_sales_import_interval_value.data,
+            form.pos_sales_import_interval_unit.data,
+        )
+        new_max_backups = form.max_backups.data
+        new_retail_pop_price = (
+            ""
+            if form.retail_pop_price.data is None
+            else format(form.retail_pop_price.data, ".2f")
+        )
+        changed_settings: list[str] = []
+        if settings_snapshot["gst_number"] != new_gst_number:
+            changed_settings.append("GST")
+        if settings_snapshot["default_timezone"] != new_default_timezone:
+            changed_settings.append("default timezone")
+        if settings_snapshot["auto_backup_enabled"] != new_auto_backup_enabled:
+            changed_settings.append("auto backup enabled")
+        if settings_snapshot["auto_backup_interval"] != new_auto_backup_interval:
+            changed_settings.append("auto backup cadence")
+        if (
+            settings_snapshot["pos_sales_import_interval"]
+            != new_pos_sales_import_interval
+        ):
+            changed_settings.append("POS sales import cadence")
+        if settings_snapshot["max_backups"] != new_max_backups:
+            changed_settings.append("max backups")
+        if settings_snapshot["base_unit_mapping"] != conversion_updates:
+            changed_settings.append("base unit conversions")
+        if settings_snapshot["retail_pop_price"] != new_retail_pop_price:
+            changed_settings.append("retail pop price")
+        if settings_snapshot["purchase_import_vendors"] != enabled_import_vendors:
+            changed_settings.append("purchase import vendors")
+        if (
+            settings_snapshot["receive_location_defaults"]
+            != receive_location_updates
+        ):
+            changed_settings.append("receive location defaults")
+
+        gst_setting.value = new_gst_number
+        tz_setting.value = new_default_timezone
+        auto_setting.value = "1" if new_auto_backup_enabled else "0"
         interval_value_setting.value = str(
             form.auto_backup_interval_value.data
         )
         interval_unit_setting.value = form.auto_backup_interval_unit.data
-        max_backups_setting.value = str(form.max_backups.data)
+        max_backups_setting.value = str(new_max_backups)
         conversions_setting.value = serialize_conversion_setting(
             conversion_updates
         )
-        if form.retail_pop_price.data is None:
-            retail_pop_price_setting.value = ""
-        else:
-            retail_pop_price_setting.value = format(
-                form.retail_pop_price.data, ".2f"
-            )
+        retail_pop_price_setting.value = new_retail_pop_price
         Setting.set_pos_sales_import_interval(
             value=form.pos_sales_import_interval_value.data,
             unit=form.pos_sales_import_interval_unit.data,
@@ -2357,6 +2416,11 @@ def settings():
         app.BASE_UNIT_CONVERSIONS = conversion_mapping
         current_app.config["BASE_UNIT_CONVERSIONS"] = conversion_mapping
         start_auto_backup_thread(current_app._get_current_object())
+        if changed_settings:
+            log_activity(
+                "Updated settings: "
+                + ", ".join(dict.fromkeys(changed_settings))
+            )
         flash("Settings updated.", "success")
         return redirect(url_for("admin.settings"))
 
@@ -2487,6 +2551,16 @@ def terminal_sales_mappings():
 @login_required
 def sales_imports():
     """Render staged POS sales imports for admin review."""
+    scope = request.endpoint or "admin.sales_imports"
+    default_filters = get_filter_defaults(current_user, scope)
+    active_filters = normalize_filters(
+        request.args, exclude=("page", "per_page", "reset")
+    )
+    if default_filters and not active_filters:
+        return redirect(
+            url_for("admin.sales_imports", **filters_to_query_args(default_filters))
+        )
+
     available_statuses = [
         "pending",
         "needs_mapping",
@@ -2494,10 +2568,14 @@ def sales_imports():
         "reversed",
         "failed",
     ]
+    page = request.args.get("page", 1, type=int)
+    per_page = get_per_page()
+    search_query = (request.args.get("search") or "").strip()
     status_filter = (request.args.get("status") or "").strip().lower()
     if status_filter not in available_statuses:
         status_filter = ""
     if request.method == "POST":
+        search_query = (request.form.get("search") or search_query).strip()
         status_filter = (request.form.get("status") or status_filter).strip().lower()
         if status_filter not in available_statuses:
             status_filter = ""
@@ -2508,11 +2586,18 @@ def sales_imports():
                 flash("Unable to find the selected sales import.", "danger")
             else:
                 _approve_sales_import(import_id)
-        return redirect(
-            url_for("admin.sales_imports", status=status_filter)
-            if status_filter
-            else url_for("admin.sales_imports")
-        )
+        redirect_args: dict[str, str] = {}
+        if status_filter:
+            redirect_args["status"] = status_filter
+        if search_query:
+            redirect_args["search"] = search_query
+        redirect_per_page = (request.form.get("per_page") or "").strip()
+        if redirect_per_page:
+            redirect_args["per_page"] = redirect_per_page
+        redirect_page = (request.form.get("page") or "").strip()
+        if redirect_page and redirect_page != "1":
+            redirect_args["page"] = redirect_page
+        return redirect(url_for("admin.sales_imports", **redirect_args))
 
     query = PosSalesImport.query.filter(
         PosSalesImport.status != "deleted"
@@ -2527,10 +2612,24 @@ def sales_imports():
     )
     if status_filter:
         query = query.filter(PosSalesImport.status == status_filter)
+    if search_query:
+        query = query.filter(
+            or_(
+                build_text_match_predicate(
+                    PosSalesImport.attachment_filename, search_query, "contains"
+                ),
+                build_text_match_predicate(
+                    PosSalesImport.message_id, search_query, "contains"
+                ),
+                build_text_match_predicate(
+                    PosSalesImport.source_provider, search_query, "contains"
+                ),
+            )
+        )
 
-    imports = query.limit(200).all()
+    imports = query.paginate(page=page, per_page=per_page)
     status_changed = False
-    for import_record in imports:
+    for import_record in imports.items:
         assignment_changed = _sync_sales_import_event_assignments(import_record)
         issue_state = _refresh_sales_import_mapping_status(import_record)
         status_changed = (
@@ -2553,7 +2652,10 @@ def sales_imports():
         "admin/sales_imports.html",
         imports=imports,
         status_filter=status_filter,
+        search_query=search_query,
         available_statuses=available_statuses,
+        per_page=per_page,
+        pagination_args=build_pagination_args(per_page),
     )
 
 
@@ -3746,6 +3848,8 @@ def sales_import_detail(import_id: int):
                 )
 
         elif action == "create_location":
+            if not current_user.has_permission("locations.create"):
+                abort(403)
             location_import_id = request.form.get("location_import_id", type=int)
             new_location_name = (request.form.get("new_location_name") or "").strip()
             location_record = next(

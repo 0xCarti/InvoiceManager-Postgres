@@ -1092,6 +1092,49 @@ def test_sales_imports_list_shows_issue_counts_and_direct_approve_button(client,
         assert ready_record.status == "pending"
 
 
+def test_sales_imports_list_supports_search_filters_and_pagination_controls(
+    client, app
+):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    ready_import = _create_price_review_import(
+        app,
+        message_id="msg-list-filter-ready",
+        product_price=5.0,
+        file_price=5.0,
+    )
+    approved_import = _create_price_review_import(
+        app,
+        message_id="msg-list-filter-approved",
+        product_price=5.0,
+        file_price=5.0,
+    )
+
+    with app.app_context():
+        ready_record = db.session.get(PosSalesImport, ready_import["import_id"])
+        approved_record = db.session.get(
+            PosSalesImport, approved_import["import_id"]
+        )
+        ready_record.attachment_filename = "morning-pending-sales.xls"
+        approved_record.attachment_filename = "evening-approved-sales.xls"
+        approved_record.status = "approved"
+        db.session.commit()
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.get(
+            "/controlpanel/sales-imports?status=approved&search=evening",
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Active filters:" in response.data
+        assert b"Search: evening" in response.data
+        assert b"Status: Approved" in response.data
+        assert b"Rows per page" in response.data
+        assert b"evening-approved-sales.xls" in response.data
+        assert b"morning-pending-sales.xls" not in response.data
+
+
 def test_admin_can_approve_sales_import_from_list_page(client, app):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
