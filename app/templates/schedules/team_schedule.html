@@ -107,6 +107,19 @@
         padding: 0.6rem 0.7rem;
         background: var(--bs-body-bg);
     }
+
+    .schedule-shift-modal-form {
+        display: flex;
+        flex: 1 1 auto;
+        flex-direction: column;
+        min-height: 0;
+    }
+
+    .schedule-shift-modal-form .modal-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+    }
 </style>
 
 <div class="container-fluid px-0">
@@ -703,10 +716,11 @@
     data-copy-count-input="{{ shift_form.copy_count.id }}"
     data-repeat-weeks-input="{{ shift_form.repeat_weeks.id }}"
     data-event-location-map='{{ schedule_event_location_map|tojson }}'
+    data-user-position-map='{{ schedule_user_position_map|tojson }}'
 >
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
-            <form method="post">
+            <form method="post" class="schedule-shift-modal-form">
                 <div class="modal-header">
                     <h2 class="modal-title fs-5" id="scheduleShiftModalTitle">Add Shift</h2>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -741,7 +755,8 @@
                         </div>
                         <div class="col-12 col-md-6">
                             {{ shift_form.position_id.label(class_='form-label') }}
-                            {{ shift_form.position_id(class_='form-select') }}
+                            {{ shift_form.position_id(class_='form-select', data_shift_position_select='1') }}
+                            <div class="form-text">Assigned shifts narrow positions to the selected user's active position eligibilities.</div>
                         </div>
                         <div class="col-12 col-md-4">
                             {{ shift_form.start_time.label(class_='form-label') }}

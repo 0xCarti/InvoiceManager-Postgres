@@ -47,12 +47,24 @@ document.addEventListener("DOMContentLoaded", () => {
         label: option.textContent,
       }))
     : [];
+  const originalPositionOptions = inputs.position
+    ? Array.from(inputs.position.options).map((option) => ({
+        value: option.value,
+        label: option.textContent,
+      }))
+    : [];
 
   let eventLocationMap = {};
+  let userPositionMap = {};
   try {
     eventLocationMap = JSON.parse(modal.dataset.eventLocationMap || "{}");
   } catch (_error) {
     eventLocationMap = {};
+  }
+  try {
+    userPositionMap = JSON.parse(modal.dataset.userPositionMap || "{}");
+  } catch (_error) {
+    userPositionMap = {};
   }
 
   function updateAssignedUserState() {
@@ -64,6 +76,7 @@ document.addEventListener("DOMContentLoaded", () => {
         inputs.assignedUser.value = "0";
       }
     }
+    syncPositionOptions(inputs.position?.value || "");
   }
 
   function setCheckboxValue(input, rawValue) {
@@ -175,6 +188,75 @@ document.addEventListener("DOMContentLoaded", () => {
     inputs.location.value = hasPreferred ? preferred : "0";
   }
 
+  function replacePositionOptions(options, preferredValue = "") {
+    if (!inputs.position) {
+      return;
+    }
+    inputs.position.innerHTML = "";
+    options.forEach((option) => {
+      const element = document.createElement("option");
+      element.value = option.value;
+      element.textContent = option.label;
+      inputs.position.appendChild(element);
+    });
+    const preferred = String(preferredValue || "");
+    const hasPreferred = Array.from(inputs.position.options).some(
+      (option) => option.value === preferred,
+    );
+    if (hasPreferred) {
+      inputs.position.value = preferred;
+    } else if (inputs.position.options.length > 0) {
+      inputs.position.value = inputs.position.options[0].value;
+    } else {
+      inputs.position.value = "";
+    }
+  }
+
+  function syncPositionOptions(preferredValue = null) {
+    if (!inputs.position) {
+      return;
+    }
+    const currentPreferred = String(preferredValue ?? inputs.position.value ?? "");
+    const mode = inputs.assignmentMode?.value || "assigned";
+    const assignedUserId = String(inputs.assignedUser?.value || "0");
+    if (mode !== "assigned" || assignedUserId === "0") {
+      inputs.position.disabled = false;
+      replacePositionOptions(originalPositionOptions, currentPreferred);
+      return;
+    }
+
+    const eligiblePositionIds = new Set(
+      (Array.isArray(userPositionMap[assignedUserId]) ? userPositionMap[assignedUserId] : [])
+        .map((value) => String(value)),
+    );
+    let eligibleOptions = originalPositionOptions.filter((option) =>
+      eligiblePositionIds.has(String(option.value)),
+    );
+    if (
+      currentPreferred
+      && !eligiblePositionIds.has(currentPreferred)
+    ) {
+      const currentOption = originalPositionOptions.find(
+        (option) => String(option.value) === currentPreferred,
+      );
+      if (currentOption) {
+        eligibleOptions = [currentOption, ...eligibleOptions];
+      }
+    }
+
+    if (!eligibleOptions.length) {
+      inputs.position.disabled = true;
+      replacePositionOptions(
+        [{ value: "", label: "No eligible positions" }],
+        "",
+      );
+      return;
+    }
+
+    inputs.position.disabled = false;
+    replacePositionOptions(eligibleOptions, currentPreferred);
+  }
+
   function syncLocationOptions(preferredValue = null) {
     if (!inputs.location || !inputs.event) {
       return;
@@ -213,12 +295,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if (inputs.assignedUser) {
       inputs.assignedUser.value = trigger.dataset.assignedUserId || "0";
     }
-    if (inputs.position) {
-      inputs.position.value = trigger.dataset.positionId || "";
-    }
     if (inputs.assignmentMode) {
       inputs.assignmentMode.value = trigger.dataset.assignmentMode || "assigned";
     }
+    syncPositionOptions(trigger.dataset.positionId || "");
     if (inputs.startTime) {
       inputs.startTime.value = trigger.dataset.startTime || "";
     }
@@ -262,6 +342,11 @@ document.addEventListener("DOMContentLoaded", () => {
   if (inputs.assignmentMode) {
     inputs.assignmentMode.addEventListener("change", updateAssignedUserState);
   }
+  if (inputs.assignedUser) {
+    inputs.assignedUser.addEventListener("change", () => {
+      syncPositionOptions(inputs.position?.value || "");
+    });
+  }
   if (inputs.startTime) {
     inputs.startTime.addEventListener("input", syncPaidHoursState);
     inputs.startTime.addEventListener("change", syncPaidHoursState);
@@ -281,5 +366,6 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   syncLocationOptions(inputs.location?.value || "0");
+  syncPositionOptions(inputs.position?.value || "");
   syncPaidHoursState();
 });

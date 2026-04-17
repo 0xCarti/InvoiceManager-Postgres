@@ -191,6 +191,38 @@ def _auto_assignable_departments(
     ]
 
 
+def _build_schedule_user_position_map(
+    users: list[User],
+    department_id: int | None,
+) -> dict[str, list[int]]:
+    if not department_id or not users:
+        return {}
+    user_ids = [user.id for user in users]
+    eligibilities = (
+        UserPositionEligibility.query.join(
+            ShiftPosition,
+            UserPositionEligibility.position_id == ShiftPosition.id,
+        )
+        .filter(
+            UserPositionEligibility.user_id.in_(user_ids),
+            UserPositionEligibility.active.is_(True),
+            ShiftPosition.department_id == department_id,
+            ShiftPosition.active.is_(True),
+        )
+        .order_by(
+            UserPositionEligibility.user_id.asc(),
+            UserPositionEligibility.priority.desc(),
+            ShiftPosition.sort_order.asc(),
+            ShiftPosition.name.asc(),
+        )
+        .all()
+    )
+    mapping: dict[str, list[int]] = {}
+    for eligibility in eligibilities:
+        mapping.setdefault(str(eligibility.user_id), []).append(eligibility.position_id)
+    return mapping
+
+
 def _auto_assign_result_summary(results) -> tuple[int, int, str]:
     assigned_count = sum(1 for result in results if result.assigned_user_id)
     unassigned_count = len(results) - assigned_count
@@ -708,6 +740,7 @@ def team_schedule():
         )
     can_auto_assign_selected_scope = False
     auto_assign_action_label = "Auto Assign"
+    schedule_user_position_map: dict[str, list[int]] = {}
 
     if all_departments_mode and visible_departments:
         context = _prepare_multi_department_schedule_context(
@@ -750,6 +783,10 @@ def team_schedule():
         action_form = CSRFOnlyForm(prefix="action")
         can_auto_assign_selected_scope = user_can_auto_assign_department(
             current_user,
+            selected_department.id,
+        )
+        schedule_user_position_map = _build_schedule_user_position_map(
+            context["assignable_users"],
             selected_department.id,
         )
 
@@ -856,6 +893,7 @@ def team_schedule():
             selected_location_filter_value=str(selected_filter_location_id or ""),
             schedule_events=schedule_events,
             event_filter_locations=event_filter_locations,
+            schedule_user_position_map=schedule_user_position_map,
             position_board_days=position_board_days,
             board_total_labor=board_total_labor,
             board_assigned_shift_count=board_assigned_shift_count,
@@ -947,6 +985,11 @@ def team_schedule():
                     shift_form.assigned_user_id.errors.append(
                         "Assigned user is outside your scheduling scope."
                     )
+                eligible_position_ids = (
+                    schedule_user_position_map.get(str(assigned_user.id), [])
+                    if assigned_user is not None
+                    else []
+                )
                 if not can_team_access:
                     if assignment_mode != Shift.ASSIGNMENT_ASSIGNED:
                         shift_form.assignment_mode.errors.append(
@@ -961,6 +1004,20 @@ def team_schedule():
                         current_user.id,
                     ):
                         abort(403)
+                if (
+                    assignment_mode == Shift.ASSIGNMENT_ASSIGNED
+                    and assigned_user is not None
+                    and position is not None
+                    and position.id not in eligible_position_ids
+                    and not (
+                        existing_shift is not None
+                        and existing_shift.assigned_user_id == assigned_user.id
+                        and existing_shift.position_id == position.id
+                    )
+                ):
+                    shift_form.position_id.errors.append(
+                        "Selected user is not eligible for that position."
+                    )
 
                 target_dates: list = [shift_form.shift_date.data]
                 copy_count = 1
@@ -1382,6 +1439,7 @@ def team_schedule():
         selected_location_filter_value=str(selected_filter_location_id or ""),
         schedule_events=schedule_events,
         event_filter_locations=event_filter_locations,
+        schedule_user_position_map=schedule_user_position_map,
         position_board_days=position_board_days,
         board_total_labor=board_total_labor,
         board_assigned_shift_count=board_assigned_shift_count,

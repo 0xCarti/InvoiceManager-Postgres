@@ -269,6 +269,45 @@ def test_team_schedule_can_create_and_publish_shift(client, app):
         assert shift.live_version == week.current_version
 
 
+def test_team_schedule_modal_renders_all_department_positions(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        department = Department(name="Modal Position Ops", active=True)
+        db.session.add(department)
+        db.session.commit()
+        db.session.add_all(
+            [
+                ShiftPosition(
+                    department_id=department.id,
+                    name="Cashier",
+                    active=True,
+                    sort_order=1,
+                ),
+                ShiftPosition(
+                    department_id=department.id,
+                    name="Runner",
+                    active=True,
+                    sort_order=2,
+                ),
+            ]
+        )
+        db.session.commit()
+        department_id = department.id
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.get(
+            f"/schedules?department_id={department_id}&week_start=2026-04-06&view_mode=position",
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Cashier" in response.data
+        assert b"Runner" in response.data
+        assert b"data-user-position-map" in response.data
+
+
 def test_team_schedule_position_view_filters_by_event_and_location(client, app):
     worker_id = create_user(app, "position-filter-worker@example.com")
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
@@ -384,6 +423,8 @@ def test_team_schedule_position_view_filters_by_event_and_location(client, app):
         assert b"Cashier" in response.data
         assert b"position-filter-worker@example.com" in response.data
         assert b"10:00 - 14:00" not in response.data
+        assert b"modal-dialog-scrollable" in response.data
+        assert b"schedule-shift-modal-form" in response.data
 
 
 def test_team_schedule_bulk_create_repeats_across_days_weeks_and_copies(client, app):
@@ -537,6 +578,84 @@ def test_team_schedule_rejects_multiple_assigned_copies_per_day(client, app):
 
     with app.app_context():
         assert Shift.query.filter_by(position_id=position_id).count() == 0
+
+
+def test_team_schedule_rejects_assigned_user_without_position_eligibility(client, app):
+    worker_id = create_user(app, "ineligible-position-worker@example.com")
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        department = Department(name="Eligibility Guard Ops", active=True)
+        db.session.add(department)
+        db.session.commit()
+        cashier = ShiftPosition(
+            department_id=department.id,
+            name="Cashier",
+            active=True,
+            sort_order=1,
+        )
+        runner = ShiftPosition(
+            department_id=department.id,
+            name="Runner",
+            active=True,
+            sort_order=2,
+        )
+        db.session.add_all([cashier, runner])
+        db.session.commit()
+        db.session.add(
+            UserDepartmentMembership(
+                user_id=worker_id,
+                department_id=department.id,
+                role="staff",
+                is_primary=True,
+            )
+        )
+        db.session.add(
+            UserPositionEligibility(
+                user_id=worker_id,
+                position_id=cashier.id,
+                priority=10,
+                active=True,
+            )
+        )
+        db.session.commit()
+        department_id = department.id
+        runner_id = runner.id
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            f"/schedules?department_id={department_id}&week_start=2026-04-06&view_mode=position",
+            data={
+                "action": "save_shift",
+                "department_id": str(department_id),
+                "week_start": "2026-04-06",
+                "view_mode": "position",
+                "shift-shift_id": "",
+                "shift-schedule_week_id": "",
+                "shift-shift_date": "2026-04-07",
+                "shift-assigned_user_id": str(worker_id),
+                "shift-position_id": str(runner_id),
+                "shift-assignment_mode": "assigned",
+                "shift-start_time": "09:00",
+                "shift-end_time": "17:00",
+                "shift-paid_hours": "",
+                "shift-location_id": "0",
+                "shift-event_id": "0",
+                "shift-notes": "",
+                "shift-color": "",
+                "shift-copy_count": "1",
+                "shift-repeat_weeks": "0",
+                "shift-target_days": ["1"],
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Selected user is not eligible for that position." in response.data
+
+    with app.app_context():
+        assert Shift.query.filter(Shift.position_id == runner_id).count() == 0
 
 
 def test_auto_assign_uses_default_availability_and_preferred_hours_cap(client, app):
