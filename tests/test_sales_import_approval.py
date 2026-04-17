@@ -1133,6 +1133,8 @@ def test_sales_imports_list_supports_search_filters_and_pagination_controls(
         assert b"Rows per page" in response.data
         assert b"evening-approved-sales.xls" in response.data
         assert b"morning-pending-sales.xls" not in response.data
+        assert b"Already approved" in response.data
+        assert b"Needs review" not in response.data
 
 
 def test_admin_can_approve_sales_import_from_list_page(client, app):
