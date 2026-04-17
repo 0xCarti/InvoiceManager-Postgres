@@ -16,6 +16,37 @@ const FilterDefaults = (() => {
     return null;
   }
 
+  function getMetaCsrfToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    if (!meta) {
+      return '';
+    }
+    return meta.getAttribute('content') || '';
+  }
+
+  function findCsrfToken(form) {
+    if (!form) {
+      return getMetaCsrfToken() || getCookie('csrf_token');
+    }
+
+    const namedField = form.querySelector('input[name="csrf_token"]');
+    if (namedField && namedField.value) {
+      return namedField.value;
+    }
+
+    const formToken = form.getAttribute('data-filter-csrf-token') || '';
+    if (formToken) {
+      return formToken;
+    }
+
+    const pageField = document.querySelector('input[name="csrf_token"]');
+    if (pageField && pageField.value) {
+      return pageField.value;
+    }
+
+    return getMetaCsrfToken() || getCookie('csrf_token');
+  }
+
   function findFeedbackElement(modal) {
     if (!modal) {
       return null;
@@ -80,8 +111,7 @@ const FilterDefaults = (() => {
       const formData = new FormData(form);
       formData.set('scope', scope);
 
-      const csrfField = form.querySelector('input[name="csrf_token"]');
-      const csrfToken = csrfField ? csrfField.value : getCookie('csrf_token');
+      const csrfToken = findCsrfToken(form);
 
       const requestHeaders = new Headers();
       if (csrfToken) {

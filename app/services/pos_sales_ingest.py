@@ -355,12 +355,12 @@ def ingest_pos_sales_attachment(
     filename: str,
     content: bytes,
     storage_dir: str | Path,
- ) -> tuple[PosSalesImport | None, bool]:
+ ) -> tuple[PosSalesImport, bool]:
     """Persist and stage a single POS sales attachment.
 
-    Returns ``(sales_import, duplicate)``. ``sales_import`` is ``None`` when the
-    attachment is ignored because it contains no locations or sales rows. In that
-    case ``duplicate`` is always ``False``.
+    Returns ``(sales_import, duplicate)``. Ignored attachments still persist a
+    ``PosSalesImport`` record with status ``ignored`` so the app can retain an
+    audit trail for received files that contained no usable sales data.
     """
 
     extension = Path(filename).suffix.lower()
@@ -383,7 +383,7 @@ def ingest_pos_sales_attachment(
         attachment_storage_path=str(persisted_path),
         sales_date=_default_sales_import_date(received_at),
         received_at=received_at,
-        status="pending",
+        status=PosSalesImport.STATUS_PENDING,
     )
     db.session.add(sales_import)
     try:
@@ -419,11 +419,24 @@ def ingest_pos_sales_attachment(
                 "Unable to delete ignored empty POS sales attachment %s",
                 persisted_path,
             )
+        ignored_import = PosSalesImport(
+            source_provider=source_provider,
+            message_id=source_message_id,
+            attachment_filename=filename,
+            attachment_sha256=attachment_sha256,
+            attachment_storage_path=None,
+            sales_date=_default_sales_import_date(received_at),
+            received_at=received_at,
+            status=PosSalesImport.STATUS_IGNORED,
+            failure_reason="Attachment does not contain any POS locations or sales rows.",
+        )
+        db.session.add(ignored_import)
+        db.session.commit()
         log_activity(
-            "Ignored POS sales import attachment with no locations or sales "
+            f"Ignored POS sales import {ignored_import.id} with no locations or sales "
             f"via {source_provider} ({filename})."
         )
-        return None, False
+        return ignored_import, False
     except Exception:
         db.session.rollback()
         failure = PosSalesImport(
@@ -434,7 +447,7 @@ def ingest_pos_sales_attachment(
             attachment_storage_path=str(persisted_path),
             sales_date=_default_sales_import_date(received_at),
             received_at=received_at,
-            status="failed",
+            status=PosSalesImport.STATUS_FAILED,
             failure_reason="Unable to parse POS spreadsheet attachment.",
         )
         db.session.add(failure)

@@ -90,9 +90,16 @@ def test_ingest_pos_sales_attachment_ignores_files_with_no_locations_or_sales(
             storage_dir=tmp_path / "mailgun_staging",
         )
 
-        assert sales_import is None
+        assert sales_import is not None
         assert duplicate is False
-        assert PosSalesImport.query.count() == 0
+        assert sales_import.status == PosSalesImport.STATUS_IGNORED
+        assert sales_import.failure_reason == (
+            "Attachment does not contain any POS locations or sales rows."
+        )
+        assert sales_import.attachment_storage_path is None
+        assert PosSalesImport.query.count() == 1
+        assert PosSalesImportLocation.query.count() == 0
+        assert PosSalesImportRow.query.count() == 0
         assert list((tmp_path / "mailgun_staging").glob("*")) == []
 
 

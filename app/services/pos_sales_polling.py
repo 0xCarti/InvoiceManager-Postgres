@@ -303,7 +303,7 @@ def run_pos_sales_mailbox_poll_once(app) -> dict[str, int]:
                         content=attachment.content,
                         storage_dir=storage_root,
                     )
-                    if sales_import is None:
+                    if sales_import is None or sales_import.status == "ignored":
                         continue
                     if duplicate:
                         result["duplicates"] += 1

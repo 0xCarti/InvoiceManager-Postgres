@@ -2567,6 +2567,7 @@ def sales_imports():
         "approved",
         "reversed",
         "failed",
+        "ignored",
     ]
     page = request.args.get("page", 1, type=int)
     per_page = get_per_page()

@@ -8,6 +8,78 @@ document.addEventListener("DOMContentLoaded", () => {
       });
   }
 
+  function getCookie(name) {
+    const cookieString = document.cookie;
+    if (!cookieString) {
+      return null;
+    }
+    const cookies = cookieString.split(";");
+    for (const cookie of cookies) {
+      const [rawKey, ...rawValue] = cookie.trim().split("=");
+      if (rawKey === name) {
+        return decodeURIComponent(rawValue.join("="));
+      }
+    }
+    return null;
+  }
+
+  const saveDefaultButton = document.querySelector("[data-schedule-save-default]");
+  const saveDefaultFeedback = document.querySelector("[data-schedule-default-feedback]");
+
+  function renderDefaultFeedback(message, isError = false) {
+    if (!saveDefaultFeedback) {
+      return;
+    }
+    saveDefaultFeedback.textContent = message;
+    saveDefaultFeedback.className = `small mt-2 ${isError ? "text-danger" : "text-success"}`;
+  }
+
+  if (saveDefaultButton && filterForm) {
+    saveDefaultButton.addEventListener("click", async () => {
+      const departmentInput = filterForm.querySelector('[name="department_id"]');
+      const scope = saveDefaultButton.dataset.scheduleDefaultScope || "";
+      if (!departmentInput || !scope) {
+        renderDefaultFeedback("Unable to save the default department.", true);
+        return;
+      }
+
+      saveDefaultButton.disabled = true;
+      renderDefaultFeedback("");
+
+      try {
+        const formData = new FormData();
+        formData.set("scope", scope);
+        formData.set("department_id", departmentInput.value || "all");
+
+        const headers = new Headers();
+        const csrfToken = getCookie("csrf_token");
+        if (csrfToken) {
+          headers.set("X-CSRFToken", csrfToken);
+        }
+
+        const response = await fetch("/preferences/filters", {
+          method: "POST",
+          body: formData,
+          headers,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          renderDefaultFeedback(
+            payload.error || "Unable to save the default department.",
+            true,
+          );
+          return;
+        }
+        renderDefaultFeedback("Default department saved.");
+      } catch (error) {
+        window.console.error("Failed to save schedule department default.", error);
+        renderDefaultFeedback("Unable to save the default department.", true);
+      } finally {
+        saveDefaultButton.disabled = false;
+      }
+    });
+  }
+
   const modal = document.getElementById("scheduleShiftModal");
   if (!modal) {
     return;
@@ -16,6 +88,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const inputIds = {
     shiftId: modal.dataset.shiftIdInput,
     shiftDate: modal.dataset.shiftDateInput,
+    department: modal.dataset.departmentInput,
     assignedUser: modal.dataset.assignedUserInput,
     position: modal.dataset.positionInput,
     assignmentMode: modal.dataset.assignmentModeInput,
@@ -55,16 +128,24 @@ document.addEventListener("DOMContentLoaded", () => {
     : [];
 
   let eventLocationMap = {};
-  let userPositionMap = {};
+  let departmentPositionMap = {};
+  let userPositionMapByDepartment = {};
   try {
     eventLocationMap = JSON.parse(modal.dataset.eventLocationMap || "{}");
   } catch (_error) {
     eventLocationMap = {};
   }
   try {
-    userPositionMap = JSON.parse(modal.dataset.userPositionMap || "{}");
+    departmentPositionMap = JSON.parse(modal.dataset.departmentPositionMap || "{}");
   } catch (_error) {
-    userPositionMap = {};
+    departmentPositionMap = {};
+  }
+  try {
+    userPositionMapByDepartment = JSON.parse(
+      modal.dataset.userPositionMapByDepartment || "{}",
+    );
+  } catch (_error) {
+    userPositionMapByDepartment = {};
   }
 
   function updateAssignedUserState() {
@@ -77,6 +158,19 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
     syncPositionOptions(inputs.position?.value || "");
+  }
+
+  function getDepartmentPositionOptions(departmentId) {
+    if (!departmentId || departmentId === "0") {
+      return [];
+    }
+    const options = Array.isArray(departmentPositionMap[departmentId])
+      ? departmentPositionMap[departmentId].map((option) => ({
+          value: String(option.value),
+          label: option.label,
+        }))
+      : [];
+    return options.length ? options : originalPositionOptions;
   }
 
   function setCheckboxValue(input, rawValue) {
@@ -217,26 +311,44 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     const currentPreferred = String(preferredValue ?? inputs.position.value ?? "");
+    const departmentId = String(inputs.department?.value || "0");
     const mode = inputs.assignmentMode?.value || "assigned";
     const assignedUserId = String(inputs.assignedUser?.value || "0");
+    const departmentOptions = getDepartmentPositionOptions(departmentId);
+
+    if (!departmentOptions.length) {
+      inputs.position.disabled = true;
+      replacePositionOptions(
+        [{ value: "", label: departmentId === "0" ? "Select a department first" : "No active positions" }],
+        "",
+      );
+      return;
+    }
+
     if (mode !== "assigned" || assignedUserId === "0") {
       inputs.position.disabled = false;
-      replacePositionOptions(originalPositionOptions, currentPreferred);
+      replacePositionOptions(departmentOptions, currentPreferred);
       return;
     }
 
     const eligiblePositionIds = new Set(
-      (Array.isArray(userPositionMap[assignedUserId]) ? userPositionMap[assignedUserId] : [])
+      (
+        Array.isArray(
+          (userPositionMapByDepartment[departmentId] || {})[assignedUserId],
+        )
+          ? (userPositionMapByDepartment[departmentId] || {})[assignedUserId]
+          : []
+      )
         .map((value) => String(value)),
     );
-    let eligibleOptions = originalPositionOptions.filter((option) =>
+    let eligibleOptions = departmentOptions.filter((option) =>
       eligiblePositionIds.has(String(option.value)),
     );
     if (
       currentPreferred
       && !eligiblePositionIds.has(currentPreferred)
     ) {
-      const currentOption = originalPositionOptions.find(
+      const currentOption = departmentOptions.find(
         (option) => String(option.value) === currentPreferred,
       );
       if (currentOption) {
@@ -292,6 +404,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (inputs.shiftDate) {
       inputs.shiftDate.value = trigger.dataset.shiftDate || "";
     }
+    if (inputs.department) {
+      inputs.department.value =
+        trigger.dataset.departmentId
+        || inputs.department.value
+        || (inputs.department.options[0]?.value ?? "0");
+    }
     if (inputs.assignedUser) {
       inputs.assignedUser.value = trigger.dataset.assignedUserId || "0";
     }
@@ -341,6 +459,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (inputs.assignmentMode) {
     inputs.assignmentMode.addEventListener("change", updateAssignedUserState);
+  }
+  if (inputs.department) {
+    inputs.department.addEventListener("change", () => {
+      syncPositionOptions("");
+    });
   }
   if (inputs.assignedUser) {
     inputs.assignedUser.addEventListener("change", () => {

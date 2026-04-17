@@ -18,6 +18,7 @@ from app.models import (
     ProductRecipeItem,
     TerminalSale,
     User,
+    UserFilterPreference,
 )
 from tests.permission_helpers import grant_permissions
 from tests.utils import login
@@ -627,7 +628,7 @@ def test_sales_import_list_hides_manage_actions_for_view_only_users(client, app)
         login(client, "sales-viewer@example.com", "viewpass")
         list_response = client.get("/controlpanel/sales-imports", follow_redirects=True)
         assert list_response.status_code == 200
-        assert b"Approve" not in list_response.data
+        assert b'class="btn btn-sm btn-success">Approve<' not in list_response.data
         assert b"Actions" not in list_response.data
 
 
@@ -1135,6 +1136,85 @@ def test_sales_imports_list_supports_search_filters_and_pagination_controls(
         assert b"morning-pending-sales.xls" not in response.data
         assert b"Already approved" in response.data
         assert b"Needs review" not in response.data
+
+
+def test_sales_import_filters_can_be_saved_from_list_modal(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    ready_import = _create_price_review_import(
+        app,
+        message_id="msg-list-save-defaults",
+        product_price=5.0,
+        file_price=5.0,
+    )
+
+    with app.app_context():
+        ready_record = db.session.get(PosSalesImport, ready_import["import_id"])
+        ready_record.status = PosSalesImport.STATUS_IGNORED
+        ready_record.failure_reason = "Attachment does not contain any POS locations or sales rows."
+        db.session.commit()
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.get("/controlpanel/sales-imports", follow_redirects=True)
+        assert response.status_code == 200
+        body = response.get_data(as_text=True)
+        token_match = re.search(r'data-filter-csrf-token="([^"]+)"', body)
+        assert token_match is not None
+
+        save_response = client.post(
+            "/preferences/filters",
+            data={
+                "scope": "admin.sales_imports",
+                "status": "ignored",
+                "search": "empty",
+            },
+            headers={"X-CSRFToken": token_match.group(1)},
+        )
+        assert save_response.status_code == 200
+
+    with app.app_context():
+        admin_user = User.query.filter_by(email=admin_email).one()
+        preference = UserFilterPreference.query.filter_by(
+            user_id=admin_user.id,
+            scope="admin.sales_imports"
+        ).one()
+        assert preference.values == {"status": ["ignored"], "search": ["empty"]}
+
+
+def test_sales_imports_list_shows_ignored_status_without_review_label(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    ignored_import = _create_price_review_import(
+        app,
+        message_id="msg-list-ignored",
+        product_price=5.0,
+        file_price=5.0,
+    )
+
+    with app.app_context():
+        ignored_record = db.session.get(PosSalesImport, ignored_import["import_id"])
+        ignored_record.attachment_filename = "empty-ignored-sales.xls"
+        ignored_record.status = PosSalesImport.STATUS_IGNORED
+        ignored_record.failure_reason = (
+            "Attachment does not contain any POS locations or sales rows."
+        )
+        for location in list(ignored_record.locations):
+            db.session.delete(location)
+        db.session.commit()
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.get(
+            "/controlpanel/sales-imports?status=ignored",
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Status: Ignored" in response.data
+        assert b"empty-ignored-sales.xls" in response.data
+        assert b"Attachment does not contain any POS locations or sales rows." in response.data
+        assert b"Needs review" not in response.data
+        assert b"Ignored" in response.data
 
 
 def test_admin_can_approve_sales_import_from_list_page(client, app):

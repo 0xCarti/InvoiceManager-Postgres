@@ -456,6 +456,12 @@ class Department(db.Model):
         cascade="all, delete-orphan",
         order_by="DepartmentScheduleWeek.week_start.desc()",
     )
+    schedule_templates = relationship(
+        "ScheduleTemplate",
+        back_populates="department",
+        cascade="all, delete-orphan",
+        order_by="ScheduleTemplate.name.asc()",
+    )
 
     __table_args__ = (db.Index("ix_schedule_department_active", "active"),)
 
@@ -497,6 +503,12 @@ class ShiftPosition(db.Model):
         cascade="all, delete-orphan",
     )
     shifts = relationship("Shift", back_populates="position")
+    schedule_templates = relationship(
+        "ScheduleTemplate",
+        back_populates="position",
+        cascade="all, delete-orphan",
+        order_by="ScheduleTemplate.name.asc()",
+    )
 
     __table_args__ = (
         db.UniqueConstraint(
@@ -507,6 +519,190 @@ class ShiftPosition(db.Model):
         db.Index("ix_schedule_shift_position_department", "department_id"),
         db.Index("ix_schedule_shift_position_active", "active"),
     )
+
+
+class ScheduleTemplate(db.Model):
+    __tablename__ = "schedule_template"
+
+    SPAN_WEEK = "week"
+    SPAN_MONTH = "month"
+    SPAN_YEAR = "year"
+    SPAN_CHOICES = (
+        (SPAN_WEEK, "Week"),
+        (SPAN_MONTH, "Month"),
+        (SPAN_YEAR, "Year"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    department_id = db.Column(
+        db.Integer, db.ForeignKey("schedule_department.id"), nullable=False
+    )
+    position_id = db.Column(
+        db.Integer, db.ForeignKey("schedule_shift_position.id"), nullable=False
+    )
+    span = db.Column(
+        db.String(20),
+        nullable=False,
+        default=SPAN_WEEK,
+        server_default=SPAN_WEEK,
+    )
+    active = db.Column(
+        db.Boolean, nullable=False, default=True, server_default="1"
+    )
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    department = relationship("Department", back_populates="schedule_templates")
+    position = relationship("ShiftPosition", back_populates="schedule_templates")
+    entries = relationship(
+        "ScheduleTemplateEntry",
+        back_populates="template",
+        cascade="all, delete-orphan",
+        order_by=(
+            "ScheduleTemplateEntry.month_of_year.asc(), "
+            "ScheduleTemplateEntry.day_of_month.asc(), "
+            "ScheduleTemplateEntry.weekday.asc(), "
+            "ScheduleTemplateEntry.start_time.asc(), "
+            "ScheduleTemplateEntry.id.asc()"
+        ),
+    )
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    updated_by = relationship("User", foreign_keys=[updated_by_id])
+
+    __table_args__ = (
+        db.Index("ix_schedule_template_department", "department_id"),
+        db.Index("ix_schedule_template_position", "position_id"),
+        db.Index("ix_schedule_template_span_active", "span", "active"),
+    )
+
+    @property
+    def span_label(self) -> str:
+        return dict(self.SPAN_CHOICES).get(self.span, self.span.title())
+
+
+class ScheduleTemplateEntry(db.Model):
+    __tablename__ = "schedule_template_entry"
+
+    WEEKDAY_LABELS = (
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    )
+    MONTH_LABELS = (
+        "",
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    template_id = db.Column(
+        db.Integer, db.ForeignKey("schedule_template.id"), nullable=False
+    )
+    weekday = db.Column(db.Integer, nullable=True)
+    day_of_month = db.Column(db.Integer, nullable=True)
+    month_of_year = db.Column(db.Integer, nullable=True)
+    assignment_mode = db.Column(
+        db.String(20),
+        nullable=False,
+        default="assigned",
+        server_default="assigned",
+    )
+    assigned_user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    start_time = db.Column(db.Time, nullable=False)
+    end_time = db.Column(db.Time, nullable=False)
+    paid_hours = db.Column(
+        db.Float, nullable=False, default=0.0, server_default="0.0"
+    )
+    paid_hours_manual = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
+    notes = db.Column(db.Text, nullable=True)
+    color = db.Column(db.String(20), nullable=True)
+    is_locked = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    template = relationship("ScheduleTemplate", back_populates="entries")
+    assigned_user = relationship("User", foreign_keys=[assigned_user_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    updated_by = relationship("User", foreign_keys=[updated_by_id])
+
+    __table_args__ = (
+        db.Index("ix_schedule_template_entry_template", "template_id"),
+        db.Index(
+            "ix_schedule_template_entry_assigned_user", "assigned_user_id"
+        ),
+    )
+
+    @property
+    def occurrence_sort_key(self) -> tuple[int, int]:
+        if self.template and self.template.span == ScheduleTemplate.SPAN_WEEK:
+            return (self.weekday or 0, 0)
+        if self.template and self.template.span == ScheduleTemplate.SPAN_MONTH:
+            return (self.day_of_month or 0, 0)
+        return (self.month_of_year or 0, self.day_of_month or 0)
+
+    @property
+    def occurrence_label(self) -> str:
+        if self.template and self.template.span == ScheduleTemplate.SPAN_WEEK:
+            if self.weekday is None or not 0 <= self.weekday < len(self.WEEKDAY_LABELS):
+                return "Unset day"
+            return self.WEEKDAY_LABELS[self.weekday]
+        if self.template and self.template.span == ScheduleTemplate.SPAN_MONTH:
+            return f"Day {self.day_of_month}" if self.day_of_month else "Unset day"
+        month_label = (
+            self.MONTH_LABELS[self.month_of_year]
+            if self.month_of_year
+            and 0 < self.month_of_year < len(self.MONTH_LABELS)
+            else "Unset month"
+        )
+        if self.day_of_month:
+            return f"{month_label} {self.day_of_month}"
+        return month_label
 
 
 class UserDepartmentMembership(db.Model):
@@ -2686,6 +2882,14 @@ class TerminalSalesResolutionState(db.Model):
 
 
 class PosSalesImport(db.Model):
+    STATUS_PENDING = "pending"
+    STATUS_NEEDS_MAPPING = "needs_mapping"
+    STATUS_APPROVED = "approved"
+    STATUS_REVERSED = "reversed"
+    STATUS_DELETED = "deleted"
+    STATUS_FAILED = "failed"
+    STATUS_IGNORED = "ignored"
+
     id = db.Column(db.Integer, primary_key=True)
     source_provider = db.Column(db.String(100), nullable=False)
     message_id = db.Column(db.String(255), nullable=False)
@@ -2706,8 +2910,8 @@ class PosSalesImport(db.Model):
     status = db.Column(
         db.String(32),
         nullable=False,
-        default="pending",
-        server_default="pending",
+        default=STATUS_PENDING,
+        server_default=STATUS_PENDING,
     )
     approved_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
     approved_at = db.Column(db.DateTime, nullable=True)
@@ -2758,7 +2962,7 @@ class PosSalesImport(db.Model):
             name="uq_pos_sales_import_idempotency",
         ),
         db.CheckConstraint(
-            "status IN ('pending', 'needs_mapping', 'approved', 'reversed', 'deleted', 'failed')",
+            "status IN ('pending', 'needs_mapping', 'approved', 'reversed', 'deleted', 'failed', 'ignored')",
             name="ck_pos_sales_import_status",
         ),
         db.Index("ix_pos_sales_import_status_received_at", "status", "received_at"),

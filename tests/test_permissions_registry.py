@@ -80,6 +80,24 @@ def test_user_can_access_endpoint_requires_matching_permission():
         "purchase.mark_purchase_order_ordered",
         "POST",
     )
+    assert user_can_access_endpoint(
+        DummyUser("schedules.manage_templates"),
+        "schedule.templates",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("schedules.apply_templates"),
+        "schedule.templates",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("schedules.apply_templates"),
+        "schedule.template_detail",
+        "POST",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("schedules.manage_templates"),
+        "schedule.template_detail",
+        "POST",
+    )
 
 
 def test_super_admin_bypasses_endpoint_permission_checks():

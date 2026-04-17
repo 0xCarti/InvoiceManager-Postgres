@@ -16,6 +16,9 @@
             {% if can_access_endpoint('schedule.tradeboard') %}
             <a class="btn btn-sm {{ 'btn-primary' if request.endpoint == 'schedule.tradeboard' else 'btn-outline-primary' }}" href="{{ url_for('schedule.tradeboard') }}">Tradeboard</a>
             {% endif %}
+            {% if can_access_endpoint('schedule.templates') %}
+            <a class="btn btn-sm {{ 'btn-primary' if request.endpoint in ['schedule.templates', 'schedule.template_detail'] else 'btn-outline-primary' }}" href="{{ url_for('schedule.templates') }}">Schedule Templates</a>
+            {% endif %}
             {% if can_access_endpoint('schedule.setup') %}
             <a class="btn btn-sm {{ 'btn-primary' if request.endpoint == 'schedule.setup' else 'btn-outline-primary' }}" href="{{ url_for('schedule.setup') }}">Scheduling Setup</a>
             {% endif %}

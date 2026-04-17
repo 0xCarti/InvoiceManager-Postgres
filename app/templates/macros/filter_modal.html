@@ -32,6 +32,7 @@
         method="{{ method }}"
         {% if form_action %}action="{{ form_action }}"{% endif %}
         data-filter-form
+        data-filter-csrf-token="{{ csrf_token() }}"
         {% if ajax %}data-filter-ajax="true"{% endif %}
         {% if scope %}data-filter-scope="{{ scope }}"{% endif %}
         {% if save_url %}data-filter-save-url="{{ save_url }}"{% endif %}

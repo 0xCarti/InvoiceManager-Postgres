@@ -57,6 +57,7 @@ from app.models import (
     Playlist,
     PlaylistItem,
     Product,
+    ScheduleTemplate,
     ShiftPosition,
     SignageMediaAsset,
     User,
@@ -2593,6 +2594,213 @@ class ShiftPositionForm(FlaskForm):
         ]
 
 
+class ScheduleTemplateCreateForm(FlaskForm):
+    name = StringField("Template Name", validators=[DataRequired(), Length(max=120)])
+    description = TextAreaField(
+        "Description", validators=[Optional(), Length(max=2000)]
+    )
+    department_id = SelectField(
+        "Department",
+        coerce=int,
+        validators=[DataRequired()],
+        validate_choice=False,
+    )
+    position_id = SelectField(
+        "Position",
+        coerce=int,
+        validators=[DataRequired()],
+        validate_choice=False,
+    )
+    span = SelectField(
+        "Template Period",
+        choices=list(ScheduleTemplate.SPAN_CHOICES),
+        validators=[DataRequired()],
+    )
+    active = BooleanField("Active", default=True)
+    submit = SubmitField("Create Template")
+
+    def __init__(
+        self,
+        *args,
+        department_choices: list[tuple[int, str]] | None = None,
+        position_choices: list[tuple[int, str]] | None = None,
+        department_id: int | None = None,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.department_id.choices = (
+            department_choices or load_schedule_department_choices()
+        )
+        if self.department_id.data in (None, "") and department_id:
+            self.department_id.data = department_id
+        self.position_id.choices = (
+            position_choices
+            if position_choices is not None
+            else load_schedule_position_choices(department_id=department_id)
+        )
+
+
+class ScheduleTemplateUpdateForm(FlaskForm):
+    name = StringField("Template Name", validators=[DataRequired(), Length(max=120)])
+    description = TextAreaField(
+        "Description", validators=[Optional(), Length(max=2000)]
+    )
+    active = BooleanField("Active", default=True)
+    submit = SubmitField("Save Template")
+
+
+class ScheduleTemplateEntryForm(FlaskForm):
+    entry_id = HiddenField(validators=[Optional()])
+    weekday = SelectField(
+        "Weekday",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+    )
+    day_of_month = IntegerField(
+        "Day of Month",
+        validators=[Optional(), NumberRange(min=1, max=31)],
+    )
+    month_of_year = SelectField(
+        "Month",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+    )
+    assignment_mode = SelectField(
+        "Shift Type",
+        choices=[
+            ("assigned", "Assigned"),
+            ("open", "Open"),
+            ("tradeboard", "Tradeboard"),
+        ],
+        validators=[DataRequired()],
+    )
+    assigned_user_id = SelectField(
+        "Assigned User",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+    )
+    start_time = TimeField("Start Time", validators=[DataRequired()], format="%H:%M")
+    end_time = TimeField("End Time", validators=[DataRequired()], format="%H:%M")
+    paid_hours = WTFormsDecimalField(
+        "Paid Hours",
+        places=2,
+        validators=[Optional(), NumberRange(min=0)],
+    )
+    paid_hours_manual = BooleanField("Use manual paid hours")
+    notes = TextAreaField("Notes", validators=[Optional(), Length(max=2000)])
+    color = SelectField("Color", validators=[Optional()])
+    is_locked = BooleanField("Lock from auto-assign")
+    submit = SubmitField("Save Template Shift")
+
+    def __init__(
+        self,
+        *args,
+        template_span: str = ScheduleTemplate.SPAN_WEEK,
+        assigned_user_choices: list[tuple[int, str]] | None = None,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.template_span = template_span
+        self.weekday.choices = [
+            (0, "Monday"),
+            (1, "Tuesday"),
+            (2, "Wednesday"),
+            (3, "Thursday"),
+            (4, "Friday"),
+            (5, "Saturday"),
+            (6, "Sunday"),
+        ]
+        self.month_of_year.choices = [
+            (1, "January"),
+            (2, "February"),
+            (3, "March"),
+            (4, "April"),
+            (5, "May"),
+            (6, "June"),
+            (7, "July"),
+            (8, "August"),
+            (9, "September"),
+            (10, "October"),
+            (11, "November"),
+            (12, "December"),
+        ]
+        self.assigned_user_id.choices = (
+            assigned_user_choices
+            if assigned_user_choices is not None
+            else [(0, "Unassigned")] + load_active_user_choices()
+        )
+        self.color.choices = [
+            ("", "Use default"),
+            ("text-primary", "Blue"),
+            ("text-success", "Green"),
+            ("text-danger", "Red"),
+            ("text-warning", "Orange"),
+            ("text-info", "Cyan"),
+            ("text-dark", "Black"),
+        ]
+        if (
+            not self.is_submitted()
+            and self.weekday.data in (None, "")
+            and template_span == ScheduleTemplate.SPAN_WEEK
+        ):
+            self.weekday.data = 0
+        if (
+            not self.is_submitted()
+            and self.month_of_year.data in (None, "")
+            and template_span == ScheduleTemplate.SPAN_YEAR
+        ):
+            self.month_of_year.data = 1
+        if not self.is_submitted() and self.day_of_month.data in (None, ""):
+            self.day_of_month.data = 1
+
+    def validate_end_time(self, field):
+        if self.start_time.data and field.data and field.data <= self.start_time.data:
+            raise ValidationError("End time must be after start time.")
+
+    def validate(self, extra_validators=None):
+        valid = super().validate(extra_validators=extra_validators)
+        span = self.template_span
+
+        if span == ScheduleTemplate.SPAN_WEEK and self.weekday.data is None:
+            self.weekday.errors.append("Select a weekday.")
+            valid = False
+        elif span == ScheduleTemplate.SPAN_MONTH and not self.day_of_month.data:
+            self.day_of_month.errors.append("Enter a day of the month.")
+            valid = False
+        elif span == ScheduleTemplate.SPAN_YEAR:
+            if self.month_of_year.data is None:
+                self.month_of_year.errors.append("Select a month.")
+                valid = False
+            if not self.day_of_month.data:
+                self.day_of_month.errors.append("Enter a day of the month.")
+                valid = False
+            if self.month_of_year.data and self.day_of_month.data:
+                try:
+                    date(2024, self.month_of_year.data, self.day_of_month.data)
+                except ValueError:
+                    self.day_of_month.errors.append(
+                        "Selected month and day do not form a valid calendar date."
+                    )
+                    valid = False
+
+        if self.assignment_mode.data == "assigned" and not (
+            self.assigned_user_id.data and self.assigned_user_id.data > 0
+        ):
+            self.assigned_user_id.errors.append(
+                "Assigned template shifts require a user."
+            )
+            valid = False
+        return valid
+
+
+class ScheduleTemplateApplyForm(FlaskForm):
+    target_start_date = DateField("Apply To", validators=[DataRequired()])
+    submit = SubmitField("Apply Selected Templates")
+
+
 class UserScheduleProfileForm(FlaskForm):
     hourly_rate = WTFormsDecimalField(
         "Hourly Rate",
@@ -2669,6 +2877,12 @@ class ShiftForm(FlaskForm):
     shift_id = HiddenField(validators=[Optional()])
     schedule_week_id = HiddenField(validators=[Optional()])
     shift_date = DateField("Date", validators=[DataRequired()])
+    department_id = SelectField(
+        "Department",
+        coerce=int,
+        validators=[DataRequired()],
+        validate_choice=False,
+    )
     assigned_user_id = SelectField(
         "Assigned User",
         coerce=int,
@@ -2731,10 +2945,29 @@ class ShiftForm(FlaskForm):
     )
     submit = SubmitField("Save Shift")
 
-    def __init__(self, *args, department_id: int | None = None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        department_id: int | None = None,
+        assigned_user_choices: list[tuple[int, str]] | None = None,
+        department_choices: list[tuple[int, str]] | None = None,
+        position_choices: list[tuple[int, str]] | None = None,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
-        self.assigned_user_id.choices = [(0, "Unassigned")] + load_active_user_choices()
-        self.position_id.choices = load_schedule_position_choices(department_id=department_id)
+        self.department_id.choices = department_choices or load_schedule_department_choices()
+        if self.department_id.data in (None, "") and department_id:
+            self.department_id.data = department_id
+        self.assigned_user_id.choices = (
+            assigned_user_choices
+            if assigned_user_choices is not None
+            else [(0, "Unassigned")] + load_active_user_choices()
+        )
+        self.position_id.choices = (
+            position_choices
+            if position_choices is not None
+            else load_schedule_position_choices(department_id=department_id)
+        )
         self.location_id.choices = [(0, "No location")] + [
             (location.id, location.name)
             for location in Location.query.filter_by(archived=False).order_by(Location.name).all()

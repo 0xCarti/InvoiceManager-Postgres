@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.models import PosSalesImport
 from app.services import pos_sales_polling
@@ -154,7 +155,10 @@ def test_poll_once_acknowledges_empty_sales_attachment_without_counting_error(
     monkeypatch.setattr(
         pos_sales_polling,
         "ingest_pos_sales_attachment",
-        lambda **kwargs: (None, False),
+        lambda **kwargs: (
+            SimpleNamespace(status=PosSalesImport.STATUS_IGNORED),
+            False,
+        ),
     )
 
     result = pos_sales_polling.run_pos_sales_mailbox_poll_once(app)

@@ -187,6 +187,8 @@ PERMISSION_DEFINITIONS: tuple[PermissionDefinition, ...] = (
     _perm("schedules.view_labor", "schedules", "View Labor Forecast", "View scheduled labor totals and labor forecast summaries."),
     _perm("schedules.manage_pay_rates", "schedules", "Manage Pay Rates", "Manage scheduling pay-rate and hours targets."),
     _perm("schedules.manage_setup", "schedules", "Manage Scheduling Setup", "Manage departments, positions, memberships, and scheduling structure."),
+    _perm("schedules.manage_templates", "schedules", "Manage Schedule Templates", "Create, edit, activate, and delete reusable schedule templates."),
+    _perm("schedules.apply_templates", "schedules", "Apply Schedule Templates", "Apply saved schedule templates into draft schedule weeks."),
     _perm("schedules.manage_self_availability", "schedules", "Manage My Availability", "Manage your recurring availability and overrides."),
     _perm("schedules.manage_team_availability", "schedules", "Manage Team Availability", "Manage availability settings for scoped users."),
     _perm("schedules.request_time_off", "schedules", "Request Time Off", "Submit and cancel your own time-off requests."),
@@ -447,6 +449,12 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     ),
     "schedule.setup": requirement(
         any_of=("schedules.manage_setup", "schedules.manage_pay_rates")
+    ),
+    "schedule.templates": requirement(
+        any_of=("schedules.manage_templates", "schedules.apply_templates")
+    ),
+    "schedule.template_detail": requirement(
+        any_of=("schedules.manage_templates", "schedules.apply_templates")
     ),
     "schedule.user_settings": requirement(
         any_of=("schedules.manage_setup", "schedules.manage_pay_rates")
@@ -718,6 +726,18 @@ ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] =
         any_of=("schedules.manage_setup", "schedules.manage_pay_rates")
     ),
     ("schedule.setup", "POST"): requirement(any_of=("schedules.manage_setup",)),
+    ("schedule.templates", "GET"): requirement(
+        any_of=("schedules.manage_templates", "schedules.apply_templates")
+    ),
+    ("schedule.templates", "POST"): requirement(
+        any_of=("schedules.manage_templates", "schedules.apply_templates")
+    ),
+    ("schedule.template_detail", "GET"): requirement(
+        any_of=("schedules.manage_templates", "schedules.apply_templates")
+    ),
+    ("schedule.template_detail", "POST"): requirement(
+        any_of=("schedules.manage_templates",)
+    ),
     ("schedule.user_settings", "GET"): requirement(
         any_of=("schedules.manage_setup", "schedules.manage_pay_rates")
     ),

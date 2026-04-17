@@ -3,6 +3,7 @@ import hmac
 import io
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.models import PosSalesImport
 
@@ -215,7 +216,10 @@ def test_mailgun_webhook_ignores_empty_sales_attachment(client, app, monkeypatch
     )
     monkeypatch.setattr(
         "app.routes.mailgun_routes.ingest_pos_sales_attachment",
-        lambda **kwargs: (None, False),
+        lambda **kwargs: (
+            SimpleNamespace(id=19, status=PosSalesImport.STATUS_IGNORED),
+            False,
+        ),
     )
 
     data = _payload("secret-key")
@@ -230,7 +234,7 @@ def test_mailgun_webhook_ignores_empty_sales_attachment(client, app, monkeypatch
     assert payload["ok"] is True
     assert payload["imports"] == []
     assert payload["ignored"] == [
-        {"filename": "empty_sales.xls", "reason": "empty_sales_file"}
+        {"filename": "empty_sales.xls", "reason": "empty_sales_file", "id": 19}
     ]
 
     with app.app_context():

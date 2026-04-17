@@ -4,6 +4,19 @@
 
 {% block content %}
 {% set can_manage_sales_imports = has_permission('sales_imports.manage') %}
+{% set column_visibility_options = [
+    {'id': 'toggle-import-id', 'target': 'col-import-id', 'label': 'Import', 'checked': True},
+    {'id': 'toggle-import-status', 'target': 'col-import-status', 'label': 'Status', 'checked': True},
+    {'id': 'toggle-import-dates', 'target': 'col-import-dates', 'label': 'Dates', 'checked': True},
+    {'id': 'toggle-import-source', 'target': 'col-import-source', 'label': 'Source', 'checked': True},
+    {'id': 'toggle-import-attachment', 'target': 'col-import-attachment', 'label': 'Attachment', 'checked': True},
+    {'id': 'toggle-import-counts', 'target': 'col-import-counts', 'label': 'Summary', 'checked': True},
+] %}
+{% if can_manage_sales_imports %}
+    {% set column_visibility_options = column_visibility_options + [
+        {'id': 'toggle-import-actions', 'target': 'col-import-actions', 'label': 'Actions', 'checked': True},
+    ] %}
+{% endif %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-toolbar,
@@ -62,15 +75,7 @@
             {{ column_visibility_dropdown(
                 table_id='sales-imports-table',
                 storage_key='salesImportsTableColumnVisibility',
-                columns=[
-                    {'id': 'toggle-import-id', 'target': 'col-import-id', 'label': 'Import', 'checked': True},
-                    {'id': 'toggle-import-status', 'target': 'col-import-status', 'label': 'Status', 'checked': True},
-                    {'id': 'toggle-import-dates', 'target': 'col-import-dates', 'label': 'Dates', 'checked': True},
-                    {'id': 'toggle-import-source', 'target': 'col-import-source', 'label': 'Source', 'checked': True},
-                    {'id': 'toggle-import-attachment', 'target': 'col-import-attachment', 'label': 'Attachment', 'checked': True},
-                    {'id': 'toggle-import-counts', 'target': 'col-import-counts', 'label': 'Summary', 'checked': True},
-                    {'id': 'toggle-import-actions', 'target': 'col-import-actions', 'label': 'Actions', 'checked': True},
-                ]
+                columns=column_visibility_options
             ) }}
         </div>
         <button type="button" class="btn btn-outline-secondary d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#filterModal">
@@ -101,7 +106,9 @@
                     <th scope="col" class="col-import-source">Source</th>
                     <th scope="col" class="col-import-attachment">Attachment</th>
                     <th scope="col" class="col-import-counts">Summary</th>
+                    {% if can_manage_sales_imports %}
                     <th scope="col" class="col-import-actions" data-sortable="false">Actions</th>
+                    {% endif %}
                 </tr>
             </thead>
             <tbody>
@@ -120,7 +127,7 @@
                         </div>
                     </td>
                     <td class="col-import-status">
-                        <span class="badge {% if import.status == 'approved' %}text-bg-success{% elif import.status == 'needs_mapping' %}text-bg-warning{% elif import.status == 'failed' %}text-bg-danger{% elif import.status == 'reversed' %}text-bg-secondary{% else %}text-bg-primary{% endif %}">
+                        <span class="badge {% if import.status == 'approved' %}text-bg-success{% elif import.status == 'needs_mapping' %}text-bg-warning{% elif import.status == 'failed' %}text-bg-danger{% elif import.status == 'reversed' %}text-bg-secondary{% elif import.status == 'ignored' %}text-bg-light border text-dark{% else %}text-bg-primary{% endif %}">
                             {{ import.status|replace('_', ' ')|title }}
                         </span>
                         <div class="small mt-2">
@@ -161,7 +168,9 @@
                     </td>
                     <td class="col-import-attachment">
                         <div class="fw-semibold text-break">{{ import.attachment_filename }}</div>
-                        {% if not import.sales_date %}
+                        {% if import.status == 'ignored' and import.failure_reason %}
+                        <div class="small text-muted mt-1">{{ import.failure_reason }}</div>
+                        {% elif not import.sales_date %}
                         <div class="small text-muted mt-1">Open the import to confirm or override the inferred sales date.</div>
                         {% endif %}
                     </td>
@@ -177,33 +186,35 @@
                             {% endif %}
                         </div>
                     </td>
+                    {% if can_manage_sales_imports %}
                     <td class="col-import-actions">
                         <div class="mobile-actions">
                             <a href="{{ url_for('admin.sales_import_detail', import_id=import.id) }}" class="btn btn-sm btn-outline-primary">Review</a>
-                            {% if can_manage_sales_imports %}
-                                {% if import.can_direct_approve %}
-                                <form method="post" class="d-inline">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <input type="hidden" name="action" value="approve_import">
-                                    <input type="hidden" name="import_id" value="{{ import.id }}">
-                                    <input type="hidden" name="status" value="{{ status_filter }}">
-                                    <input type="hidden" name="search" value="{{ search_query }}">
-                                    <input type="hidden" name="page" value="{{ imports.page }}">
-                                    <input type="hidden" name="per_page" value="{{ per_page }}">
-                                    <button type="submit" class="btn btn-sm btn-success">Approve</button>
-                                </form>
-                                {% elif import.status == 'approved' %}
-                                <span class="small text-success align-self-center">Already approved</span>
-                                {% elif import.status == 'reversed' %}
-                                <span class="small text-muted align-self-center">Reversed</span>
-                                {% elif import.status == 'failed' %}
-                                <span class="small text-danger align-self-center">Failed</span>
-                                {% else %}
-                                <span class="small text-muted align-self-center">Needs review</span>
-                                {% endif %}
+                            {% if import.can_direct_approve %}
+                            <form method="post" class="d-inline">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="action" value="approve_import">
+                                <input type="hidden" name="import_id" value="{{ import.id }}">
+                                <input type="hidden" name="status" value="{{ status_filter }}">
+                                <input type="hidden" name="search" value="{{ search_query }}">
+                                <input type="hidden" name="page" value="{{ imports.page }}">
+                                <input type="hidden" name="per_page" value="{{ per_page }}">
+                                <button type="submit" class="btn btn-sm btn-success">Approve</button>
+                            </form>
+                            {% elif import.status == 'approved' %}
+                            <span class="small text-success align-self-center">Already approved</span>
+                            {% elif import.status == 'reversed' %}
+                            <span class="small text-muted align-self-center">Reversed</span>
+                            {% elif import.status == 'failed' %}
+                            <span class="small text-danger align-self-center">Failed</span>
+                            {% elif import.status == 'ignored' %}
+                            <span class="small text-muted align-self-center">Ignored</span>
+                            {% else %}
+                            <span class="small text-muted align-self-center">Needs review</span>
                             {% endif %}
                         </div>
                     </td>
+                    {% endif %}
                 </tr>
                 {% endfor %}
             </tbody>

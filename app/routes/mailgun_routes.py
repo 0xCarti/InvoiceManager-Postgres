@@ -148,11 +148,16 @@ def inbound_mailgun():
                 content=content,
                 storage_dir=storage_dir,
             )
-            if sales_import is None:
+            if sales_import is None or sales_import.status == "ignored":
                 ignored.append(
                     {
                         "filename": filename,
                         "reason": "empty_sales_file",
+                        **(
+                            {"id": sales_import.id}
+                            if sales_import is not None
+                            else {}
+                        ),
                     }
                 )
                 continue

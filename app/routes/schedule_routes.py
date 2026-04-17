@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date as date_cls, datetime, timedelta
 from types import SimpleNamespace
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
+from sqlalchemy import or_
 from sqlalchemy.orm import selectinload
 
 from app import db
@@ -14,6 +15,10 @@ from app.forms import (
     AvailabilityWindowForm,
     CSRFOnlyForm,
     DepartmentForm,
+    ScheduleTemplateApplyForm,
+    ScheduleTemplateCreateForm,
+    ScheduleTemplateEntryForm,
+    ScheduleTemplateUpdateForm,
     ShiftForm,
     ShiftPositionForm,
     TimeOffRequestForm,
@@ -22,6 +27,7 @@ from app.forms import (
     UserDepartmentMembershipForm,
     UserPositionEligibilityForm,
     UserScheduleProfileForm,
+    load_schedule_position_choices,
 )
 from app.models import (
     AvailabilityOverride,
@@ -30,6 +36,8 @@ from app.models import (
     Event,
     EventLocation,
     RecurringAvailabilityWindow,
+    ScheduleTemplate,
+    ScheduleTemplateEntry,
     Shift,
     ShiftPosition,
     TimeOffRequest,
@@ -64,6 +72,8 @@ from app.services.schedule_service import (
     user_department_ids,
     user_is_schedule_gm,
 )
+from app.utils.filter_state import get_filter_defaults
+from app.utils.pagination import PAGINATION_SIZES, build_pagination_args, get_per_page
 
 
 schedule = Blueprint("schedule", __name__)
@@ -83,6 +93,111 @@ def _parse_int(value, default=None):
 
 def _parse_checkbox(value) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "y", "yes", "on"}
+
+
+def _managed_schedule_departments(actor: User) -> list[Department]:
+    return [
+        department
+        for department in get_visible_departments(actor, require_team_access=True)
+        if user_can_manage_department(actor, department.id)
+    ]
+
+
+def _schedule_template_list_redirect_url() -> str:
+    params = {}
+    for key in ("q", "department_id", "position_id", "span", "status", "per_page"):
+        value = request.args.get(key)
+        if value not in (None, ""):
+            params[key] = value
+    return url_for("schedule.templates", **params)
+
+
+def _template_period_anchor(span: str, target_date: date_cls) -> date_cls:
+    if span == ScheduleTemplate.SPAN_WEEK:
+        return normalize_week_start(target_date)
+    if span == ScheduleTemplate.SPAN_MONTH:
+        return target_date.replace(day=1)
+    return target_date.replace(month=1, day=1)
+
+
+def _expand_template_entry_date(
+    template: ScheduleTemplate,
+    entry: ScheduleTemplateEntry,
+    target_date: date_cls,
+) -> date_cls | None:
+    anchor = _template_period_anchor(template.span, target_date)
+    if template.span == ScheduleTemplate.SPAN_WEEK:
+        if entry.weekday is None:
+            return None
+        return anchor + timedelta(days=entry.weekday)
+    if template.span == ScheduleTemplate.SPAN_MONTH:
+        if entry.day_of_month is None:
+            return None
+        try:
+            return anchor.replace(day=entry.day_of_month)
+        except ValueError:
+            return None
+    if entry.month_of_year is None or entry.day_of_month is None:
+        return None
+    try:
+        return anchor.replace(
+            month=entry.month_of_year,
+            day=entry.day_of_month,
+        )
+    except ValueError:
+        return None
+
+
+def _effective_template_entry_paid_hours(entry: ScheduleTemplateEntryForm) -> float:
+    if entry.paid_hours_manual.data and entry.paid_hours.data is not None:
+        return round(float(entry.paid_hours.data or 0.0), 2)
+    return round(
+        (
+            datetime.combine(datetime.utcnow().date(), entry.end_time.data)
+            - datetime.combine(datetime.utcnow().date(), entry.start_time.data)
+        ).total_seconds()
+        / 3600.0,
+        2,
+    )
+
+
+def _schedule_template_or_404(
+    template_id: int,
+    managed_department_ids: set[int],
+) -> ScheduleTemplate:
+    template = (
+        ScheduleTemplate.query.options(
+            selectinload(ScheduleTemplate.department),
+            selectinload(ScheduleTemplate.position),
+            selectinload(ScheduleTemplate.entries).selectinload(
+                ScheduleTemplateEntry.assigned_user
+            ),
+        )
+        .filter(
+            ScheduleTemplate.id == template_id,
+            ScheduleTemplate.department_id.in_(managed_department_ids),
+        )
+        .first()
+    )
+    if template is None:
+        abort(404)
+    return template
+
+
+def _template_assigned_user_choices(
+    actor: User,
+    department_id: int,
+    extra_users: list[User] | None = None,
+) -> list[tuple[int, str]]:
+    users = get_visible_schedule_users(actor, department_id)
+    indexed = {user.id: user for user in users}
+    for user in extra_users or []:
+        if user is not None:
+            indexed[user.id] = user
+    ordered = sorted(indexed.values(), key=lambda user: (user.sort_key, user.email.casefold()))
+    return [(0, "Unassigned")] + [
+        (user.id, user.display_label) for user in ordered if user.active
+    ]
 
 
 def _schedule_redirect(
@@ -223,6 +338,59 @@ def _build_schedule_user_position_map(
     return mapping
 
 
+def _build_schedule_department_position_map(
+    departments: list[Department],
+) -> dict[str, list[dict[str, str]]]:
+    return {
+        str(department.id): [
+            {"value": str(position_id), "label": label}
+            for position_id, label in load_schedule_position_choices(
+                department_id=department.id
+            )
+        ]
+        for department in departments
+    }
+
+
+def _build_schedule_user_position_map_by_department(
+    users: list[User],
+    departments: list[Department],
+) -> dict[str, dict[str, list[int]]]:
+    return {
+        str(department.id): _build_schedule_user_position_map(users, department.id)
+        for department in departments
+    }
+
+
+def _resolve_team_schedule_department_filter(
+    departments: list[Department],
+    raw_value,
+    *,
+    scope: str,
+) -> str | int | None:
+    parsed = _parse_department_filter_value(raw_value)
+    visible_department_ids = {department.id for department in departments}
+    if parsed == ALL_DEPARTMENTS_VALUE:
+        return parsed if len(departments) > 1 else (departments[0].id if departments else None)
+    if isinstance(parsed, int):
+        return parsed if parsed in visible_department_ids else None
+    if not departments:
+        return None
+
+    saved_filters = get_filter_defaults(current_user, scope)
+    saved_value = None
+    if saved_filters.get("department_id"):
+        saved_value = saved_filters["department_id"][0]
+    saved_department = _parse_department_filter_value(saved_value)
+    if saved_department == ALL_DEPARTMENTS_VALUE and len(departments) > 1:
+        return ALL_DEPARTMENTS_VALUE
+    if isinstance(saved_department, int) and saved_department in visible_department_ids:
+        return saved_department
+    if len(departments) > 1:
+        return ALL_DEPARTMENTS_VALUE
+    return departments[0].id
+
+
 def _auto_assign_result_summary(results) -> tuple[int, int, str]:
     assigned_count = sum(1 for result in results if result.assigned_user_id)
     unassigned_count = len(results) - assigned_count
@@ -237,6 +405,20 @@ def _auto_assign_result_summary(results) -> tuple[int, int, str]:
     if unassigned_reasons:
         reason_note = f" {'; '.join(unassigned_reasons[:2])}"
     return assigned_count, unassigned_count, reason_note
+
+
+def _publish_schedule_week(schedule_week: DepartmentScheduleWeek, actor: User) -> bool:
+    if schedule_week.is_published:
+        return False
+    schedule_week.is_published = True
+    schedule_week.published_at = datetime.utcnow()
+    schedule_week.unpublished_at = None
+    schedule_week.published_by = actor
+    schedule_week.current_version += 1
+    for shift in schedule_week.shifts:
+        apply_rate_snapshot(shift)
+        shift.live_version = schedule_week.current_version
+    return True
 
 
 def _current_seen_count_for_users(
@@ -675,9 +857,21 @@ def team_schedule():
         current_user,
         visible_departments,
     )
+    scope = request.endpoint or "schedule.team_schedule"
+    posted_action = (request.form.get("action") or "").strip() if request.method == "POST" else ""
     view_mode = _parse_schedule_view_mode(request.values.get("view_mode"))
-    requested_department_filter = _parse_department_filter_value(
-        request.values.get("department_id") or request.values.get("shift-department_id")
+    current_department_filter_raw = (
+        request.args.get("department_id")
+        or (
+            request.form.get("page_department_id")
+            if request.method == "POST" and posted_action == "save_shift"
+            else request.form.get("department_id")
+        )
+    )
+    requested_department_filter = _resolve_team_schedule_department_filter(
+        visible_departments,
+        current_department_filter_raw,
+        scope=scope,
     )
     all_departments_mode = requested_department_filter == ALL_DEPARTMENTS_VALUE
     selected_department = None if all_departments_mode else _select_department(
@@ -728,11 +922,17 @@ def team_schedule():
                 can_self_schedule=can_self_schedule,
                 can_auto_assign_selected_scope=False,
                 auto_assign_action_label="Auto Assign",
+                can_publish_selected_scope=False,
+                publish_action_label="Publish",
             )
     week_start = normalize_week_start(
         request.values.get("week_start") or request.values.get("shift-week_start")
     )
     include_self_only = not can_team_access and can_self_schedule
+    shift_assignable_users = _build_team_schedule_filter_users(
+        visible_departments,
+        include_self_only=include_self_only,
+    )
     requested_user_id = None
     if view_mode == SCHEDULE_VIEW_USER:
         requested_user_id = _parse_int(
@@ -740,7 +940,24 @@ def team_schedule():
         )
     can_auto_assign_selected_scope = False
     auto_assign_action_label = "Auto Assign"
-    schedule_user_position_map: dict[str, list[int]] = {}
+    can_publish_selected_scope = False
+    publish_action_label = "Publish"
+    managed_department_ids = (
+        {department.id for department in _managed_schedule_departments(current_user)}
+        if current_user.has_permission("schedules.publish")
+        else set()
+    )
+    publishable_departments: list[Department] = []
+    shift_form = None
+    schedule_department_position_map = _build_schedule_department_position_map(
+        visible_departments
+    )
+    schedule_user_position_map_by_department: dict[str, dict[str, list[int]]] = {}
+    selected_shift_department_id = (
+        selected_department.id
+        if selected_department
+        else (visible_departments[0].id if visible_departments else None)
+    )
 
     if all_departments_mode and visible_departments:
         context = _prepare_multi_department_schedule_context(
@@ -750,7 +967,6 @@ def team_schedule():
             requested_user_id=requested_user_id,
         )
         schedule_week = context["schedule_week"]
-        shift_form = None
         action_form = CSRFOnlyForm(prefix="action")
         selected_user_id = (
             context["selected_user_id"] if view_mode == SCHEDULE_VIEW_USER else None
@@ -758,6 +974,13 @@ def team_schedule():
         filter_users = context["assignable_users"]
         can_auto_assign_selected_scope = bool(auto_assignable_departments)
         auto_assign_action_label = "Auto Assign Allowed Departments"
+        publishable_departments = [
+            department
+            for department in visible_departments
+            if department.id in managed_department_ids
+        ]
+        can_publish_selected_scope = bool(publishable_departments)
+        publish_action_label = "Publish Allowed Departments"
     else:
         context = _prepare_schedule_week_context(
             selected_department,
@@ -779,15 +1002,14 @@ def team_schedule():
         else:
             selected_user_id = None
         schedule_week = context["schedule_week"]
-        shift_form = ShiftForm(prefix="shift", department_id=selected_department.id)
         action_form = CSRFOnlyForm(prefix="action")
         can_auto_assign_selected_scope = user_can_auto_assign_department(
             current_user,
             selected_department.id,
         )
-        schedule_user_position_map = _build_schedule_user_position_map(
-            context["assignable_users"],
-            selected_department.id,
+        can_publish_selected_scope = (
+            current_user.has_permission("schedules.publish")
+            and user_can_manage_department(current_user, selected_department.id)
         )
 
     schedule_events = _load_schedule_events_for_week(schedule_week.week_start)
@@ -811,6 +1033,31 @@ def team_schedule():
         selected_filter_location_id = requested_filter_location_id
 
     schedule_event_location_map: dict[str, list[dict[str, str | int]]] = {}
+    if visible_departments:
+        shift_assigned_user_choices = [(0, "Unassigned")] + [
+            (user.id, user.display_label) for user in shift_assignable_users
+        ]
+        shift_department_choices = [
+            (department.id, department.name) for department in visible_departments
+        ]
+        shift_position_choices = (
+            load_schedule_position_choices(department_id=selected_shift_department_id)
+            if selected_shift_department_id
+            else []
+        )
+        shift_form = ShiftForm(
+            prefix="shift",
+            department_id=selected_shift_department_id,
+            assigned_user_choices=shift_assigned_user_choices,
+            department_choices=shift_department_choices,
+            position_choices=shift_position_choices,
+        )
+        schedule_user_position_map_by_department = (
+            _build_schedule_user_position_map_by_department(
+                shift_assignable_users,
+                visible_departments,
+            )
+        )
     if shift_form is not None:
         schedule_event_location_map = _build_schedule_event_location_map(
             Event.query.options(
@@ -856,7 +1103,7 @@ def team_schedule():
 
     if request.method == "POST" and all_departments_mode:
         action = (request.form.get("action") or "").strip()
-        if action != "auto_assign":
+        if action not in {"auto_assign", "publish_week"}:
             abort(400)
 
     if selected_department is None and not all_departments_mode:
@@ -893,7 +1140,8 @@ def team_schedule():
             selected_location_filter_value=str(selected_filter_location_id or ""),
             schedule_events=schedule_events,
             event_filter_locations=event_filter_locations,
-            schedule_user_position_map=schedule_user_position_map,
+            schedule_department_position_map=schedule_department_position_map,
+            schedule_user_position_map_by_department=schedule_user_position_map_by_department,
             position_board_days=position_board_days,
             board_total_labor=board_total_labor,
             board_assigned_shift_count=board_assigned_shift_count,
@@ -903,6 +1151,8 @@ def team_schedule():
             can_self_schedule=can_self_schedule,
             can_auto_assign_selected_scope=False,
             auto_assign_action_label="Auto Assign",
+            can_publish_selected_scope=False,
+            publish_action_label="Publish",
         )
 
     if request.method == "POST":
@@ -927,14 +1177,46 @@ def team_schedule():
             if shift_form.validate_on_submit():
                 shift_id = _parse_int(shift_form.shift_id.data)
                 existing_shift = db.session.get(Shift, shift_id) if shift_id else None
+                current_schedule_week_id = getattr(schedule_week, "id", None)
                 if (
                     existing_shift is not None
-                    and existing_shift.schedule_week_id != schedule_week.id
+                    and current_schedule_week_id is not None
+                    and existing_shift.schedule_week_id != current_schedule_week_id
                 ):
                     abort(400)
 
+                target_department_id = (
+                    shift_form.department_id.data
+                    if shift_form.department_id.data not in (None, 0)
+                    else None
+                )
+                target_department = next(
+                    (
+                        department
+                        for department in visible_departments
+                        if department.id == target_department_id
+                    ),
+                    None,
+                )
+                if target_department is None:
+                    shift_form.department_id.errors.append(
+                        "Selected department is invalid."
+                    )
+                if (
+                    existing_shift is not None
+                    and target_department is not None
+                    and existing_shift.schedule_week.department_id != target_department.id
+                ):
+                    shift_form.department_id.errors.append(
+                        "Editing a shift cannot change departments."
+                    )
+
                 position = db.session.get(ShiftPosition, shift_form.position_id.data)
-                if position is None or position.department_id != selected_department.id:
+                if (
+                    position is None
+                    or target_department is None
+                    or position.department_id != target_department.id
+                ):
                     shift_form.position_id.errors.append(
                         "Selected position does not belong to this department."
                     )
@@ -980,14 +1262,16 @@ def team_schedule():
                 assigned_user = (
                     db.session.get(User, assigned_user_id) if assigned_user_id else None
                 )
-                visible_user_ids = {user.id for user in context["assignable_users"]}
+                visible_user_ids = {user.id for user in shift_assignable_users}
                 if assigned_user is not None and assigned_user.id not in visible_user_ids:
                     shift_form.assigned_user_id.errors.append(
                         "Assigned user is outside your scheduling scope."
                     )
                 eligible_position_ids = (
-                    schedule_user_position_map.get(str(assigned_user.id), [])
-                    if assigned_user is not None
+                    schedule_user_position_map_by_department.get(
+                        str(target_department.id), {}
+                    ).get(str(assigned_user.id), [])
+                    if assigned_user is not None and target_department is not None
                     else []
                 )
                 if not can_team_access:
@@ -1099,7 +1383,11 @@ def team_schedule():
                             2,
                         )
 
-                    schedule_weeks_by_start = {schedule_week.week_start: schedule_week}
+                    schedule_weeks_by_key: dict[tuple[object, int], object] = {}
+                    if selected_department is not None:
+                        schedule_weeks_by_key[
+                            (schedule_week.week_start, selected_department.id)
+                        ] = schedule_week
                     changes_by_week: dict[object, dict[str, object]] = {}
                     target_dates_with_copies = [
                         target_date
@@ -1115,16 +1403,18 @@ def team_schedule():
                             before = capture_shift_snapshot(shift)
                         else:
                             target_week_start = normalize_week_start(target_date)
-                            target_schedule_week = schedule_weeks_by_start.get(
-                                target_week_start
+                            target_schedule_week = schedule_weeks_by_key.get(
+                                (target_week_start, target_department.id)
                             )
                             if target_schedule_week is None:
                                 target_schedule_week = get_or_create_schedule_week(
-                                    selected_department.id,
+                                    target_department.id,
                                     target_week_start,
                                 )
                                 db.session.flush()
-                                schedule_weeks_by_start[target_week_start] = (
+                                schedule_weeks_by_key[
+                                    (target_week_start, target_department.id)
+                                ] = (
                                     target_schedule_week
                                 )
                             shift = Shift(
@@ -1223,12 +1513,12 @@ def team_schedule():
                         "success",
                     )
                     log_schedule_action(
-                        f"Saved {total_saved} schedule shift(s) for department {selected_department.name}"
+                        f"Saved {total_saved} schedule shift(s) for department {target_department.name}"
                     )
                     return redirect(
                         _schedule_redirect(
                             "schedule.team_schedule",
-                            selected_department.id,
+                            target_department.id,
                             schedule_week.week_start,
                             **redirect_kwargs,
                         )
@@ -1265,17 +1555,88 @@ def team_schedule():
         elif action == "publish_week":
             if not current_user.has_permission("schedules.publish"):
                 abort(403)
+            if all_departments_mode:
+                if not publishable_departments:
+                    abort(403)
+                allowed_department_ids = [
+                    department.id for department in publishable_departments
+                ]
+                schedule_weeks = (
+                    DepartmentScheduleWeek.query.filter(
+                        DepartmentScheduleWeek.department_id.in_(
+                            allowed_department_ids
+                        ),
+                        DepartmentScheduleWeek.week_start == schedule_week.week_start,
+                    )
+                    .all()
+                )
+                weeks_by_department_id = {
+                    week.department_id: week for week in schedule_weeks
+                }
+                published_weeks: list[DepartmentScheduleWeek] = []
+                published_departments: list[str] = []
+                already_published_departments: list[str] = []
+                missing_departments: list[str] = []
+                for department in publishable_departments:
+                    target_week = weeks_by_department_id.get(department.id)
+                    if target_week is None:
+                        missing_departments.append(department.name)
+                        continue
+                    if not _publish_schedule_week(target_week, current_user):
+                        already_published_departments.append(department.name)
+                        continue
+                    published_weeks.append(target_week)
+                    published_departments.append(department.name)
+                if published_weeks:
+                    db.session.commit()
+                    for published_week in published_weeks:
+                        notify_schedule_posted(published_week, published_week.shifts)
+                flash_bits: list[str] = []
+                if published_departments:
+                    published_label = (
+                        "department schedule week"
+                        if len(published_departments) == 1
+                        else "department schedule weeks"
+                    )
+                    publish_note = (
+                        f"Published {len(published_departments)} {published_label}"
+                    )
+                    if len(published_departments) <= 3:
+                        publish_note += f": {', '.join(published_departments)}."
+                    else:
+                        publish_note += "."
+                    flash_bits.append(publish_note)
+                else:
+                    flash_bits.append(
+                        "No draft schedule weeks were available for your managed departments."
+                    )
+                if already_published_departments:
+                    flash_bits.append(
+                        f"{len(already_published_departments)} already published."
+                    )
+                if missing_departments:
+                    flash_bits.append(
+                        f"{len(missing_departments)} not created yet for that week."
+                    )
+                flash(
+                    " ".join(flash_bits),
+                    "success" if published_departments else "warning",
+                )
+                if published_departments:
+                    log_schedule_action(
+                        f"Published {len(published_departments)} department schedule week(s) for week {schedule_week.week_start}"
+                    )
+                return redirect(
+                    _schedule_redirect(
+                        "schedule.team_schedule",
+                        ALL_DEPARTMENTS_VALUE,
+                        schedule_week.week_start,
+                        **redirect_kwargs,
+                    )
+                )
             if not user_can_manage_department(current_user, selected_department.id):
                 abort(403)
-            if not schedule_week.is_published:
-                schedule_week.is_published = True
-                schedule_week.published_at = datetime.utcnow()
-                schedule_week.unpublished_at = None
-                schedule_week.published_by = current_user
-                schedule_week.current_version += 1
-                for shift in schedule_week.shifts:
-                    apply_rate_snapshot(shift)
-                    shift.live_version = schedule_week.current_version
+            if _publish_schedule_week(schedule_week, current_user):
                 db.session.commit()
                 notify_schedule_posted(schedule_week, schedule_week.shifts)
                 flash("Schedule week published.", "success")
@@ -1439,7 +1800,8 @@ def team_schedule():
         selected_location_filter_value=str(selected_filter_location_id or ""),
         schedule_events=schedule_events,
         event_filter_locations=event_filter_locations,
-        schedule_user_position_map=schedule_user_position_map,
+        schedule_department_position_map=schedule_department_position_map,
+        schedule_user_position_map_by_department=schedule_user_position_map_by_department,
         position_board_days=position_board_days,
         board_total_labor=board_total_labor,
         board_assigned_shift_count=board_assigned_shift_count,
@@ -1449,6 +1811,8 @@ def team_schedule():
         can_self_schedule=can_self_schedule,
         can_auto_assign_selected_scope=can_auto_assign_selected_scope,
         auto_assign_action_label=auto_assign_action_label,
+        can_publish_selected_scope=can_publish_selected_scope,
+        publish_action_label=publish_action_label,
     )
 
 
@@ -1930,6 +2294,668 @@ def tradeboard():
         pending_claims=pending_claims,
         review_form=review_form,
         action_form=action_form,
+    )
+
+
+@schedule.route("/schedules/templates", methods=["GET", "POST"])
+@login_required
+def templates():
+    """Create, review, and apply reusable schedule templates."""
+    managed_departments = _managed_schedule_departments(current_user)
+    managed_department_ids = {department.id for department in managed_departments}
+    can_manage_templates = current_user.has_permission("schedules.manage_templates")
+    can_apply_templates = current_user.has_permission("schedules.apply_templates")
+    requested_action = (
+        (request.form.get("action") or "").strip() if request.method == "POST" else ""
+    )
+
+    default_department_id = managed_departments[0].id if managed_departments else None
+    selected_create_department_id = (
+        _parse_int(request.form.get("template-department_id"))
+        if requested_action == "create_template"
+        else default_department_id
+    )
+    template_form = ScheduleTemplateCreateForm(
+        formdata=request.form if requested_action == "create_template" else None,
+        prefix="template",
+        department_choices=[
+            (department.id, department.name) for department in managed_departments
+        ],
+        position_choices=(
+            load_schedule_position_choices(department_id=selected_create_department_id)
+            if managed_departments
+            else []
+        ),
+        department_id=default_department_id,
+    )
+    apply_form = ScheduleTemplateApplyForm(
+        formdata=request.form if requested_action == "apply_templates" else None,
+        prefix="apply",
+    )
+    action_form = CSRFOnlyForm(prefix="template_action")
+
+    filter_search = (request.args.get("q") or "").strip()
+    filter_department_id = _parse_int(request.args.get("department_id"))
+    filter_position_id = _parse_int(request.args.get("position_id"))
+    filter_span = (request.args.get("span") or "all").strip().lower()
+    if filter_span not in {
+        "all",
+        ScheduleTemplate.SPAN_WEEK,
+        ScheduleTemplate.SPAN_MONTH,
+        ScheduleTemplate.SPAN_YEAR,
+    }:
+        filter_span = "all"
+    filter_status = (request.args.get("status") or "active").strip().lower()
+    if filter_status not in {"active", "inactive", "all"}:
+        filter_status = "active"
+
+    filter_positions = (
+        ShiftPosition.query.options(selectinload(ShiftPosition.department))
+        .filter(ShiftPosition.department_id.in_(managed_department_ids))
+        .order_by(
+            ShiftPosition.department_id.asc(),
+            ShiftPosition.sort_order.asc(),
+            ShiftPosition.name.asc(),
+        )
+        .all()
+        if managed_department_ids
+        else []
+    )
+    valid_position_ids = {position.id for position in filter_positions}
+    if filter_position_id not in valid_position_ids:
+        filter_position_id = None
+    if filter_department_id not in managed_department_ids:
+        filter_department_id = None
+
+    template_query = ScheduleTemplate.query.options(
+        selectinload(ScheduleTemplate.department),
+        selectinload(ScheduleTemplate.position),
+        selectinload(ScheduleTemplate.entries),
+    )
+    if managed_department_ids:
+        template_query = template_query.filter(
+            ScheduleTemplate.department_id.in_(managed_department_ids)
+        )
+    else:
+        template_query = template_query.filter(ScheduleTemplate.id.is_(None))
+    if filter_department_id:
+        template_query = template_query.filter(
+            ScheduleTemplate.department_id == filter_department_id
+        )
+    if filter_position_id:
+        template_query = template_query.filter(
+            ScheduleTemplate.position_id == filter_position_id
+        )
+    if filter_span != "all":
+        template_query = template_query.filter(ScheduleTemplate.span == filter_span)
+    if filter_status == "active":
+        template_query = template_query.filter(ScheduleTemplate.active.is_(True))
+    elif filter_status == "inactive":
+        template_query = template_query.filter(ScheduleTemplate.active.is_(False))
+    if filter_search:
+        search_term = f"%{filter_search}%"
+        template_query = template_query.join(ScheduleTemplate.department).join(
+            ScheduleTemplate.position
+        ).filter(
+            or_(
+                ScheduleTemplate.name.ilike(search_term),
+                ScheduleTemplate.description.ilike(search_term),
+                Department.name.ilike(search_term),
+                ShiftPosition.name.ilike(search_term),
+            )
+        )
+    template_query = template_query.order_by(
+        ScheduleTemplate.active.desc(),
+        ScheduleTemplate.updated_at.desc(),
+        ScheduleTemplate.name.asc(),
+    )
+
+    per_page = get_per_page()
+    page = request.args.get("page", default=1, type=int)
+    templates_page = template_query.paginate(page=page, per_page=per_page, error_out=False)
+    pagination_args = build_pagination_args(per_page)
+
+    if request.method == "POST":
+        if requested_action == "create_template":
+            if not can_manage_templates:
+                abort(403)
+            if not managed_departments:
+                flash(
+                    "No scheduling departments are available to create templates.",
+                    "warning",
+                )
+                return redirect(_schedule_template_list_redirect_url())
+            if template_form.validate_on_submit():
+                department = next(
+                    (
+                        candidate
+                        for candidate in managed_departments
+                        if candidate.id == template_form.department_id.data
+                    ),
+                    None,
+                )
+                if department is None:
+                    template_form.department_id.errors.append(
+                        "Selected department is invalid."
+                    )
+                position = db.session.get(ShiftPosition, template_form.position_id.data)
+                if (
+                    position is None
+                    or department is None
+                    or position.department_id != department.id
+                ):
+                    template_form.position_id.errors.append(
+                        "Selected position does not belong to this department."
+                    )
+                if not template_form.errors:
+                    template = ScheduleTemplate(
+                        name=(template_form.name.data or "").strip(),
+                        description=(template_form.description.data or "").strip()
+                        or None,
+                        department=department,
+                        position=position,
+                        span=template_form.span.data,
+                        active=bool(template_form.active.data),
+                        created_by=current_user,
+                        updated_by=current_user,
+                    )
+                    db.session.add(template)
+                    db.session.commit()
+                    flash("Schedule template created.", "success")
+                    log_schedule_action(
+                        f"Created schedule template {template.name} for department {department.name} position {position.name}"
+                    )
+                    return redirect(
+                        url_for("schedule.template_detail", template_id=template.id)
+                    )
+            flash("Unable to create template. Please review the form.", "danger")
+        elif requested_action == "toggle_template":
+            if not can_manage_templates:
+                abort(403)
+            template = _schedule_template_or_404(
+                _parse_int(request.form.get("template_id")),
+                managed_department_ids,
+            )
+            template.active = not template.active
+            template.updated_by = current_user
+            db.session.commit()
+            flash(
+                "Template activated." if template.active else "Template archived.",
+                "success",
+            )
+            log_schedule_action(
+                f"{'Activated' if template.active else 'Archived'} schedule template {template.name}"
+            )
+            return redirect(_schedule_template_list_redirect_url())
+        elif requested_action == "delete_template":
+            if not can_manage_templates:
+                abort(403)
+            template = _schedule_template_or_404(
+                _parse_int(request.form.get("template_id")),
+                managed_department_ids,
+            )
+            template_name = template.name
+            db.session.delete(template)
+            db.session.commit()
+            flash("Template deleted.", "success")
+            log_schedule_action(f"Deleted schedule template {template_name}")
+            return redirect(_schedule_template_list_redirect_url())
+        elif requested_action == "apply_templates":
+            if not can_apply_templates:
+                abort(403)
+            if not managed_departments:
+                flash(
+                    "No scheduling departments are available to apply templates.",
+                    "warning",
+                )
+                return redirect(_schedule_template_list_redirect_url())
+            if apply_form.validate_on_submit():
+                selected_template_ids = sorted(
+                    {
+                        template_id
+                        for template_id in (
+                            _parse_int(value)
+                            for value in request.form.getlist("template_ids")
+                        )
+                        if template_id
+                    }
+                )
+                if not selected_template_ids:
+                    flash("Select at least one template to apply.", "warning")
+                    return redirect(_schedule_template_list_redirect_url())
+
+                selected_templates = (
+                    ScheduleTemplate.query.options(
+                        selectinload(ScheduleTemplate.department),
+                        selectinload(ScheduleTemplate.position),
+                        selectinload(ScheduleTemplate.entries).selectinload(
+                            ScheduleTemplateEntry.assigned_user
+                        ),
+                    )
+                    .filter(
+                        ScheduleTemplate.id.in_(selected_template_ids),
+                        ScheduleTemplate.department_id.in_(managed_department_ids),
+                    )
+                    .all()
+                )
+                if len(selected_templates) != len(selected_template_ids):
+                    abort(404)
+
+                inactive_templates = [
+                    template.name for template in selected_templates if not template.active
+                ]
+                if inactive_templates:
+                    flash(
+                        "Inactive templates cannot be applied: "
+                        + ", ".join(inactive_templates[:3]),
+                        "warning",
+                    )
+                    return redirect(_schedule_template_list_redirect_url())
+
+                empty_templates: list[str] = []
+                invalid_occurrence_count = 0
+                validation_errors: list[str] = []
+                expanded_entries: list[
+                    tuple[ScheduleTemplate, ScheduleTemplateEntry, date_cls]
+                ] = []
+                week_keys: set[tuple[int, date_cls]] = set()
+
+                for template in selected_templates:
+                    if not template.entries:
+                        empty_templates.append(template.name)
+                        continue
+                    for entry in template.entries:
+                        shift_date = _expand_template_entry_date(
+                            template,
+                            entry,
+                            apply_form.target_start_date.data,
+                        )
+                        if shift_date is None:
+                            invalid_occurrence_count += 1
+                            continue
+                        if entry.assignment_mode == Shift.ASSIGNMENT_ASSIGNED:
+                            assigned_user = entry.assigned_user
+                            if assigned_user is None or not assigned_user.active:
+                                validation_errors.append(
+                                    f"Template {template.name} has an assigned shift without an active user."
+                                )
+                            elif not user_can_manage_other_user(
+                                current_user,
+                                assigned_user,
+                                template.department_id,
+                            ):
+                                validation_errors.append(
+                                    f"Assigned user {assigned_user.name_or_email} is outside your scope for template {template.name}."
+                                )
+                            elif (
+                                UserPositionEligibility.query.filter_by(
+                                    user_id=assigned_user.id,
+                                    position_id=template.position_id,
+                                    active=True,
+                                ).first()
+                                is None
+                            ):
+                                validation_errors.append(
+                                    f"Assigned user {assigned_user.name_or_email} is no longer eligible for {template.position.name}."
+                                )
+                        expanded_entries.append((template, entry, shift_date))
+                        week_keys.add(
+                            (template.department_id, normalize_week_start(shift_date))
+                        )
+
+                if validation_errors:
+                    flash(validation_errors[0], "danger")
+                    return redirect(_schedule_template_list_redirect_url())
+                if not expanded_entries:
+                    flash(
+                        "No template shifts were available to apply."
+                        + (
+                            f" Empty templates: {', '.join(empty_templates[:3])}."
+                            if empty_templates
+                            else ""
+                        ),
+                        "warning",
+                    )
+                    return redirect(_schedule_template_list_redirect_url())
+
+                existing_weeks = (
+                    DepartmentScheduleWeek.query.filter(
+                        DepartmentScheduleWeek.department_id.in_(
+                            {department_id for department_id, _week_start in week_keys}
+                        ),
+                        DepartmentScheduleWeek.week_start.in_(
+                            {week_start for _department_id, week_start in week_keys}
+                        ),
+                    ).all()
+                    if week_keys
+                    else []
+                )
+                weeks_by_key = {
+                    (week.department_id, week.week_start): week for week in existing_weeks
+                }
+                blocked_weeks = [
+                    week
+                    for key, week in weeks_by_key.items()
+                    if key in week_keys and week.is_published
+                ]
+                if blocked_weeks:
+                    blocked_labels = ", ".join(
+                        f"{week.department.name} {week.week_start.isoformat()}"
+                        for week in blocked_weeks[:3]
+                    )
+                    flash(
+                        "Templates can only be applied to draft schedule weeks. "
+                        f"Unpublish these weeks first: {blocked_labels}.",
+                        "warning",
+                    )
+                    return redirect(_schedule_template_list_redirect_url())
+
+                created_count = 0
+                for template, entry, shift_date in expanded_entries:
+                    week_start = normalize_week_start(shift_date)
+                    week_key = (template.department_id, week_start)
+                    target_schedule_week = weeks_by_key.get(week_key)
+                    if target_schedule_week is None:
+                        target_schedule_week = get_or_create_schedule_week(
+                            template.department_id,
+                            week_start,
+                        )
+                        db.session.flush()
+                        weeks_by_key[week_key] = target_schedule_week
+
+                    shift = Shift(
+                        schedule_week=target_schedule_week,
+                        position_id=template.position_id,
+                        shift_date=shift_date,
+                        start_time=entry.start_time,
+                        end_time=entry.end_time,
+                        paid_hours=round(float(entry.paid_hours or 0.0), 2),
+                        paid_hours_manual=bool(entry.paid_hours_manual),
+                        notes=entry.notes,
+                        color=entry.color,
+                        assignment_mode=entry.assignment_mode,
+                        is_locked=bool(entry.is_locked),
+                        created_by=current_user,
+                        updated_by=current_user,
+                    )
+                    if (
+                        entry.assignment_mode == Shift.ASSIGNMENT_ASSIGNED
+                        and entry.assigned_user is not None
+                    ):
+                        shift.assigned_user = entry.assigned_user
+                    else:
+                        shift.assigned_user = None
+                    apply_rate_snapshot(shift)
+                    db.session.add(shift)
+                    db.session.flush()
+                    record_shift_audit(
+                        shift,
+                        actor=current_user,
+                        action="created_from_template",
+                        version=target_schedule_week.current_version or 0,
+                        before=None,
+                        after=capture_shift_snapshot(shift),
+                        summary=f"Created from schedule template {template.name}.",
+                    )
+                    created_count += 1
+
+                db.session.commit()
+                flash_bits = [
+                    f"Applied {len(selected_templates)} template(s) and created {created_count} shift(s)."
+                ]
+                if empty_templates:
+                    flash_bits.append(
+                        "Skipped empty templates: "
+                        + ", ".join(empty_templates[:3])
+                        + ("." if len(empty_templates) <= 3 else ", ...")
+                    )
+                if invalid_occurrence_count:
+                    flash_bits.append(
+                        f"Skipped {invalid_occurrence_count} template occurrence(s) that do not exist in the target period."
+                    )
+                flash(" ".join(flash_bits), "success")
+                log_schedule_action(
+                    f"Applied {len(selected_templates)} schedule template(s) creating {created_count} shift(s)"
+                )
+                return redirect(_schedule_template_list_redirect_url())
+            flash("Unable to apply templates. Please review the form.", "danger")
+
+    active_filter_badges = []
+    if filter_search:
+        active_filter_badges.append(f"Search: {filter_search}")
+    if filter_department_id:
+        department = next(
+            (
+                candidate
+                for candidate in managed_departments
+                if candidate.id == filter_department_id
+            ),
+            None,
+        )
+        if department is not None:
+            active_filter_badges.append(f"Department: {department.name}")
+    if filter_position_id:
+        position = next(
+            (
+                candidate
+                for candidate in filter_positions
+                if candidate.id == filter_position_id
+            ),
+            None,
+        )
+        if position is not None:
+            active_filter_badges.append(f"Position: {position.name}")
+    if filter_span != "all":
+        active_filter_badges.append(f"Period: {filter_span.title()}")
+    if filter_status != "active":
+        active_filter_badges.append(f"Status: {filter_status.title()}")
+
+    return render_template(
+        "schedules/templates.html",
+        templates_page=templates_page,
+        template_form=template_form,
+        apply_form=apply_form,
+        action_form=action_form,
+        managed_departments=managed_departments,
+        filter_positions=filter_positions,
+        filter_search=filter_search,
+        filter_department_id=filter_department_id,
+        filter_position_id=filter_position_id,
+        filter_span=filter_span,
+        filter_status=filter_status,
+        active_filter_badges=active_filter_badges,
+        can_manage_templates=can_manage_templates,
+        can_apply_templates=can_apply_templates,
+        schedule_department_position_map=_build_schedule_department_position_map(
+            managed_departments
+        ),
+        PAGINATION_SIZES=PAGINATION_SIZES,
+        per_page=per_page,
+        pagination_args=pagination_args,
+    )
+
+
+@schedule.route("/schedules/templates/<int:template_id>", methods=["GET", "POST"])
+@login_required
+def template_detail(template_id: int):
+    """Manage the shifts attached to a saved schedule template."""
+    managed_departments = _managed_schedule_departments(current_user)
+    managed_department_ids = {department.id for department in managed_departments}
+    can_manage_templates = current_user.has_permission("schedules.manage_templates")
+    can_apply_templates = current_user.has_permission("schedules.apply_templates")
+    template = _schedule_template_or_404(template_id, managed_department_ids)
+    requested_action = (
+        (request.form.get("action") or "").strip() if request.method == "POST" else ""
+    )
+
+    if request.method == "POST" and not can_manage_templates:
+        abort(403)
+
+    edit_entry_id = _parse_int(
+        request.form.get("entry-entry_id")
+        if requested_action == "save_entry"
+        else request.args.get("edit_entry_id")
+    )
+    edit_entry = next(
+        (entry for entry in template.entries if entry.id == edit_entry_id),
+        None,
+    )
+
+    update_form = (
+        ScheduleTemplateUpdateForm(
+            formdata=request.form if requested_action == "update_template" else None,
+            prefix="template",
+            obj=template,
+        )
+        if can_manage_templates
+        else None
+    )
+    assigned_user_choices = _template_assigned_user_choices(
+        current_user,
+        template.department_id,
+        extra_users=[
+            entry.assigned_user
+            for entry in template.entries
+            if entry.assigned_user is not None
+        ],
+    )
+    entry_form = (
+        ScheduleTemplateEntryForm(
+            formdata=request.form if requested_action == "save_entry" else None,
+            prefix="entry",
+            template_span=template.span,
+            assigned_user_choices=assigned_user_choices,
+            obj=edit_entry,
+        )
+        if can_manage_templates
+        else None
+    )
+    action_form = CSRFOnlyForm(prefix="template_action")
+
+    if request.method == "POST":
+        if requested_action == "update_template":
+            if update_form.validate_on_submit():
+                template.name = (update_form.name.data or "").strip()
+                template.description = (update_form.description.data or "").strip() or None
+                template.active = bool(update_form.active.data)
+                template.updated_by = current_user
+                db.session.commit()
+                flash("Template updated.", "success")
+                log_schedule_action(f"Updated schedule template {template.name}")
+                return redirect(
+                    url_for("schedule.template_detail", template_id=template.id)
+                )
+            flash("Unable to update template. Please review the form.", "danger")
+        elif requested_action == "save_entry":
+            if entry_form.validate_on_submit():
+                target_entry = None
+                if edit_entry_id:
+                    target_entry = db.session.get(ScheduleTemplateEntry, edit_entry_id)
+                    if target_entry is None or target_entry.template_id != template.id:
+                        abort(404)
+
+                assigned_user_id = (
+                    entry_form.assigned_user_id.data
+                    if entry_form.assigned_user_id.data not in (None, 0)
+                    else None
+                )
+                assigned_user = (
+                    db.session.get(User, assigned_user_id) if assigned_user_id else None
+                )
+                visible_assigned_user_ids = {
+                    choice_id
+                    for choice_id, _choice_label in assigned_user_choices
+                    if choice_id
+                }
+                if (
+                    assigned_user is not None
+                    and assigned_user.id not in visible_assigned_user_ids
+                ):
+                    entry_form.assigned_user_id.errors.append(
+                        "Assigned user is outside your scheduling scope."
+                    )
+                if (
+                    assigned_user is not None
+                    and UserPositionEligibility.query.filter_by(
+                        user_id=assigned_user.id,
+                        position_id=template.position_id,
+                        active=True,
+                    ).first()
+                    is None
+                ):
+                    entry_form.assigned_user_id.errors.append(
+                        "Assigned user is not eligible for this template position."
+                    )
+
+                if not entry_form.errors:
+                    action_label = "updated" if target_entry is not None else "created"
+                    if target_entry is None:
+                        target_entry = ScheduleTemplateEntry(
+                            template=template,
+                            created_by=current_user,
+                        )
+                        db.session.add(target_entry)
+
+                    if template.span == ScheduleTemplate.SPAN_WEEK:
+                        target_entry.weekday = entry_form.weekday.data
+                        target_entry.day_of_month = None
+                        target_entry.month_of_year = None
+                    elif template.span == ScheduleTemplate.SPAN_MONTH:
+                        target_entry.weekday = None
+                        target_entry.day_of_month = entry_form.day_of_month.data
+                        target_entry.month_of_year = None
+                    else:
+                        target_entry.weekday = None
+                        target_entry.day_of_month = entry_form.day_of_month.data
+                        target_entry.month_of_year = entry_form.month_of_year.data
+                    target_entry.assignment_mode = entry_form.assignment_mode.data
+                    target_entry.assigned_user = (
+                        assigned_user
+                        if entry_form.assignment_mode.data == Shift.ASSIGNMENT_ASSIGNED
+                        else None
+                    )
+                    target_entry.start_time = entry_form.start_time.data
+                    target_entry.end_time = entry_form.end_time.data
+                    target_entry.paid_hours_manual = bool(
+                        entry_form.paid_hours_manual.data
+                    )
+                    target_entry.paid_hours = _effective_template_entry_paid_hours(
+                        entry_form
+                    )
+                    target_entry.notes = (entry_form.notes.data or "").strip() or None
+                    target_entry.color = (entry_form.color.data or "").strip() or None
+                    target_entry.is_locked = bool(entry_form.is_locked.data)
+                    target_entry.updated_by = current_user
+                    db.session.commit()
+                    flash("Template shift saved.", "success")
+                    log_schedule_action(
+                        f"{'Updated' if action_label == 'updated' else 'Added'} schedule template shift on {template.name}"
+                    )
+                    return redirect(
+                        url_for("schedule.template_detail", template_id=template.id)
+                    )
+            flash("Unable to save template shift. Please review the form.", "danger")
+        elif requested_action == "delete_entry":
+            entry = db.session.get(
+                ScheduleTemplateEntry, _parse_int(request.form.get("entry_id"))
+            )
+            if entry is None or entry.template_id != template.id:
+                abort(404)
+            db.session.delete(entry)
+            db.session.commit()
+            flash("Template shift deleted.", "success")
+            log_schedule_action(f"Deleted schedule template shift from {template.name}")
+            return redirect(url_for("schedule.template_detail", template_id=template.id))
+
+    return render_template(
+        "schedules/template_detail.html",
+        template=template,
+        update_form=update_form,
+        entry_form=entry_form,
+        action_form=action_form,
+        edit_entry=edit_entry,
+        can_manage_templates=can_manage_templates,
+        can_apply_templates=can_apply_templates,
     )
 
 

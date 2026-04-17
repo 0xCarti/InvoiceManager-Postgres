@@ -31,6 +31,11 @@
             {% if sales_import.deletion_reason %}&middot; Reason: {{ sales_import.deletion_reason }}{% endif %}
         </p>
         {% endif %}
+        {% if sales_import.failure_reason and sales_import.status in ['failed', 'ignored'] %}
+        <p class="text-muted mb-0 small">
+            {{ 'Failure reason' if sales_import.status == 'failed' else 'Ignored reason' }}: {{ sales_import.failure_reason }}
+        </p>
+        {% endif %}
     </div>
     <div class="d-grid gap-2 d-sm-flex flex-wrap">
         {% if can_manage_sales_imports %}

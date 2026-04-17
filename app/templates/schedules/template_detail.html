@@ -1,0 +1,270 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container-fluid px-0">
+    {% include 'schedules/_schedule_tabs.html' %}
+
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+                <h1 class="h4 mb-0">{{ template.name }}</h1>
+                <span class="badge {{ 'text-bg-success' if template.active else 'text-bg-secondary' }}">
+                    {{ 'Active' if template.active else 'Inactive' }}
+                </span>
+                <span class="badge text-bg-light border">{{ template.span_label }}</span>
+            </div>
+            <div class="text-muted small">
+                {{ template.department.name if template.department else 'Unknown Department' }}
+                | {{ template.position.name if template.position else 'Unknown Position' }}
+                | {{ template.entries|length }} saved shift{{ '' if template.entries|length == 1 else 's' }}
+            </div>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-outline-secondary" href="{{ url_for('schedule.templates') }}">Back to Templates</a>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-xl-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h2 class="h5">Template Details</h2>
+                    {% if can_manage_templates and update_form %}
+                    <form method="post" class="row g-3">
+                        {{ update_form.hidden_tag() }}
+                        <input type="hidden" name="action" value="update_template">
+                        <div class="col-12">
+                            {{ update_form.name.label(class_='form-label') }}
+                            {{ update_form.name(class_='form-control') }}
+                            {% for error in update_form.name.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Department</label>
+                            <input type="text" class="form-control" value="{{ template.department.name if template.department else '' }}" disabled>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Position</label>
+                            <input type="text" class="form-control" value="{{ template.position.name if template.position else '' }}" disabled>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Template Period</label>
+                            <input type="text" class="form-control" value="{{ template.span_label }}" disabled>
+                            <div class="form-text">Create a new template if you need a different department, position, or period.</div>
+                        </div>
+                        <div class="col-12">
+                            {{ update_form.description.label(class_='form-label') }}
+                            {{ update_form.description(class_='form-control', rows='4') }}
+                            {% for error in update_form.description.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="col-12">
+                            <div class="form-check">
+                                {{ update_form.active(class_='form-check-input') }}
+                                {{ update_form.active.label(class_='form-check-label') }}
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-primary">Save Template</button>
+                        </div>
+                    </form>
+                    {% else %}
+                    <dl class="row mb-0">
+                        <dt class="col-sm-4">Department</dt>
+                        <dd class="col-sm-8">{{ template.department.name if template.department else '-' }}</dd>
+                        <dt class="col-sm-4">Position</dt>
+                        <dd class="col-sm-8">{{ template.position.name if template.position else '-' }}</dd>
+                        <dt class="col-sm-4">Period</dt>
+                        <dd class="col-sm-8">{{ template.span_label }}</dd>
+                        <dt class="col-sm-4">Description</dt>
+                        <dd class="col-sm-8">{{ template.description or 'No description' }}</dd>
+                    </dl>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-xl-8">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                        <div>
+                            <h2 class="h5 mb-1">{{ 'Edit Template Shift' if edit_entry else 'Add Template Shift' }}</h2>
+                            <div class="text-muted small">
+                                {% if template.span == 'week' %}
+                                Pick the weekday this shift should land on whenever the template is applied.
+                                {% elif template.span == 'month' %}
+                                Pick the calendar day of the month this shift should land on whenever the template is applied.
+                                {% else %}
+                                Pick the month and day this shift should land on whenever the template is applied.
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% if edit_entry %}
+                        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('schedule.template_detail', template_id=template.id) }}">Cancel Edit</a>
+                        {% endif %}
+                    </div>
+                    {% if can_manage_templates and entry_form %}
+                    <form method="post" class="row g-3">
+                        {{ entry_form.hidden_tag() }}
+                        <input type="hidden" name="action" value="save_entry">
+                        <div class="col-12 col-md-4">
+                            {% if template.span == 'week' %}
+                            {{ entry_form.weekday.label(class_='form-label') }}
+                            {{ entry_form.weekday(class_='form-select') }}
+                            {% for error in entry_form.weekday.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                            {% elif template.span == 'month' %}
+                            {{ entry_form.day_of_month.label(class_='form-label') }}
+                            {{ entry_form.day_of_month(class_='form-control') }}
+                            {% for error in entry_form.day_of_month.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                            {% else %}
+                            {{ entry_form.month_of_year.label(class_='form-label') }}
+                            {{ entry_form.month_of_year(class_='form-select') }}
+                            {% for error in entry_form.month_of_year.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                            {% endif %}
+                        </div>
+                        {% if template.span == 'year' %}
+                        <div class="col-12 col-md-4">
+                            {{ entry_form.day_of_month.label(class_='form-label') }}
+                            {{ entry_form.day_of_month(class_='form-control') }}
+                            {% for error in entry_form.day_of_month.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                        <div class="col-12 col-md-4">
+                            {{ entry_form.assignment_mode.label(class_='form-label') }}
+                            {{ entry_form.assignment_mode(class_='form-select') }}
+                            {% for error in entry_form.assignment_mode.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="col-12 col-md-4">
+                            {{ entry_form.assigned_user_id.label(class_='form-label') }}
+                            {{ entry_form.assigned_user_id(class_='form-select') }}
+                            <div class="form-text">Only used for assigned shifts.</div>
+                            {% for error in entry_form.assigned_user_id.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="col-12 col-md-4">
+                            {{ entry_form.start_time.label(class_='form-label') }}
+                            {{ entry_form.start_time(class_='form-control') }}
+                            {% for error in entry_form.start_time.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="col-12 col-md-4">
+                            {{ entry_form.end_time.label(class_='form-label') }}
+                            {{ entry_form.end_time(class_='form-control') }}
+                            {% for error in entry_form.end_time.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="col-12 col-md-4">
+                            {{ entry_form.paid_hours.label(class_='form-label') }}
+                            {{ entry_form.paid_hours(class_='form-control') }}
+                            <div class="form-check mt-2">
+                                {{ entry_form.paid_hours_manual(class_='form-check-input') }}
+                                {{ entry_form.paid_hours_manual.label(class_='form-check-label') }}
+                            </div>
+                        </div>
+                        <div class="col-12 col-md-4">
+                            {{ entry_form.color.label(class_='form-label') }}
+                            {{ entry_form.color(class_='form-select') }}
+                        </div>
+                        <div class="col-12 col-md-4 d-flex align-items-end">
+                            <div class="form-check mb-2">
+                                {{ entry_form.is_locked(class_='form-check-input') }}
+                                {{ entry_form.is_locked.label(class_='form-check-label') }}
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            {{ entry_form.notes.label(class_='form-label') }}
+                            {{ entry_form.notes(class_='form-control', rows='3') }}
+                            {% for error in entry_form.notes.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-primary">Save Template Shift</button>
+                        </div>
+                    </form>
+                    {% else %}
+                    <div class="text-muted small">
+                        You can view the saved template shifts below. Editing them requires the schedule-template manage permission.
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                <div>
+                    <h2 class="h5 mb-1">Saved Template Shifts</h2>
+                    <div class="text-muted small">
+                        Applying this template always adds these rows into draft weeks only. Use the main template list page when you are ready to apply one or many templates.
+                    </div>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>When</th>
+                            <th>Shift Type</th>
+                            <th>User</th>
+                            <th>Time</th>
+                            <th>Paid Hours</th>
+                            <th>Notes</th>
+                            {% if can_manage_templates %}
+                            <th>Actions</th>
+                            {% endif %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for entry in template.entries %}
+                        <tr>
+                            <td>{{ entry.occurrence_label }}</td>
+                            <td>{{ entry.assignment_mode|replace('_', ' ')|title }}</td>
+                            <td>{{ entry.assigned_user.name_or_email if entry.assigned_user else '-' }}</td>
+                            <td>{{ entry.start_time.strftime('%H:%M') }} - {{ entry.end_time.strftime('%H:%M') }}</td>
+                            <td>{{ '%.2f'|format(entry.paid_hours or 0.0) }}</td>
+                            <td>{{ entry.notes or '-' }}</td>
+                            {% if can_manage_templates %}
+                            <td>
+                                <div class="d-flex flex-wrap gap-2">
+                                    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('schedule.template_detail', template_id=template.id, edit_entry_id=entry.id) }}">Edit</a>
+                                    <form method="post" class="d-inline">
+                                        {{ action_form.hidden_tag() }}
+                                        <input type="hidden" name="action" value="delete_entry">
+                                        <input type="hidden" name="entry_id" value="{{ entry.id }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" data-confirm-message="Delete this saved template shift?">Delete</button>
+                                    </form>
+                                </div>
+                            </td>
+                            {% endif %}
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="{{ 7 if can_manage_templates else 6 }}" class="text-muted">No template shifts have been saved yet.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

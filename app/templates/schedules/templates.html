@@ -1,0 +1,357 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style>
+    @media (max-width: 767.98px) {
+        .schedule-template-toolbar,
+        .schedule-template-pagination {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .schedule-template-toolbar > *,
+        .schedule-template-pagination > *,
+        .schedule-template-pagination form {
+            width: 100%;
+        }
+    }
+</style>
+
+<div class="container-fluid px-0 mobile-list-page">
+    {% include 'schedules/_schedule_tabs.html' %}
+
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h1 class="h4 mb-1">Schedule Templates</h1>
+            <div class="text-muted small">
+                Build reusable department and position shift patterns, then apply one or many templates into draft schedule weeks.
+            </div>
+        </div>
+    </div>
+
+    {% if can_manage_templates %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                <div>
+                    <h2 class="h5 mb-1">Create Template</h2>
+                    <div class="text-muted small">
+                        Templates stay department and position scoped. Event and location stay blank so they can be paired to future event-template work.
+                    </div>
+                </div>
+                <span class="badge text-bg-light border">Published weeks are blocked during apply</span>
+            </div>
+            <form
+                method="post"
+                class="row g-3"
+                data-template-department-position-map='{{ schedule_department_position_map|tojson }}'
+                data-template-department-input="{{ template_form.department_id.id }}"
+                data-template-position-input="{{ template_form.position_id.id }}"
+            >
+                {{ template_form.hidden_tag() }}
+                <input type="hidden" name="action" value="create_template">
+                <div class="col-12 col-lg-3">
+                    {{ template_form.name.label(class_='form-label') }}
+                    {{ template_form.name(class_='form-control') }}
+                    {% for error in template_form.name.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-12 col-lg-2">
+                    {{ template_form.department_id.label(class_='form-label') }}
+                    {{ template_form.department_id(class_='form-select') }}
+                    {% for error in template_form.department_id.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-12 col-lg-3">
+                    {{ template_form.position_id.label(class_='form-label') }}
+                    {{ template_form.position_id(class_='form-select') }}
+                    {% for error in template_form.position_id.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-12 col-lg-2">
+                    {{ template_form.span.label(class_='form-label') }}
+                    {{ template_form.span(class_='form-select') }}
+                    {% for error in template_form.span.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-12 col-lg-2 d-flex align-items-end">
+                    <div class="form-check mb-2">
+                        {{ template_form.active(class_='form-check-input') }}
+                        {{ template_form.active.label(class_='form-check-label') }}
+                    </div>
+                </div>
+                <div class="col-12">
+                    {{ template_form.description.label(class_='form-label') }}
+                    {{ template_form.description(class_='form-control', rows='2') }}
+                    {% for error in template_form.description.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary">Create Template</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3 schedule-template-toolbar">
+                <div class="text-muted small">
+                    Filter templates before applying them. A single target date is enough: weekly templates snap to that week, monthly templates to that month, and yearly templates to that year.
+                </div>
+            </div>
+            <form method="get" class="row g-2 align-items-end">
+                <div class="col-12 col-md-4 col-xl-3">
+                    <label class="form-label">Search</label>
+                    <input type="text" name="q" class="form-control" value="{{ filter_search }}" placeholder="Template, department, or position">
+                </div>
+                <div class="col-12 col-md-3 col-xl-2">
+                    <label class="form-label">Department</label>
+                    <select name="department_id" class="form-select">
+                        <option value="">All Departments</option>
+                        {% for department in managed_departments %}
+                        <option value="{{ department.id }}" {% if filter_department_id == department.id %}selected{% endif %}>{{ department.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-12 col-md-3 col-xl-2">
+                    <label class="form-label">Position</label>
+                    <select name="position_id" class="form-select">
+                        <option value="">All Positions</option>
+                        {% for position in filter_positions %}
+                        <option value="{{ position.id }}" {% if filter_position_id == position.id %}selected{% endif %}>{{ position.department.name }} - {{ position.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-6 col-md-2 col-xl-2">
+                    <label class="form-label">Period</label>
+                    <select name="span" class="form-select">
+                        <option value="all" {% if filter_span == 'all' %}selected{% endif %}>All</option>
+                        <option value="week" {% if filter_span == 'week' %}selected{% endif %}>Week</option>
+                        <option value="month" {% if filter_span == 'month' %}selected{% endif %}>Month</option>
+                        <option value="year" {% if filter_span == 'year' %}selected{% endif %}>Year</option>
+                    </select>
+                </div>
+                <div class="col-6 col-md-2 col-xl-2">
+                    <label class="form-label">Status</label>
+                    <select name="status" class="form-select">
+                        <option value="active" {% if filter_status == 'active' %}selected{% endif %}>Active</option>
+                        <option value="inactive" {% if filter_status == 'inactive' %}selected{% endif %}>Inactive</option>
+                        <option value="all" {% if filter_status == 'all' %}selected{% endif %}>All</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-auto d-flex gap-2">
+                    <button type="submit" class="btn btn-primary">Filter</button>
+                    <a class="btn btn-outline-secondary" href="{{ url_for('schedule.templates') }}">Reset</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {% if active_filter_badges %}
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="text-muted small">Active filters:</span>
+        {% for badge in active_filter_badges %}
+        <span class="badge rounded-pill text-bg-light border">{{ badge }}</span>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <form method="post" id="schedule-template-apply-form">
+        {{ apply_form.hidden_tag() }}
+        <input type="hidden" name="action" value="apply_templates">
+        <div class="card mb-3">
+            <div class="card-body d-flex flex-column flex-lg-row justify-content-between align-items-lg-end gap-3">
+                <div>
+                    <h2 class="h5 mb-1">Apply Selected Templates</h2>
+                    <div class="text-muted small">
+                        Applying always adds shifts alongside the existing draft schedule. If any touched week is published, the whole apply is blocked.
+                    </div>
+                </div>
+                {% if can_apply_templates %}
+                <div class="d-flex flex-column flex-md-row align-items-md-end gap-2">
+                    <div>
+                        {{ apply_form.target_start_date.label(class_='form-label') }}
+                        {{ apply_form.target_start_date(class_='form-control') }}
+                        {% for error in apply_form.target_start_date.errors %}
+                        <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="select-all-templates">
+                        <label class="form-check-label" for="select-all-templates">Select visible</label>
+                    </div>
+                    <button type="submit" class="btn btn-success mb-2">Apply to Draft Schedule</button>
+                </div>
+                {% else %}
+                <div class="text-muted small">You can view templates here, but applying them requires the schedule-template apply permission.</div>
+                {% endif %}
+            </div>
+        </div>
+    </form>
+
+    <div class="table-responsive">
+        <table class="table table-hover align-middle sortable">
+            <thead>
+                <tr>
+                    <th data-sortable="false" class="text-center">Select</th>
+                    <th>Template</th>
+                    <th>Scope</th>
+                    <th>Period</th>
+                    <th>Shifts</th>
+                    <th>Status</th>
+                    <th>Updated</th>
+                    <th data-sortable="false">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for template in templates_page.items %}
+                <tr>
+                    <td class="text-center">
+                        {% if can_apply_templates and template.active %}
+                        <input class="form-check-input template-select-box" type="checkbox" name="template_ids" value="{{ template.id }}" form="schedule-template-apply-form">
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="fw-semibold">{{ template.name }}</div>
+                        {% if template.description %}
+                        <div class="small text-muted">{{ template.description }}</div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div>{{ template.department.name if template.department else 'Unknown Department' }}</div>
+                        <div class="small text-muted">{{ template.position.name if template.position else 'Unknown Position' }}</div>
+                    </td>
+                    <td>{{ template.span_label }}</td>
+                    <td>{{ template.entries|length }}</td>
+                    <td>
+                        <span class="badge {{ 'text-bg-success' if template.active else 'text-bg-secondary' }}">
+                            {{ 'Active' if template.active else 'Inactive' }}
+                        </span>
+                    </td>
+                    <td>
+                        <div>{{ template.updated_at.strftime('%Y-%m-%d') if template.updated_at else '-' }}</div>
+                        <div class="small text-muted">{{ template.updated_at.strftime('%H:%M') if template.updated_at else '' }}</div>
+                    </td>
+                    <td>
+                        <div class="d-flex flex-wrap gap-2">
+                            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('schedule.template_detail', template_id=template.id) }}">
+                                {{ 'Manage' if can_manage_templates else 'View' }}
+                            </a>
+                            {% if can_manage_templates %}
+                            <form method="post" class="d-inline">
+                                {{ action_form.hidden_tag() }}
+                                <input type="hidden" name="action" value="toggle_template">
+                                <input type="hidden" name="template_id" value="{{ template.id }}">
+                                <button type="submit" class="btn btn-sm btn-outline-secondary">
+                                    {{ 'Archive' if template.active else 'Activate' }}
+                                </button>
+                            </form>
+                            <form method="post" class="d-inline">
+                                {{ action_form.hidden_tag() }}
+                                <input type="hidden" name="action" value="delete_template">
+                                <input type="hidden" name="template_id" value="{{ template.id }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" data-confirm-message="Delete this template and all of its saved shifts?">Delete</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="8" class="text-muted">No schedule templates match the current filters.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3 schedule-template-pagination">
+        <nav aria-label="Schedule template pagination">
+            <ul class="pagination mb-0">
+                <li class="page-item {% if not templates_page.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('schedule.templates', page=templates_page.prev_num if templates_page.has_prev else 1, **pagination_args) }}"{% if not templates_page.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link">Page {{ templates_page.page }} of {{ templates_page.pages or 1 }}</span>
+                </li>
+                <li class="page-item {% if not templates_page.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('schedule.templates', page=templates_page.next_num if templates_page.has_next else templates_page.pages or 1, **pagination_args) }}"{% if not templates_page.has_next %} tabindex="-1" aria-disabled="true"{% endif %}>Next</a>
+                </li>
+            </ul>
+        </nav>
+        <form method="get" class="d-flex align-items-center gap-2">
+            {% for key, values in request.args.lists() %}
+                {% if key not in ['page', 'per_page'] %}
+                    {% for value in values %}
+                        <input type="hidden" name="{{ key }}" value="{{ value }}">
+                    {% endfor %}
+                {% endif %}
+            {% endfor %}
+            <input type="hidden" name="page" value="1">
+            <label for="schedule-template-per-page" class="form-label mb-0">Rows per page</label>
+            <select id="schedule-template-per-page" name="per_page" class="form-select js-auto-submit">
+                {% for option in PAGINATION_SIZES %}
+                <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('DOMContentLoaded', () => {
+    const createForm = document.querySelector('[data-template-department-position-map]');
+    if (createForm) {
+        const departmentInput = document.getElementById(createForm.dataset.templateDepartmentInput);
+        const positionInput = document.getElementById(createForm.dataset.templatePositionInput);
+        const positionMap = JSON.parse(createForm.dataset.templateDepartmentPositionMap || '{}');
+
+        const renderPositionOptions = () => {
+            if (!departmentInput || !positionInput) {
+                return;
+            }
+            const selectedDepartmentId = departmentInput.value || '';
+            const options = positionMap[selectedDepartmentId] || [];
+            const currentValue = positionInput.value;
+            positionInput.innerHTML = '';
+            options.forEach((option) => {
+                const element = document.createElement('option');
+                element.value = option.id;
+                element.textContent = option.label;
+                if (String(option.id) === String(currentValue)) {
+                    element.selected = true;
+                }
+                positionInput.appendChild(element);
+            });
+            if (!positionInput.value && positionInput.options.length) {
+                positionInput.options[0].selected = true;
+            }
+        };
+
+        departmentInput?.addEventListener('change', renderPositionOptions);
+        renderPositionOptions();
+    }
+
+    const selectAll = document.getElementById('select-all-templates');
+    const checkboxes = Array.from(document.querySelectorAll('.template-select-box'));
+    selectAll?.addEventListener('change', () => {
+        checkboxes.forEach((checkbox) => {
+            checkbox.checked = selectAll.checked;
+        });
+    });
+});
+</script>
+{% endblock %}
