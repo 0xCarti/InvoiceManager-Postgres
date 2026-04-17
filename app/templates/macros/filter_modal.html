@@ -37,6 +37,15 @@
         {% if scope %}data-filter-scope="{{ scope }}"{% endif %}
         {% if save_url %}data-filter-save-url="{{ save_url }}"{% endif %}
       >
+        {% if save_defaults %}
+        <input
+          type="hidden"
+          name="csrf_token"
+          value="{{ csrf_token() }}"
+          disabled
+          data-filter-csrf-input
+        >
+        {% endif %}
         <div class="modal-body">
           <div class="alert d-none" role="alert" data-filter-feedback aria-live="polite"></div>
           {{ caller() }}

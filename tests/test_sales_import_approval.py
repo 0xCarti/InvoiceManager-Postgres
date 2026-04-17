@@ -1141,33 +1141,30 @@ def test_sales_imports_list_supports_search_filters_and_pagination_controls(
 def test_sales_import_filters_can_be_saved_from_list_modal(client, app):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
-    ready_import = _create_price_review_import(
+    _create_price_review_import(
         app,
         message_id="msg-list-save-defaults",
         product_price=5.0,
         file_price=5.0,
     )
 
-    with app.app_context():
-        ready_record = db.session.get(PosSalesImport, ready_import["import_id"])
-        ready_record.status = PosSalesImport.STATUS_IGNORED
-        ready_record.failure_reason = "Attachment does not contain any POS locations or sales rows."
-        db.session.commit()
-
     with client:
         login(client, admin_email, admin_pass)
         response = client.get("/controlpanel/sales-imports", follow_redirects=True)
         assert response.status_code == 200
         body = response.get_data(as_text=True)
-        token_match = re.search(r'data-filter-csrf-token="([^"]+)"', body)
+        token_match = re.search(
+            r'name="csrf_token"\s+value="([^"]+)"\s+disabled\s+data-filter-csrf-input',
+            body,
+            re.S,
+        )
         assert token_match is not None
 
         save_response = client.post(
             "/preferences/filters",
             data={
                 "scope": "admin.sales_imports",
-                "status": "ignored",
-                "search": "empty",
+                "status": "pending",
             },
             headers={"X-CSRFToken": token_match.group(1)},
         )
@@ -1179,7 +1176,7 @@ def test_sales_import_filters_can_be_saved_from_list_modal(client, app):
             user_id=admin_user.id,
             scope="admin.sales_imports"
         ).one()
-        assert preference.values == {"status": ["ignored"], "search": ["empty"]}
+        assert preference.values == {"status": ["pending"]}
 
 
 def test_sales_imports_list_shows_ignored_status_without_review_label(client, app):

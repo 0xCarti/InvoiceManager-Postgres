@@ -31,7 +31,11 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     saveDefaultFeedback.textContent = message;
-    saveDefaultFeedback.className = `small mt-2 ${isError ? "text-danger" : "text-success"}`;
+    if (!message) {
+      saveDefaultFeedback.className = "schedule-default-feedback small text-muted";
+      return;
+    }
+    saveDefaultFeedback.className = `schedule-default-feedback small ${isError ? "text-danger" : "text-success"}`;
   }
 
   if (saveDefaultButton && filterForm) {
