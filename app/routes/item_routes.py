@@ -671,6 +671,16 @@ def view_item(item_id):
     vendor_aliases = (
         _load_item_vendor_aliases(item_id) if can_view_vendor_aliases else []
     )
+    recipe_product_items = (
+        ProductRecipeItem.query.join(Product)
+        .options(
+            selectinload(ProductRecipeItem.product),
+            selectinload(ProductRecipeItem.unit),
+        )
+        .filter(ProductRecipeItem.item_id == item_id)
+        .order_by(Product.name)
+        .all()
+    )
     vendor_alias_delete_form = DeleteForm()
     purchase_page = request.args.get("purchase_page", 1, type=int)
     sales_page = request.args.get("sales_page", 1, type=int)
@@ -710,7 +720,9 @@ def view_item(item_id):
     return render_template(
         "items/view_item.html",
         item=item_obj,
+        can_view_vendor_aliases=can_view_vendor_aliases,
         vendor_aliases=vendor_aliases,
+        recipe_product_items=recipe_product_items,
         vendor_alias_delete_form=vendor_alias_delete_form,
         purchase_items=purchase_items,
         sales_items=sales_items,

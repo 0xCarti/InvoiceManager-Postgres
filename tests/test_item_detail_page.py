@@ -29,7 +29,7 @@ def setup_history(app, *, include_vendor_alias_permission: bool = True):
         user = User(
             email="hist@example.com",
             password=generate_password_hash("pass"),
-            is_admin=True,
+            is_admin=False,
             active=True,
         )
         customer = Customer(first_name="Cust", last_name="Omer")
@@ -39,8 +39,30 @@ def setup_history(app, *, include_vendor_alias_permission: bool = True):
         loc1 = Location(name="L1")
         loc2 = Location(name="L2")
         product = Product(name="WidgetProd", gl_code="5000", price=5, cost=0)
-        pri = ProductRecipeItem(product=product, item=item, quantity=1)
-        db.session.add_all([user, customer, vendor, item, unit, loc1, loc2, product, pri])
+        secondary_product = Product(
+            name="WidgetMixer", gl_code="5001", price=6, cost=0
+        )
+        pri = ProductRecipeItem(
+            product=product, item=item, quantity=1, countable=True
+        )
+        secondary_pri = ProductRecipeItem(
+            product=secondary_product, item=item, quantity=1, countable=False
+        )
+        db.session.add_all(
+            [
+                user,
+                customer,
+                vendor,
+                item,
+                unit,
+                loc1,
+                loc2,
+                product,
+                secondary_product,
+                pri,
+                secondary_pri,
+            ]
+        )
         db.session.commit()
         grant_item_workflow_permissions(user)
         if include_vendor_alias_permission:
@@ -89,6 +111,10 @@ def test_item_detail_page(client, app):
         assert inv_id in page
         assert str(transfer_id) in page
         assert "WidgetProd" in page
+        assert "WidgetMixer" in page
+        assert "Product Recipe Usage" in page
+        assert "Countable" in page
+        assert "Not Countable" in page
         assert "VEN-100" in page
         assert "Widget Master Case" in page
 

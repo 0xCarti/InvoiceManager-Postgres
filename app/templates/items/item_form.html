@@ -207,36 +207,7 @@
         </div>
         {% endif %}
         <div class="tab-pane fade" id="item-recipe-products" role="tabpanel" aria-labelledby="item-recipe-products-tab">
-            <div class="table-responsive">
-                <table class="table align-middle">
-                    <thead>
-                        <tr>
-                            <th>Product</th>
-                            <th>Countable</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                    {% for recipe_item in recipe_product_items %}
-                        <tr>
-                            <td>
-                                {% if recipe_item.product %}
-                                    <a href="{{ url_for('product.edit_product', product_id=recipe_item.product_id) }}">
-                                        {{ recipe_item.product.name }}
-                                    </a>
-                                {% else %}
-                                    <span class="text-muted">Unknown product</span>
-                                {% endif %}
-                            </td>
-                            <td>{{ 'Yes' if recipe_item.countable else 'No' }}</td>
-                        </tr>
-                    {% else %}
-                        <tr>
-                            <td colspan="2" class="text-center text-muted">This item is not currently used in any product recipes.</td>
-                        </tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+            {% include 'items/_recipe_product_usage_table.html' %}
         </div>
     </div>
     {% else %}

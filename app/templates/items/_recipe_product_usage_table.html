@@ -1,0 +1,49 @@
+{% set recipe_product_items = recipe_product_items | default([]) %}
+<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+    <div>
+        <h3 class="h5 mb-1">Product Recipe Usage</h3>
+        <p class="text-muted mb-0">
+            Countable recipe lines can make this item appear on location stand sheets and keep it locked on location item lists while that product is assigned there.
+        </p>
+    </div>
+</div>
+<div class="table-responsive">
+    <table class="table align-middle">
+        <thead>
+            <tr>
+                <th>Product</th>
+                <th>Countable on Stand Sheets</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for recipe_item in recipe_product_items %}
+            <tr>
+                <td>
+                    {% if recipe_item.product %}
+                        {% if can_access_endpoint('product.edit_product', 'GET') %}
+                        <a href="{{ url_for('product.edit_product', product_id=recipe_item.product_id) }}">
+                            {{ recipe_item.product.name }}
+                        </a>
+                        {% else %}
+                        {{ recipe_item.product.name }}
+                        {% endif %}
+                    {% else %}
+                    <span class="text-muted">Unknown product</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if recipe_item.countable %}
+                    <span class="badge text-bg-success">Countable</span>
+                    {% else %}
+                    <span class="badge text-bg-secondary">Not Countable</span>
+                    {% endif %}
+                </td>
+            </tr>
+        {% else %}
+            <tr>
+                <td colspan="2" class="text-center text-muted">This item is not currently used in any product recipes.</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
