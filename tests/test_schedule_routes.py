@@ -7,6 +7,9 @@ from app import db
 from app.models import (
     Department,
     DepartmentScheduleWeek,
+    Event,
+    EventLocation,
+    Location,
     Shift,
     ShiftPosition,
     TimeOffRequest,
@@ -264,6 +267,276 @@ def test_team_schedule_can_create_and_publish_shift(client, app):
         assert shift is not None
         assert shift.assigned_user_id == employee_id
         assert shift.live_version == week.current_version
+
+
+def test_team_schedule_position_view_filters_by_event_and_location(client, app):
+    worker_id = create_user(app, "position-filter-worker@example.com")
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        department = Department(name="Position Board Ops", active=True)
+        location_a = Location(name="North Stand")
+        location_b = Location(name="South Stand")
+        event_a = Event(
+            name="Morning Event",
+            start_date=date(2026, 4, 6),
+            end_date=date(2026, 4, 12),
+        )
+        event_b = Event(
+            name="Evening Event",
+            start_date=date(2026, 4, 6),
+            end_date=date(2026, 4, 12),
+        )
+        db.session.add_all([department, location_a, location_b, event_a, event_b])
+        db.session.commit()
+
+        db.session.add_all(
+            [
+                EventLocation(event_id=event_a.id, location_id=location_a.id),
+                EventLocation(event_id=event_b.id, location_id=location_b.id),
+            ]
+        )
+        db.session.commit()
+
+        cashier = ShiftPosition(
+            department_id=department.id,
+            name="Cashier",
+            active=True,
+            sort_order=1,
+        )
+        runner = ShiftPosition(
+            department_id=department.id,
+            name="Runner",
+            active=True,
+            sort_order=2,
+        )
+        db.session.add_all([cashier, runner])
+        db.session.commit()
+
+        db.session.add_all(
+            [
+                UserDepartmentMembership(
+                    user_id=worker_id,
+                    department_id=department.id,
+                    role="staff",
+                    is_primary=True,
+                ),
+                UserPositionEligibility(
+                    user_id=worker_id,
+                    position_id=cashier.id,
+                    priority=10,
+                    active=True,
+                ),
+            ]
+        )
+        week = DepartmentScheduleWeek(
+            department_id=department.id,
+            week_start=date(2026, 4, 6),
+            is_published=False,
+            current_version=0,
+        )
+        db.session.add(week)
+        db.session.commit()
+
+        db.session.add_all(
+            [
+                Shift(
+                    schedule_week_id=week.id,
+                    position_id=cashier.id,
+                    assigned_user_id=worker_id,
+                    location_id=location_a.id,
+                    event_id=event_a.id,
+                    shift_date=date(2026, 4, 7),
+                    start_time=time(9, 0),
+                    end_time=time(17, 0),
+                    paid_hours=8.0,
+                    assignment_mode=Shift.ASSIGNMENT_ASSIGNED,
+                    live_version=0,
+                ),
+                Shift(
+                    schedule_week_id=week.id,
+                    position_id=runner.id,
+                    location_id=location_b.id,
+                    event_id=event_b.id,
+                    shift_date=date(2026, 4, 7),
+                    start_time=time(10, 0),
+                    end_time=time(14, 0),
+                    paid_hours=4.0,
+                    assignment_mode=Shift.ASSIGNMENT_OPEN,
+                    live_version=0,
+                ),
+            ]
+        )
+        db.session.commit()
+        department_id = department.id
+        event_a_id = event_a.id
+        location_a_id = location_a.id
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.get(
+            f"/schedules?department_id={department_id}&week_start=2026-04-06&view_mode=position&filter_event_id={event_a_id}&filter_location_id={location_a_id}",
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"By Position View" in response.data
+        assert b"Cashier" in response.data
+        assert b"position-filter-worker@example.com" in response.data
+        assert b"10:00 - 14:00" not in response.data
+
+
+def test_team_schedule_bulk_create_repeats_across_days_weeks_and_copies(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        department = Department(name="Bulk Create Ops", active=True)
+        location = Location(name="Bulk Create Stand")
+        event = Event(
+            name="Tournament Week",
+            start_date=date(2026, 4, 6),
+            end_date=date(2026, 4, 19),
+        )
+        db.session.add_all([department, location, event])
+        db.session.commit()
+
+        db.session.add(EventLocation(event_id=event.id, location_id=location.id))
+        db.session.commit()
+
+        position = ShiftPosition(
+            department_id=department.id,
+            name="Warehouse",
+            active=True,
+        )
+        db.session.add(position)
+        db.session.commit()
+        department_id = department.id
+        position_id = position.id
+        event_id = event.id
+        location_id = location.id
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            f"/schedules?department_id={department_id}&week_start=2026-04-06&view_mode=position&filter_event_id={event_id}&filter_location_id={location_id}",
+            data={
+                "action": "save_shift",
+                "department_id": str(department_id),
+                "week_start": "2026-04-06",
+                "view_mode": "position",
+                "filter_event_id": str(event_id),
+                "filter_location_id": str(location_id),
+                "shift-shift_id": "",
+                "shift-schedule_week_id": "",
+                "shift-shift_date": "2026-04-07",
+                "shift-assigned_user_id": "0",
+                "shift-position_id": str(position_id),
+                "shift-assignment_mode": "tradeboard",
+                "shift-start_time": "09:00",
+                "shift-end_time": "11:00",
+                "shift-paid_hours": "",
+                "shift-location_id": str(location_id),
+                "shift-event_id": str(event_id),
+                "shift-notes": "Coverage block",
+                "shift-color": "text-primary",
+                "shift-copy_count": "2",
+                "shift-repeat_weeks": "1",
+                "shift-target_days": ["1", "3"],
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"8 shifts saved." in response.data
+
+    with app.app_context():
+        shifts = (
+            Shift.query.filter_by(position_id=position_id)
+            .order_by(Shift.shift_date.asc(), Shift.id.asc())
+            .all()
+        )
+        assert len(shifts) == 8
+        assert {shift.assignment_mode for shift in shifts} == {Shift.ASSIGNMENT_TRADEBOARD}
+        assert {shift.event_id for shift in shifts} == {event_id}
+        assert {shift.location_id for shift in shifts} == {location_id}
+        assert [shift.shift_date for shift in shifts].count(date(2026, 4, 7)) == 2
+        assert [shift.shift_date for shift in shifts].count(date(2026, 4, 9)) == 2
+        assert [shift.shift_date for shift in shifts].count(date(2026, 4, 14)) == 2
+        assert [shift.shift_date for shift in shifts].count(date(2026, 4, 16)) == 2
+
+
+def test_team_schedule_rejects_multiple_assigned_copies_per_day(client, app):
+    worker_id = create_user(app, "assigned-copy-worker@example.com")
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        department = Department(name="Assigned Copy Ops", active=True)
+        db.session.add(department)
+        db.session.commit()
+        position = ShiftPosition(
+            department_id=department.id,
+            name="Operator",
+            active=True,
+        )
+        db.session.add(position)
+        db.session.commit()
+        db.session.add(
+            UserDepartmentMembership(
+                user_id=worker_id,
+                department_id=department.id,
+                role="staff",
+                is_primary=True,
+            )
+        )
+        db.session.add(
+            UserPositionEligibility(
+                user_id=worker_id,
+                position_id=position.id,
+                priority=10,
+                active=True,
+            )
+        )
+        db.session.commit()
+        department_id = department.id
+        position_id = position.id
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            f"/schedules?department_id={department_id}&week_start=2026-04-06&view_mode=position",
+            data={
+                "action": "save_shift",
+                "department_id": str(department_id),
+                "week_start": "2026-04-06",
+                "view_mode": "position",
+                "shift-shift_id": "",
+                "shift-schedule_week_id": "",
+                "shift-shift_date": "2026-04-07",
+                "shift-assigned_user_id": str(worker_id),
+                "shift-position_id": str(position_id),
+                "shift-assignment_mode": "assigned",
+                "shift-start_time": "09:00",
+                "shift-end_time": "17:00",
+                "shift-paid_hours": "",
+                "shift-location_id": "0",
+                "shift-event_id": "0",
+                "shift-notes": "",
+                "shift-color": "",
+                "shift-copy_count": "2",
+                "shift-repeat_weeks": "0",
+                "shift-target_days": ["1"],
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert (
+            b"Assigned shifts can only create one copy per selected day."
+            in response.data
+        )
+
+    with app.app_context():
+        assert Shift.query.filter_by(position_id=position_id).count() == 0
 
 
 def test_auto_assign_uses_default_availability_and_preferred_hours_cap(client, app):

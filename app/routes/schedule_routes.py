@@ -27,6 +27,8 @@ from app.models import (
     AvailabilityOverride,
     Department,
     DepartmentScheduleWeek,
+    Event,
+    EventLocation,
     RecurringAvailabilityWindow,
     Shift,
     ShiftPosition,
@@ -66,6 +68,8 @@ from app.services.schedule_service import (
 
 schedule = Blueprint("schedule", __name__)
 ALL_DEPARTMENTS_VALUE = "all"
+SCHEDULE_VIEW_USER = "user"
+SCHEDULE_VIEW_POSITION = "position"
 
 
 def _parse_int(value, default=None):
@@ -87,12 +91,21 @@ def _schedule_redirect(
     week_start,
     *,
     user_id: int | None = None,
+    view_mode: str | None = None,
+    filter_event_id: int | None = None,
+    filter_location_id: int | None = None,
 ) -> str:
     values = {"week_start": normalize_week_start(week_start).isoformat()}
     if department_id:
         values["department_id"] = department_id
     if user_id:
         values["user_id"] = user_id
+    if view_mode == SCHEDULE_VIEW_POSITION:
+        values["view_mode"] = view_mode
+    if filter_event_id:
+        values["filter_event_id"] = filter_event_id
+    if filter_location_id:
+        values["filter_location_id"] = filter_location_id
     return url_for(endpoint, **values)
 
 
@@ -232,6 +245,192 @@ def _team_schedule_access_mode() -> tuple[bool, bool]:
     return can_team, can_self
 
 
+def _parse_schedule_view_mode(value) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == SCHEDULE_VIEW_POSITION:
+        return SCHEDULE_VIEW_POSITION
+    return SCHEDULE_VIEW_USER
+
+
+def _load_schedule_events_for_week(week_start) -> list[Event]:
+    normalized_week_start = normalize_week_start(week_start)
+    week_end = normalized_week_start + timedelta(days=6)
+    return (
+        Event.query.options(
+            selectinload(Event.locations).selectinload(EventLocation.location),
+        )
+        .filter(
+            Event.start_date <= week_end,
+            Event.end_date >= normalized_week_start,
+        )
+        .order_by(Event.start_date.asc(), Event.name.asc())
+        .all()
+    )
+
+
+def _select_schedule_event(events: list[Event], event_id: int | None) -> Event | None:
+    if not event_id:
+        return None
+    for event in events:
+        if event.id == event_id:
+            return event
+    return None
+
+
+def _sorted_event_locations(event: Event | None) -> list[EventLocation]:
+    if event is None:
+        return []
+    return sorted(
+        [
+            event_location
+            for event_location in event.locations
+            if event_location.location is not None
+        ],
+        key=lambda item: item.location.name.casefold(),
+    )
+
+
+def _build_schedule_event_location_map(events: list[Event]) -> dict[str, list[dict[str, str | int]]]:
+    mapping: dict[str, list[dict[str, str | int]]] = {"0": []}
+    for event in events:
+        mapping[str(event.id)] = [
+            {
+                "id": event_location.location_id,
+                "name": event_location.location.name,
+            }
+            for event_location in _sorted_event_locations(event)
+        ]
+    return mapping
+
+
+def _filter_shifts_for_position_view(
+    shifts: list[Shift],
+    *,
+    week_dates: list,
+    visible_user_ids: set[int],
+    selected_event_id: int | None,
+    selected_location_id: int | None,
+) -> list[Shift]:
+    week_date_set = set(week_dates)
+    filtered: list[Shift] = []
+    for shift in shifts:
+        if shift.shift_date not in week_date_set:
+            continue
+        if shift.assigned_user_id and shift.assigned_user_id not in visible_user_ids:
+            continue
+        if selected_event_id and shift.event_id != selected_event_id:
+            continue
+        if selected_location_id and shift.location_id != selected_location_id:
+            continue
+        filtered.append(shift)
+    return sorted(
+        filtered,
+        key=lambda value: (
+            value.shift_date,
+            getattr(value.position.department, "name", "") if value.position else "",
+            getattr(value.position, "sort_order", 0) if value.position else 0,
+            getattr(value.position, "name", "") if value.position else "",
+            value.start_time,
+            getattr(value.assigned_user, "sort_key", "")
+            if value.assigned_user is not None
+            else "",
+            value.id,
+        ),
+    )
+
+
+def _build_position_schedule_days(
+    shifts: list[Shift],
+    *,
+    week_dates: list,
+    show_department_names: bool,
+) -> list[dict]:
+    shifts_by_day: dict[object, list[Shift]] = defaultdict(list)
+    for shift in shifts:
+        shifts_by_day[shift.shift_date].append(shift)
+
+    day_rows: list[dict] = []
+    for day in week_dates:
+        position_groups: dict[tuple[int, int], dict] = {}
+        day_shifts = shifts_by_day.get(day, [])
+        for shift in day_shifts:
+            position = shift.position
+            if position is None:
+                continue
+            department = position.department
+            group_key = (
+                department.id if show_department_names and department is not None else 0,
+                position.id,
+            )
+            group = position_groups.setdefault(
+                group_key,
+                {
+                    "position": position,
+                    "department": department,
+                    "shifts": [],
+                    "shift_count": 0,
+                    "total_hours": 0.0,
+                },
+            )
+            group["shifts"].append(shift)
+            group["shift_count"] += 1
+            group["total_hours"] += float(shift.paid_hours or 0.0)
+
+        ordered_groups = sorted(
+            position_groups.values(),
+            key=lambda item: (
+                item["department"].name.casefold()
+                if show_department_names and item["department"] is not None
+                else "",
+                int(getattr(item["position"], "sort_order", 0) or 0),
+                item["position"].name.casefold(),
+            ),
+        )
+        for group in ordered_groups:
+            group["shifts"].sort(
+                key=lambda value: (
+                    value.start_time,
+                    getattr(value.assigned_user, "sort_key", "")
+                    if value.assigned_user is not None
+                    else "",
+                    value.id,
+                )
+            )
+
+        if show_department_names:
+            sections_map: dict[int, dict] = {}
+            for group in ordered_groups:
+                department = group["department"]
+                if department is None:
+                    continue
+                section = sections_map.setdefault(
+                    department.id,
+                    {
+                        "department": department,
+                        "position_groups": [],
+                    },
+                )
+                section["position_groups"].append(group)
+            sections = list(sections_map.values())
+        else:
+            sections = []
+            if ordered_groups:
+                sections.append({"department": None, "position_groups": ordered_groups})
+
+        day_rows.append(
+            {
+                "date": day,
+                "shift_count": len(day_shifts),
+                "total_hours": round(
+                    sum(float(shift.paid_hours or 0.0) for shift in day_shifts),
+                    2,
+                ),
+                "sections": sections,
+            }
+        )
+    return day_rows
+
+
 def _prepare_schedule_week_context(
     department: Department,
     week_start,
@@ -240,7 +439,9 @@ def _prepare_schedule_week_context(
 ):
     schedule_week = (
         DepartmentScheduleWeek.query.options(
-            selectinload(DepartmentScheduleWeek.shifts).selectinload(Shift.position),
+            selectinload(DepartmentScheduleWeek.shifts)
+            .selectinload(Shift.position)
+            .selectinload(ShiftPosition.department),
             selectinload(DepartmentScheduleWeek.shifts).selectinload(
                 Shift.assigned_user
             ),
@@ -442,6 +643,7 @@ def team_schedule():
         current_user,
         visible_departments,
     )
+    view_mode = _parse_schedule_view_mode(request.values.get("view_mode"))
     requested_department_filter = _parse_department_filter_value(
         request.values.get("department_id") or request.values.get("shift-department_id")
     )
@@ -480,6 +682,16 @@ def team_schedule():
                 week_label="",
                 previous_week=None,
                 next_week=None,
+                view_mode=view_mode,
+                selected_event_filter_value="",
+                selected_location_filter_value="",
+                schedule_events=[],
+                event_filter_locations=[],
+                position_board_days=[],
+                board_total_labor=0.0,
+                board_assigned_shift_count=0,
+                board_open_shift_count=0,
+                schedule_event_location_map={},
                 can_team_access=can_team_access,
                 can_self_schedule=can_self_schedule,
                 can_auto_assign_selected_scope=False,
@@ -489,9 +701,11 @@ def team_schedule():
         request.values.get("week_start") or request.values.get("shift-week_start")
     )
     include_self_only = not can_team_access and can_self_schedule
-    requested_user_id = _parse_int(
-        request.values.get("user_id") or request.values.get("shift-user_id")
-    )
+    requested_user_id = None
+    if view_mode == SCHEDULE_VIEW_USER:
+        requested_user_id = _parse_int(
+            request.values.get("user_id") or request.values.get("shift-user_id")
+        )
     can_auto_assign_selected_scope = False
     auto_assign_action_label = "Auto Assign"
 
@@ -505,7 +719,9 @@ def team_schedule():
         schedule_week = context["schedule_week"]
         shift_form = None
         action_form = CSRFOnlyForm(prefix="action")
-        selected_user_id = context["selected_user_id"]
+        selected_user_id = (
+            context["selected_user_id"] if view_mode == SCHEDULE_VIEW_USER else None
+        )
         filter_users = context["assignable_users"]
         can_auto_assign_selected_scope = bool(auto_assignable_departments)
         auto_assign_action_label = "Auto Assign Allowed Departments"
@@ -516,16 +732,19 @@ def team_schedule():
             include_self_only=include_self_only,
         )
         filter_users = context["assignable_users"]
-        filtered_visible_users, selected_user_id = _filter_schedule_users(
-            context["visible_users"],
-            requested_user_id,
-        )
-        context["visible_users"] = filtered_visible_users
-        context["current_seen_count"] = _current_seen_count_for_users(
-            context["receipts_by_user_id"],
-            context["schedule_week"].current_version or 0,
-            filtered_visible_users,
-        )
+        if view_mode == SCHEDULE_VIEW_USER:
+            filtered_visible_users, selected_user_id = _filter_schedule_users(
+                context["visible_users"],
+                requested_user_id,
+            )
+            context["visible_users"] = filtered_visible_users
+            context["current_seen_count"] = _current_seen_count_for_users(
+                context["receipts_by_user_id"],
+                context["schedule_week"].current_version or 0,
+                filtered_visible_users,
+            )
+        else:
+            selected_user_id = None
         schedule_week = context["schedule_week"]
         shift_form = ShiftForm(prefix="shift", department_id=selected_department.id)
         action_form = CSRFOnlyForm(prefix="action")
@@ -533,6 +752,70 @@ def team_schedule():
             current_user,
             selected_department.id,
         )
+
+    schedule_events = _load_schedule_events_for_week(schedule_week.week_start)
+    selected_filter_event = _select_schedule_event(
+        schedule_events,
+        _parse_int(
+            request.values.get("filter_event_id")
+            or request.values.get("shift-filter_event_id")
+        ),
+    )
+    event_filter_locations = _sorted_event_locations(selected_filter_event)
+    requested_filter_location_id = _parse_int(
+        request.values.get("filter_location_id")
+        or request.values.get("shift-filter_location_id")
+    )
+    selected_filter_location_id = None
+    if requested_filter_location_id and any(
+        event_location.location_id == requested_filter_location_id
+        for event_location in event_filter_locations
+    ):
+        selected_filter_location_id = requested_filter_location_id
+
+    schedule_event_location_map: dict[str, list[dict[str, str | int]]] = {}
+    if shift_form is not None:
+        schedule_event_location_map = _build_schedule_event_location_map(
+            Event.query.options(
+                selectinload(Event.locations).selectinload(EventLocation.location),
+            )
+            .order_by(Event.start_date.desc(), Event.name.asc())
+            .all()
+        )
+
+    position_board_shifts: list[Shift] = []
+    position_board_days: list[dict] = []
+    board_total_labor = context["total_labor"]
+    board_assigned_shift_count = sum(
+        1
+        for shift in schedule_week.shifts
+        if shift.assignment_mode == Shift.ASSIGNMENT_ASSIGNED and shift.assigned_user_id
+    )
+    board_open_shift_count = len(context["open_shifts"])
+    if view_mode == SCHEDULE_VIEW_POSITION:
+        position_board_shifts = _filter_shifts_for_position_view(
+            list(schedule_week.shifts),
+            week_dates=context["week_dates"],
+            visible_user_ids={user.id for user in context["visible_users"]},
+            selected_event_id=selected_filter_event.id if selected_filter_event else None,
+            selected_location_id=selected_filter_location_id,
+        )
+        position_board_days = _build_position_schedule_days(
+            position_board_shifts,
+            week_dates=context["week_dates"],
+            show_department_names=all_departments_mode,
+        )
+        board_total_labor = sum(
+            float(shift.paid_hours or 0.0) * float(shift.hourly_rate_snapshot or 0.0)
+            for shift in position_board_shifts
+        )
+        board_assigned_shift_count = sum(
+            1
+            for shift in position_board_shifts
+            if shift.assignment_mode == Shift.ASSIGNMENT_ASSIGNED
+            and shift.assigned_user_id
+        )
+        board_open_shift_count = len(position_board_shifts) - board_assigned_shift_count
 
     if request.method == "POST" and all_departments_mode:
         action = (request.form.get("action") or "").strip()
@@ -566,6 +849,18 @@ def team_schedule():
             week_label="",
             previous_week=None,
             next_week=None,
+            view_mode=view_mode,
+            selected_event_filter_value=str(
+                selected_filter_event.id if selected_filter_event else ""
+            ),
+            selected_location_filter_value=str(selected_filter_location_id or ""),
+            schedule_events=schedule_events,
+            event_filter_locations=event_filter_locations,
+            position_board_days=position_board_days,
+            board_total_labor=board_total_labor,
+            board_assigned_shift_count=board_assigned_shift_count,
+            board_open_shift_count=board_open_shift_count,
+            schedule_event_location_map=schedule_event_location_map,
             can_team_access=can_team_access,
             can_self_schedule=can_self_schedule,
             can_auto_assign_selected_scope=False,
@@ -574,6 +869,20 @@ def team_schedule():
 
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()
+        redirect_kwargs = {
+            "user_id": selected_user_id if view_mode == SCHEDULE_VIEW_USER else None,
+            "view_mode": view_mode,
+            "filter_event_id": (
+                selected_filter_event.id
+                if view_mode == SCHEDULE_VIEW_POSITION and selected_filter_event
+                else None
+            ),
+            "filter_location_id": (
+                selected_filter_location_id
+                if view_mode == SCHEDULE_VIEW_POSITION
+                else None
+            ),
+        }
         if action == "save_shift":
             if not (can_team_access or can_self_schedule):
                 abort(403)
@@ -591,9 +900,32 @@ def team_schedule():
                     shift_form.position_id.errors.append(
                         "Selected position does not belong to this department."
                     )
-                if shift_form.shift_date.data not in context["week_dates"]:
-                    shift_form.shift_date.errors.append(
-                        "Shift date must be within the selected week."
+
+                selected_event_id = _parse_int(shift_form.event_id.data)
+                selected_location_id = _parse_int(shift_form.location_id.data)
+                selected_event = None
+                if selected_event_id:
+                    selected_event = (
+                        Event.query.options(
+                            selectinload(Event.locations).selectinload(
+                                EventLocation.location
+                            ),
+                        )
+                        .filter_by(id=selected_event_id)
+                        .first()
+                    )
+                    if selected_event is None:
+                        shift_form.event_id.errors.append("Selected event is invalid.")
+                if (
+                    selected_event is not None
+                    and selected_location_id
+                    and not any(
+                        event_location.location_id == selected_location_id
+                        for event_location in selected_event.locations
+                    )
+                ):
+                    shift_form.location_id.errors.append(
+                        "Selected location is not assigned to the chosen event."
                     )
 
                 assigned_user_id = (
@@ -630,31 +962,67 @@ def team_schedule():
                     ):
                         abort(403)
 
-                if not shift_form.errors:
-                    manual_errors = _validate_manual_assignment(
-                        assigned_user
-                        if assignment_mode == Shift.ASSIGNMENT_ASSIGNED
-                        else None,
-                        shift_form.shift_date.data,
-                        shift_form.start_time.data,
-                        shift_form.end_time.data,
-                        exclude_shift_id=existing_shift.id if existing_shift else None,
-                    )
-                    for error in manual_errors:
-                        shift_form.start_time.errors.append(error)
+                target_dates: list = [shift_form.shift_date.data]
+                copy_count = 1
+                if existing_shift is not None:
+                    if shift_form.shift_date.data not in context["week_dates"]:
+                        shift_form.shift_date.errors.append(
+                            "Shift date must be within the selected week."
+                        )
+                else:
+                    selected_weekdays = sorted(set(shift_form.target_days.data or []))
+                    if not selected_weekdays:
+                        if shift_form.shift_date.data in context["week_dates"]:
+                            selected_weekdays = [
+                                (shift_form.shift_date.data.weekday()) % 7
+                            ]
+                        else:
+                            shift_form.target_days.errors.append(
+                                "Select at least one day for a new shift."
+                            )
+                    copy_count = int(shift_form.copy_count.data or 1)
+                    repeat_weeks = int(shift_form.repeat_weeks.data or 0)
+                    target_dates = [
+                        schedule_week.week_start + timedelta(days=weekday + (week_offset * 7))
+                        for week_offset in range(repeat_weeks + 1)
+                        for weekday in selected_weekdays
+                    ]
+                    if (
+                        assignment_mode == Shift.ASSIGNMENT_ASSIGNED
+                        and assigned_user_id
+                        and copy_count > 1
+                    ):
+                        shift_form.copy_count.errors.append(
+                            "Assigned shifts can only create one copy per selected day."
+                        )
+
+                if selected_event is not None and not shift_form.errors:
+                    invalid_event_dates = [
+                        target_date
+                        for target_date in target_dates
+                        if target_date < selected_event.start_date
+                        or target_date > selected_event.end_date
+                    ]
+                    if invalid_event_dates:
+                        shift_form.event_id.errors.append(
+                            "Selected event does not cover every chosen shift date."
+                        )
 
                 if not shift_form.errors:
-                    target_dates = [shift_form.shift_date.data]
-                    if existing_shift is None:
-                        repeated_dates = {
-                            schedule_week.week_start + timedelta(days=weekday)
-                            for weekday in (shift_form.repeat_days.data or [])
-                        }
-                        repeated_dates.add(shift_form.shift_date.data)
-                        target_dates = sorted(repeated_dates)
+                    for target_date in sorted(set(target_dates)):
+                        manual_errors = _validate_manual_assignment(
+                            assigned_user
+                            if assignment_mode == Shift.ASSIGNMENT_ASSIGNED
+                            else None,
+                            target_date,
+                            shift_form.start_time.data,
+                            shift_form.end_time.data,
+                            exclude_shift_id=existing_shift.id if existing_shift else None,
+                        )
+                        for error in manual_errors:
+                            shift_form.start_time.errors.append(error)
 
-                    change_records: list[tuple[dict | None, Shift]] = []
-                    touched_shifts: list[tuple[Shift, str, dict | None, dict | None]] = []
+                if not shift_form.errors:
                     if (
                         shift_form.paid_hours_manual.data
                         and shift_form.paid_hours.data is not None
@@ -674,13 +1042,40 @@ def team_schedule():
                             2,
                         )
 
-                    for target_date in target_dates:
-                        shift = existing_shift if existing_shift is not None else Shift(
-                            schedule_week=schedule_week,
-                            created_by=current_user,
-                        )
-                        before = capture_shift_snapshot(shift) if existing_shift else None
-                        if existing_shift is None:
+                    schedule_weeks_by_start = {schedule_week.week_start: schedule_week}
+                    changes_by_week: dict[object, dict[str, object]] = {}
+                    target_dates_with_copies = [
+                        target_date
+                        for target_date in target_dates
+                        for _copy_index in range(copy_count)
+                    ]
+
+                    for target_date in target_dates_with_copies:
+                        if existing_shift is not None:
+                            target_schedule_week = schedule_week
+                            shift = existing_shift
+                            action_name = "updated"
+                            before = capture_shift_snapshot(shift)
+                        else:
+                            target_week_start = normalize_week_start(target_date)
+                            target_schedule_week = schedule_weeks_by_start.get(
+                                target_week_start
+                            )
+                            if target_schedule_week is None:
+                                target_schedule_week = get_or_create_schedule_week(
+                                    selected_department.id,
+                                    target_week_start,
+                                )
+                                db.session.flush()
+                                schedule_weeks_by_start[target_week_start] = (
+                                    target_schedule_week
+                                )
+                            shift = Shift(
+                                schedule_week=target_schedule_week,
+                                created_by=current_user,
+                            )
+                            action_name = "created"
+                            before = None
                             db.session.add(shift)
                         shift.position = position
                         shift.shift_date = target_date
@@ -688,8 +1083,8 @@ def team_schedule():
                         shift.end_time = shift_form.end_time.data
                         shift.notes = (shift_form.notes.data or "").strip() or None
                         shift.color = (shift_form.color.data or "").strip() or None
-                        shift.location_id = _parse_int(shift_form.location_id.data)
-                        shift.event_id = _parse_int(shift_form.event_id.data)
+                        shift.location_id = selected_location_id
+                        shift.event_id = selected_event_id
                         shift.assignment_mode = assignment_mode
                         shift.is_locked = bool(shift_form.is_locked.data)
                         shift.paid_hours_manual = bool(shift_form.paid_hours_manual.data)
@@ -701,58 +1096,84 @@ def team_schedule():
                             shift.assigned_user = None
                         apply_rate_snapshot(shift)
                         after = capture_shift_snapshot(shift)
-                        change_records.append((before, shift))
-                        touched_shifts.append(
-                            (
-                                shift,
-                                "updated" if existing_shift else "created",
-                                before,
-                                after,
-                            )
+                        week_entry = changes_by_week.setdefault(
+                            target_schedule_week.week_start,
+                            {
+                                "schedule_week": target_schedule_week,
+                                "change_records": [],
+                                "touched_shifts": [],
+                            },
+                        )
+                        week_entry["change_records"].append((before, shift))
+                        week_entry["touched_shifts"].append(
+                            (shift, action_name, before, after)
                         )
                         existing_shift = None
 
-                    published_material_changes = [
-                        (before, shift)
-                        for before, shift in change_records
-                        if before is None
-                        or material_change_fields(before, capture_shift_snapshot(shift))
-                    ]
-                    if schedule_week.is_published and published_material_changes:
-                        schedule_week.current_version += 1
-                        for shift, _action, _before, _after in touched_shifts:
-                            shift.live_version = schedule_week.current_version
+                    published_notifications: list[tuple[DepartmentScheduleWeek, list]] = []
+                    total_saved = 0
+                    for week_entry in changes_by_week.values():
+                        target_schedule_week = week_entry["schedule_week"]
+                        change_records = week_entry["change_records"]
+                        touched_shifts = week_entry["touched_shifts"]
+                        total_saved += len(touched_shifts)
+                        published_material_changes = [
+                            (before, shift)
+                            for before, shift in change_records
+                            if before is None
+                            or material_change_fields(
+                                before,
+                                capture_shift_snapshot(shift),
+                            )
+                        ]
+                        if target_schedule_week.is_published and published_material_changes:
+                            target_schedule_week.current_version += 1
+                            for shift, _action_name, _before, _after in touched_shifts:
+                                shift.live_version = target_schedule_week.current_version
+                            published_notifications.append(
+                                (target_schedule_week, published_material_changes)
+                            )
 
-                    for shift, action_name, before, after in touched_shifts:
-                        record_shift_audit(
-                            shift,
-                            actor=current_user,
-                            action=action_name,
-                            version=shift.live_version
-                            or schedule_week.current_version
-                            or 0,
-                            before=before,
-                            after=after,
-                            summary=(
-                                f"{'Updated' if action_name == 'updated' else 'Created'} "
-                                f"shift for {shift.shift_date}."
-                            ),
-                        )
+                    for week_entry in changes_by_week.values():
+                        target_schedule_week = week_entry["schedule_week"]
+                        for shift, action_name, before, after in week_entry[
+                            "touched_shifts"
+                        ]:
+                            record_shift_audit(
+                                shift,
+                                actor=current_user,
+                                action=action_name,
+                                version=shift.live_version
+                                or target_schedule_week.current_version
+                                or 0,
+                                before=before,
+                                after=after,
+                                summary=(
+                                    f"{'Updated' if action_name == 'updated' else 'Created'} "
+                                    f"shift for {shift.shift_date}."
+                                ),
+                            )
                     db.session.commit()
-                    if schedule_week.is_published and published_material_changes:
+                    for target_schedule_week, published_material_changes in (
+                        published_notifications
+                    ):
                         notify_schedule_changes(
-                            schedule_week, published_material_changes
+                            target_schedule_week,
+                            published_material_changes,
                         )
-                    flash("Shift saved.", "success")
+                    flash(
+                        "Shift saved." if total_saved == 1 else f"{total_saved} shifts saved.",
+                        "success",
+                    )
                     log_schedule_action(
-                        f"Saved schedule shifts for department {selected_department.name}"
+                        f"Saved {total_saved} schedule shift(s) for department {selected_department.name}"
                     )
                     return redirect(
                         _schedule_redirect(
                             "schedule.team_schedule",
                             selected_department.id,
                             schedule_week.week_start,
-                            user_id=selected_user_id,
+                            **redirect_kwargs,
                         )
                     )
             flash("Unable to save shift. Please review the form.", "danger")
@@ -781,7 +1202,7 @@ def team_schedule():
                     "schedule.team_schedule",
                     selected_department.id,
                     schedule_week.week_start,
-                    user_id=selected_user_id,
+                    **redirect_kwargs,
                 )
             )
         elif action == "publish_week":
@@ -809,7 +1230,7 @@ def team_schedule():
                     "schedule.team_schedule",
                     selected_department.id,
                     schedule_week.week_start,
-                    user_id=selected_user_id,
+                    **redirect_kwargs,
                 )
             )
         elif action == "unpublish_week":
@@ -830,7 +1251,7 @@ def team_schedule():
                     "schedule.team_schedule",
                     selected_department.id,
                     schedule_week.week_start,
-                    user_id=selected_user_id,
+                    **redirect_kwargs,
                 )
             )
         elif action == "auto_assign":
@@ -884,11 +1305,11 @@ def team_schedule():
                     f"Ran auto-assign for {len(processed_departments)} departments week {schedule_week.week_start}"
                 )
                 return redirect(
-                    url_for(
+                    _schedule_redirect(
                         "schedule.team_schedule",
-                        department_id=ALL_DEPARTMENTS_VALUE,
-                        week_start=schedule_week.week_start.isoformat(),
-                        user_id=selected_user_id or None,
+                        ALL_DEPARTMENTS_VALUE,
+                        schedule_week.week_start,
+                        **redirect_kwargs,
                     )
                 )
 
@@ -912,7 +1333,7 @@ def team_schedule():
                     "schedule.team_schedule",
                     selected_department.id,
                     schedule_week.week_start,
-                    user_id=selected_user_id,
+                    **redirect_kwargs,
                 )
             )
 
@@ -956,6 +1377,16 @@ def team_schedule():
         week_label=format_week_label(schedule_week.week_start),
         previous_week=schedule_week.week_start - timedelta(days=7),
         next_week=schedule_week.week_start + timedelta(days=7),
+        view_mode=view_mode,
+        selected_event_filter_value=str(selected_filter_event.id if selected_filter_event else ""),
+        selected_location_filter_value=str(selected_filter_location_id or ""),
+        schedule_events=schedule_events,
+        event_filter_locations=event_filter_locations,
+        position_board_days=position_board_days,
+        board_total_labor=board_total_labor,
+        board_assigned_shift_count=board_assigned_shift_count,
+        board_open_shift_count=board_open_shift_count,
+        schedule_event_location_map=schedule_event_location_map,
         can_team_access=can_team_access,
         can_self_schedule=can_self_schedule,
         can_auto_assign_selected_scope=can_auto_assign_selected_scope,

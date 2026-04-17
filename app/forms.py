@@ -2713,11 +2713,21 @@ class ShiftForm(FlaskForm):
     notes = TextAreaField("Notes", validators=[Optional(), Length(max=2000)])
     color = SelectField("Color", validators=[Optional()])
     is_locked = BooleanField("Lock from auto-assign")
-    repeat_days = SelectMultipleField(
-        "Repeat on",
+    target_days = SelectMultipleField(
+        "Add to days",
         coerce=int,
         validators=[Optional()],
         validate_choice=False,
+    )
+    copy_count = IntegerField(
+        "Create copies",
+        validators=[Optional(), NumberRange(min=1, max=20)],
+        default=1,
+    )
+    repeat_weeks = IntegerField(
+        "Repeat for more weeks",
+        validators=[Optional(), NumberRange(min=0, max=12)],
+        default=0,
     )
     submit = SubmitField("Save Shift")
 
@@ -2742,7 +2752,7 @@ class ShiftForm(FlaskForm):
             ("text-info", "Cyan"),
             ("text-dark", "Black"),
         ]
-        self.repeat_days.choices = [
+        self.target_days.choices = [
             (0, "Mon"),
             (1, "Tue"),
             (2, "Wed"),

@@ -28,15 +28,32 @@ document.addEventListener("DOMContentLoaded", () => {
     notes: modal.dataset.notesInput,
     color: modal.dataset.colorInput,
     isLocked: modal.dataset.isLockedInput,
+    copyCount: modal.dataset.copyCountInput,
+    repeatWeeks: modal.dataset.repeatWeeksInput,
   };
 
   const inputs = Object.fromEntries(
     Object.entries(inputIds).map(([key, id]) => [key, document.getElementById(id)]),
   );
   const title = document.getElementById("scheduleShiftModalTitle");
-  const repeatBoxes = Array.from(
-    modal.querySelectorAll('input[name$="repeat_days"]'),
+  const shiftDateSection = modal.querySelector("[data-shift-date-section]");
+  const createOptionsSection = modal.querySelector("[data-shift-create-options]");
+  const targetDayBoxes = Array.from(
+    modal.querySelectorAll('[data-target-day-checkbox="1"]'),
   );
+  const originalLocationOptions = inputs.location
+    ? Array.from(inputs.location.options).map((option) => ({
+        value: option.value,
+        label: option.textContent,
+      }))
+    : [];
+
+  let eventLocationMap = {};
+  try {
+    eventLocationMap = JSON.parse(modal.dataset.eventLocationMap || "{}");
+  } catch (_error) {
+    eventLocationMap = {};
+  }
 
   function updateAssignedUserState() {
     const mode = inputs.assignmentMode?.value || "assigned";
@@ -84,26 +101,109 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  function resetRepeatBoxes() {
-    repeatBoxes.forEach((box) => {
+  function resetTargetDayBoxes() {
+    targetDayBoxes.forEach((box) => {
       box.checked = false;
     });
   }
 
-  function setDefaultRepeat(shiftDate) {
+  function syncShiftDateFromTargetDays() {
+    if (!inputs.shiftDate) {
+      return;
+    }
+    const firstChecked = targetDayBoxes.find((box) => box.checked);
+    if (firstChecked?.dataset.targetDate) {
+      inputs.shiftDate.value = firstChecked.dataset.targetDate;
+    }
+  }
+
+  function setDefaultTargetDay(shiftDate) {
     if (!shiftDate) {
       return;
     }
-    const date = new Date(`${shiftDate}T00:00:00`);
-    const weekday = (date.getDay() + 6) % 7;
-    repeatBoxes.forEach((box) => {
-      box.checked = Number(box.value) === weekday;
+    targetDayBoxes.forEach((box) => {
+      box.checked = box.dataset.targetDate === shiftDate;
     });
+    syncShiftDateFromTargetDays();
+  }
+
+  function syncCreateMode(isEdit) {
+    if (title) {
+      title.textContent = isEdit ? "Edit Shift" : "Add Shift";
+    }
+    if (shiftDateSection) {
+      shiftDateSection.hidden = !isEdit;
+    }
+    if (createOptionsSection) {
+      createOptionsSection.hidden = isEdit;
+    }
+    if (inputs.copyCount) {
+      inputs.copyCount.disabled = isEdit;
+      if (!isEdit && !inputs.copyCount.value) {
+        inputs.copyCount.value = "1";
+      }
+      if (isEdit) {
+        inputs.copyCount.value = "1";
+      }
+    }
+    if (inputs.repeatWeeks) {
+      inputs.repeatWeeks.disabled = isEdit;
+      if (!isEdit && !inputs.repeatWeeks.value) {
+        inputs.repeatWeeks.value = "0";
+      }
+      if (isEdit) {
+        inputs.repeatWeeks.value = "0";
+      }
+    }
+  }
+
+  function replaceLocationOptions(options, preferredValue = "0") {
+    if (!inputs.location) {
+      return;
+    }
+    inputs.location.innerHTML = "";
+    options.forEach((option) => {
+      const element = document.createElement("option");
+      element.value = option.value;
+      element.textContent = option.label;
+      inputs.location.appendChild(element);
+    });
+    const preferred = String(preferredValue || "0");
+    const hasPreferred = Array.from(inputs.location.options).some(
+      (option) => option.value === preferred,
+    );
+    inputs.location.value = hasPreferred ? preferred : "0";
+  }
+
+  function syncLocationOptions(preferredValue = null) {
+    if (!inputs.location || !inputs.event) {
+      return;
+    }
+    const currentPreferred = preferredValue ?? inputs.location.value ?? "0";
+    const eventId = String(inputs.event.value || "0");
+    if (eventId === "0") {
+      replaceLocationOptions(originalLocationOptions, currentPreferred);
+      return;
+    }
+    const eventLocations = Array.isArray(eventLocationMap[eventId])
+      ? eventLocationMap[eventId]
+      : [];
+    const noLocationOption = originalLocationOptions.find(
+      (option) => option.value === "0",
+    ) || { value: "0", label: "No location" };
+    const narrowedOptions = [
+      noLocationOption,
+      ...eventLocations.map((location) => ({
+        value: String(location.id),
+        label: location.name,
+      })),
+    ];
+    replaceLocationOptions(narrowedOptions, currentPreferred);
   }
 
   function populateFromTrigger(trigger) {
     const isEdit = Boolean(trigger.dataset.shiftId);
-    title.textContent = isEdit ? "Edit Shift" : "Add Shift";
+    syncCreateMode(isEdit);
     if (inputs.shiftId) {
       inputs.shiftId.value = trigger.dataset.shiftId || "";
     }
@@ -129,12 +229,10 @@ document.addEventListener("DOMContentLoaded", () => {
       inputs.paidHours.value = trigger.dataset.paidHours || "";
     }
     setCheckboxValue(inputs.paidHoursManual, trigger.dataset.paidHoursManual);
-    if (inputs.location) {
-      inputs.location.value = trigger.dataset.locationId || "0";
-    }
     if (inputs.event) {
       inputs.event.value = trigger.dataset.eventId || "0";
     }
+    syncLocationOptions(trigger.dataset.locationId || "0");
     if (inputs.notes) {
       inputs.notes.value = trigger.dataset.notes || "";
     }
@@ -143,9 +241,15 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     setCheckboxValue(inputs.isLocked, trigger.dataset.isLocked);
 
-    resetRepeatBoxes();
+    resetTargetDayBoxes();
     if (!isEdit) {
-      setDefaultRepeat(trigger.dataset.shiftDate);
+      setDefaultTargetDay(trigger.dataset.shiftDate);
+      if (inputs.copyCount) {
+        inputs.copyCount.value = "1";
+      }
+      if (inputs.repeatWeeks) {
+        inputs.repeatWeeks.value = "0";
+      }
     }
     updateAssignedUserState();
     syncPaidHoursState();
@@ -169,6 +273,13 @@ document.addEventListener("DOMContentLoaded", () => {
   if (inputs.paidHoursManual) {
     inputs.paidHoursManual.addEventListener("change", syncPaidHoursState);
   }
+  if (inputs.event) {
+    inputs.event.addEventListener("change", () => syncLocationOptions("0"));
+  }
+  targetDayBoxes.forEach((box) => {
+    box.addEventListener("change", syncShiftDateFromTargetDays);
+  });
 
+  syncLocationOptions(inputs.location?.value || "0");
   syncPaidHoursState();
 });
