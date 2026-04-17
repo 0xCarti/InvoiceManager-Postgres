@@ -314,11 +314,12 @@
                                 class="btn btn-outline-secondary schedule-default-pin-btn"
                                 data-schedule-save-default
                                 data-schedule-default-scope="{{ request.endpoint }}"
+                                data-schedule-default-csrf="{{ csrf_token() }}"
                                 title="Save department as default"
                                 aria-label="Save Department as Default"
                             >
                                 <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false">
-                                    <path d="M10.5 1a.5.5 0 0 1 .5.5V4l1.9 1.9a.5.5 0 0 1-.354.854H9.622l-.49 2.214 2.364 2.364-.707.707-2.364-2.364L6.21 10.176v4.324l-1-1.5-1-1.5v-1.324l2.214-2.215-.49-2.214H2.954A.5.5 0 0 1 2.6 5.9L4.5 4V1.5a.5.5 0 0 1 .5-.5h5.5z"/>
+                                    <path d="M11.146.854a.5.5 0 0 1 .708 0l3.292 3.292a.5.5 0 0 1-.708.708l-.646-.647-2.354 2.355c-.24.24-.35.576-.295.91l.442 2.71a.5.5 0 0 1-.143.443l-1.06 1.06 2.971 2.97a.5.5 0 0 1-.707.708l-2.971-2.97-5.322 5.321a.5.5 0 0 1-.707-.707l5.322-5.322-2.971-2.97 1.06-1.061a.5.5 0 0 1 .443-.143l2.71.442a1.25 1.25 0 0 0 .91-.295l2.355-2.354-.646-.647a.5.5 0 0 1 0-.708z"/>
                                 </svg>
                                 <span class="visually-hidden">Save Department as Default</span>
                             </button>
@@ -961,5 +962,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/schedule_board.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/schedule_board.js', v='20260417b') }}" defer></script>
 {% endblock %}

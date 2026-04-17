@@ -23,6 +23,28 @@ document.addEventListener("DOMContentLoaded", () => {
     return null;
   }
 
+  function findCsrfToken() {
+    const buttonToken =
+      saveDefaultButton?.dataset.scheduleDefaultCsrf?.trim() || "";
+    if (buttonToken) {
+      return buttonToken;
+    }
+
+    const pageField = document.querySelector('input[name="csrf_token"]');
+    if (pageField?.value) {
+      return pageField.value;
+    }
+
+    const metaToken = document
+      .querySelector('meta[name="csrf-token"]')
+      ?.getAttribute("content");
+    if (metaToken) {
+      return metaToken;
+    }
+
+    return getCookie("csrf_token");
+  }
+
   const saveDefaultButton = document.querySelector("[data-schedule-save-default]");
   const saveDefaultFeedback = document.querySelector("[data-schedule-default-feedback]");
 
@@ -56,7 +78,7 @@ document.addEventListener("DOMContentLoaded", () => {
         formData.set("department_id", departmentInput.value || "all");
 
         const headers = new Headers();
-        const csrfToken = getCookie("csrf_token");
+        const csrfToken = findCsrfToken();
         if (csrfToken) {
           headers.set("X-CSRFToken", csrfToken);
         }

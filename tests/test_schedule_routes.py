@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import date, time
 
 from werkzeug.security import generate_password_hash
@@ -19,6 +20,7 @@ from app.models import (
     TradeboardClaim,
     User,
     UserDepartmentMembership,
+    UserFilterPreference,
     UserPositionEligibility,
 )
 from app.utils.activity import flush_activity_logs
@@ -366,6 +368,44 @@ def test_team_schedule_uses_saved_department_default_when_no_filter_supplied(
             f'<option value="{department_b_id}" selected>Saved Default B</option>'.encode()
             in response.data
         )
+
+
+def test_team_schedule_page_renders_pin_default_save_token(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        department_a = Department(name="Pinned Default A", active=True)
+        department_b = Department(name="Pinned Default B", active=True)
+        db.session.add_all([department_a, department_b])
+        db.session.commit()
+        department_b_id = department_b.id
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.get("/schedules?week_start=2026-04-06", follow_redirects=True)
+        assert response.status_code == 200
+        body = response.get_data(as_text=True)
+        token_match = re.search(r'data-schedule-default-csrf="([^"]+)"', body)
+        assert token_match is not None
+
+        save_response = client.post(
+            "/preferences/filters",
+            data={
+                "scope": "schedule.team_schedule",
+                "department_id": str(department_b_id),
+            },
+            headers={"X-CSRFToken": token_match.group(1)},
+        )
+        assert save_response.status_code == 200
+
+    with app.app_context():
+        admin_user = User.query.filter_by(email=admin_email).one()
+        preference = UserFilterPreference.query.filter_by(
+            user_id=admin_user.id,
+            scope="schedule.team_schedule",
+        ).one()
+        assert preference.values == {"department_id": [str(department_b_id)]}
 
 
 def test_team_schedule_position_view_filters_by_event_and_location(client, app):
