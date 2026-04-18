@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="container my-4">
-    <h1 class="h3 mb-3">{{ 'Edit Menu' if menu else 'Create Menu' }}</h1>
+    <h1 class="h3 mb-3">{{ 'High brenna' if menu else 'Create Menu' }}</h1>
     <form method="post" id="menu-form" data-products-endpoint="{{ url_for('menu.get_menu_products') }}">
         {{ form.hidden_tag() }}
         <div class="mb-3">
