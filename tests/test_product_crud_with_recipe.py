@@ -98,6 +98,45 @@ def test_create_product_with_recipe_items(client, app):
         assert ids == {item1_id, item2_id}
 
 
+def test_create_product_auto_updates_cost_from_recipe_items(client, app):
+    email, item1_id, item2_id, unit1_id, unit2_id = setup_user_and_items(app)
+    with app.app_context():
+        item1 = db.session.get(Item, item1_id)
+        item2 = db.session.get(Item, item2_id)
+        item1.cost = 2.5
+        item2.cost = 1.5
+        db.session.commit()
+
+    with client:
+        login(client, email, "pass")
+        response = client.post(
+            "/products/create",
+            data={
+                "name": "Auto Cost Cake",
+                "price": 8,
+                "cost": 99,
+                "auto_update_recipe_cost": "y",
+                "gl_code": "4000",
+                "items-0-item": item1_id,
+                "items-0-unit": unit1_id,
+                "items-0-quantity": 2,
+                "items-0-countable": "y",
+                "items-1-item": item2_id,
+                "items-1-unit": unit2_id,
+                "items-1-quantity": 1,
+                "items-1-countable": "",
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+
+    with app.app_context():
+        product = Product.query.filter_by(name="Auto Cost Cake").first()
+        assert product is not None
+        assert product.auto_update_recipe_cost is True
+        assert product.cost == 6.5
+
+
 def test_edit_product_recipe_on_edit_page(client, app):
     email, item1_id, item2_id, unit1_id, unit2_id = setup_user_and_items(app)
     with app.app_context():
@@ -139,6 +178,104 @@ def test_edit_product_recipe_on_edit_page(client, app):
         ri = product.recipe_items[0]
         assert ri.item_id == item2_id
         assert ri.quantity == 4
+
+
+def test_edit_product_auto_updates_cost_from_recipe_items(client, app):
+    email, item1_id, item2_id, unit1_id, unit2_id = setup_user_and_items(app)
+    with app.app_context():
+        item1 = db.session.get(Item, item1_id)
+        item2 = db.session.get(Item, item2_id)
+        item1.cost = 1.25
+        item2.cost = 2.75
+        product = Product(
+            name="Auto Cost Bread",
+            price=5.0,
+            cost=1.0,
+            auto_update_recipe_cost=False,
+        )
+        db.session.add(product)
+        db.session.commit()
+        db.session.add(
+            ProductRecipeItem(
+                product_id=product.id,
+                item_id=item1_id,
+                unit_id=unit1_id,
+                quantity=1,
+                countable=True,
+            )
+        )
+        db.session.commit()
+        product_id = product.id
+
+    with client:
+        login(client, email, "pass")
+        response = client.post(
+            f"/products/{product_id}/edit",
+            data={
+                "name": "Auto Cost Bread",
+                "price": 5.0,
+                "cost": 99,
+                "auto_update_recipe_cost": "y",
+                "gl_code": "4000",
+                "items-0-item": item1_id,
+                "items-0-unit": unit1_id,
+                "items-0-quantity": 2,
+                "items-0-countable": "y",
+                "items-1-item": item2_id,
+                "items-1-unit": unit2_id,
+                "items-1-quantity": 1,
+                "items-1-countable": "",
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+
+    with app.app_context():
+        product = db.session.get(Product, product_id)
+        assert product is not None
+        assert product.auto_update_recipe_cost is True
+        assert product.cost == 5.25
+        assert len(product.recipe_items) == 2
+
+
+def test_edit_product_page_refreshes_auto_updated_cost(client, app):
+    email, item1_id, _, unit1_id, _ = setup_user_and_items(app)
+    with app.app_context():
+        item1 = db.session.get(Item, item1_id)
+        item1.cost = 2.0
+        product = Product(
+            name="Live Auto Cost Product",
+            price=6.0,
+            cost=2.0,
+            auto_update_recipe_cost=True,
+        )
+        db.session.add(product)
+        db.session.commit()
+        db.session.add(
+            ProductRecipeItem(
+                product_id=product.id,
+                item_id=item1_id,
+                unit_id=unit1_id,
+                quantity=1,
+                countable=True,
+            )
+        )
+        db.session.commit()
+        product_id = product.id
+
+        item1.cost = 4.5
+        db.session.commit()
+
+    with client:
+        login(client, email, "pass")
+        response = client.get(f"/products/{product_id}/edit")
+        assert response.status_code == 200
+        assert "Auto-update cost" in response.get_data(as_text=True)
+
+    with app.app_context():
+        product = db.session.get(Product, product_id)
+        assert product is not None
+        assert product.cost == 4.5
 
 
 def test_edit_product_page_shows_recipe_item_vendor_skus(client, app):

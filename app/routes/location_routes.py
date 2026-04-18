@@ -32,7 +32,11 @@ from app.utils.filter_state import (
     get_filter_defaults,
     normalize_filters,
 )
-from app.utils.menu_assignments import apply_menu_products, set_location_menu
+from app.utils.menu_assignments import (
+    apply_menu_products,
+    get_authoritative_location_products,
+    set_location_menu,
+)
 from app.utils.pagination import build_pagination_args, get_per_page
 from app.utils.units import (
     DEFAULT_BASE_UNIT_CONVERSIONS,
@@ -61,7 +65,7 @@ def _build_location_stand_sheet_items(location: Location):
 
     stand_items = []
     seen = set()
-    for product_obj in location.products:
+    for product_obj in get_authoritative_location_products(location):
         for recipe_item in product_obj.recipe_items:
             if recipe_item.countable and recipe_item.item_id not in seen:
                 seen.add(recipe_item.item_id)
@@ -94,7 +98,7 @@ def _protected_location_item_ids(location_obj: Location) -> set[int]:
     """Return item ids that cannot be removed from the location."""
 
     protected = set()
-    for product_obj in location_obj.products:
+    for product_obj in get_authoritative_location_products(location_obj):
         for recipe_item in product_obj.recipe_items:
             if recipe_item.countable:
                 protected.add(recipe_item.item_id)
@@ -553,7 +557,7 @@ def location_items(location_id):
         record.item_id: record for record in location_obj.stand_items
     }
     created = False
-    for product_obj in location_obj.products:
+    for product_obj in get_authoritative_location_products(location_obj):
         for recipe_item in product_obj.recipe_items:
             if not recipe_item.countable:
                 continue

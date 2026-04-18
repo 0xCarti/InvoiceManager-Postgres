@@ -380,6 +380,101 @@ def _build_product_vendor_alias_groups(product_obj: Product) -> list[dict[str, o
     ]
 
 
+def _normalize_recipe_yield_quantity(value) -> float:
+    yield_quantity = coerce_float(value)
+    if yield_quantity is None or yield_quantity <= 0:
+        return 1.0
+    return float(yield_quantity)
+
+
+def _build_recipe_entries_from_item_forms(item_forms) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
+    for item_form in item_forms:
+        item_id = item_form.item.data
+        quantity = coerce_float(item_form.quantity.data)
+        if not item_id or quantity is None:
+            continue
+        entries.append(
+            {
+                "item_id": item_id,
+                "unit_id": item_form.unit.data or None,
+                "quantity": quantity,
+                "countable": bool(item_form.countable.data),
+            }
+        )
+    return entries
+
+
+def _build_recipe_entries_from_product(
+    product_obj: Product,
+) -> list[dict[str, object]]:
+    return [
+        {
+            "item_id": recipe_item.item_id,
+            "unit_id": recipe_item.unit_id,
+            "quantity": recipe_item.quantity,
+            "countable": recipe_item.countable,
+        }
+        for recipe_item in product_obj.recipe_items
+        if recipe_item.item_id is not None and recipe_item.quantity is not None
+    ]
+
+
+def _calculate_recipe_cost_from_entries(
+    recipe_entries: list[dict[str, object]],
+    yield_quantity,
+) -> float:
+    batch_cost = 0.0
+    for entry in recipe_entries:
+        item = db.session.get(Item, entry.get("item_id"))
+        if item is None:
+            continue
+        quantity = coerce_float(entry.get("quantity"))
+        if quantity is None:
+            continue
+        factor = 1.0
+        unit_id = entry.get("unit_id")
+        if unit_id:
+            unit = db.session.get(ItemUnit, unit_id)
+            if unit and (unit.item_id == item.id or unit.item_id is None):
+                factor = coerce_float(unit.factor) or 1.0
+        batch_cost += (item.cost or 0.0) * quantity * factor
+
+    normalized_yield_quantity = _normalize_recipe_yield_quantity(yield_quantity)
+    return batch_cost / normalized_yield_quantity
+
+
+def _replace_product_recipe_items(
+    product_obj: Product,
+    recipe_entries: list[dict[str, object]],
+) -> None:
+    ProductRecipeItem.query.filter_by(product_id=product_obj.id).delete()
+    for entry in recipe_entries:
+        db.session.add(
+            ProductRecipeItem(
+                product_id=product_obj.id,
+                item_id=entry["item_id"],
+                unit_id=entry["unit_id"],
+                quantity=entry["quantity"],
+                countable=entry["countable"],
+            )
+        )
+
+
+def _sync_auto_recipe_cost(product_obj: Product) -> bool:
+    if not product_obj.auto_update_recipe_cost:
+        return False
+    recalculated_cost = _calculate_recipe_cost_from_entries(
+        _build_recipe_entries_from_product(product_obj),
+        product_obj.recipe_yield_quantity,
+    )
+    previous_cost = coerce_float(product_obj.cost) or 0.0
+    if abs(previous_cost - recalculated_cost) < 1e-9:
+        return False
+    product_obj.cost = recalculated_cost
+    return True
+
+
 @product.route("/products/bulk-update", methods=["GET", "POST"])
 @login_required
 def bulk_update_products():
@@ -579,13 +674,19 @@ def create_product():
     """Add a new product definition."""
     sales_import_context = _get_sales_import_product_create_context()
     form = ProductWithRecipeForm()
-    if request.method == "GET" and sales_import_context is not None and not form.name.data:
+    if (
+        request.method == "GET"
+        and sales_import_context is not None
+        and not form.name.data
+    ):
         form.name.data = sales_import_context["row_record"].source_product_name
 
     if form.validate_on_submit():
-        yield_quantity = form.recipe_yield_quantity.data
-        if yield_quantity is None or yield_quantity <= 0:
-            yield_quantity = 1
+        yield_quantity = _normalize_recipe_yield_quantity(
+            form.recipe_yield_quantity.data
+        )
+        recipe_entries = _build_recipe_entries_from_item_forms(form.items)
+        auto_update_recipe_cost = bool(form.auto_update_recipe_cost.data)
         selected_gl_code_id = form.gl_code_id.data or None
         if selected_gl_code_id == 0:
             selected_gl_code_id = None
@@ -599,11 +700,16 @@ def create_product():
             invoice_sale_price=form.invoice_sale_price.data
             if form.invoice_sale_price.data is not None
             else form.price.data,
-            cost=form.cost.data,  # Save cost
+            cost=(
+                _calculate_recipe_cost_from_entries(recipe_entries, yield_quantity)
+                if auto_update_recipe_cost
+                else coerce_float(form.cost.data) or 0.0
+            ),
+            auto_update_recipe_cost=auto_update_recipe_cost,
             gl_code=form.gl_code.data,
             gl_code_id=selected_gl_code_id,
             sales_gl_code_id=sales_gl_code_id,
-            recipe_yield_quantity=float(yield_quantity),
+            recipe_yield_quantity=yield_quantity,
             recipe_yield_unit=form.recipe_yield_unit.data or None,
         )
         if not product.gl_code and product.gl_code_id:
@@ -613,21 +719,7 @@ def create_product():
         db.session.add(product)
         db.session.flush()
 
-        for item_form in form.items:
-            item_id = item_form.item.data
-            unit_id = item_form.unit.data or None
-            quantity = item_form.quantity.data
-            countable = item_form.countable.data
-            if item_id and quantity is not None:
-                db.session.add(
-                    ProductRecipeItem(
-                        product_id=product.id,
-                        item_id=item_id,
-                        unit_id=unit_id,
-                        quantity=quantity,
-                        countable=countable,
-                    )
-                )
+        _replace_product_recipe_items(product, recipe_entries)
         if sales_import_context is not None:
             _map_product_to_sales_import(
                 sales_import_context["import_record"],
@@ -679,9 +771,11 @@ def ajax_create_product():
     """Create a product via AJAX."""
     form = ProductWithRecipeForm()
     if form.validate_on_submit():
-        yield_quantity = form.recipe_yield_quantity.data
-        if yield_quantity is None or yield_quantity <= 0:
-            yield_quantity = 1
+        yield_quantity = _normalize_recipe_yield_quantity(
+            form.recipe_yield_quantity.data
+        )
+        recipe_entries = _build_recipe_entries_from_item_forms(form.items)
+        auto_update_recipe_cost = bool(form.auto_update_recipe_cost.data)
         selected_gl_code_id = form.gl_code_id.data or None
         if selected_gl_code_id == 0:
             selected_gl_code_id = None
@@ -695,11 +789,16 @@ def ajax_create_product():
             invoice_sale_price=form.invoice_sale_price.data
             if form.invoice_sale_price.data is not None
             else form.price.data,
-            cost=form.cost.data,
+            cost=(
+                _calculate_recipe_cost_from_entries(recipe_entries, yield_quantity)
+                if auto_update_recipe_cost
+                else coerce_float(form.cost.data) or 0.0
+            ),
+            auto_update_recipe_cost=auto_update_recipe_cost,
             gl_code=form.gl_code.data,
             gl_code_id=selected_gl_code_id,
             sales_gl_code_id=sales_gl_code_id,
-            recipe_yield_quantity=float(yield_quantity),
+            recipe_yield_quantity=yield_quantity,
             recipe_yield_unit=form.recipe_yield_unit.data or None,
         )
         if not product.gl_code and product.gl_code_id:
@@ -707,22 +806,8 @@ def ajax_create_product():
             if gl:
                 product.gl_code = gl.code
         db.session.add(product)
-        db.session.commit()
-        for item_form in form.items:
-            item_id = item_form.item.data
-            unit_id = item_form.unit.data or None
-            quantity = item_form.quantity.data
-            countable = item_form.countable.data
-            if item_id and quantity is not None:
-                db.session.add(
-                    ProductRecipeItem(
-                        product_id=product.id,
-                        item_id=item_id,
-                        unit_id=unit_id,
-                        quantity=quantity,
-                        countable=countable,
-                    )
-                )
+        db.session.flush()
+        _replace_product_recipe_items(product, recipe_entries)
         db.session.commit()
         log_activity(f"Created product {product.name}")
         row_html = render_template(
@@ -816,10 +901,19 @@ def copy_product(product_id):
     if product_obj is None:
         abort(404)
     form = ProductWithRecipeForm()
+    current_cost = (
+        _calculate_recipe_cost_from_entries(
+            _build_recipe_entries_from_product(product_obj),
+            product_obj.recipe_yield_quantity,
+        )
+        if product_obj.auto_update_recipe_cost
+        else (product_obj.cost or 0.0)
+    )
     form.name.data = product_obj.name
     form.price.data = product_obj.price
     form.invoice_sale_price.data = product_obj.invoice_sale_price
-    form.cost.data = product_obj.cost or 0.0
+    form.cost.data = current_cost
+    form.auto_update_recipe_cost.data = product_obj.auto_update_recipe_cost
     form.gl_code.data = product_obj.gl_code
     form.gl_code_id.data = product_obj.gl_code_id
     form.sales_gl_code.data = product_obj.sales_gl_code_id
@@ -864,7 +958,16 @@ def edit_product(product_id):
             if form.invoice_sale_price.data is not None
             else form.price.data
         )
-        product.cost = form.cost.data or 0.0  # 👈 Update cost
+        recipe_entries = _build_recipe_entries_from_item_forms(form.items)
+        product.auto_update_recipe_cost = bool(form.auto_update_recipe_cost.data)
+        product.cost = (
+            _calculate_recipe_cost_from_entries(
+                recipe_entries,
+                form.recipe_yield_quantity.data,
+            )
+            if product.auto_update_recipe_cost
+            else coerce_float(form.cost.data) or 0.0
+        )
         selected_gl_code_id = form.gl_code_id.data or None
         if selected_gl_code_id == 0:
             selected_gl_code_id = None
@@ -875,32 +978,16 @@ def edit_product(product_id):
         product.gl_code = form.gl_code.data
         product.gl_code_id = selected_gl_code_id
         product.sales_gl_code_id = sales_gl_code_id
-        yield_quantity = form.recipe_yield_quantity.data
-        if yield_quantity is None or yield_quantity <= 0:
-            yield_quantity = 1
-        product.recipe_yield_quantity = float(yield_quantity)
+        product.recipe_yield_quantity = _normalize_recipe_yield_quantity(
+            form.recipe_yield_quantity.data
+        )
         product.recipe_yield_unit = form.recipe_yield_unit.data or None
         if not product.gl_code and product.gl_code_id:
             gl = db.session.get(GLCode, product.gl_code_id)
             if gl:
                 product.gl_code = gl.code
 
-        ProductRecipeItem.query.filter_by(product_id=product.id).delete()
-        for item_form in form.items:
-            item_id = item_form.item.data
-            unit_id = item_form.unit.data or None
-            quantity = item_form.quantity.data
-            countable = item_form.countable.data
-            if item_id and quantity is not None:
-                db.session.add(
-                    ProductRecipeItem(
-                        product_id=product.id,
-                        item_id=item_id,
-                        unit_id=unit_id,
-                        quantity=quantity,
-                        countable=countable,
-                    )
-                )
+        _replace_product_recipe_items(product, recipe_entries)
         db.session.commit()
         log_activity(f"Edited product {product.id}")
         if not is_ajax:
@@ -913,10 +1000,15 @@ def edit_product(product_id):
         )
         return jsonify(success=True, product_id=product.id, row_html=row_html)
     elif request.method == "GET":
+        auto_cost_changed = _sync_auto_recipe_cost(product)
+        if auto_cost_changed:
+            db.session.commit()
+            log_activity(f"Auto-updated recipe cost for product {product.id}")
         form.name.data = product.name
         form.price.data = product.price
         form.invoice_sale_price.data = product.invoice_sale_price
-        form.cost.data = product.cost or 0.0  # 👈 Pre-fill cost
+        form.cost.data = product.cost or 0.0
+        form.auto_update_recipe_cost.data = product.auto_update_recipe_cost
         form.gl_code.data = product.gl_code
         form.gl_code_id.data = product.gl_code_id
         form.sales_gl_code.data = product.sales_gl_code_id
@@ -1021,10 +1113,12 @@ def edit_product_recipe(product_id):
         abort(404)
     form = ProductRecipeForm()
     if form.validate_on_submit():
-        yield_quantity = form.recipe_yield_quantity.data
-        if yield_quantity is None or yield_quantity <= 0:
-            yield_quantity = 1
-        product.recipe_yield_quantity = float(yield_quantity)
+        yield_quantity = _normalize_recipe_yield_quantity(
+            form.recipe_yield_quantity.data
+        )
+        recipe_entries: list[dict[str, object]] = []
+        previous_cost = coerce_float(product.cost) or 0.0
+        product.recipe_yield_quantity = yield_quantity
         product.recipe_yield_unit = form.recipe_yield_unit.data or None
         ProductRecipeItem.query.filter_by(product_id=product.id).delete()
         items = [
@@ -1039,6 +1133,14 @@ def edit_product_recipe(product_id):
             quantity = coerce_float(request.form.get(f"items-{index}-quantity"))
             countable = request.form.get(f"items-{index}-countable") == "y"
             if item_id and quantity is not None:
+                recipe_entries.append(
+                    {
+                        "item_id": item_id,
+                        "unit_id": unit_id or None,
+                        "quantity": quantity,
+                        "countable": countable,
+                    }
+                )
                 db.session.add(
                     ProductRecipeItem(
                         product_id=product.id,
@@ -1048,7 +1150,21 @@ def edit_product_recipe(product_id):
                         countable=countable,
                     )
                 )
+        if product.auto_update_recipe_cost:
+            product.cost = _calculate_recipe_cost_from_entries(
+                recipe_entries,
+                product.recipe_yield_quantity,
+            )
         db.session.commit()
+        if (
+            product.auto_update_recipe_cost
+            and abs(previous_cost - (product.cost or 0.0)) >= 1e-9
+        ):
+            log_activity(
+                f"Edited recipe and auto-updated cost for product {product.id}"
+            )
+        else:
+            log_activity(f"Edited recipe for product {product.id}")
         flash("Recipe updated successfully!", "success")
         return redirect(url_for("product.view_products"))
     elif request.method == "GET":
@@ -1084,27 +1200,19 @@ def calculate_product_cost(product_id):
     product = db.session.get(Product, product_id)
     if product is None:
         abort(404)
-    total = 0.0
-    for ri in product.recipe_items:
-        item_cost = getattr(ri.item, "cost", 0.0)
-        try:
-            qty = float(ri.quantity or 0)
-        except (TypeError, ValueError):
-            qty = 0
-        factor = ri.unit.factor if ri.unit else 1
-        total += (item_cost or 0) * qty * factor
-    yield_override = coerce_float(request.args.get("yield_quantity"))
-    yield_quantity = product.recipe_yield_quantity or 0
-    if yield_override is not None and yield_override > 0:
-        yield_quantity = yield_override
-    if not yield_quantity or yield_quantity <= 0:
-        yield_quantity = 1.0
-    per_unit_cost = total / yield_quantity if yield_quantity else total
+    yield_quantity = request.args.get("yield_quantity")
+    if coerce_float(yield_quantity) is None:
+        yield_quantity = product.recipe_yield_quantity
+    normalized_yield_quantity = _normalize_recipe_yield_quantity(yield_quantity)
+    per_unit_cost = _calculate_recipe_cost_from_entries(
+        _build_recipe_entries_from_product(product),
+        normalized_yield_quantity,
+    )
     return jsonify(
         {
             "cost": per_unit_cost,
-            "batch_cost": total,
-            "yield_quantity": yield_quantity,
+            "batch_cost": per_unit_cost * normalized_yield_quantity,
+            "yield_quantity": normalized_yield_quantity,
             "yield_unit": product.recipe_yield_unit,
         }
     )
@@ -1115,38 +1223,20 @@ def calculate_product_cost(product_id):
 def calculate_product_cost_preview():
     """Calculate recipe cost from the posted form data."""
     payload = request.get_json(silent=True) or {}
-    items = payload.get("items") or []
-    total = 0.0
-    for item_data in items:
-        item_id = item_data.get("item_id")
-        quantity = coerce_float(item_data.get("quantity"))
-        if not item_id or quantity is None:
-            continue
-        item = db.session.get(Item, item_id)
-        if item is None:
-            continue
-        unit_id = item_data.get("unit_id")
-        factor = 1.0
-        if unit_id:
-            unit = db.session.get(ItemUnit, unit_id)
-            if unit and (unit.item_id == item.id or unit.item_id is None):
-                try:
-                    factor = float(unit.factor or 1.0)
-                except (TypeError, ValueError):
-                    factor = 1.0
-        total += (item.cost or 0.0) * quantity * factor
-
-    yield_quantity = coerce_float(payload.get("yield_quantity"))
-    if yield_quantity is None or yield_quantity <= 0:
-        yield_quantity = 1.0
-    per_unit_cost = total / yield_quantity if yield_quantity else total
+    normalized_yield_quantity = _normalize_recipe_yield_quantity(
+        payload.get("yield_quantity")
+    )
+    per_unit_cost = _calculate_recipe_cost_from_entries(
+        payload.get("items") or [],
+        normalized_yield_quantity,
+    )
     yield_unit = payload.get("yield_unit")
 
     return jsonify(
         {
             "cost": per_unit_cost,
-            "batch_cost": total,
-            "yield_quantity": yield_quantity,
+            "batch_cost": per_unit_cost * normalized_yield_quantity,
+            "yield_quantity": normalized_yield_quantity,
             "yield_unit": yield_unit,
         }
     )
@@ -1183,19 +1273,10 @@ def bulk_set_cost_from_recipe():
 
     updated = 0
     for product_obj in products:
-        total = 0.0
-        for recipe_item in product_obj.recipe_items:
-            item_cost = getattr(recipe_item.item, "cost", 0.0)
-            try:
-                quantity = float(recipe_item.quantity or 0)
-            except (TypeError, ValueError):
-                quantity = 0.0
-            factor = recipe_item.unit.factor if recipe_item.unit else 1
-            total += (item_cost or 0.0) * quantity * factor
-        yield_quantity = product_obj.recipe_yield_quantity or 0
-        if not yield_quantity or yield_quantity <= 0:
-            yield_quantity = 1.0
-        product_obj.cost = total / yield_quantity if yield_quantity else total
+        product_obj.cost = _calculate_recipe_cost_from_entries(
+            _build_recipe_entries_from_product(product_obj),
+            product_obj.recipe_yield_quantity,
+        )
         updated += 1
 
     db.session.commit()

@@ -32,7 +32,19 @@
     <div class="row">
         <div class="col-md-6 mb-3">
             {{ form.cost.label(class="form-label") }}
-            {{ form.cost(class="form-control", id="cost") }}
+            <div class="d-flex flex-column flex-sm-row align-items-sm-center gap-2">
+                <div class="flex-grow-1">
+                    {{ form.cost(class="form-control" + (" is-invalid" if form.cost.errors else ""), id="cost", placeholder="0.00", step="0.01", min="0", data_role="product-cost-input") }}
+                </div>
+                <div class="form-check flex-shrink-0">
+                    {{ form.auto_update_recipe_cost(class="form-check-input", data_role="auto-cost-toggle") }}
+                    {{ form.auto_update_recipe_cost.label(class="form-check-label") }}
+                </div>
+            </div>
+            <div class="form-text">When enabled, cost stays synced to the current recipe items and yield.</div>
+            {% for error in form.cost.errors %}
+            <div class="invalid-feedback d-block">{{ error }}</div>
+            {% endfor %}
         </div>
         <div class="col-md-6 mb-3">
             {% if sales_field is defined and sales_field is not none %}
@@ -92,7 +104,6 @@
         {% endfor %}
     </div>
     <button type="button" class="btn btn-secondary" data-role="add-item">Add Item</button>
-    <button type="button" class="btn btn-secondary" data-role="calc-cost" {% if product_id %}data-product-id="{{ product_id }}"{% endif %}>Set Cost From Recipe</button>
     {% if show_submit %}
         <button type="submit" class="btn btn-primary">Submit</button>
     {% endif %}
@@ -163,28 +174,52 @@
         };
     }
 
-    function initializeCostButton() {
-        const btn = root.querySelector('[data-role="calc-cost"]');
-        if (!btn) {
-            return;
+    function buildJsonHeaders() {
+        const headers = { 'Content-Type': 'application/json' };
+        const csrfInput = root.querySelector('input[name="csrf_token"]');
+        if (csrfInput) {
+            headers['X-CSRFToken'] = csrfInput.value;
         }
-        btn.addEventListener('click', function() {
-            const recipeData = collectRecipeData();
-            const costInput = root.querySelector('#cost');
-            if (!recipeData.items.length) {
-                if (costInput) {
-                    costInput.value = 0;
-                }
+        return headers;
+    }
+
+    function initializeAutoCostSync() {
+        const costInput = root.querySelector('[data-role="product-cost-input"]');
+        const autoCostToggle = root.querySelector('[data-role="auto-cost-toggle"]');
+        const itemList = root.querySelector('[data-role="item-list"]');
+        const yieldInput = root.querySelector('#recipe_yield_quantity');
+        if (!costInput || !autoCostToggle) {
+            return null;
+        }
+
+        let refreshTimeout = null;
+        let requestNonce = 0;
+
+        function setCostInputMode() {
+            if (autoCostToggle.checked) {
+                costInput.setAttribute('readonly', 'readonly');
+                costInput.classList.add('bg-light');
+            } else {
+                costInput.removeAttribute('readonly');
+                costInput.classList.remove('bg-light');
+            }
+        }
+
+        function refreshCostNow() {
+            if (!autoCostToggle.checked) {
                 return;
             }
-            const headers = { 'Content-Type': 'application/json' };
-            const csrfInput = root.querySelector('input[name="csrf_token"]');
-            if (csrfInput) {
-                headers['X-CSRFToken'] = csrfInput.value;
+
+            const recipeData = collectRecipeData();
+            if (!recipeData.items.length) {
+                costInput.value = 0;
+                return;
             }
+
+            const currentNonce = ++requestNonce;
             fetch('/products/calculate_cost_preview', {
                 method: 'POST',
-                headers: headers,
+                headers: buildJsonHeaders(),
                 body: JSON.stringify(recipeData),
             })
                 .then(resp => {
@@ -194,18 +229,75 @@
                     return resp.json();
                 })
                 .then(data => {
-                    if (costInput && typeof data.cost !== 'undefined') {
+                    if (currentNonce !== requestNonce) {
+                        return;
+                    }
+                    if (typeof data.cost !== 'undefined') {
                         costInput.value = data.cost;
                     }
-                    const yieldInput = root.querySelector('#recipe_yield_quantity');
                     if (yieldInput && typeof data.yield_quantity !== 'undefined') {
                         yieldInput.value = data.yield_quantity;
                     }
                 })
                 .catch(() => {
+                    if (currentNonce !== requestNonce) {
+                        return;
+                    }
                     alert('Unable to calculate recipe cost. Please try again.');
                 });
+        }
+
+        function scheduleCostRefresh(immediate = false) {
+            if (!autoCostToggle.checked) {
+                return;
+            }
+            if (refreshTimeout) {
+                window.clearTimeout(refreshTimeout);
+            }
+            if (immediate) {
+                refreshCostNow();
+                return;
+            }
+            refreshTimeout = window.setTimeout(refreshCostNow, 150);
+        }
+
+        autoCostToggle.addEventListener('change', function() {
+            setCostInputMode();
+            if (autoCostToggle.checked) {
+                scheduleCostRefresh(true);
+            }
         });
+
+        if (yieldInput) {
+            yieldInput.addEventListener('input', function() {
+                scheduleCostRefresh();
+            });
+        }
+
+        if (itemList) {
+            itemList.addEventListener('input', function(event) {
+                if (event.target.matches('input[name$="-quantity"]')) {
+                    scheduleCostRefresh();
+                }
+            });
+            itemList.addEventListener('change', function(event) {
+                if (
+                    event.target.matches('.unit-select') ||
+                    event.target.matches('input[name$="-countable"]')
+                ) {
+                    scheduleCostRefresh();
+                }
+            });
+        }
+
+        setCostInputMode();
+        if (autoCostToggle.checked) {
+            scheduleCostRefresh(true);
+        }
+
+        return {
+            scheduleCostRefresh: scheduleCostRefresh,
+        };
     }
 
     function fetchUnits(row, itemId, selected) {
@@ -228,6 +320,9 @@
             sel.innerHTML = opts;
             if (selected) {
                 sel.value = selected;
+            }
+            if (autoCostController) {
+                autoCostController.scheduleCostRefresh(true);
             }
         });
     }
@@ -284,8 +379,13 @@
             const row = createRow(itemIndex);
             itemList.appendChild(row);
             itemIndex++;
+            if (autoCostController) {
+                autoCostController.scheduleCostRefresh(true);
+            }
         });
     }
+
+    let autoCostController = null;
 
     function initializeItemListInteractions() {
         const itemList = root.querySelector('[data-role="item-list"]');
@@ -295,6 +395,9 @@
         itemList.addEventListener('click', function(e) {
             if (e.target && e.target.classList.contains('remove-item')) {
                 e.target.closest('.row').remove();
+                if (autoCostController) {
+                    autoCostController.scheduleCostRefresh(true);
+                }
             } else if (e.target && e.target.classList.contains('item-suggestion')) {
                 e.preventDefault();
                 const row = e.target.closest('.item-row');
@@ -315,6 +418,9 @@
                 }
                 fetchUnits(row, id);
                 updateItemLink(row, id, itemName);
+                if (autoCostController) {
+                    autoCostController.scheduleCostRefresh(true);
+                }
             }
         });
 
@@ -337,6 +443,9 @@
                     const unitSelect = row.querySelector('.unit-select');
                     if (unitSelect) {
                         unitSelect.innerHTML = '';
+                    }
+                    if (autoCostController) {
+                        autoCostController.scheduleCostRefresh(true);
                     }
                     return;
                 }
@@ -375,7 +484,7 @@
     }
 
     function init() {
-        initializeCostButton();
+        autoCostController = initializeAutoCostSync();
         initializeAddItem();
         initializeItemListInteractions();
     }

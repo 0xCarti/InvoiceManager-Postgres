@@ -150,8 +150,9 @@
                                         href="#"
                                         class="btn btn-sm btn-outline-secondary"
                                         data-email-stand-sheet
-                                        data-email-action="/events/{{ event.id }}/stand_sheet/{{ el.location_id }}/email"
+                                        data-email-action="{{ url_for('event.email_bulk_stand_sheets', event_id=event.id) }}"
                                         data-email-label="{{ el.location.name }}"
+                                        data-location-ids="{{ el.location_id }}"
                                     >Email Stand Sheet</a>
                                 {% endif %}
                                 {% if event.event_type == 'inventory' %}
@@ -169,8 +170,9 @@
                                         href="#"
                                         class="btn btn-sm btn-outline-secondary"
                                         data-email-stand-sheet
-                                        data-email-action="/events/{{ event.id }}/stand_sheet/{{ el.location_id }}/email"
+                                        data-email-action="{{ url_for('event.email_bulk_stand_sheets', event_id=event.id) }}"
                                         data-email-label="{{ el.location.name }}"
+                                        data-location-ids="{{ el.location_id }}"
                                     >Email Stand Sheet</a>
                                 {% endif %}
                                 {% if el.confirmed %}

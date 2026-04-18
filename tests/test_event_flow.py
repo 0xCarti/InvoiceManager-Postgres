@@ -794,6 +794,162 @@ def test_bulk_stand_sheets_render_multiple_pages(client, app):
         assert b"Upload Stand Sheet QR" not in resp.data
 
 
+def test_view_event_location_email_button_uses_existing_bulk_email_route(
+    client, app
+):
+    email, loc_id, prod_id, item_id = setup_event_env(app)
+    with client:
+        login(client, email, "pass")
+        client.post(
+            "/events/create",
+            data={
+                "name": "EmailButtonEvent",
+                "start_date": "2023-05-01",
+                "end_date": "2023-05-02",
+                "event_type": "inventory",
+            },
+            follow_redirects=True,
+        )
+
+    with app.app_context():
+        event = Event.query.filter_by(name="EmailButtonEvent").first()
+        assert event is not None
+        event_id = event.id
+
+    with client:
+        login(client, email, "pass")
+        client.post(
+            f"/events/{event_id}/add_location",
+            data={"location_id": loc_id},
+            follow_redirects=True,
+        )
+        response = client.get(f"/events/{event_id}")
+        assert response.status_code == 200
+        assert (
+            f'data-email-action="/events/{event_id}/stand_sheets/email"'.encode()
+            in response.data
+        )
+        assert f'data-location-ids="{loc_id}"'.encode() in response.data
+
+
+def test_email_bulk_stand_sheets_can_limit_to_single_location(
+    client, app, monkeypatch
+):
+    with app.app_context():
+        user = User(
+            email="standsheet-email@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        first_location = Location(name="North Stand")
+        second_location = Location(name="South Stand")
+        event = Event(
+            name="Stand Sheet Email Event",
+            start_date=date(2026, 4, 1),
+            end_date=date(2026, 4, 1),
+            event_type="inventory",
+        )
+        db.session.add_all([user, first_location, second_location, event])
+        db.session.commit()
+        grant_event_permissions(user)
+
+        db.session.add_all(
+            [
+                EventLocation(event=event, location=first_location),
+                EventLocation(event=event, location=second_location),
+            ]
+        )
+        db.session.commit()
+
+        event_id = event.id
+        first_location_id = first_location.id
+        user_email = user.email
+
+    rendered = {}
+    sent_emails = []
+
+    def fake_render_stand_sheet_pdf(documents, base_url):
+        assert len(documents) == 1
+        template_name, context = documents[0]
+        rendered["template_name"] = template_name
+        rendered["location_names"] = [
+            entry["location"].name for entry in context["data"]
+        ]
+        return b"%PDF-1.4"
+
+    def fake_send_email(**kwargs):
+        sent_emails.append(kwargs)
+
+    monkeypatch.setattr(
+        "app.routes.event_routes.render_stand_sheet_pdf",
+        fake_render_stand_sheet_pdf,
+    )
+    monkeypatch.setattr("app.routes.event_routes.send_email", fake_send_email)
+
+    with client:
+        login(client, user_email, "pass")
+        response = client.post(
+            f"/events/{event_id}/stand_sheets/email",
+            data={
+                "email": "manager@example.com",
+                "location_ids": str(first_location_id),
+            },
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True
+    assert rendered["template_name"] == "events/bulk_stand_sheets_pdf.html"
+    assert rendered["location_names"] == ["North Stand"]
+    assert sent_emails
+    assert sent_emails[0]["body"] == "Attached is the requested stand sheet."
+
+
+def test_email_bulk_stand_sheets_rejects_invalid_location_for_event(
+    client, app
+):
+    with app.app_context():
+        user = User(
+            email="standsheet-invalid@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        location = Location(name="Only Stand")
+        other_location = Location(name="Other Stand")
+        event = Event(
+            name="Invalid Stand Sheet Email Event",
+            start_date=date(2026, 4, 2),
+            end_date=date(2026, 4, 2),
+            event_type="inventory",
+        )
+        db.session.add_all([user, location, other_location, event])
+        db.session.commit()
+        grant_event_permissions(user)
+
+        db.session.add(EventLocation(event=event, location=location))
+        db.session.commit()
+
+        event_id = event.id
+        invalid_location_id = other_location.id
+        user_email = user.email
+
+    with client:
+        login(client, user_email, "pass")
+        response = client.post(
+            f"/events/{event_id}/stand_sheets/email",
+            data={
+                "email": "manager@example.com",
+                "location_ids": str(invalid_location_id),
+            },
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["success"] is False
+    assert "not part of this event" in payload["message"]
+
+
 def test_save_stand_sheet(client, app):
     email, loc_id, prod_id, item_id = setup_event_env(app, base_unit="ounce")
     with app.app_context():

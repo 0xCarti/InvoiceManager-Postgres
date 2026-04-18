@@ -1607,6 +1607,9 @@ class Product(db.Model):
     cost = db.Column(
         db.Float, nullable=False, default=0.0, server_default="0.0"
     )
+    auto_update_recipe_cost = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
     gl_code_id = db.Column(
         db.Integer, db.ForeignKey("gl_code.id"), nullable=True
     )

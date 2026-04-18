@@ -3046,7 +3046,11 @@ def _apply_event_linked_sales_payload(
         product = db.session.get(Product, product_id)
         if product is None:
             continue
-        if location_obj is not None and product not in location_obj.products:
+        if (
+            location_obj is not None
+            and location_obj.current_menu is None
+            and product not in location_obj.products
+        ):
             location_obj.products.append(product)
             for recipe_item in product.recipe_items:
                 if not recipe_item.countable or recipe_item.item_id is None:

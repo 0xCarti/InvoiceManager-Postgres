@@ -29,6 +29,35 @@ def _collect_product_items(products: Iterable["Product"]) -> dict[int, int]:
     return items
 
 
+def get_authoritative_location_products(location: Location | None) -> list["Product"]:
+    """Return the product set that should drive a location's stand sheets."""
+
+    if location is None:
+        return []
+    if location.current_menu is not None:
+        return list(location.current_menu.products)
+    return list(location.products)
+
+
+def get_countable_recipe_item_ids(products: Iterable["Product"]) -> set[int]:
+    """Return the countable recipe item ids referenced by the products."""
+
+    return set(_collect_product_items(products).keys())
+
+
+def get_location_drift_recipe_item_ids(location: Location | None) -> set[int]:
+    """Return recipe-backed item ids added outside the location's current menu."""
+
+    if location is None or location.current_menu is None:
+        return set()
+
+    menu_product_ids = {product.id for product in location.current_menu.products}
+    drift_products = [
+        product for product in location.products if product.id not in menu_product_ids
+    ]
+    return get_countable_recipe_item_ids(drift_products)
+
+
 def apply_menu_products(
     location: Location,
     menu: Optional[Menu],

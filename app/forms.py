@@ -1533,8 +1533,9 @@ class ProductForm(FlaskForm):
         places=2,
     )
     cost = DecimalField(
-        "Cost", validators=[InputRequired(), NumberRange(min=0)], default=0.0
+        "Cost", validators=[Optional(), NumberRange(min=0)], default=0.0
     )
+    auto_update_recipe_cost = BooleanField("Auto-update cost")
     gl_code_id = SelectField(
         "GL Code", coerce=int, validators=[Optional()], validate_choice=False
     )
@@ -1560,6 +1561,15 @@ class ProductForm(FlaskForm):
         self.gl_code.choices = [(g.code, g.code) for g in sales_codes_raw]
         self.gl_code_id.choices = formatted_sales_codes
         self.sales_gl_code.choices = formatted_sales_codes
+
+    def validate(self, extra_validators=None):
+        valid = super().validate(extra_validators=extra_validators)
+        if not self.auto_update_recipe_cost.data and self.cost.data is None:
+            self.cost.errors.append(
+                "Cost is required unless auto-update cost is enabled."
+            )
+            return False
+        return valid
 
 
 class BulkProductUpdateForm(FlaskForm):

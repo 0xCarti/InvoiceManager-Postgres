@@ -61,6 +61,10 @@ from app.utils.filter_state import (
     get_filter_defaults,
     normalize_filters,
 )
+from app.utils.menu_assignments import (
+    get_authoritative_location_products,
+    get_location_drift_recipe_item_ids,
+)
 from app.utils.numeric import coerce_float
 from app.utils.pos_import import (
     combine_terminal_sales_totals,
@@ -477,7 +481,9 @@ def _build_item_price_lookup(
     location_obj = event_location.location
     allowed_product_ids: set[int] | None = None
     if location_obj is not None:
-        allowed_product_ids = {product.id for product in location_obj.products}
+        allowed_product_ids = {
+            product.id for product in get_authoritative_location_products(location_obj)
+        }
 
     for entry in stand_items:
         item = entry.get("item")
@@ -861,14 +867,11 @@ def _apply_pending_sales(
         if (
             link_products_to_locations
             and location_obj is not None
+            and location_obj.current_menu is None
             and product not in location_obj.products
         ):
             location_obj.products.append(product)
             _ensure_location_items(location_obj, product)
-        if location_obj is not None and event_location_id in totals_map:
-            if product not in location_obj.products:
-                location_obj.products.append(product)
-                _ensure_location_items(location_obj, product)
         if location_obj is not None and location_obj.name:
             updated_locations.add(location_obj.name)
 
@@ -1591,7 +1594,7 @@ def add_terminal_sale(event_id, el_id):
         location_obj = event_location.location
         products: list[Product] = []
         if location_obj is not None:
-            products.extend(location_obj.products)
+            products.extend(get_authoritative_location_products(location_obj))
         for sale in event_location.terminal_sales:
             product = sale.product
             if product is None:
@@ -1602,12 +1605,6 @@ def add_terminal_sale(event_id, el_id):
         return products
 
     available_products = _collect_event_location_products(el)
-    location_obj = el.location
-    if location_obj is not None:
-        for product in available_products:
-            if product not in location_obj.products:
-                location_obj.products.append(product)
-                _ensure_location_items(location_obj, product)
 
     if request.method == "POST":
         updated = False
@@ -4868,7 +4865,10 @@ def _get_stand_items(location_id, event_id=None):
             for sheet in el.stand_sheet_items:
                 sheet_map[sheet.item_id] = sheet
 
-    for product_obj in location.products:
+    authoritative_products = get_authoritative_location_products(location)
+    drift_item_ids = get_location_drift_recipe_item_ids(location)
+
+    for product_obj in authoritative_products:
         for recipe_item in product_obj.recipe_items:
             if recipe_item.countable and recipe_item.item_id not in seen:
                 seen.add(recipe_item.item_id)
@@ -4903,6 +4903,8 @@ def _get_stand_items(location_id, event_id=None):
         location_id=location_id
     ).all():
         if record.item_id in seen:
+            continue
+        if record.item_id in drift_item_ids:
             continue
         item = record.item
         recv_unit = next((u for u in item.units if u.receiving_default), None)
@@ -5340,8 +5342,50 @@ def email_bulk_stand_sheets(event_id):
         flash(message, "danger")
         return redirect(url_for("event.bulk_stand_sheets", event_id=event_id))
 
+    raw_location_ids = request.form.getlist("location_ids")
+    requested_location_ids = []
+    saw_location_filter = False
+    for raw_value in raw_location_ids:
+        for token in (raw_value or "").split(","):
+            token = token.strip()
+            if not token:
+                continue
+            saw_location_filter = True
+            try:
+                location_id = int(token)
+            except ValueError:
+                message = "One or more selected locations are invalid."
+                if is_ajax:
+                    return jsonify({"success": False, "message": message}), 400
+                flash(message, "danger")
+                return redirect(url_for("event.view_event", event_id=event_id))
+            if location_id not in requested_location_ids:
+                requested_location_ids.append(location_id)
+
+    event_locations_by_location_id = {
+        el.location_id: el for el in ev.locations if el.location_id is not None
+    }
+    if saw_location_filter:
+        invalid_location_ids = [
+            location_id
+            for location_id in requested_location_ids
+            if location_id not in event_locations_by_location_id
+        ]
+        if invalid_location_ids:
+            message = "One or more selected locations are not part of this event."
+            if is_ajax:
+                return jsonify({"success": False, "message": message}), 400
+            flash(message, "danger")
+            return redirect(url_for("event.view_event", event_id=event_id))
+        event_locations = [
+            event_locations_by_location_id[location_id]
+            for location_id in requested_location_ids
+        ]
+    else:
+        event_locations = list(ev.locations)
+
     data = []
-    for el in ev.locations:
+    for el in event_locations:
         loc, items = _get_stand_items(el.location_id, event_id)
         data.append({"location": loc, "stand_items": items})
 
@@ -5376,10 +5420,15 @@ def email_bulk_stand_sheets(event_id):
         return redirect(url_for("event.bulk_stand_sheets", event_id=event_id))
 
     try:
+        stand_sheet_count = len(event_locations)
         send_email(
             to_address=email_address,
             subject=f"{ev.name} stand sheets",
-            body="Attached are the stand sheets for the requested event.",
+            body=(
+                "Attached are the stand sheets for the requested event."
+                if stand_sheet_count != 1
+                else "Attached is the requested stand sheet."
+            ),
             attachments=[
                 (
                     f"event-{event_id}-stand-sheets.pdf",
@@ -5399,9 +5448,17 @@ def email_bulk_stand_sheets(event_id):
         return redirect(url_for("event.bulk_stand_sheets", event_id=event_id))
 
     log_activity(
-        f"Emailed stand sheets for event {event_id} to {email_address}"
+        (
+            f"Emailed stand sheet for 1 location in event {event_id} to {email_address}"
+            if len(event_locations) == 1
+            else f"Emailed stand sheets for event {event_id} to {email_address}"
+        )
     )
-    success_message = f"Stand sheets sent to {email_address}."
+    success_message = (
+        f"Stand sheet sent to {email_address}."
+        if len(event_locations) == 1
+        else f"Stand sheets sent to {email_address}."
+    )
     if is_ajax:
         return jsonify({"success": True, "message": success_message})
     flash(success_message, "success")
