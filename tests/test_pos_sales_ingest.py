@@ -103,7 +103,7 @@ def test_ingest_pos_sales_attachment_ignores_files_with_no_locations_or_sales(
         assert list((tmp_path / "mailgun_staging").glob("*")) == []
 
 
-def test_parse_rows_compute_unit_price_using_net_inc_plus_abs_discount():
+def test_parse_rows_compute_unit_price_using_signed_discount():
     rows = [
         ["MAIN STAND", "", "", "", "", "", "", "", ""],
         ["Product Code", "Product Name", "", "", "Qty", "", "", "Net Inc", "Discount"],
@@ -114,13 +114,54 @@ def test_parse_rows_compute_unit_price_using_net_inc_plus_abs_discount():
     lemonade = parsed["MAIN STAND"]["rows"][0]
     promo = parsed["MAIN STAND"]["rows"][1]
 
-    assert lemonade["line_total"] == Decimal("11.75")
-    assert lemonade["unit_price"] == Decimal("5.875")
+    assert lemonade["line_total"] == Decimal("9.25")
+    assert lemonade["unit_price"] == Decimal("4.625")
     assert lemonade["quantity"] == Decimal("2")
 
-    assert promo["line_total"] == Decimal("2.5")
-    assert promo["unit_price"] == Decimal("2.5")
+    assert promo["line_total"] == Decimal("1.5")
+    assert promo["unit_price"] == Decimal("1.5")
     assert promo["quantity"] == Decimal("0")
+
+
+def test_stage_pos_sales_import_preserves_signed_email_discounts_in_prices(
+    app, monkeypatch
+):
+    workbook_rows = [
+        ["MAIN STAND", "", "", "", "", "", "", "", ""],
+        ["Product Code", "Product Name", "", "", "Qty", "", "", "Net Inc", "Discount"],
+        ["100", "Lemonade", "", "", "2", "", "", "10.50", "-1.25"],
+    ]
+
+    monkeypatch.setattr(
+        pos_sales_ingest,
+        "iter_pos_excel_rows",
+        lambda filepath, extension: iter(workbook_rows),
+    )
+
+    with app.app_context():
+        sales_import = PosSalesImport(
+            source_provider="mailgun",
+            message_id="<signed-discount-layout>",
+            attachment_filename="sales.xls",
+            attachment_sha256="d" * 64,
+            attachment_storage_path="/tmp/signed-discount-layout.xls",
+            status="pending",
+        )
+        db.session.add(sales_import)
+        db.session.flush()
+
+        pos_sales_ingest.stage_pos_sales_import(sales_import, "ignored.xls", ".xls")
+        db.session.commit()
+
+        location = PosSalesImportLocation.query.filter_by(import_id=sales_import.id).first()
+        row = PosSalesImportRow.query.filter_by(import_id=sales_import.id).first()
+
+        assert location is not None
+        assert row is not None
+        assert location.computed_total == 9.25
+        assert row.discount_raw == "-1.25"
+        assert row.computed_line_total == 9.25
+        assert row.computed_unit_price == 4.625
 
 
 def test_stage_pos_sales_import_handles_stock_item_sales_location_layout(

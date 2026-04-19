@@ -517,6 +517,9 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "admin.import_data": requirement(any_of=("imports.run",)),
     "admin.import_page": requirement(any_of=("imports.view", "imports.run")),
     "admin.system_info": requirement(any_of=("system_info.view",)),
+    "admin.download_sales_import_attachment": requirement(
+        any_of=("sales_imports.view", "sales_imports.manage")
+    ),
     "admin.sales_import_detail": requirement(any_of=("sales_imports.view", "sales_imports.manage")),
     "admin.permission_catalog": requirement(any_of=("permissions.view", "permissions.manage")),
 }
@@ -815,6 +818,9 @@ ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] =
     ("admin.terminal_sales_mappings", "POST"): requirement(any_of=("terminal_sales_mappings.manage",)),
     ("admin.sales_imports", "GET"): requirement(any_of=("sales_imports.view", "sales_imports.manage")),
     ("admin.sales_imports", "POST"): requirement(any_of=("sales_imports.manage",)),
+    ("admin.download_sales_import_attachment", "GET"): requirement(
+        any_of=("sales_imports.view", "sales_imports.manage")
+    ),
     ("admin.sales_import_detail", "GET"): requirement(any_of=("sales_imports.view", "sales_imports.manage")),
     ("admin.sales_import_detail", "POST"): requirement(any_of=("sales_imports.manage",)),
     ("admin.vendor_item_aliases", "GET"): requirement(any_of=("vendor_item_aliases.view", "vendor_item_aliases.manage")),

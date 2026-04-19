@@ -306,7 +306,8 @@ def parse_terminal_sales_email_rows(
         net_inc = parse_terminal_sales_decimal(_get("net_inc")) or Decimal("0")
         discount_raw = parse_terminal_sales_decimal(_get("discount"))
         discount_abs = abs(discount_raw) if discount_raw is not None else Decimal("0")
-        line_total = net_inc + discount_abs
+        discount_total = discount_raw if discount_raw is not None else Decimal("0")
+        line_total = net_inc + discount_total
 
         has_numeric_aggregate = any(
             parse_terminal_sales_decimal(_get(name)) is not None

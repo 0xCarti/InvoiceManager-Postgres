@@ -104,6 +104,7 @@ def test_super_admin_bypasses_endpoint_permission_checks():
     user = DummyUser(is_super_admin=True)
 
     assert user_can_access_endpoint(user, "admin.settings")
+    assert user_can_access_endpoint(user, "admin.download_sales_import_attachment")
     assert user_can_access_endpoint(user, "admin.sales_import_detail", "POST")
 
 

@@ -672,6 +672,56 @@ def test_sales_import_detail_hides_manage_actions_for_view_only_users(
         assert b"View only" in detail_response.data
 
 
+def test_view_only_user_can_download_sales_import_attachment(client, app, tmp_path):
+    attachment_path = tmp_path / "sales-debug.xls"
+    attachment_path.write_bytes(b"debug workbook bytes")
+
+    with app.app_context():
+        sales_import = PosSalesImport(
+            source_provider="mailgun",
+            message_id="msg-download-view-only",
+            attachment_filename="sales-debug.xls",
+            attachment_sha256="d" * 64,
+            attachment_storage_path=str(attachment_path),
+            status="pending",
+        )
+        db.session.add(sales_import)
+        db.session.commit()
+        sales_import_id = sales_import.id
+
+        user = User(
+            email="sales-download-view@example.com",
+            password=generate_password_hash("downloadpass"),
+            active=True,
+            is_admin=False,
+        )
+        db.session.add(user)
+        db.session.commit()
+        grant_permissions(
+            user,
+            "sales_imports.view",
+            group_name="Sales Import Download View",
+            description="Can view and download staged sales import files.",
+        )
+
+    with client:
+        login(client, "sales-download-view@example.com", "downloadpass")
+        detail_response = client.get(
+            f"/controlpanel/sales-imports/{sales_import_id}",
+            follow_redirects=True,
+        )
+        assert detail_response.status_code == 200
+        assert b"Download File" in detail_response.data
+
+        download_response = client.get(
+            f"/controlpanel/sales-imports/{sales_import_id}/download"
+        )
+        assert download_response.status_code == 200
+        assert download_response.data == b"debug workbook bytes"
+        assert "attachment" in download_response.headers["Content-Disposition"]
+        assert "sales-debug.xls" in download_response.headers["Content-Disposition"]
+
+
 def test_sales_import_detail_hides_create_and_map_without_product_create_permission(
     client, app
 ):

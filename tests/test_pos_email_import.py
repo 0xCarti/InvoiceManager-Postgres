@@ -59,20 +59,20 @@ def test_parse_terminal_sales_email_rows_detects_locations_and_totals():
     assert suites_rows[0]["net_inc"] == Decimal("1234.50")
     assert suites_rows[0]["discount_raw"] == Decimal("-23.45")
     assert suites_rows[0]["discount_abs"] == Decimal("23.45")
-    assert suites_rows[0]["line_total"] == Decimal("1257.95")
-    assert suites_rows[0]["unit_price"] == Decimal("628.975")
+    assert suites_rows[0]["line_total"] == Decimal("1211.05")
+    assert suites_rows[0]["unit_price"] == Decimal("605.525")
     assert suites_rows[0]["raw_row"][1] == "17oz Draft Beer"
 
     suites_totals = parsed["PRIVATE SUITES"]["location_totals"]
     assert len(suites_totals) == 1
     assert suites_totals[0]["quantity"] == Decimal("3")
-    assert suites_totals[0]["line_total"] == Decimal("105.00")
+    assert suites_totals[0]["line_total"] == Decimal("95.00")
 
     tap_rows = parsed["TAP ROOM"]["rows"]
     assert len(tap_rows) == 1
     assert tap_rows[0]["quantity"] == Decimal("0")
-    assert tap_rows[0]["line_total"] == Decimal("14.00")
-    assert tap_rows[0]["unit_price"] == Decimal("14.00")
+    assert tap_rows[0]["line_total"] == Decimal("10.00")
+    assert tap_rows[0]["unit_price"] == Decimal("10.00")
 
 
 def test_parse_terminal_sales_email_rows_handles_sectioned_blocks_and_decimal_formats():
@@ -91,11 +91,11 @@ def test_parse_terminal_sales_email_rows_handles_sectioned_blocks_and_decimal_fo
 
     assert list(parsed.keys()) == ["SUITE 1", "SUITE 2"]
     assert parsed["SUITE 1"]["rows"][0]["quantity"] == Decimal("1.50")
-    assert parsed["SUITE 1"]["rows"][0]["line_total"] == Decimal("3220.50")
-    assert parsed["SUITE 1"]["location_totals"][0]["line_total"] == Decimal("3220.50")
+    assert parsed["SUITE 1"]["rows"][0]["line_total"] == Decimal("3200.00")
+    assert parsed["SUITE 1"]["location_totals"][0]["line_total"] == Decimal("3200.00")
 
     assert parsed["SUITE 2"]["rows"][0]["quantity"] == Decimal("0")
-    assert parsed["SUITE 2"]["rows"][0]["unit_price"] == Decimal("2.50")
+    assert parsed["SUITE 2"]["rows"][0]["unit_price"] == Decimal("2.00")
     assert parsed["SUITE 2"]["location_totals"][0]["quantity"] == Decimal("0")
 
 

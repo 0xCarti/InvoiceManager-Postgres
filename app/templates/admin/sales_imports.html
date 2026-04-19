@@ -4,6 +4,7 @@
 
 {% block content %}
 {% set can_manage_sales_imports = has_permission('sales_imports.manage') %}
+{% set can_download_sales_import_attachments = can_access_endpoint('admin.download_sales_import_attachment') %}
 {% set column_visibility_options = [
     {'id': 'toggle-import-id', 'target': 'col-import-id', 'label': 'Import', 'checked': True},
     {'id': 'toggle-import-status', 'target': 'col-import-status', 'label': 'Status', 'checked': True},
@@ -168,6 +169,18 @@
                     </td>
                     <td class="col-import-attachment">
                         <div class="fw-semibold text-break">{{ import.attachment_filename }}</div>
+                        {% if can_download_sales_import_attachments and import.attachment_available %}
+                        <div class="mt-2">
+                            <a
+                                href="{{ url_for('admin.download_sales_import_attachment', import_id=import.id) }}"
+                                class="btn btn-sm btn-outline-secondary"
+                            >
+                                Download
+                            </a>
+                        </div>
+                        {% elif import.attachment_storage_path %}
+                        <div class="small text-muted mt-1">Stored file unavailable.</div>
+                        {% endif %}
                         {% if import.status == 'ignored' and import.failure_reason %}
                         <div class="small text-muted mt-1">{{ import.failure_reason }}</div>
                         {% elif not import.sales_date %}

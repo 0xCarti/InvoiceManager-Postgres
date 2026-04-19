@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 {% set can_manage_sales_imports = has_permission('sales_imports.manage') %}
+{% set can_download_sales_import_attachments = can_access_endpoint('admin.download_sales_import_attachment') %}
 {% set can_create_locations = can_access_endpoint('locations.add_location', 'POST') %}
 {% set can_create_products = can_access_endpoint('product.create_product') %}
 {% set can_create_and_map = can_manage_sales_imports and can_create_products %}
@@ -75,6 +76,41 @@
         <span class="badge bg-secondary align-self-center">View only</span>
         {% endif %}
         <a href="{{ url_for('admin.sales_imports') }}" class="btn btn-outline-secondary">Back to Imports</a>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="row g-2 align-items-center">
+            <div class="col-lg-8">
+                <div class="fw-semibold">Received File</div>
+                <div class="text-break">{{ sales_import.attachment_filename }}</div>
+                <div class="small text-muted">
+                    {% if sales_import.received_at %}
+                    Received {{ sales_import.received_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+                    {% else %}
+                    Received time unavailable
+                    {% endif %}
+                    {% if sales_import.message_id %}
+                    &middot; Message ID: {{ sales_import.message_id }}
+                    {% endif %}
+                </div>
+            </div>
+            <div class="col-lg-4">
+                {% if can_download_sales_import_attachments and attachment_available %}
+                <a
+                    href="{{ url_for('admin.download_sales_import_attachment', import_id=sales_import.id) }}"
+                    class="btn btn-outline-secondary w-100"
+                >
+                    Download File
+                </a>
+                {% else %}
+                <div class="small text-muted">
+                    No stored attachment is currently available for download.
+                </div>
+                {% endif %}
+            </div>
+        </div>
     </div>
 </div>
 

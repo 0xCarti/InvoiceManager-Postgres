@@ -2645,6 +2645,9 @@ def sales_imports():
         import_record.can_direct_approve = (
             import_record.status == "pending" and actionable_issue_count == 0
         )
+        import_record.attachment_available = (
+            _get_sales_import_attachment_path(import_record) is not None
+        )
 
     if status_changed:
         db.session.commit()
@@ -3331,6 +3334,19 @@ def _refresh_sales_import_mapping_status(
     return issue_state
 
 
+def _get_sales_import_attachment_path(
+    import_record: PosSalesImport,
+) -> str | None:
+    attachment_path = (import_record.attachment_storage_path or "").strip()
+    if not attachment_path:
+        return None
+
+    normalized_path = os.path.abspath(attachment_path)
+    if not os.path.isfile(normalized_path):
+        return None
+    return normalized_path
+
+
 def _detach_sales_import_attachment(import_record: PosSalesImport) -> None:
     attachment_path = (import_record.attachment_storage_path or "").strip()
     import_record.attachment_storage_path = None
@@ -3693,6 +3709,27 @@ def _check_negative_sales_import_reverse(import_record: PosSalesImport) -> list[
     return warnings
 
 
+@admin.route("/controlpanel/sales-imports/<int:import_id>/download", methods=["GET"])
+@login_required
+def download_sales_import_attachment(import_id: int):
+    """Download the original attachment for a staged POS sales import."""
+    from flask import send_from_directory
+
+    sales_import = PosSalesImport.query.filter(PosSalesImport.id == import_id).first_or_404()
+    attachment_path = _get_sales_import_attachment_path(sales_import)
+    if attachment_path is None:
+        abort(404)
+
+    log_activity(f"Downloaded POS sales import attachment for import {sales_import.id}")
+    return send_from_directory(
+        os.path.dirname(attachment_path),
+        os.path.basename(attachment_path),
+        as_attachment=True,
+        download_name=sales_import.attachment_filename
+        or os.path.basename(attachment_path),
+    )
+
+
 @admin.route("/controlpanel/sales-imports/<int:import_id>", methods=["GET", "POST"])
 @login_required
 def sales_import_detail(import_id: int):
@@ -3716,6 +3753,7 @@ def sales_import_detail(import_id: int):
         .filter(PosSalesImport.id == import_id)
         .first_or_404()
     )
+    attachment_available = _get_sales_import_attachment_path(sales_import) is not None
 
     def _apply_auto_mappings() -> bool:
         changed = False
@@ -4472,6 +4510,7 @@ def sales_import_detail(import_id: int):
     return render_template(
         "admin/sales_import_detail.html",
         sales_import=sales_import,
+        attachment_available=attachment_available,
         sorted_locations=sorted_locations,
         location_issue_counts=location_issue_counts,
         selected_location=selected_location,
