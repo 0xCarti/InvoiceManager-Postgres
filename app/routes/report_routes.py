@@ -22,6 +22,7 @@ from flask_login import login_required
 from app import db
 from app.forms import (
     DepartmentSalesForecastForm,
+    EventSpoilageReportForm,
     InventoryVarianceReportForm,
     PurchaseCostForecastForm,
     PurchaseInventorySummaryForm,
@@ -36,6 +37,7 @@ from app.models import (
     Customer,
     Event,
     EventLocation,
+    EventStandSheetItem,
     GLCode,
     Invoice,
     InvoiceProduct,
@@ -2549,6 +2551,117 @@ def event_terminal_sales_report():
 
     return render_template(
         "report_event_terminal_sales.html", form=form, report=report_data
+    )
+
+
+@report.route("/reports/event-spoilage", methods=["GET", "POST"])
+@login_required
+def event_spoilage_report():
+    """Report spoilage recorded on event stand sheets for selected events."""
+
+    form = EventSpoilageReportForm()
+    report_rows = None
+    totals = None
+    selected_event_labels: list[str] = []
+
+    if form.validate_on_submit():
+        selected_event_ids = form.events.data or []
+        selected_event_labels = [
+            label for value, label in form.events.choices if value in selected_event_ids
+        ]
+        conversions = _get_base_unit_conversions()
+
+        spoilage_rows = (
+            db.session.query(
+                Event.id.label("event_id"),
+                Event.name.label("event_name"),
+                Event.start_date.label("start_date"),
+                Event.end_date.label("end_date"),
+                Event.closed.label("event_closed"),
+                Location.id.label("location_id"),
+                Location.name.label("location_name"),
+                Item.id.label("item_id"),
+                Item.name.label("item_name"),
+                Item.base_unit.label("base_unit"),
+                Item.cost.label("item_cost"),
+                func.sum(EventStandSheetItem.spoiled).label("spoiled_quantity"),
+            )
+            .select_from(Event)
+            .join(EventLocation, EventLocation.event_id == Event.id)
+            .join(Location, EventLocation.location_id == Location.id)
+            .join(
+                EventStandSheetItem,
+                EventStandSheetItem.event_location_id == EventLocation.id,
+            )
+            .join(Item, EventStandSheetItem.item_id == Item.id)
+            .filter(Event.id.in_(selected_event_ids))
+            .filter(EventStandSheetItem.spoiled > 0)
+            .filter(or_(Event.closed.is_(True), EventLocation.confirmed.is_(True)))
+            .group_by(
+                Event.id,
+                Event.name,
+                Event.start_date,
+                Event.end_date,
+                Event.closed,
+                Location.id,
+                Location.name,
+                Item.id,
+                Item.name,
+                Item.base_unit,
+                Item.cost,
+            )
+            .order_by(
+                Event.start_date.desc(),
+                Event.name,
+                Location.name,
+                Item.name,
+            )
+            .all()
+        )
+
+        report_rows = []
+        total_cost = 0.0
+
+        for row in spoilage_rows:
+            spoiled_quantity, report_unit = convert_quantity_for_reporting(
+                float(row.spoiled_quantity or 0.0),
+                row.base_unit or "",
+                conversions,
+            )
+            unit_cost = convert_cost_for_reporting(
+                float(row.item_cost or 0.0),
+                row.base_unit or "",
+                conversions,
+            )
+            spoilage_cost = float(spoiled_quantity or 0.0) * float(unit_cost or 0.0)
+            total_cost += spoilage_cost
+
+            report_rows.append(
+                {
+                    "event_id": row.event_id,
+                    "event_name": row.event_name,
+                    "start_date": row.start_date,
+                    "end_date": row.end_date,
+                    "event_closed": bool(row.event_closed),
+                    "location_id": row.location_id,
+                    "location_name": row.location_name,
+                    "item_id": row.item_id,
+                    "item_name": row.item_name,
+                    "unit_label": get_unit_label(report_unit),
+                    "spoiled_quantity": float(spoiled_quantity or 0.0),
+                    "unit_cost": float(unit_cost or 0.0),
+                    "spoilage_cost": spoilage_cost,
+                }
+            )
+
+        totals = {"total_cost": total_cost}
+
+    return render_template(
+        "report_event_spoilage.html",
+        form=form,
+        report_rows=report_rows,
+        totals=totals,
+        selected_event_labels=selected_event_labels,
     )
 
 

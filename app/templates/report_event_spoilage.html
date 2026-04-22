@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <h2 class="mb-0">Event Spoilage Report</h2>
+    </div>
+    <p class="text-muted">
+        Review spoiled inventory recorded on stand sheets for one or more events.
+        Open events only include confirmed locations; closed events include all recorded locations.
+    </p>
+
+    <form method="POST" class="mb-4">
+        {{ form.hidden_tag() }}
+        <div class="row g-3">
+            <div class="col-12">
+                {{ form.events.label(class="form-label") }}
+                {{ form.events(class="form-select", multiple=true) }}
+                <div class="form-text">Hold Ctrl (Windows) or Command (Mac) to select multiple events.</div>
+                {% if form.events.errors %}
+                    <div class="text-danger small">{{ form.events.errors[0] }}</div>
+                {% endif %}
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary mt-3">Generate Report</button>
+    </form>
+
+    {% if report_rows is not none %}
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <h3 class="mb-0">Report Results</h3>
+        </div>
+
+        {% if report_rows %}
+            {% if selected_event_labels %}
+                <div class="alert alert-secondary" role="status">
+                    <div class="fw-semibold">Events Selected</div>
+                    <div class="small">{{ selected_event_labels | join(', ') }}</div>
+                </div>
+            {% endif %}
+            <div class="table-responsive">
+                <table class="table table-bordered table-striped align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th scope="col">Event</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Location</th>
+                            <th scope="col">Item</th>
+                            <th scope="col">Unit</th>
+                            <th scope="col" class="text-end">Spoiled Qty</th>
+                            <th scope="col" class="text-end">Unit Cost</th>
+                            <th scope="col" class="text-end">Total Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in report_rows %}
+                            <tr>
+                                <td>
+                                    <div>{{ row.event_name }}</div>
+                                    <div class="text-muted small">
+                                        {{ row.start_date.strftime('%Y-%m-%d') }} to {{ row.end_date.strftime('%Y-%m-%d') }}
+                                    </div>
+                                </td>
+                                <td>
+                                    {% if row.event_closed %}
+                                        <span class="badge bg-secondary">Closed</span>
+                                    {% else %}
+                                        <span class="badge bg-warning text-dark">Open</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ row.location_name }}</td>
+                                <td>{{ row.item_name }}</td>
+                                <td>{{ row.unit_label }}</td>
+                                <td class="text-end">{{ '%.2f'|format(row.spoiled_quantity) }}</td>
+                                <td class="text-end">${{ '%.2f'|format(row.unit_cost) }}</td>
+                                <td class="text-end">${{ '%.2f'|format(row.spoilage_cost) }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <th colspan="7" class="text-end">Total Spoilage Cost</th>
+                            <th class="text-end">${{ '%.2f'|format(totals.total_cost) }}</th>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        {% else %}
+            <div class="alert alert-info" role="alert">
+                No spoiled event items matched the selected events.
+            </div>
+        {% endif %}
+    {% endif %}
+</div>
+{% endblock %}

@@ -372,6 +372,7 @@ NAV_GROUPS = (
             ("report.product_recipe_report", "Recipe Report"),
             ("report.product_location_sales_report", "Product Location Sales Report"),
             ("report.event_terminal_sales_report", "Event Terminal Sales Report"),
+            ("report.event_spoilage_report", "Event Spoilage Report"),
             ("report.purchase_cost_forecast", "Forecasted Stock Item Sales"),
             ("report.customer_invoice_report", "Vendor Invoices Report"),
         ),

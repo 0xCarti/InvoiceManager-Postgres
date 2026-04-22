@@ -10,6 +10,9 @@ from werkzeug.security import generate_password_hash
 from app import db
 from app.models import (
     Customer,
+    Event,
+    EventLocation,
+    EventStandSheetItem,
     GLCode,
     Invoice,
     InvoiceProduct,
@@ -1208,6 +1211,108 @@ def test_purchase_cost_forecast_report(client, app):
     )
     assert resp.status_code == 200
     assert b"No forecast data was available" in resp.data
+
+
+def test_event_spoilage_report_filters_open_events_to_confirmed_locations(client, app):
+    with app.app_context():
+        user = User(
+            email="event-spoilage@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+            is_admin=True,
+        )
+        item = Item(name="Event Spoilage Lager", base_unit="each", cost=5.0)
+        open_event = Event(
+            name="Open Spoilage Event",
+            start_date=date(2024, 4, 10),
+            end_date=date(2024, 4, 10),
+            closed=False,
+        )
+        closed_event = Event(
+            name="Closed Spoilage Event",
+            start_date=date(2024, 4, 11),
+            end_date=date(2024, 4, 11),
+            closed=True,
+        )
+        confirmed_location = Location(name="Confirmed Spoilage Stand")
+        unconfirmed_location = Location(name="Unconfirmed Spoilage Stand")
+        closed_location = Location(name="Closed Spoilage Stand")
+        db.session.add_all(
+            [
+                user,
+                item,
+                open_event,
+                closed_event,
+                confirmed_location,
+                unconfirmed_location,
+                closed_location,
+            ]
+        )
+        db.session.commit()
+
+        open_confirmed = EventLocation(
+            event_id=open_event.id,
+            location_id=confirmed_location.id,
+            confirmed=True,
+        )
+        open_unconfirmed = EventLocation(
+            event_id=open_event.id,
+            location_id=unconfirmed_location.id,
+            confirmed=False,
+        )
+        closed_unconfirmed = EventLocation(
+            event_id=closed_event.id,
+            location_id=closed_location.id,
+            confirmed=False,
+        )
+        db.session.add_all([open_confirmed, open_unconfirmed, closed_unconfirmed])
+        db.session.commit()
+
+        db.session.add_all(
+            [
+                EventStandSheetItem(
+                    event_location_id=open_confirmed.id,
+                    item_id=item.id,
+                    spoiled=3,
+                ),
+                EventStandSheetItem(
+                    event_location_id=open_unconfirmed.id,
+                    item_id=item.id,
+                    spoiled=4,
+                ),
+                EventStandSheetItem(
+                    event_location_id=closed_unconfirmed.id,
+                    item_id=item.id,
+                    spoiled=2,
+                ),
+            ]
+        )
+        db.session.commit()
+
+        open_event_id = open_event.id
+        closed_event_id = closed_event.id
+
+    login(client, "event-spoilage@example.com", "pass")
+
+    response = client.get("/reports/event-spoilage")
+    assert response.status_code == 200
+
+    response = client.post(
+        "/reports/event-spoilage",
+        data={"events": [str(open_event_id), str(closed_event_id)]},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Event Spoilage Report" in response.data
+    assert b"Open Spoilage Event" in response.data
+    assert b"Closed Spoilage Event" in response.data
+    assert b"Confirmed Spoilage Stand" in response.data
+    assert b"Closed Spoilage Stand" in response.data
+    assert b"Unconfirmed Spoilage Stand" not in response.data
+    assert b"$5.00" in response.data
+    assert b"$15.00" in response.data
+    assert b"$10.00" in response.data
+    assert b"$25.00" in response.data
 
 
 def test_purchase_inventory_summary_report(client, app):

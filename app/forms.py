@@ -291,6 +291,24 @@ def load_product_choices():
     return g.product_choices
 
 
+def load_event_choices():
+    """Return event choices for reports, cached per request."""
+    if "event_choices" not in g:
+        events = Event.query.order_by(Event.start_date.desc(), Event.name).all()
+        g.event_choices = [
+            (
+                event.id,
+                (
+                    f"{event.name} "
+                    f"({event.start_date.isoformat()} to {event.end_date.isoformat()}) "
+                    f"- {'Closed' if event.closed else 'Open'}"
+                ),
+            )
+            for event in events
+        ]
+    return g.event_choices
+
+
 def load_location_menu_product_choices(location_id: int | None):
     """Return product choices for a location's current menu when available."""
     if not location_id:
@@ -1962,6 +1980,23 @@ class EventTerminalSalesReportForm(FlaskForm):
     def validate_end_date(self, field):
         if self.start_date.data and field.data and field.data < self.start_date.data:
             raise ValidationError("End date must be on or after the start date.")
+
+
+class EventSpoilageReportForm(FlaskForm):
+    events = SelectMultipleField(
+        "Events",
+        coerce=int,
+        render_kw={"size": 12},
+    )
+    submit = SubmitField("Generate Report")
+
+    def __init__(self, *args, **kwargs):
+        super(EventSpoilageReportForm, self).__init__(*args, **kwargs)
+        self.events.choices = load_event_choices()
+
+    def validate_events(self, field):
+        if not field.data:
+            raise ValidationError("Select at least one event.")
 
 
 class ProductRecipeReportForm(FlaskForm):
