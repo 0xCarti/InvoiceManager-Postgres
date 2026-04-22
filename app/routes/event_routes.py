@@ -77,6 +77,7 @@ from app.utils.pos_import import (
 )
 from app.utils.units import (
     DEFAULT_BASE_UNIT_CONVERSIONS,
+    convert_cost_for_reporting,
     convert_quantity,
     convert_quantity_for_reporting,
     get_unit_label,
@@ -4520,6 +4521,7 @@ def confirm_location(event_id, el_id):
                 else "",
             )
     stand_variances: list[dict] = []
+    conversions = _conversion_mapping()
     price_lookup = _build_item_price_lookup(el, stand_items)
     for entry in stand_items:
         sheet_values = entry.get("sheet_values")
@@ -4543,9 +4545,16 @@ def confirm_location(event_id, el_id):
         )
         has_sheet = entry.get("sheet") is not None
         item_obj = entry.get("item")
-        price_per_unit = (
+        price_per_unit_base = (
             price_lookup.get(item_obj.id)
             if item_obj is not None and price_lookup is not None
+            else None
+        )
+        price_per_unit = (
+            convert_cost_for_reporting(
+                price_per_unit_base, entry.get("base_unit"), conversions
+            )
+            if price_per_unit_base is not None
             else None
         )
         variance_amount = (

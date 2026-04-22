@@ -21,6 +21,7 @@ from app.models import (
     TerminalSale,
     User,
 )
+from app.utils.units import DEFAULT_BASE_UNIT_CONVERSIONS
 from tests.permission_helpers import grant_event_permissions
 from tests.utils import login
 
@@ -322,3 +323,111 @@ def test_confirm_location_populates_missing_file_totals(app, client):
         assert summary is not None
         assert summary.total_quantity == pytest.approx(4.0)
         assert summary.total_amount == pytest.approx(30.0)
+
+
+def test_confirm_location_uses_reporting_unit_prices_for_liquor_items(app, client):
+    with app.app_context():
+        app.config["BASE_UNIT_CONVERSIONS"] = {
+            **DEFAULT_BASE_UNIT_CONVERSIONS,
+            "millilitre": "ounce",
+        }
+
+        user = User(
+            email="liquor-confirm@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        location = Location(name="West Pop Up")
+        product = Product(name="Single Rye", price=8.25, cost=3.0)
+        item = Item(name="LQR - JP Wisers Rye", base_unit="millilitre")
+        event = Event(
+            name="Liquor Event",
+            start_date=date(2024, 4, 1),
+            end_date=date(2024, 4, 1),
+        )
+
+        db.session.add_all([user, location, product, item, event])
+        db.session.commit()
+        grant_event_permissions(user)
+
+        ounce_unit = ItemUnit(
+            item_id=item.id,
+            name="ounce",
+            factor=29.5735295625,
+            receiving_default=True,
+            transfer_default=True,
+        )
+        db.session.add(ounce_unit)
+        db.session.commit()
+
+        recipe = ProductRecipeItem(
+            product_id=product.id,
+            item_id=item.id,
+            unit=ounce_unit,
+            quantity=1,
+            countable=True,
+        )
+        location.products.append(product)
+        db.session.add_all(
+            [
+                recipe,
+                LocationStandItem(
+                    location_id=location.id,
+                    item_id=item.id,
+                    expected_count=0,
+                ),
+            ]
+        )
+        db.session.commit()
+
+        event_location = EventLocation(event=event, location=location)
+        db.session.add(event_location)
+        db.session.commit()
+
+        db.session.add_all(
+            [
+                TerminalSale(
+                    event_location_id=event_location.id,
+                    product_id=product.id,
+                    quantity=2.0,
+                ),
+                EventStandSheetItem(
+                    event_location_id=event_location.id,
+                    item_id=item.id,
+                    opening_count=3 * 29.5735295625,
+                    transferred_in=0,
+                    transferred_out=0,
+                    adjustments=0,
+                    eaten=0,
+                    spoiled=0,
+                    closing_count=0,
+                ),
+            ]
+        )
+        db.session.commit()
+
+        event_id = event.id
+        event_location_id = event_location.id
+        item_id = item.id
+        user_email = user.email
+
+    with captured_templates(app) as templates:
+        login_response = login(client, user_email, "pass")
+        assert login_response.status_code == 200
+        response = client.get(f"/events/{event_id}/locations/{event_location_id}/confirm")
+        assert response.status_code == 200
+
+    template_matches = [
+        (template, context)
+        for template, context in templates
+        if template.name == "events/confirm_location.html"
+    ]
+    assert template_matches, "Expected the confirm location template to render"
+    _, context = template_matches[0]
+
+    stand_entry = next(
+        entry for entry in context["stand_variances"] if entry["item"].id == item_id
+    )
+    assert stand_entry["price"] == pytest.approx(8.25)
+    assert stand_entry["variance"] == pytest.approx(1.0)
+    assert stand_entry["variance_amount"] == pytest.approx(8.25)
