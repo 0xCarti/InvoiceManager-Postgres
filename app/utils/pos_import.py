@@ -270,6 +270,8 @@ def parse_terminal_sales_email_rows(
     current_location: str | None = None
     global_header: dict[str, int] = {}
     current_header: dict[str, int] = {}
+    saw_product_since_last_total = False
+    saw_location_total_in_section = False
 
     for row_number, raw_row in enumerate(rows, start=1):
         row = list(raw_row)
@@ -288,6 +290,8 @@ def parse_terminal_sales_email_rows(
             current_location = location_name
             current_header = dict(global_header)
             parsed.setdefault(current_location, {"rows": [], "location_totals": []})
+            saw_product_since_last_total = False
+            saw_location_total_in_section = False
             continue
 
         if not current_location:
@@ -314,6 +318,12 @@ def parse_terminal_sales_email_rows(
             for name in ("quantity", "net_inc", "discount", "amount")
         )
         if not product_name and has_numeric_aggregate:
+            # Some IdealPOS exports append a single workbook grand total after the
+            # last location subtotal. Once a section already emitted a subtotal,
+            # ignore any additional aggregate-only rows until another product row
+            # appears or a new location header starts.
+            if saw_location_total_in_section and not saw_product_since_last_total:
+                continue
             parsed[current_location]["location_totals"].append(
                 {
                     "row_number": row_number,
@@ -325,6 +335,8 @@ def parse_terminal_sales_email_rows(
                     "line_total": line_total,
                 }
             )
+            saw_location_total_in_section = True
+            saw_product_since_last_total = False
             continue
 
         if not product_name:
@@ -348,6 +360,7 @@ def parse_terminal_sales_email_rows(
                 "unit_price": unit_price,
             }
         )
+        saw_product_since_last_total = True
 
     return dict(parsed)
 

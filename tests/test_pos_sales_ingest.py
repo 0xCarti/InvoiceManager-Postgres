@@ -213,6 +213,8 @@ def test_stage_pos_sales_import_handles_stock_item_sales_location_layout(
             discounts="0.00",
         ),
         make_row(quantity="2", net_inc="10.00", discounts="0.00"),
+        [""] * 22,
+        make_row(quantity="7", net_inc="29.18", discounts="3.32"),
     ]
 
     monkeypatch.setattr(
@@ -264,5 +266,9 @@ def test_stage_pos_sales_import_handles_stock_item_sales_location_layout(
         assert locations[0].net_inc == 19.18
         assert locations[0].discounts_abs == 3.32
         assert locations[0].computed_total == 22.5
+        assert locations[1].total_quantity == 2.0
+        assert locations[1].net_inc == 10.0
+        assert locations[1].discounts_abs == 0.0
+        assert locations[1].computed_total == 10.0
         assert rows[0].quantity == 5.0
         assert rows[0].computed_unit_price == 4.5

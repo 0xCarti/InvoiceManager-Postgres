@@ -150,3 +150,47 @@ def test_parse_terminal_sales_email_rows_handles_stock_item_sales_location_layou
     assert tap_rows[0]["quantity"] == Decimal("2")
     assert tap_rows[0]["line_total"] == Decimal("10.00")
     assert tap_rows[0]["unit_price"] == Decimal("5.00")
+
+
+def test_parse_terminal_sales_email_rows_ignores_workbook_grand_total_after_last_location():
+    rows = [
+        _stock_item_sales_header_row(),
+        ["AG CENTRE"] + [""] * 21,
+        _stock_item_sales_row(
+            product_code="65",
+            product_name="591ml Pepsi",
+            quantity="5",
+            net_inc="19.18",
+            discounts="3.32",
+        ),
+        _stock_item_sales_row(
+            quantity="5",
+            net_inc="19.18",
+            discounts="3.32",
+        ),
+        ["TAP ROOM"] + [""] * 21,
+        _stock_item_sales_row(
+            product_code="240",
+            product_name="Apple Juice",
+            quantity="2",
+            net_inc="10.00",
+            discounts="0.00",
+        ),
+        _stock_item_sales_row(
+            quantity="2",
+            net_inc="10.00",
+            discounts="0.00",
+        ),
+        [""] * 22,
+        _stock_item_sales_row(
+            quantity="7",
+            net_inc="29.18",
+            discounts="3.32",
+        ),
+    ]
+
+    parsed = parse_terminal_sales_email_rows(rows)
+
+    assert len(parsed["TAP ROOM"]["location_totals"]) == 1
+    assert parsed["TAP ROOM"]["location_totals"][0]["quantity"] == Decimal("2")
+    assert parsed["TAP ROOM"]["location_totals"][0]["line_total"] == Decimal("10.00")
