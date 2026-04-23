@@ -2638,12 +2638,13 @@ def sales_imports():
         )
         actionable_issue_count = (
             issue_state["issue_count"]
-            if import_record.status in {"pending", "needs_mapping"}
+            if import_record.status in _SALES_IMPORT_REVIEW_EDITABLE_STATUSES
             else 0
         )
         import_record.issue_count = actionable_issue_count
         import_record.can_direct_approve = (
-            import_record.status == "pending" and actionable_issue_count == 0
+            _sales_import_can_be_approved(import_record)
+            and actionable_issue_count == 0
         )
         import_record.attachment_available = (
             _get_sales_import_attachment_path(import_record) is not None
@@ -2674,6 +2675,31 @@ def _parse_sales_import_approval_changes(row: PosSalesImportRow) -> list[dict]:
 
 
 _SALES_IMPORT_PRICE_ACTIONS = {"file", "app", "custom", "skip"}
+_SALES_IMPORT_REVIEW_EDITABLE_STATUSES = {
+    PosSalesImport.STATUS_PENDING,
+    PosSalesImport.STATUS_NEEDS_MAPPING,
+    PosSalesImport.STATUS_REVERSED,
+}
+_SALES_IMPORT_APPROVABLE_STATUSES = {
+    PosSalesImport.STATUS_PENDING,
+    PosSalesImport.STATUS_REVERSED,
+}
+
+
+def _sales_import_review_is_editable(import_record: PosSalesImport) -> bool:
+    return import_record.status in _SALES_IMPORT_REVIEW_EDITABLE_STATUSES
+
+
+def _sales_import_can_be_approved(import_record: PosSalesImport) -> bool:
+    return import_record.status in _SALES_IMPORT_APPROVABLE_STATUSES
+
+
+def _sales_import_review_locked_message(import_record: PosSalesImport) -> str:
+    if import_record.status == PosSalesImport.STATUS_APPROVED:
+        return "Undo the approved import before changing review mappings or prices."
+    if import_record.status == PosSalesImport.STATUS_DELETED:
+        return "Deleted imports cannot be changed."
+    return "Review changes are only allowed while the import is pending approval or after an undo."
 
 
 def _parse_sales_import_row_metadata(row: PosSalesImportRow) -> dict[str, Any]:
@@ -2774,7 +2800,7 @@ def _sync_sales_import_event_assignments(
     *,
     candidate_lookup: dict[int, list[EventLocation]] | None = None,
 ) -> bool:
-    if sales_import.status not in {"pending", "needs_mapping"}:
+    if sales_import.status not in _SALES_IMPORT_REVIEW_EDITABLE_STATUSES:
         return False
 
     candidate_lookup = (
@@ -3423,15 +3449,15 @@ def _approve_sales_import(import_id: int) -> bool:
             flash("The requested import could not be found.", "danger")
             return False
 
-        if locked_import.status in {"pending", "needs_mapping"}:
+        if locked_import.status in _SALES_IMPORT_REVIEW_EDITABLE_STATUSES:
             _sync_sales_import_event_assignments(locked_import)
             issue_state = _refresh_sales_import_mapping_status(locked_import)
         else:
             issue_state = _collect_sales_import_issue_state(locked_import)
 
-        if locked_import.status != "pending":
+        if not _sales_import_can_be_approved(locked_import):
             flash(
-                "Import approval is only allowed while the import status is Pending.",
+                "Import approval is only allowed while the import status is Pending or Reversed.",
                 "warning",
             )
             return False
@@ -3834,7 +3860,19 @@ def sales_import_detail(import_id: int):
         action = (request.form.get("action") or "").strip()
         selected_location_id = request.form.get("selected_location_id", type=int)
 
+        def _redirect_review_locked():
+            flash(_sales_import_review_locked_message(sales_import), "warning")
+            return redirect(
+                url_for(
+                    "admin.sales_import_detail",
+                    import_id=sales_import.id,
+                    location_id=selected_location_id,
+                )
+            )
+
         if action == "save_sales_date":
+            if not _sales_import_review_is_editable(sales_import):
+                return _redirect_review_locked()
             raw_sales_date = (request.form.get("sales_date") or "").strip()
             if not raw_sales_date:
                 flash("Select the sales date before saving.", "warning")
@@ -3853,6 +3891,8 @@ def sales_import_detail(import_id: int):
                     )
 
         elif action == "map_location":
+            if not _sales_import_review_is_editable(sales_import):
+                return _redirect_review_locked()
             location_import_id = request.form.get("location_import_id", type=int)
             target_location_id = request.form.get("target_location_id", type=int)
             location_record = next(
@@ -3891,6 +3931,8 @@ def sales_import_detail(import_id: int):
                 )
 
         elif action == "create_location":
+            if not _sales_import_review_is_editable(sales_import):
+                return _redirect_review_locked()
             if not current_user.has_permission("locations.create"):
                 abort(403)
             location_import_id = request.form.get("location_import_id", type=int)
@@ -3939,6 +3981,8 @@ def sales_import_detail(import_id: int):
                 )
 
         elif action == "map_product":
+            if not _sales_import_review_is_editable(sales_import):
+                return _redirect_review_locked()
             row_id = request.form.get("row_id", type=int)
             target_product_id = request.form.get("target_product_id", type=int)
             row_record = next(
@@ -3982,6 +4026,8 @@ def sales_import_detail(import_id: int):
                 )
 
         elif action == "create_product":
+            if not _sales_import_review_is_editable(sales_import):
+                return _redirect_review_locked()
             row_id = request.form.get("row_id", type=int)
             row_record = next(
                 (
@@ -4010,6 +4056,8 @@ def sales_import_detail(import_id: int):
                 )
 
         elif action == "resolve_row_price":
+            if not _sales_import_review_is_editable(sales_import):
+                return _redirect_review_locked()
             row_id = request.form.get("row_id", type=int)
             resolution = _normalize_sales_import_price_action(
                 request.form.get("price_resolution")
@@ -4025,11 +4073,6 @@ def sales_import_detail(import_id: int):
             )
             if not row_record:
                 flash("Unable to find the selected import row.", "danger")
-            elif sales_import.status not in {"pending", "needs_mapping"}:
-                flash(
-                    "Price review can only be changed while the import is pending approval.",
-                    "warning",
-                )
             elif resolution is None:
                 flash("Choose how this row should handle pricing before saving.", "warning")
             elif row_record.product_id is None and resolution != "skip":
@@ -4079,6 +4122,8 @@ def sales_import_detail(import_id: int):
                 )
 
         elif action == "refresh_auto_mapping":
+            if not _sales_import_review_is_editable(sales_import):
+                return _redirect_review_locked()
             auto_mapping_changed = _apply_auto_mappings()
             issue_state = _sync_detail_review_state()
             if (
@@ -4316,7 +4361,9 @@ def sales_import_detail(import_id: int):
                 locked_import.reversal_batch_id = reversal_batch_id
                 locked_import.reversal_reason = reversal_reason
                 db.session.commit()
-                success_message = "Import reversal complete."
+                success_message = (
+                    "Import reversal complete. Review changes are unlocked and the import can be approved again."
+                )
                 if row_change_count:
                     success_message += (
                         f" Reversed approved sales rows for {row_change_count} row"
@@ -4531,7 +4578,9 @@ def sales_import_detail(import_id: int):
         reversal_warnings=reversal_warnings,
         row_review_data=row_review_data,
         location_discount_totals=location_discount_totals,
-        price_review_locked=sales_import.status not in {"pending", "needs_mapping"},
+        can_approve_import=_sales_import_can_be_approved(sales_import),
+        review_edit_locked=not _sales_import_review_is_editable(sales_import),
+        price_review_locked=not _sales_import_review_is_editable(sales_import),
         undo_confirm_form=undo_confirm_form,
     )
 

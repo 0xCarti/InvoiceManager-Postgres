@@ -58,6 +58,53 @@ def _seed_import_with_unresolved_rows(app, *, message_id: str = "msg-map-1"):
         return sales_import.id, location.id, row.id
 
 
+def _seed_import_with_existing_location_mapping(
+    app, *, message_id: str = "msg-mapped-location"
+):
+    with app.app_context():
+        mapped_location = Location(name=f"Sugar Rush {message_id}")
+        override_location = Location(name=f"Caesar Bar {message_id}")
+        product = Product(name=f"Mapped Product {message_id}", price=6.0, cost=2.5)
+        db.session.add_all([mapped_location, override_location, product])
+        db.session.flush()
+
+        sales_import = PosSalesImport(
+            source_provider="mailgun",
+            message_id=message_id,
+            attachment_filename="sales.xls",
+            attachment_sha256=(message_id[-1] or "m") * 64,
+            status="pending",
+        )
+        db.session.add(sales_import)
+        db.session.flush()
+
+        location = PosSalesImportLocation(
+            import_id=sales_import.id,
+            source_location_name=mapped_location.name,
+            normalized_location_name=mapped_location.name.lower().replace(" ", "_"),
+            location_id=mapped_location.id,
+            parse_index=0,
+        )
+        db.session.add(location)
+        db.session.flush()
+
+        db.session.add(
+            PosSalesImportRow(
+                import_id=sales_import.id,
+                location_import_id=location.id,
+                source_product_name=product.name,
+                normalized_product_name=product.name.lower().replace(" ", "_"),
+                product_id=product.id,
+                quantity=1.0,
+                computed_unit_price=product.price,
+                parse_index=0,
+            )
+        )
+        db.session.commit()
+
+        return sales_import.id, location.id, mapped_location.id, override_location.id
+
+
 def test_mapping_resolution_create_or_map_flow_updates_rows_and_aliases(client, app):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
@@ -154,6 +201,32 @@ def test_mapping_resolution_create_or_map_flow_updates_rows_and_aliases(client, 
         assert created_product.price == pytest.approx(6.5)
         assert location_alias.location_id == created_location.id
         assert product_alias.product_id == created_product.id
+
+
+def test_sales_import_detail_shows_override_location_mapping_for_existing_match(
+    client, app
+):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    import_id, _, mapped_location_id, override_location_id = (
+        _seed_import_with_existing_location_mapping(
+            app, message_id="msg-existing-location-map-ui"
+        )
+    )
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.get(
+            f"/controlpanel/sales-imports/{import_id}",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Override location mapping" in body
+    assert "Currently mapped to Sugar Rush msg-existing-location-map-ui" in body
+    assert f'option value="{mapped_location_id}" selected' in body
+    assert f'value="{override_location_id}"' in body
 
 
 @pytest.mark.parametrize(

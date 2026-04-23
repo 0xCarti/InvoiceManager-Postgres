@@ -1400,6 +1400,152 @@ def test_admin_can_undo_approved_sales_import_and_restore_inventory(client, app)
         assert len(metadata["reversal"]["changes"]) == 1
 
 
+def test_admin_can_reapprove_reversed_sales_import_after_location_override(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        original_location = Location(name="Sugar Rush")
+        corrected_location = Location(name="Caesar Bar")
+        item = Item(name="Override Patty", base_unit="each", quantity=40.0)
+        product = Product(name="Override Burger", price=10.0, cost=3.0)
+        db.session.add_all([original_location, corrected_location, item, product])
+        db.session.flush()
+
+        db.session.add(
+            ProductRecipeItem(
+                product_id=product.id,
+                item_id=item.id,
+                quantity=2.0,
+                countable=True,
+            )
+        )
+        db.session.add_all(
+            [
+                LocationStandItem(
+                    location_id=original_location.id,
+                    item_id=item.id,
+                    expected_count=30.0,
+                ),
+                LocationStandItem(
+                    location_id=corrected_location.id,
+                    item_id=item.id,
+                    expected_count=20.0,
+                ),
+            ]
+        )
+
+        sales_import = PosSalesImport(
+            source_provider="mailgun",
+            message_id="msg-reapprove-override-1",
+            attachment_filename="sales.xls",
+            attachment_sha256="r" * 64,
+            status="pending",
+        )
+        db.session.add(sales_import)
+        db.session.flush()
+
+        import_location = PosSalesImportLocation(
+            import_id=sales_import.id,
+            source_location_name="Sugar Rush",
+            normalized_location_name="sugar_rush",
+            location_id=original_location.id,
+            parse_index=0,
+        )
+        db.session.add(import_location)
+        db.session.flush()
+
+        db.session.add(
+            PosSalesImportRow(
+                import_id=sales_import.id,
+                location_import_id=import_location.id,
+                source_product_name="Override Burger",
+                normalized_product_name="override_burger",
+                product_id=product.id,
+                quantity=4.0,
+                computed_unit_price=product.price,
+                parse_index=0,
+            )
+        )
+        db.session.commit()
+        sales_import_id = sales_import.id
+        location_import_id = import_location.id
+        original_location_id = original_location.id
+        corrected_location_id = corrected_location.id
+        item_id = item.id
+
+    with client:
+        login(client, admin_email, admin_pass)
+
+        approve_response = client.post(
+            f"/controlpanel/sales-imports/{sales_import_id}",
+            data={"action": "approve_import"},
+            follow_redirects=True,
+        )
+        assert approve_response.status_code == 200
+        assert b"Import approved" in approve_response.data
+
+        with app.app_context():
+            first_approval_batch_id = (
+                db.session.get(PosSalesImport, sales_import_id).approval_batch_id
+            )
+
+        undo_response = client.post(
+            f"/controlpanel/sales-imports/{sales_import_id}",
+            data={
+                "action": "undo_approved_import",
+                "reversal_reason": "Need to move sales to Caesar Bar",
+            },
+            follow_redirects=True,
+        )
+        assert undo_response.status_code == 200
+        assert b"can be approved again" in undo_response.data
+
+        remap_response = client.post(
+            f"/controlpanel/sales-imports/{sales_import_id}",
+            data={
+                "action": "map_location",
+                "location_import_id": location_import_id,
+                "target_location_id": corrected_location_id,
+                "selected_location_id": location_import_id,
+            },
+            follow_redirects=True,
+        )
+        assert remap_response.status_code == 200
+        assert b"Location mapping saved" in remap_response.data
+
+        reapprove_response = client.post(
+            f"/controlpanel/sales-imports/{sales_import_id}",
+            data={
+                "action": "approve_import",
+                "selected_location_id": location_import_id,
+            },
+            follow_redirects=True,
+        )
+        assert reapprove_response.status_code == 200
+        assert b"Import approved" in reapprove_response.data
+
+    with app.app_context():
+        sales_import = db.session.get(PosSalesImport, sales_import_id)
+        import_location = db.session.get(PosSalesImportLocation, location_import_id)
+        original_record = LocationStandItem.query.filter_by(
+            location_id=original_location_id,
+            item_id=item_id,
+        ).one()
+        corrected_record = LocationStandItem.query.filter_by(
+            location_id=corrected_location_id,
+            item_id=item_id,
+        ).one()
+        refreshed_item = db.session.get(Item, item_id)
+
+        assert sales_import.status == "approved"
+        assert sales_import.approval_batch_id != first_approval_batch_id
+        assert import_location.location_id == corrected_location_id
+        assert original_record.expected_count == 30.0
+        assert corrected_record.expected_count == 12.0
+        assert refreshed_item.quantity == 32.0
+
+
 def test_sales_import_undo_blocked_unless_import_is_approved(client, app):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")

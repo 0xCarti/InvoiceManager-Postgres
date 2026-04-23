@@ -25,6 +25,11 @@
             {% if sales_import.reversal_reason %}&middot; Reason: {{ sales_import.reversal_reason }}{% endif %}
         </p>
         {% endif %}
+        {% if sales_import.status == 'reversed' %}
+        <p class="text-muted mb-0 small">
+            Review changes are unlocked. Fix mappings or pricing, then approve the import again when it is ready.
+        </p>
+        {% endif %}
         {% if sales_import.deleted_at %}
         <p class="text-muted mb-0 small">
             Deleted by {{ sales_import.deleter.username if sales_import.deleter else ('User #' ~ sales_import.deleted_by) }}
@@ -44,7 +49,7 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="action" value="approve_import">
             <input type="hidden" name="selected_location_id" value="{{ selected_location.id if selected_location else '' }}">
-            <button type="submit" class="btn btn-success btn-sm" {% if unresolved_location_count or unresolved_event_location_count or unresolved_row_count or unresolved_price_count or sales_import.status != 'pending' %}disabled{% endif %}>
+            <button type="submit" class="btn btn-success btn-sm" {% if unresolved_location_count or unresolved_event_location_count or unresolved_row_count or unresolved_price_count or not can_approve_import %}disabled{% endif %}>
                 Approve Import
             </button>
         </form>
@@ -61,7 +66,7 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="action" value="refresh_auto_mapping">
             <input type="hidden" name="selected_location_id" value="{{ selected_location.id if selected_location else '' }}">
-            <button type="submit" class="btn btn-outline-primary btn-sm">Refresh Auto-Mapping</button>
+            <button type="submit" class="btn btn-outline-primary btn-sm" {% if review_edit_locked %}disabled{% endif %}>Refresh Auto-Mapping</button>
         </form>
         <button
             type="button"
@@ -138,10 +143,11 @@
                             class="form-control"
                             value="{{ sales_import.sales_date.isoformat() if sales_import.sales_date else '' }}"
                             required
+                            {% if review_edit_locked %}disabled{% endif %}
                         >
                     </div>
                     <div class="col-sm-4">
-                        <button type="submit" class="btn btn-outline-primary w-100">Save Date</button>
+                        <button type="submit" class="btn btn-outline-primary w-100" {% if review_edit_locked %}disabled{% endif %}>Save Date</button>
                     </div>
                 </form>
                 {% else %}
@@ -170,6 +176,11 @@
 {% else %}
 <div class="alert alert-success py-2">
     All mappings and price checks are resolved. This import is ready for approval.
+</div>
+{% endif %}
+{% if sales_import.status == 'reversed' %}
+<div class="alert alert-info py-2">
+    This import has been undone already. Review edits are available now, and approving it again will reapply the sales using the updated mappings.
 </div>
 {% endif %}
 
@@ -280,9 +291,16 @@
                     </ul>
                 </div>
                 {% endif %}
-                {% if can_manage_sales_imports and selected_location.location_id is none %}
+                {% if can_manage_sales_imports and not review_edit_locked %}
                 <div class="border rounded p-3 mb-3 bg-light">
-                    <div class="fw-semibold mb-2">Resolve location mapping</div>
+                    <div class="fw-semibold mb-2">{{ 'Resolve location mapping' if selected_location.location_id is none else 'Override location mapping' }}</div>
+                    <div class="small text-muted mb-2">
+                        {% if selected_location.location %}
+                        Currently mapped to {{ selected_location.location.name }}. Save another location to override that mapping for this import alias.
+                        {% else %}
+                        Choose the correct app location for this import location before approval.
+                        {% endif %}
+                    </div>
                     <form method="post" class="row g-2 align-items-end mb-2">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="action" value="map_location">
@@ -293,7 +311,7 @@
                             <select class="form-select form-select-sm" name="target_location_id" required>
                                 <option value="">Select location</option>
                                 {% for location in locations %}
-                                <option value="{{ location.id }}">{{ location.name }}</option>
+                                <option value="{{ location.id }}" {% if selected_location.location_id == location.id %}selected{% endif %}>{{ location.name }}</option>
                                 {% endfor %}
                             </select>
                         </div>
@@ -680,7 +698,7 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-2">This will reverse inventory updates using stored approval metadata and set this import to <strong>Reversed</strong>.</p>
+                    <p class="mb-2">This will reverse inventory updates using stored approval metadata and set this import to <strong>Reversed</strong> so you can review and approve it again.</p>
                     {% if reversal_warnings %}
                     <div class="alert alert-warning py-2 small">
                         <div class="fw-semibold">Potential negative inventory impact:</div>
