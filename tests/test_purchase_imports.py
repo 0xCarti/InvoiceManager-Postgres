@@ -2,7 +2,6 @@ import datetime
 import io
 import re
 import zipfile
-from pathlib import Path
 
 import pytest
 from openpyxl import Workbook
@@ -22,14 +21,6 @@ def _make_pratts_file(csv_text: str) -> FileStorage:
 
 def _make_pratts_vendor() -> Vendor:
     return Vendor(first_name="Pratt", last_name="Supplies")
-
-
-def _make_central_supply_file(csv_text: str) -> FileStorage:
-    return FileStorage(stream=io.BytesIO(csv_text.encode()), filename="central.csv")
-
-
-def _make_central_supply_vendor() -> Vendor:
-    return Vendor(first_name="Central", last_name="Supply")
 
 
 def _make_manitoba_vendor() -> Vendor:
@@ -163,59 +154,6 @@ def test_parse_pratts_csv_invalid_quantities():
     assert "No purchasable lines found" in str(excinfo.value)
 
 
-def test_parse_central_supply_csv_success():
-    fixture_path = Path(__file__).parent / "fixtures" / "central_supply_sample.csv"
-    parsed = parse_purchase_order_csv(
-        _make_central_supply_file(fixture_path.read_text()),
-        _make_central_supply_vendor(),
-    )
-
-    assert parsed.order_number == "ORD-9001"
-    assert parsed.expected_total == 25.0
-
-    quantities = [line.quantity for line in parsed.items]
-    assert quantities == [2, 5, 3]
-
-    descriptions = {line.vendor_description for line in parsed.items}
-    assert descriptions == {"Alpha Item", "Beta Item", "Gamma Item"}
-
-    pack_sizes = {line.pack_size for line in parsed.items}
-    assert pack_sizes == {"1/12 oz", "2/6 ct", "1/1 lb"}
-
-
-def test_parse_central_supply_missing_headers():
-    csv_text = """Vendor SKU,Item Description,Order Qty,Extended Price
-CS-001,Alpha Item,2,7.00
-"""
-
-    with pytest.raises(CSVImportError) as excinfo:
-        parse_purchase_order_csv(
-            _make_central_supply_file(csv_text), _make_central_supply_vendor()
-        )
-
-    assert "Missing required Central Supply columns" in str(excinfo.value)
-    assert "price" in str(excinfo.value)
-
-
-def test_parse_central_supply_ignores_invalid_quantities():
-    csv_text = """Vendor SKU,Item Description,Order Qty,Unit Price,Extended Price
-CS-001,Alpha Item,0,3.50,0.00
-CS-002,Beta Item,,1.20,0.00
-CS-003,Gamma Item,-1,4.00,-4.00
-CS-004,Delta Item,4,2.00,8.00
-"""
-
-    parsed = parse_purchase_order_csv(
-        _make_central_supply_file(csv_text), _make_central_supply_vendor()
-    )
-
-    assert len(parsed.items) == 1
-    only_item: ParsedPurchaseLine = parsed.items[0]
-    assert only_item.vendor_sku == "CS-004"
-    assert only_item.quantity == 4
-    assert parsed.expected_total == 8.0
-
-
 def test_parse_manitoba_liquor_xlsx_success_with_malformed_dimension():
     parsed = parse_purchase_order_csv(
         _make_manitoba_file(malformed_dimension=True),
@@ -239,6 +177,72 @@ def test_parse_manitoba_liquor_xlsx_success_with_malformed_dimension():
     assert second.vendor_description == "OLD STYLE PILSNER 58.67L KEG"
     assert second.quantity == 8
     assert second.unit_cost == pytest.approx(219.99)
+
+
+def test_parse_manitoba_liquor_xlsx_supports_actual_export_headers():
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(
+        [
+            "Item Number",
+            "Order Quantity",
+            "Product Description",
+            "Package Size",
+            "Unit Price",
+            "Extended Price",
+            "Distributor",
+            "Case Qty",
+            "Units per Case",
+        ]
+    )
+    sheet.append(
+        [
+            15485,
+            480,
+            "COORS ORIGINAL 473C",
+            "473 ml x 24",
+            3.44,
+            1651.20,
+            "BREWERS DISTRIBUTOR LTD.",
+            20,
+            24,
+        ]
+    )
+    sheet.append(
+        [
+            18669,
+            70,
+            "COORS ORIGINAL 24/355C",
+            "8520 ml x 1",
+            46.57,
+            3259.90,
+            "BREWERS DISTRIBUTOR LTD.",
+            70,
+            1,
+        ]
+    )
+
+    stream = io.BytesIO()
+    workbook.save(stream)
+    workbook.close()
+
+    parsed = parse_purchase_order_csv(
+        FileStorage(stream=io.BytesIO(stream.getvalue()), filename="mbll.xlsx"),
+        _make_manitoba_vendor(),
+    )
+
+    assert len(parsed.items) == 2
+    assert parsed.order_number is None
+    assert parsed.order_date is None
+    assert parsed.expected_total == pytest.approx(4911.10)
+
+    first: ParsedPurchaseLine = parsed.items[0]
+    assert first.vendor_sku == "15485"
+    assert first.pack_size == "473 ml x 24"
+
+    second: ParsedPurchaseLine = parsed.items[1]
+    assert second.vendor_sku == "18669"
+    assert second.pack_size == "8520 ml x 1"
 
 
 def test_parse_manitoba_liquor_xlsx_missing_headers():

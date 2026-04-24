@@ -25,6 +25,20 @@
       padding-bottom: 4px;
       margin-bottom: 10px;
     }
+    .usage-date {
+      display: flex;
+      justify-content: flex-end;
+      align-items: flex-end;
+      gap: 8px;
+      font-size: 11px;
+      margin-bottom: 10px;
+    }
+    .usage-date .line {
+      display: inline-block;
+      min-width: 140px;
+      border-bottom: 1px solid #000;
+      height: 1em;
+    }
     .table table {
       width: 100%;
       border-collapse: collapse;
@@ -75,6 +89,10 @@
   <section class="report standsheet-page">
     <div class="meta">
       <div>Location: {{ location.name }}</div>
+    </div>
+    <div class="usage-date">
+      <span>Date Used</span>
+      <span class="line"></span>
     </div>
     <div class="table">
       <table>

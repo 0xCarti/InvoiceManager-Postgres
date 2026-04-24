@@ -76,6 +76,7 @@ def test_location_stand_sheet_pdf_contains_items(app, monkeypatch):
             base_url=request.url_root,
         )
         assert item_name.encode() in pdf_bytes
+        assert b"Date Used" in pdf_bytes
         assert captured_base_url["base_url"] == request.url_root
         assert captured_styles["string"] == "@page { size: letter landscape; }"
         assert isinstance(captured_styles["stylesheets"], list)
@@ -162,6 +163,7 @@ def test_event_stand_sheet_pdf_contains_items(app, monkeypatch):
             base_url=request.url_root,
         )
         assert item_name.encode() in pdf_bytes
+        assert b"Date Used" in pdf_bytes
         assert captured_base_url["base_url"] == request.url_root
         assert captured_styles["string"] == "@page { size: letter landscape; }"
         assert isinstance(captured_styles["stylesheets"], list)

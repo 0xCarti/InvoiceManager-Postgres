@@ -2990,17 +2990,202 @@ def _restore_event_location_sales_state(
         )
 
 
+def _empty_event_linked_variance_details() -> dict[str, list[dict[str, Any]]]:
+    return {
+        "products": [],
+        "price_mismatches": [],
+        "menu_issues": [],
+        "unmapped_products": [],
+    }
+
+
+def _normalize_event_linked_variance_details(
+    value: Any,
+) -> dict[str, list[dict[str, Any]]]:
+    normalized = _empty_event_linked_variance_details()
+    if not isinstance(value, dict):
+        return normalized
+    for key in normalized:
+        entries = value.get(key)
+        if isinstance(entries, list):
+            normalized[key] = [entry for entry in entries if isinstance(entry, dict)]
+    return normalized
+
+
+def _event_linked_variance_details_has_entries(value: Any) -> bool:
+    details = _normalize_event_linked_variance_details(value)
+    return any(details[key] for key in details)
+
+
+def _build_event_linked_sales_summary_contribution(
+    import_locations: list[PosSalesImportLocation],
+) -> dict[str, Any]:
+    source_location_names: list[str] = []
+    skipped_rows: list[dict[str, Any]] = []
+    total_quantity = 0.0
+    total_amount = 0.0
+
+    for import_location in import_locations:
+        source_name = (import_location.source_location_name or "").strip()
+        if source_name and source_name not in source_location_names:
+            source_location_names.append(source_name)
+
+        total_quantity += float(import_location.total_quantity or 0.0)
+        total_amount += float(import_location.computed_total or 0.0)
+
+        for row in import_location.rows:
+            review = _get_sales_import_row_review(row)
+            action = _normalize_sales_import_price_action(review.get("price_action"))
+            if action != "skip":
+                continue
+            file_price = coerce_float(row.computed_unit_price)
+            skipped_rows.append(
+                {
+                    "product_name": row.source_product_name,
+                    "quantity": float(row.quantity or 0.0),
+                    "file_amount": float(row.computed_line_total or 0.0),
+                    "file_prices": [file_price] if file_price is not None else [],
+                    "sales_location": source_name or None,
+                }
+            )
+
+    variance_details = None
+    if skipped_rows:
+        variance_details = _empty_event_linked_variance_details()
+        variance_details["unmapped_products"] = skipped_rows
+
+    return {
+        "source_location": ", ".join(source_location_names) or None,
+        "total_quantity": total_quantity,
+        "total_amount": total_amount,
+        "variance_details": variance_details,
+    }
+
+
+def _split_event_linked_source_locations(value: Any) -> list[str]:
+    if not isinstance(value, str):
+        return []
+    seen: set[str] = set()
+    names: list[str] = []
+    for chunk in value.split(","):
+        normalized = chunk.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        names.append(normalized)
+    return names
+
+
+def _event_location_has_remaining_approved_source_name(
+    event_location_id: int,
+    source_name: str,
+    *,
+    excluded_import_id: int | None = None,
+) -> bool:
+    query = (
+        PosSalesImportLocation.query.join(
+            PosSalesImport, PosSalesImport.id == PosSalesImportLocation.import_id
+        )
+        .filter(PosSalesImportLocation.event_location_id == event_location_id)
+        .filter(PosSalesImport.status == PosSalesImport.STATUS_APPROVED)
+        .filter(PosSalesImportLocation.source_location_name == source_name)
+    )
+    if excluded_import_id is not None:
+        query = query.filter(PosSalesImportLocation.import_id != excluded_import_id)
+    return query.first() is not None
+
+
+def _apply_event_linked_summary_delta(
+    event_location_id: int,
+    contribution: dict[str, Any],
+    *,
+    mode: str,
+    excluded_import_id: int | None = None,
+) -> None:
+    summary_record = EventLocationTerminalSalesSummary.query.filter_by(
+        event_location_id=event_location_id
+    ).first()
+    contribution_quantity = float(contribution.get("total_quantity") or 0.0)
+    contribution_amount = float(contribution.get("total_amount") or 0.0)
+    contribution_names = _split_event_linked_source_locations(
+        contribution.get("source_location")
+    )
+    contribution_details = _normalize_event_linked_variance_details(
+        contribution.get("variance_details")
+    )
+
+    if summary_record is None:
+        if mode == "subtract":
+            return
+        summary_record = EventLocationTerminalSalesSummary(
+            event_location_id=event_location_id
+        )
+        db.session.add(summary_record)
+
+    existing_quantity = float(summary_record.total_quantity or 0.0)
+    existing_amount = float(summary_record.total_amount or 0.0)
+    existing_names = _split_event_linked_source_locations(summary_record.source_location)
+    existing_details = _normalize_event_linked_variance_details(
+        summary_record.variance_details
+    )
+
+    if mode == "add":
+        updated_quantity = existing_quantity + contribution_quantity
+        updated_amount = existing_amount + contribution_amount
+        for name in contribution_names:
+            if name not in existing_names:
+                existing_names.append(name)
+        for key in existing_details:
+            existing_details[key].extend(contribution_details[key])
+    else:
+        updated_quantity = existing_quantity - contribution_quantity
+        updated_amount = existing_amount - contribution_amount
+        retained_names: list[str] = []
+        for name in existing_names:
+            if (
+                name in contribution_names
+                and not _event_location_has_remaining_approved_source_name(
+                    event_location_id,
+                    name,
+                    excluded_import_id=excluded_import_id,
+                )
+            ):
+                continue
+            if name not in retained_names:
+                retained_names.append(name)
+        existing_names = retained_names
+        for key in existing_details:
+            for entry in contribution_details[key]:
+                if entry in existing_details[key]:
+                    existing_details[key].remove(entry)
+
+    if abs(updated_quantity) < 1e-9:
+        updated_quantity = 0.0
+    if abs(updated_amount) < 1e-9:
+        updated_amount = 0.0
+
+    has_details = _event_linked_variance_details_has_entries(existing_details)
+    if (
+        not existing_names
+        and not has_details
+        and abs(updated_quantity) < 1e-9
+        and abs(updated_amount) < 1e-9
+    ):
+        db.session.delete(summary_record)
+        return
+
+    summary_record.source_location = ", ".join(existing_names) or None
+    summary_record.total_quantity = updated_quantity
+    summary_record.total_amount = updated_amount
+    summary_record.variance_details = existing_details if has_details else None
+
+
 def _build_event_linked_sales_application_payload(
     sales_import: PosSalesImport,
     import_locations: list[PosSalesImportLocation],
     row_review_data: dict[int, dict[str, Any]],
 ) -> dict[str, Any]:
     aggregated_sales: dict[int, dict[str, Any]] = {}
-    source_location_names: list[str] = []
-    skipped_rows: list[dict[str, Any]] = []
-    total_quantity = 0.0
-    total_amount = 0.0
-
     sales_date_value = sales_import.sales_date
     sold_at = (
         datetime.combine(sales_date_value, time(hour=12))
@@ -3009,12 +3194,6 @@ def _build_event_linked_sales_application_payload(
     )
 
     for import_location in import_locations:
-        source_name = (import_location.source_location_name or "").strip()
-        if source_name and source_name not in source_location_names:
-            source_location_names.append(source_name)
-        total_quantity += float(import_location.total_quantity or 0.0)
-        total_amount += float(import_location.computed_total or 0.0)
-
         for row in import_location.rows:
             row_review = row_review_data.get(row.id, {})
             if row_review.get("is_active") and row.product_id is not None:
@@ -3029,43 +3208,24 @@ def _build_event_linked_sales_application_payload(
                 payload["quantity"] += float(row.quantity or 0.0)
                 continue
 
-            if row_review.get("is_skipped"):
-                file_price = coerce_float(row.computed_unit_price)
-                skipped_rows.append(
-                    {
-                        "product_name": row.source_product_name,
-                        "quantity": float(row.quantity or 0.0),
-                        "file_amount": float(row.computed_line_total or 0.0),
-                        "file_prices": [file_price] if file_price is not None else [],
-                        "sales_location": source_name or None,
-                    }
-                )
-
-    variance_details = None
-    if skipped_rows:
-        variance_details = {
-            "products": [],
-            "price_mismatches": [],
-            "menu_issues": [],
-            "unmapped_products": skipped_rows,
-        }
-
     return {
         "terminal_sales": list(aggregated_sales.values()),
-        "summary": {
-            "source_location": ", ".join(source_location_names) or None,
-            "total_quantity": total_quantity,
-            "total_amount": total_amount,
-            "variance_details": variance_details,
-        },
+        "summary": _build_event_linked_sales_summary_contribution(import_locations),
     }
 
 
 def _apply_event_linked_sales_payload(
     event_location: EventLocation,
     payload: dict[str, Any],
+    *,
+    source_import_id: int,
+    approval_batch_id: str,
 ) -> None:
-    _restore_event_location_sales_state(event_location.id, None)
+    TerminalSale.query.filter_by(
+        event_location_id=event_location.id,
+        approval_batch_id=approval_batch_id,
+    ).delete(synchronize_session=False)
+    db.session.flush()
 
     location_obj = event_location.location
     for sale_payload in payload.get("terminal_sales", []):
@@ -3105,24 +3265,10 @@ def _apply_event_linked_sales_payload(
             TerminalSale(
                 event_location_id=event_location.id,
                 product_id=product.id,
+                pos_sales_import_id=source_import_id,
+                approval_batch_id=approval_batch_id,
                 quantity=float(sale_payload.get("quantity") or 0.0),
                 sold_at=sale_payload.get("sold_at") or datetime.utcnow(),
-            )
-        )
-
-    summary_payload = payload.get("summary") or {}
-    has_summary_values = any(
-        summary_payload.get(key) is not None
-        for key in ("source_location", "total_quantity", "total_amount", "variance_details")
-    )
-    if has_summary_values:
-        db.session.add(
-            EventLocationTerminalSalesSummary(
-                event_location_id=event_location.id,
-                source_location=summary_payload.get("source_location"),
-                total_quantity=coerce_float(summary_payload.get("total_quantity")),
-                total_amount=coerce_float(summary_payload.get("total_amount")),
-                variance_details=summary_payload.get("variance_details"),
             )
         )
 
@@ -3494,19 +3640,12 @@ def _approve_sales_import(import_id: int) -> bool:
             product.price = selected_price
 
         event_linked_groups: dict[int, list[PosSalesImportLocation]] = {}
-        event_snapshots: dict[int, dict[str, Any]] = {}
         for import_location in locked_import.locations:
             if import_location.event_location_id is None:
                 continue
             event_linked_groups.setdefault(
                 import_location.event_location_id, []
             ).append(import_location)
-            if import_location.event_location_id not in event_snapshots:
-                event_snapshots[import_location.event_location_id] = (
-                    _serialize_event_location_sales_state(
-                        import_location.event_location
-                    )
-                )
 
         for event_location_id, grouped_locations in event_linked_groups.items():
             event_location = next(
@@ -3525,7 +3664,17 @@ def _approve_sales_import(import_id: int) -> bool:
                 grouped_locations,
                 row_review_data,
             )
-            _apply_event_linked_sales_payload(event_location, payload)
+            _apply_event_linked_sales_payload(
+                event_location,
+                payload,
+                source_import_id=locked_import.id,
+                approval_batch_id=approval_batch_id,
+            )
+            _apply_event_linked_summary_delta(
+                event_location.id,
+                payload.get("summary") or {},
+                mode="add",
+            )
 
             for import_location in grouped_locations:
                 import_location.approval_batch_id = approval_batch_id
@@ -3536,10 +3685,13 @@ def _approve_sales_import(import_id: int) -> bool:
                 location_metadata["approved_at"] = approval_time.isoformat()
                 location_metadata["mode"] = "event_location"
                 location_metadata["event_location_id"] = event_location_id
-                location_metadata["previous_state"] = event_snapshots.get(
-                    event_location_id
+                location_metadata["event_sales_strategy"] = "append"
+                location_metadata["applied_summary"] = (
+                    _build_event_linked_sales_summary_contribution(
+                        [import_location]
+                    )
                 )
-                location_metadata["applied_summary"] = payload.get("summary")
+                location_metadata.pop("previous_state", None)
                 _write_sales_import_location_metadata(
                     import_location, location_metadata
                 )
@@ -4206,6 +4358,20 @@ def sales_import_detail(import_id: int):
                 reversal_batch_id = f"pos-import-reverse-{locked_import.id}-{uuid.uuid4().hex[:12]}"
                 row_change_count = 0
                 restored_event_location_ids: set[int] = set()
+                reversed_event_sales_batches: set[tuple[int, str | None]] = set()
+                event_linked_locations_by_event: dict[int, list[PosSalesImportLocation]] = {}
+                for import_location in locked_import.locations:
+                    event_location_id = (
+                        import_location.event_location_id
+                        or _parse_sales_import_location_metadata(import_location).get(
+                            "event_location_id"
+                        )
+                    )
+                    if event_location_id is None:
+                        continue
+                    event_linked_locations_by_event.setdefault(
+                        event_location_id, []
+                    ).append(import_location)
 
                 for import_location in locked_import.locations:
                     location_metadata = _parse_sales_import_location_metadata(
@@ -4217,8 +4383,45 @@ def sales_import_detail(import_id: int):
                             location_metadata.get("event_location_id")
                             or import_location.event_location_id
                         )
+                        applied_batch_id = (
+                            import_location.approval_batch_id
+                            or location_metadata.get("approval_batch_id")
+                        )
+                        event_sales_strategy = (
+                            location_metadata.get("event_sales_strategy")
+                            or "replace_snapshot"
+                        )
                         skipped_closed_event_restore = False
-                        if event_location_id and event_location_id not in restored_event_location_ids:
+                        if (
+                            event_sales_strategy == "append"
+                            and event_location_id is not None
+                        ):
+                            batch_key = (event_location_id, applied_batch_id)
+                            if batch_key not in reversed_event_sales_batches:
+                                delete_query = TerminalSale.query.filter_by(
+                                    event_location_id=event_location_id
+                                )
+                                if applied_batch_id:
+                                    delete_query = delete_query.filter_by(
+                                        approval_batch_id=applied_batch_id
+                                    )
+                                else:
+                                    delete_query = delete_query.filter_by(
+                                        pos_sales_import_id=locked_import.id
+                                    )
+                                delete_query.delete(synchronize_session=False)
+                                _apply_event_linked_summary_delta(
+                                    event_location_id,
+                                    _build_event_linked_sales_summary_contribution(
+                                        event_linked_locations_by_event.get(
+                                            event_location_id, [import_location]
+                                        )
+                                    ),
+                                    mode="subtract",
+                                    excluded_import_id=locked_import.id,
+                                )
+                                reversed_event_sales_batches.add(batch_key)
+                        elif event_location_id and event_location_id not in restored_event_location_ids:
                             event_location = import_location.event_location
                             if (
                                 event_location is not None
@@ -4240,6 +4443,8 @@ def sales_import_detail(import_id: int):
                             "reason": reversal_reason,
                             "mode": "event_location",
                             "event_location_id": event_location_id,
+                            "event_sales_strategy": event_sales_strategy,
+                            "approval_batch_id": applied_batch_id,
                             "skipped_closed_event_restore": skipped_closed_event_restore,
                         }
                         _write_sales_import_location_metadata(
@@ -4258,6 +4463,8 @@ def sales_import_detail(import_id: int):
                                 "reason": reversal_reason,
                                 "mode": "event_location",
                                 "event_location_id": event_location_id,
+                                "event_sales_strategy": event_sales_strategy,
+                                "approval_batch_id": applied_batch_id,
                                 "skipped_closed_event_restore": skipped_closed_event_restore,
                             }
                             row.approval_metadata = json.dumps(metadata)

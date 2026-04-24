@@ -258,6 +258,117 @@ def _create_event_linked_sales_import(
         }
 
 
+def _create_multi_day_event_linked_import_pair(
+    app,
+    *,
+    message_id: str,
+    first_sales_date: date_cls = date_cls(2026, 4, 15),
+    second_sales_date: date_cls = date_cls(2026, 4, 16),
+    first_quantity: float = 3.0,
+    second_quantity: float = 2.0,
+):
+    with app.app_context():
+        location = Location(name=f"Event Stand {message_id}")
+        item = Item(name=f"Event Item {message_id}", base_unit="each", quantity=25.0)
+        product = Product(name=f"Event Product {message_id}", price=7.5, cost=2.0)
+        event = Event(
+            name=f"Event {message_id}",
+            start_date=first_sales_date,
+            end_date=second_sales_date,
+        )
+        db.session.add_all([location, item, product, event])
+        db.session.flush()
+
+        event_location = EventLocation(event_id=event.id, location_id=location.id)
+        db.session.add(event_location)
+        db.session.flush()
+
+        db.session.add(
+            ProductRecipeItem(
+                product_id=product.id,
+                item_id=item.id,
+                quantity=2.0,
+                countable=True,
+            )
+        )
+        db.session.add(
+            LocationStandItem(
+                location_id=location.id,
+                item_id=item.id,
+                expected_count=25.0,
+            )
+        )
+        db.session.flush()
+
+        results: list[dict[str, object]] = []
+        for parse_index, (day_suffix, sales_date, sales_quantity) in enumerate(
+            [
+                ("day1", first_sales_date, first_quantity),
+                ("day2", second_sales_date, second_quantity),
+            ]
+        ):
+            sales_import = PosSalesImport(
+                source_provider="mailgun",
+                message_id=f"{message_id}-{day_suffix}",
+                attachment_filename="sales.xls",
+                attachment_sha256=(f"{message_id}{day_suffix}"[-8:] or "w").ljust(
+                    64, day_suffix[0]
+                )[:64],
+                status="pending",
+                sales_date=sales_date,
+            )
+            db.session.add(sales_import)
+            db.session.flush()
+
+            import_location = PosSalesImportLocation(
+                import_id=sales_import.id,
+                source_location_name=location.name,
+                normalized_location_name=location.name.lower().replace(" ", "_"),
+                location_id=location.id,
+                total_quantity=sales_quantity,
+                net_inc=sales_quantity * float(product.price),
+                computed_total=sales_quantity * float(product.price),
+                parse_index=parse_index,
+            )
+            db.session.add(import_location)
+            db.session.flush()
+
+            row = PosSalesImportRow(
+                import_id=sales_import.id,
+                location_import_id=import_location.id,
+                source_product_name=product.name,
+                normalized_product_name=product.name.lower().replace(" ", "_"),
+                product_id=product.id,
+                quantity=sales_quantity,
+                net_inc=sales_quantity * float(product.price),
+                computed_line_total=sales_quantity * float(product.price),
+                computed_unit_price=float(product.price),
+                parse_index=parse_index,
+            )
+            db.session.add(row)
+            db.session.flush()
+
+            results.append(
+                {
+                    "import_id": sales_import.id,
+                    "location_import_id": import_location.id,
+                    "row_id": row.id,
+                    "sales_date": sales_date,
+                }
+            )
+
+        db.session.commit()
+
+        return {
+            "event_id": event.id,
+            "event_location_id": event_location.id,
+            "location_id": location.id,
+            "item_id": item.id,
+            "product_id": product.id,
+            "imports": results,
+        }
+
+
 def test_admin_can_approve_sales_import_and_apply_inventory(client, app):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
@@ -401,6 +512,8 @@ def test_admin_can_approve_sales_import_and_post_to_event_location(client, app):
         assert item.quantity == 25.0
         assert len(terminal_sales) == 1
         assert terminal_sales[0].product_id == seeded["product_id"]
+        assert terminal_sales[0].pos_sales_import_id == seeded["import_id"]
+        assert terminal_sales[0].approval_batch_id == sales_import.approval_batch_id
         assert terminal_sales[0].quantity == 3.0
         assert terminal_sales[0].sold_at.date() == seeded["sales_date"]
         assert summary.total_quantity == 3.0
@@ -410,75 +523,119 @@ def test_admin_can_approve_sales_import_and_post_to_event_location(client, app):
         row_metadata = json.loads(row.approval_metadata)
         assert location_metadata["mode"] == "event_location"
         assert location_metadata["event_location_id"] == seeded["event_location_id"]
-        assert location_metadata["previous_state"]["terminal_sales"] == []
+        assert location_metadata["event_sales_strategy"] == "append"
+        assert location_metadata["applied_summary"]["total_quantity"] == 3.0
         assert row_metadata["target"]["mode"] == "event_location"
         assert row_metadata["target"]["event_location_id"] == seeded["event_location_id"]
 
 
-def test_admin_can_undo_event_linked_sales_import_and_restore_previous_event_sales(
+def test_admin_can_append_event_linked_sales_across_daily_imports(
     client, app
 ):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
-    seeded = _create_event_linked_sales_import(
-        app,
-        message_id="msg-undo-event-linked",
-        existing_event_quantity=1.0,
+    seeded = _create_multi_day_event_linked_import_pair(
+        app, message_id="msg-append-event-linked"
     )
 
     with client:
         login(client, admin_email, admin_pass)
-        approve_response = client.post(
-            f"/controlpanel/sales-imports/{seeded['import_id']}",
+        first_approve_response = client.post(
+            f"/controlpanel/sales-imports/{seeded['imports'][0]['import_id']}",
             data={"action": "approve_import"},
             follow_redirects=True,
         )
-        assert approve_response.status_code == 200
-        assert b"Import approved" in approve_response.data
+        assert first_approve_response.status_code == 200
+        assert b"Import approved" in first_approve_response.data
 
-        undo_response = client.post(
-            f"/controlpanel/sales-imports/{seeded['import_id']}",
-            data={
-                "action": "undo_approved_import",
-                "reversal_reason": "restore prior event totals",
-            },
+        second_approve_response = client.post(
+            f"/controlpanel/sales-imports/{seeded['imports'][1]['import_id']}",
+            data={"action": "approve_import"},
             follow_redirects=True,
         )
-        assert undo_response.status_code == 200
-        assert b"Import reversal complete" in undo_response.data
+        assert second_approve_response.status_code == 200
+        assert b"Import approved" in second_approve_response.data
 
     with app.app_context():
-        sales_import = db.session.get(PosSalesImport, seeded["import_id"])
-        import_location = db.session.get(
-            PosSalesImportLocation, seeded["location_import_id"]
-        )
-        row = db.session.get(PosSalesImportRow, seeded["row_id"])
-        stand_item = LocationStandItem.query.filter_by(
-            location_id=seeded["location_id"],
-            item_id=seeded["item_id"],
-        ).one()
-        item = db.session.get(Item, seeded["item_id"])
         terminal_sales = TerminalSale.query.filter_by(
             event_location_id=seeded["event_location_id"]
-        ).all()
+        ).order_by(TerminalSale.sold_at.asc(), TerminalSale.id.asc()).all()
         summary = EventLocationTerminalSalesSummary.query.filter_by(
             event_location_id=seeded["event_location_id"]
         ).one()
 
-        assert sales_import.status == "reversed"
-        assert import_location.reversal_batch_id == sales_import.reversal_batch_id
-        assert stand_item.expected_count == 25.0
-        assert item.quantity == 25.0
-        assert len(terminal_sales) == 1
-        assert terminal_sales[0].quantity == 1.0
-        assert summary.total_quantity == 1.0
-        assert summary.total_amount == 7.5
+        assert len(terminal_sales) == 2
+        assert [sale.quantity for sale in terminal_sales] == [3.0, 2.0]
+        assert [sale.sold_at.date() for sale in terminal_sales] == [
+            seeded["imports"][0]["sales_date"],
+            seeded["imports"][1]["sales_date"],
+        ]
+        assert summary.total_quantity == 5.0
+        assert summary.total_amount == 37.5
 
-        location_metadata = json.loads(import_location.approval_metadata)
-        row_metadata = json.loads(row.approval_metadata)
+
+def test_admin_can_undo_one_event_linked_import_and_keep_later_event_sales(
+    client, app
+):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    seeded = _create_multi_day_event_linked_import_pair(
+        app, message_id="msg-undo-one-event-linked"
+    )
+
+    with client:
+        login(client, admin_email, admin_pass)
+        for import_seed in seeded["imports"]:
+            approve_response = client.post(
+                f"/controlpanel/sales-imports/{import_seed['import_id']}",
+                data={"action": "approve_import"},
+                follow_redirects=True,
+            )
+            assert approve_response.status_code == 200
+            assert b"Import approved" in approve_response.data
+
+        undo_response = client.post(
+            f"/controlpanel/sales-imports/{seeded['imports'][0]['import_id']}",
+            data={
+                "action": "undo_approved_import",
+                "reversal_reason": "remove only the first day's sales",
+            },
+            follow_redirects=True,
+        )
+        assert undo_response.status_code == 200
+        assert b"can be approved again" in undo_response.data
+
+    with app.app_context():
+        first_import = db.session.get(PosSalesImport, seeded["imports"][0]["import_id"])
+        first_location = db.session.get(
+            PosSalesImportLocation, seeded["imports"][0]["location_import_id"]
+        )
+        first_row = db.session.get(PosSalesImportRow, seeded["imports"][0]["row_id"])
+        second_import = db.session.get(PosSalesImport, seeded["imports"][1]["import_id"])
+        terminal_sales = TerminalSale.query.filter_by(
+            event_location_id=seeded["event_location_id"]
+        ).order_by(TerminalSale.sold_at.asc(), TerminalSale.id.asc()).all()
+        summary = EventLocationTerminalSalesSummary.query.filter_by(
+            event_location_id=seeded["event_location_id"]
+        ).one()
+
+        assert first_import.status == "reversed"
+        assert first_location.reversal_batch_id == first_import.reversal_batch_id
+        assert second_import.status == "approved"
+        assert len(terminal_sales) == 1
+        assert terminal_sales[0].quantity == 2.0
+        assert terminal_sales[0].sold_at.date() == seeded["imports"][1]["sales_date"]
+        assert terminal_sales[0].pos_sales_import_id == seeded["imports"][1]["import_id"]
+        assert summary.total_quantity == 2.0
+        assert summary.total_amount == 15.0
+
+        location_metadata = json.loads(first_location.approval_metadata)
+        row_metadata = json.loads(first_row.approval_metadata)
         assert location_metadata["reversal"]["mode"] == "event_location"
-        assert location_metadata["reversal"]["reason"] == "restore prior event totals"
+        assert location_metadata["reversal"]["event_sales_strategy"] == "append"
+        assert location_metadata["reversal"]["reason"] == "remove only the first day's sales"
         assert row_metadata["reversal"]["mode"] == "event_location"
+        assert row_metadata["reversal"]["event_sales_strategy"] == "append"
 
 
 def test_sales_import_approval_blocked_for_unresolved_mappings(client, app):

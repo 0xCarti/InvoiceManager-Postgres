@@ -2500,7 +2500,6 @@ class SettingsForm(FlaskForm):
     )
     enable_sysco_imports = BooleanField("SYSCO", default=True)
     enable_pratts_imports = BooleanField("PRATTS", default=True)
-    enable_central_supply_imports = BooleanField("CENTRAL SUPPLY", default=True)
     enable_manitoba_liquor_imports = BooleanField(
         "MANITOBA LIQUOR & LOTTERIES", default=True
     )
@@ -2563,7 +2562,6 @@ class SettingsForm(FlaskForm):
         return [
             ("SYSCO", self.enable_sysco_imports),
             ("PRATTS", self.enable_pratts_imports),
-            ("CENTRAL SUPPLY", self.enable_central_supply_imports),
             (
                 "MANITOBA LIQUOR & LOTTERIES",
                 self.enable_manitoba_liquor_imports,

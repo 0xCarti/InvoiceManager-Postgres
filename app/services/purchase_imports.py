@@ -69,40 +69,6 @@ _PRATTS_OPTIONAL_HEADERS = {
     "order_number": {"order #", "po number", "order number", "po #"},
 }
 
-_CENTRAL_SUPPLY_REQUIRED_HEADERS = {
-    "item": {"item", "item #", "item number", "vendor sku", "vendor item #"},
-    "description": {"description", "item description"},
-    "quantity": {
-        "qty ship",
-        "qty shipped",
-        "quantity shipped",
-        "qty",
-        "order qty",
-        "quantity ordered",
-    },
-    "price": {"price", "unit price", "unit cost"},
-    "ext_price": {
-        "ext price",
-        "extended price",
-        "extd price",
-        "extended cost",
-        "ext cost",
-    },
-}
-
-_CENTRAL_SUPPLY_OPTIONAL_HEADERS = {
-    "pack": {"pack", "pack size", "pack/size", "pack & size"},
-    "size": {"size"},
-    "order_number": {
-        "order #",
-        "po number",
-        "order number",
-        "po #",
-        "po no.",
-        "order no.",
-    },
-}
-
 _MANITOBA_LIQUOR_REQUIRED_HEADERS = {
     "item": {"item number"},
     "description": {"product description"},
@@ -112,7 +78,12 @@ _MANITOBA_LIQUOR_REQUIRED_HEADERS = {
 }
 
 _MANITOBA_LIQUOR_OPTIONAL_HEADERS = {
-    "pack_size": {"vol/case size", "case size", "vol / case size"},
+    "pack_size": {
+        "package size",
+        "vol/case size",
+        "case size",
+        "vol / case size",
+    },
     "order_number": {"order no.", "order no", "order number"},
     "original_order_number": {
         "original order no",
@@ -361,75 +332,6 @@ def _parse_pratts_csv(file_obj: IO) -> ParsedPurchaseOrder:
     )
 
 
-def _parse_central_supply_csv(file_obj: IO) -> ParsedPurchaseOrder:
-    reader = _prepare_reader(file_obj)
-    header_map = _normalize_headers(reader.fieldnames)
-    header_lookup, missing_headers = _resolve_headers(
-        header_map, _CENTRAL_SUPPLY_REQUIRED_HEADERS, _CENTRAL_SUPPLY_OPTIONAL_HEADERS
-    )
-    if missing_headers:
-        readable = ", ".join(sorted(missing_headers))
-        raise CSVImportError(
-            f"Missing required Central Supply columns: {readable}. Please upload the standard export file."
-        )
-
-    items: List[ParsedPurchaseLine] = []
-    order_number = None
-    expected_total = 0.0
-    has_ext_price = False
-
-    for row in reader:
-        vendor_sku = row.get(header_lookup["item"], "").strip()
-        raw_description = row.get(header_lookup["description"], "").strip()
-        raw_qty = row.get(header_lookup["quantity"], "")
-        raw_price = row.get(header_lookup["price"], "")
-
-        quantity = coerce_float(raw_qty)
-        if quantity is None or quantity <= 0:
-            continue
-
-        if not order_number and "order_number" in header_lookup:
-            order_number = row.get(header_lookup["order_number"], "").strip() or None
-
-        pack = (
-            row.get(header_lookup.get("pack", ""), "").strip()
-            if "pack" in header_lookup
-            else ""
-        )
-        size = (
-            row.get(header_lookup.get("size", ""), "").strip()
-            if "size" in header_lookup
-            else ""
-        )
-        pack_size = " ".join(filter(None, [pack, size])) or None
-
-        unit_cost = coerce_float(raw_price)
-        raw_ext = row.get(header_lookup["ext_price"], "")
-        ext_cost = coerce_float(raw_ext)
-        if ext_cost is not None:
-            expected_total += ext_cost
-            has_ext_price = True
-
-        items.append(
-            ParsedPurchaseLine(
-                vendor_sku=vendor_sku or None,
-                vendor_description=raw_description or vendor_sku,
-                pack_size=pack_size,
-                quantity=quantity,
-                unit_cost=unit_cost,
-            )
-        )
-
-    if not items:
-        raise CSVImportError("No purchasable lines found in the CSV file.")
-
-    return ParsedPurchaseOrder(
-        items=items,
-        order_number=order_number,
-        expected_total=expected_total if has_ext_price else None,
-    )
-
-
 def _parse_manitoba_liquor_xlsx(file_obj: IO) -> ParsedPurchaseOrder:
     rows = _iter_excel_rows(file_obj)
     header_row = next(rows, None)
@@ -527,9 +429,9 @@ def parse_purchase_order_csv(file: FileStorage, vendor: Vendor) -> ParsedPurchas
     if not file:
         raise CSVImportError("No file was provided for upload.")
 
-    vendor_name = " ".join(filter(None, [vendor.first_name, vendor.last_name])).strip().lower()
-    if "central supply" in vendor_name:
-        return _parse_central_supply_csv(file.stream)
+    vendor_name = " ".join(
+        filter(None, [vendor.first_name, vendor.last_name])
+    ).strip().lower()
     if "sysco" in vendor_name:
         return _parse_sysco_csv(file.stream)
     if "pratt" in vendor_name:

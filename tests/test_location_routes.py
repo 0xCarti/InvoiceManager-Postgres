@@ -132,6 +132,7 @@ def test_location_flow(client, app):
         resp = client.get(f"/locations/{lid}/stand_sheet")
         assert resp.status_code == 200
         assert b"Location: Kitchen" in resp.data
+        assert b"Date Used" in resp.data
         resp = client.post(
             f"/locations/edit/{lid}",
             data={"name": "Kitchen2", "menu_id": str(expanded_menu_id)},

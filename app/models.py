@@ -2777,6 +2777,10 @@ class TerminalSale(db.Model):
     product_id = db.Column(
         db.Integer, db.ForeignKey("product.id"), nullable=False
     )
+    pos_sales_import_id = db.Column(
+        db.Integer, db.ForeignKey("pos_sales_import.id"), nullable=True
+    )
+    approval_batch_id = db.Column(db.String(64), nullable=True)
     quantity = db.Column(db.Float, nullable=False)
     sold_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
@@ -2784,6 +2788,16 @@ class TerminalSale(db.Model):
         "EventLocation", back_populates="terminal_sales"
     )
     product = relationship("Product", back_populates="terminal_sales")
+    pos_sales_import = relationship("PosSalesImport")
+
+    __table_args__ = (
+        db.Index(
+            "ix_terminal_sale_event_location_batch",
+            "event_location_id",
+            "approval_batch_id",
+        ),
+        db.Index("ix_terminal_sale_pos_sales_import", "pos_sales_import_id"),
+    )
 
 
 class EventLocationTerminalSalesSummary(db.Model):
@@ -3157,9 +3171,9 @@ class Setting(db.Model):
     DEFAULT_PURCHASE_IMPORT_VENDORS = [
         "SYSCO",
         "PRATTS",
-        "CENTRAL SUPPLY",
         "MANITOBA LIQUOR & LOTTERIES",
     ]
+    LEGACY_DISABLED_PURCHASE_IMPORT_VENDORS = {"CENTRAL SUPPLY"}
 
     @classmethod
     def get_receive_location_defaults(cls) -> dict[str, int]:
@@ -3220,7 +3234,13 @@ class Setting(db.Model):
         cleaned = []
         for vendor in vendors:
             if isinstance(vendor, str) and vendor.strip():
-                cleaned.append(vendor.strip())
+                normalized_vendor = vendor.strip()
+                if (
+                    normalized_vendor.upper()
+                    in cls.LEGACY_DISABLED_PURCHASE_IMPORT_VENDORS
+                ):
+                    continue
+                cleaned.append(normalized_vendor)
 
         return cleaned or list(cls.DEFAULT_PURCHASE_IMPORT_VENDORS)
 
@@ -3231,7 +3251,13 @@ class Setting(db.Model):
         cleaned: list[str] = []
         for vendor in vendors:
             if isinstance(vendor, str) and vendor.strip():
-                cleaned.append(vendor.strip())
+                normalized_vendor = vendor.strip()
+                if (
+                    normalized_vendor.upper()
+                    in cls.LEGACY_DISABLED_PURCHASE_IMPORT_VENDORS
+                ):
+                    continue
+                cleaned.append(normalized_vendor)
 
         setting = cls.query.filter_by(name=cls.PURCHASE_IMPORT_VENDORS).first()
         if setting is None:
