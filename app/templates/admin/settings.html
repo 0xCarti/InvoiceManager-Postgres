@@ -1,32 +1,65 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="container mt-4">
-    <h2>Application Settings</h2>
+<div class="container mt-4 app-page-shell">
+    <div class="app-page-header">
+        <div class="app-page-header-copy">
+            <h2 class="mb-1">Application Settings</h2>
+            <p class="text-muted mb-0">Group related defaults into cards so the page reads as sections instead of one long stack of controls.</p>
+        </div>
+    </div>
     {% if not can_manage_settings %}
     <div class="alert alert-info">You have view-only access to settings. Update controls are disabled.</div>
     {% endif %}
-    <form method="post">
+    <form method="post" class="app-page-shell">
         {{ form.hidden_tag() }}
-        <div class="form-group">
-            {{ form.gst_number.label }}
-            {{ form.gst_number(class='form-control', disabled=not can_manage_settings) }}
-        </div>
-        <div class="form-group mt-2">
-            {{ form.retail_pop_price.label }}
-            <div class="input-group">
-                <span class="input-group-text">$</span>
-                {{ form.retail_pop_price(class='form-control', disabled=not can_manage_settings) }}
+        <section class="app-form-card">
+            <div class="app-page-header mb-3">
+                <div class="app-page-header-copy">
+                    <h3 class="h5 mb-1">Core Defaults</h3>
+                    <p class="text-muted mb-0">Tax, pop pricing, timezone, and backup controls live together in one settings card.</p>
+                </div>
             </div>
-            {% if form.retail_pop_price.errors %}
-                <div class="text-danger small">{{ form.retail_pop_price.errors[0] }}</div>
-            {% endif %}
-        </div>
-        <div class="form-group mt-2">
-            {{ form.default_timezone.label }}
-            {{ form.default_timezone(class='form-control', disabled=not can_manage_settings) }}
-        </div>
-        <div class="mt-4">
+            <div class="app-form-grid">
+                <div class="form-group">
+                    {{ form.gst_number.label(class='form-label') }}
+                    {{ form.gst_number(class='form-control', disabled=not can_manage_settings) }}
+                </div>
+                <div class="form-group">
+                    {{ form.retail_pop_price.label(class='form-label') }}
+                    <div class="input-group">
+                        <span class="input-group-text">$</span>
+                        {{ form.retail_pop_price(class='form-control', disabled=not can_manage_settings) }}
+                    </div>
+                    {% if form.retail_pop_price.errors %}
+                        <div class="text-danger small">{{ form.retail_pop_price.errors[0] }}</div>
+                    {% endif %}
+                </div>
+                <div class="form-group">
+                    {{ form.default_timezone.label(class='form-label') }}
+                    {{ form.default_timezone(class='form-control', disabled=not can_manage_settings) }}
+                </div>
+                <div class="form-group">
+                    <div class="form-check form-switch mt-4">
+                        {{ form.auto_backup_enabled(class='form-check-input', disabled=not can_manage_settings) }}
+                        {{ form.auto_backup_enabled.label(class='form-check-label') }}
+                    </div>
+                </div>
+                <div class="form-group">
+                    {{ form.auto_backup_interval_value.label(class='form-label') }}
+                    {{ form.auto_backup_interval_value(class='form-control', type='text', inputmode='text', disabled=not can_manage_settings, **{'data-numeric-input': '1', 'autocapitalize': 'off', 'autocorrect': 'off', 'spellcheck': 'false'}) }}
+                </div>
+                <div class="form-group">
+                    {{ form.auto_backup_interval_unit.label(class='form-label') }}
+                    {{ form.auto_backup_interval_unit(class='form-control', disabled=not can_manage_settings) }}
+                </div>
+                <div class="form-group">
+                    {{ form.max_backups.label(class='form-label') }}
+                    {{ form.max_backups(class='form-control', type='text', inputmode='text', disabled=not can_manage_settings, **{'data-numeric-input': '1', 'autocapitalize': 'off', 'autocorrect': 'off', 'spellcheck': 'false'}) }}
+                </div>
+            </div>
+        </section>
+        <section class="app-form-card">
             <h3>POS Sales Imports</h3>
             <p class="text-muted">
                 The app uses this lookback interval and the file received time in the default timezone to infer the business date for each imported POS sales file. For your current setup, use <strong>1 Day</strong>.
@@ -47,26 +80,8 @@
                     {% endif %}
                 </div>
             </div>
-        </div>
-        <div class="form-check form-switch mt-2">
-            {{ form.auto_backup_enabled(class='form-check-input', disabled=not can_manage_settings) }}
-            {{ form.auto_backup_enabled.label(class='form-check-label') }}
-        </div>
-        <div class="row mt-2">
-            <div class="col">
-                {{ form.auto_backup_interval_value.label }}
-                {{ form.auto_backup_interval_value(class='form-control', type='text', inputmode='text', disabled=not can_manage_settings, **{'data-numeric-input': '1', 'autocapitalize': 'off', 'autocorrect': 'off', 'spellcheck': 'false'}) }}
-            </div>
-            <div class="col">
-                {{ form.auto_backup_interval_unit.label }}
-                {{ form.auto_backup_interval_unit(class='form-control', disabled=not can_manage_settings) }}
-            </div>
-        </div>
-        <div class="form-group mt-2">
-            {{ form.max_backups.label }}
-            {{ form.max_backups(class='form-control', type='text', inputmode='text', disabled=not can_manage_settings, **{'data-numeric-input': '1', 'autocapitalize': 'off', 'autocorrect': 'off', 'spellcheck': 'false'}) }}
-        </div>
-        <div class="mt-4">
+        </section>
+        <section class="app-form-card">
             <h3>Purchase Receiving Defaults</h3>
             <p class="text-muted">Select default locations for each department.</p>
             <div class="row g-3">
@@ -80,8 +95,8 @@
                 </div>
                 {% endfor %}
             </div>
-        </div>
-        <div class="mt-4">
+        </section>
+        <section class="app-form-card">
             <h3>Purchase Order Imports</h3>
             <p class="text-muted">Choose which preset vendors can be selected when importing purchase orders.</p>
             <div class="row g-3">
@@ -97,8 +112,8 @@
                 </div>
                 {% endfor %}
             </div>
-        </div>
-        <div class="mt-4">
+        </section>
+        <section class="app-form-card">
             <h3>Reporting Units</h3>
             <p class="text-muted">Choose how base units should appear in reports.</p>
             <div class="table-responsive">
@@ -124,9 +139,11 @@
                     </tbody>
                 </table>
             </div>
-        </div>
+        </section>
         {% if can_manage_settings %}
-        {{ form.submit(class='btn btn-primary') }}
+        <div class="app-form-actions">
+            {{ form.submit(class='btn btn-primary') }}
+        </div>
         {% endif %}
     </form>
 </div>

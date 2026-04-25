@@ -24,12 +24,17 @@
     }
 }
 </style>
-<div class="mobile-list-page">
-<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
-    <h2 class="mb-0">{{ location.name }} Items</h2>
-    <a class="btn btn-outline-secondary" href="{{ url_for('notes.entity_notes', entity_type='location', entity_id=location.id) }}">
-        View Notes
-    </a>
+<div class="mobile-list-page app-page-shell">
+<div class="app-page-header">
+    <div class="app-page-header-copy">
+        <h2 class="mb-1">{{ location.name }} Items</h2>
+        <p class="text-muted mb-0">Review stand sheet quantities and location-level purchase GL overrides without the editor rows crowding together.</p>
+    </div>
+    <div class="app-page-header-actions">
+        <a class="btn btn-outline-secondary" href="{{ url_for('notes.entity_notes', entity_type='location', entity_id=location.id) }}">
+            View Notes
+        </a>
+    </div>
 </div>
 {% if can_add_items %}
 <form method="post" action="{{ url_for('locations.add_location_item', location_id=location.id) }}" class="row g-2 align-items-end mb-4">
@@ -120,7 +125,7 @@
             {% endfor %}
                 <tr>
                     <td><strong>Total</strong></td>
-                    <td><strong>{{ total }}</strong></td>
+                    <td><strong>{{ '{:,.2f}'.format(total or 0) }}</strong></td>
                     <td colspan="2"></td>
                 </tr>
             </tbody>

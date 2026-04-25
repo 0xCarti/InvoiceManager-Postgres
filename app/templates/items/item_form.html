@@ -109,7 +109,7 @@
     </div>
     <button type="button" class="btn btn-outline-secondary" id="add-unit">Add Unit</button>
 {% endset %}
-<form method="POST" data-item-form data-next-index="{{ form.units|length }}" data-barcode-next-index="{{ form.barcodes|length }}">
+<form method="POST" class="app-page-shell" data-item-form data-next-index="{{ form.units|length }}" data-barcode-next-index="{{ form.barcodes|length }}">
     {{ form.hidden_tag() }}
     {% if show_location_tab %}
     <ul class="nav nav-tabs" id="itemFormTabs" role="tablist">
@@ -213,7 +213,9 @@
     {% else %}
         {{ details_content | safe }}
     {% endif %}
-    {{ form.submit(class="btn btn-primary mt-3") }}
+    <div class="app-form-actions">
+        {{ form.submit(class="btn btn-primary") }}
+    </div>
     <template id="unit-row-template">
     <div class="row g-2 align-items-end unit-row mb-2">
         <div class="col-md-4">

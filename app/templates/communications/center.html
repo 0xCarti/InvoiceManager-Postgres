@@ -48,6 +48,10 @@
     box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
 }
 
+.communications-page .communications-hero .btn {
+    min-height: 2.625rem;
+}
+
 .communications-page .communications-bulletin-shell {
     border: 1px solid rgba(29, 79, 145, 0.12);
     border-radius: 1rem;
@@ -162,6 +166,10 @@
     box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18);
 }
 
+.communications-page .communications-modal .modal-dialog {
+    max-width: 960px;
+}
+
 .communications-page .communications-modal form {
     display: flex;
     flex: 1 1 auto;
@@ -178,10 +186,12 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
+    padding: 1.25rem 1.5rem;
 }
 
 .communications-page .communications-modal .modal-footer {
     border-top-color: rgba(17, 24, 39, 0.08);
+    padding: 1rem 1.5rem;
 }
 
 .communications-page .communications-history-modal-body {
@@ -511,7 +521,7 @@
                         </div>
                         <div class="mb-0">
                             {{ message_form.body.label(class_='form-label') }}
-                            {{ message_form.body(class_='form-control', rows='8') }}
+                            {{ message_form.body(class_='form-control', rows='10') }}
                             {% for error in message_form.body.errors %}
                             <div class="text-danger small">{{ error }}</div>
                             {% endfor %}
@@ -572,7 +582,7 @@
                         </div>
                         <div class="mb-0">
                             {{ bulletin_form.body.label(class_='form-label') }}
-                            {{ bulletin_form.body(class_='form-control', rows='8') }}
+                            {{ bulletin_form.body(class_='form-control', rows='10') }}
                             {% for error in bulletin_form.body.errors %}
                             <div class="text-danger small">{{ error }}</div>
                             {% endfor %}

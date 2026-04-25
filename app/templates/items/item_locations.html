@@ -18,8 +18,13 @@
     }
 }
 </style>
-<div class="mobile-list-page">
-<h2>{{ item.name }} Locations</h2>
+<div class="mobile-list-page app-page-shell">
+<div class="app-page-header">
+    <div class="app-page-header-copy">
+        <h2 class="mb-1">{{ item.name }} Locations</h2>
+        <p class="text-muted mb-0">Review location counts and per-location purchase GL overrides in the same aligned table pattern as other inventory pages.</p>
+    </div>
+</div>
 <form method="post" class="mb-3">
     {{ form.hidden_tag() }}
     <div class="table-responsive mobile-table-wrap">
@@ -62,7 +67,7 @@
             {% endfor %}
                 <tr>
                     <td><strong>Total</strong></td>
-                    <td><strong>{{ total }}</strong></td>
+                    <td><strong>{{ '{:,.2f}'.format(total or 0) }}</strong></td>
                     <td></td>
                 </tr>
             </tbody>

@@ -46,6 +46,7 @@ def test_spoilage_page_filters(client, app):
     # unfiltered should show item
     resp = client.get("/spoilage")
     assert b"Milk" in resp.data
+    assert b"app-page-shell" in resp.data
 
     # filter by purchase gl code
     resp = client.get(f"/spoilage?purchase_gl_code={gl_id}")

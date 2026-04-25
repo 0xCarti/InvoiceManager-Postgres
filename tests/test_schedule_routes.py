@@ -309,6 +309,8 @@ def test_team_schedule_modal_renders_all_department_positions(client, app):
             follow_redirects=True,
         )
         assert response.status_code == 200
+        assert b'app-page-shell' in response.data
+        assert b'app-card' in response.data
         assert b"Cashier" in response.data
         assert b"Runner" in response.data
         assert b'data-department-position-map=' in response.data

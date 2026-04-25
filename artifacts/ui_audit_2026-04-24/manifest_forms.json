@@ -1,0 +1,77 @@
+[
+  {
+    "name": "transfer_add_modal",
+    "url": "https://im.brycecotton.ca/transfers",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\transfer_add_modal.png"
+  },
+  {
+    "name": "event_create_modal",
+    "url": "https://im.brycecotton.ca/events?type=&name_contains=&name_not_contains=&date_filter=&start_date_from=&start_date_to=&end_date_from=&end_date_to=&closed_status=open",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\event_create_modal.png"
+  },
+  {
+    "name": "event_detail_39",
+    "url": "https://im.brycecotton.ca/events/39",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\event_detail_39.png"
+  },
+  {
+    "name": "invoice_create_modal",
+    "url": "https://im.brycecotton.ca/view_invoices",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\invoice_create_modal.png"
+  },
+  {
+    "name": "item_add_page",
+    "url": "https://im.brycecotton.ca/items/add",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\item_add_page.png"
+  },
+  {
+    "name": "location_stand_sheet_12",
+    "url": "https://im.brycecotton.ca/locations/12/stand_sheet",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\location_stand_sheet_12.png"
+  },
+  {
+    "name": "location_items_12",
+    "url": "https://im.brycecotton.ca/locations/12/items",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\location_items_12.png"
+  },
+  {
+    "name": "menu_add_page",
+    "url": "https://im.brycecotton.ca/menus/add",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\menu_add_page.png"
+  },
+  {
+    "name": "product_create_modal",
+    "url": "https://im.brycecotton.ca/products",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\product_create_modal.png"
+  },
+  {
+    "name": "product_edit_1",
+    "url": "https://im.brycecotton.ca/products/1/edit",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\product_edit_1.png"
+  },
+  {
+    "name": "purchase_order_upload_modal",
+    "url": "https://im.brycecotton.ca/purchase_orders",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\purchase_order_upload_modal.png"
+  },
+  {
+    "name": "purchase_order_create_page",
+    "url": "https://im.brycecotton.ca/purchase_orders/create",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\purchase_order_create_page.png"
+  },
+  {
+    "name": "purchase_order_receive_162",
+    "url": "https://im.brycecotton.ca/purchase_orders/162/receive",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\purchase_order_receive_162.png"
+  },
+  {
+    "name": "communications_send_message_modal",
+    "url": "https://im.brycecotton.ca/communications",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\communications_send_message_modal.png"
+  },
+  {
+    "name": "communications_post_bulletin_modal",
+    "url": "https://im.brycecotton.ca/communications",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\communications_post_bulletin_modal.png"
+  }
+]

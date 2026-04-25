@@ -42,7 +42,7 @@
     </td>
     <td class="col-archived" data-sort-value="{{ '1' if item.archived else '0' }}">{{ 'Yes' if item.archived else 'No' }}</td>
     <td class="col-actions">
-        <div class="mobile-actions mobile-card-actions">
+        <div class="mobile-actions mobile-card-actions app-action-stack">
             <a href="{{ url_for('item.view_item', item_id=item.id) }}" class="btn btn-primary btn-sm">View</a>
             <button type="button" class="btn btn-secondary btn-sm edit-item-btn" data-item-id="{{ item.id }}">Edit</button>
             <button type="button" class="btn btn-secondary btn-sm copy-item-btn" data-item-id="{{ item.id }}">Copy</button>

@@ -9,7 +9,7 @@
         {% endif %}
     </td>
     <td class="col-location-actions">
-        <div class="mobile-actions">
+        <div class="mobile-actions app-action-stack">
             <button type="button" class="btn btn-info btn-sm edit-location-btn" data-id="{{ location.id }}">Edit</button>
             <a href="{{ url_for('locations.view_stand_sheet', location_id=location.id) }}" class="btn btn-secondary btn-sm">Stand Sheet</a>
             <a href="{{ url_for('locations.location_items', location_id=location.id) }}" class="btn btn-outline-secondary btn-sm">Manage Items</a>

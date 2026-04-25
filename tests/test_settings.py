@@ -185,5 +185,6 @@ def test_settings_view_only_user_sees_read_only_page(client, app):
 
     assert response.status_code == 200
     assert b"You have view-only access to settings." in response.data
+    assert b"Core Defaults" in response.data
     assert b">Update<" not in response.data
     assert b"disabled" in response.data

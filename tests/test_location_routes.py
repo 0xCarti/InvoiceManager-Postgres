@@ -129,6 +129,7 @@ def test_location_flow(client, app):
         login(client, email, "pass")
         resp = client.get("/locations")
         assert resp.status_code == 200
+        assert b"app-page-shell" in resp.data
         resp = client.get(f"/locations/{lid}/stand_sheet")
         assert resp.status_code == 200
         assert b"Location: Kitchen" in resp.data

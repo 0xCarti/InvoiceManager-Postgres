@@ -1,56 +1,65 @@
 {% extends 'base.html' %}
 {% block content %}
-<div class="container mt-4">
-    <h2>Receive Invoice for PO {{ po.id }}</h2>
+<div class="container mt-4 app-page-shell">
+    <div class="app-page-header">
+        <div class="app-page-header-copy">
+            <h2 class="mb-1">Receive Invoice for PO {{ po.id }}</h2>
+            <p class="text-muted mb-0">Use the wider receiving grid to reconcile invoice totals and line-level receiving details without everything collapsing into one column.</p>
+        </div>
+    </div>
     <style>
-        .item-row .item-col {
+        .receiving-item-row .item-col {
             flex: 2 1 260px;
             min-width: 220px;
         }
 
-        .item-row .unit-col {
+        .receiving-item-row .unit-col {
             flex: 0 0 auto;
         }
 
-        .item-row .unit-col .unit-select {
+        .receiving-item-row .unit-col .unit-select {
             width: auto;
             min-width: 7rem;
         }
 
-        .item-row .quantity-col,
-        .item-row .vendor-sku-col,
-        .item-row .cost-col,
-        .item-row .deposit-col {
+        .receiving-item-row .quantity-col,
+        .receiving-item-row .vendor-sku-col,
+        .receiving-item-row .cost-col,
+        .receiving-item-row .deposit-col {
             flex: 1 1 140px;
             min-width: 120px;
         }
 
-        .item-row .line-total-col {
+        .receiving-item-row .line-total-col {
             flex: 0 0 110px;
             min-width: 100px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            font-weight: 600;
         }
 
-        .item-row .move-button-stack .btn {
+        .receiving-item-row .move-button-stack .btn {
             font-weight: bold;
         }
 
         @media (max-width: 768px) {
-            .item-row .item-col,
-            .item-row .unit-col,
-            .item-row .quantity-col,
-            .item-row .vendor-sku-col,
-            .item-row .cost-col,
-            .item-row .line-total-col {
+            .receiving-item-row .item-col,
+            .receiving-item-row .unit-col,
+            .receiving-item-row .quantity-col,
+            .receiving-item-row .vendor-sku-col,
+            .receiving-item-row .cost-col,
+            .receiving-item-row .line-total-col {
                 flex: 0 0 100%;
                 max-width: 100%;
             }
 
-            .item-row .unit-col .unit-select {
+            .receiving-item-row .unit-col .unit-select {
                 width: 100%;
             }
         }
 
-        .item-row .optional-panel {
+        .receiving-item-row .optional-panel {
             display: none;
             border-left: 4px solid #e9ecef;
             background: #f8f9fa;
@@ -58,45 +67,60 @@
             border-radius: 0.25rem;
         }
 
-        .item-row .optional-panel.show {
+        .receiving-item-row .optional-panel.show {
             display: block;
         }
     </style>
-    <form method="POST">
+    <form method="POST" class="app-page-shell">
         {{ form.hidden_tag() }}
-        <div class="form-group">
-            {{ form.received_date.label(class="form-label") }}
-            {{ form.received_date(class="form-control narrow-field") }}
+        <section class="app-form-card">
+            <div class="app-page-header mb-3">
+                <div class="app-page-header-copy">
+                    <h3 class="h5 mb-1">Invoice Details</h3>
+                    <p class="text-muted mb-0">Header amounts, location, and department defaults are grouped into a single aligned section.</p>
+                </div>
+            </div>
+            <div class="receive-form-grid app-form-grid">
+                <div class="form-group">
+                    {{ form.received_date.label(class="form-label") }}
+                    {{ form.received_date(class="form-control narrow-field") }}
+                </div>
+                <div class="form-group">
+                    {{ form.invoice_number.label(class="form-label") }}
+                    {{ form.invoice_number(class="form-control narrow-field") }}
+                </div>
+                <div class="form-group">
+                    {{ form.location_id.label(class="form-label") }}
+                    {{ form.location_id(class="form-control narrow-field") }}
+                </div>
+                <div class="form-group">
+                    {{ form.department.label(class="form-label") }}
+                    {{ form.department(class="form-select narrow-field") }}
+                </div>
+                <div class="form-group">
+                    {{ form.gst.label(class="form-label") }}
+                    {{ form.gst(class="form-control narrow-field") }}
+                </div>
+                <div class="form-group">
+                    {{ form.pst.label(class="form-label") }}
+                    {{ form.pst(class="form-control narrow-field") }}
+                </div>
+                <div class="form-group">
+                    {{ form.delivery_charge.label(class="form-label") }}
+                    {{ form.delivery_charge(class="form-control narrow-field") }}
+                </div>
+            </div>
+        </section>
+        <section class="app-form-card">
+        <div class="page-header-stack mb-3">
+            <div>
+                <h3 class="h5 mb-1">Items</h3>
+                <p class="text-muted small mb-0">Vendor SKU can stay blank while the purchase order is saved, but each received line must have one before finalizing this invoice.</p>
+            </div>
         </div>
-        <div class="form-group">
-            {{ form.gst.label(class="form-label") }}
-            {{ form.gst(class="form-control narrow-field") }}
-        </div>
-        <div class="form-group">
-            {{ form.location_id.label(class="form-label") }}
-            {{ form.location_id(class="form-control narrow-field") }}
-        </div>
-        <div class="form-group">
-            {{ form.department.label(class="form-label") }}
-            {{ form.department(class="form-select narrow-field") }}
-        </div>
-        <div class="form-group">
-            {{ form.pst.label(class="form-label") }}
-            {{ form.pst(class="form-control narrow-field") }}
-        </div>
-        <div class="form-group">
-            {{ form.delivery_charge.label(class="form-label") }}
-            {{ form.delivery_charge(class="form-control narrow-field") }}
-        </div>
-        <div class="form-group">
-            {{ form.invoice_number.label(class="form-label") }}
-            {{ form.invoice_number(class="form-control narrow-field") }}
-        </div>
-        <h4>Items</h4>
-        <p class="text-muted small">Vendor SKU can stay blank while the purchase order is saved, but each received line must have one before finalizing this invoice.</p>
-        <div id="items">
+        <div id="items" class="receiving-items-list">
         {% for item in form.items %}
-        <div class="row g-2 item-row mb-2 align-items-center">
+        <div class="row g-3 item-row receiving-item-row align-items-center">
             <div class="col item-col">
                 {{ item.item(class="form-control item-select") }}
                 {{ item.vendor_description(class="vendor-description-field") }}
@@ -134,7 +158,12 @@
                 <label class="form-label mb-1 d-md-none" for="{{ item.container_deposit.id }}">Deposit</label>
                 {{ item.container_deposit(class="form-control deposit", value=deposit_value, placeholder="Deposit") }}
             </div>
-            <div class="col line-total-col"><span class="line-total">0.00</span></div>
+            <div class="col line-total-col">
+                <div>
+                    <div class="small text-muted">Line Total</div>
+                    <span class="line-total">0.00</span>
+                </div>
+            </div>
             <div class="col-auto">
                 <div class="d-flex flex-column gap-1 move-button-stack">
                     <button type="button" class="btn btn-outline-secondary btn-sm move-up drag-handle" aria-label="Move item up" title="Move item up">=</button>
@@ -162,14 +191,23 @@
         </div>
         {% endfor %}
         </div>
-        <button id="add-item" type="button" class="btn btn-secondary mt-3">Add Item</button>
-        <div class="form-group mt-3">
-            <label>Item Total: $<span id="item-total">0.00</span></label>
+        </section>
+        <section class="app-form-card">
+        <div class="app-metric-grid">
+            <div class="app-metric-card">
+                <div class="text-muted small">Item Total</div>
+                <div class="fs-5 fw-semibold">$<span id="item-total">0.00</span></div>
+            </div>
+            <div class="app-metric-card">
+                <div class="text-muted small">Grand Total</div>
+                <div class="fs-5 fw-semibold">$<span id="grand-total">0.00</span></div>
+            </div>
         </div>
-        <div class="form-group mt-3">
-            <label>Grand Total: $<span id="grand-total">0.00</span></label>
+        <div class="app-form-actions mt-3">
+            <button id="add-item" type="button" class="btn btn-secondary">Add Item</button>
+            <button type="submit" class="btn btn-primary">Submit</button>
         </div>
-        <button type="submit" class="btn btn-primary mt-3">Submit</button>
+        </section>
     </form>
 </div>
 <script src="{{ url_for('static', filename='js/date_pickers.js') }}"></script>
@@ -217,7 +255,7 @@
 
     function createRow(index) {
         const row = document.createElement('div');
-        row.classList.add('row','g-2','mb-2','item-row','align-items-center');
+        row.classList.add('row','g-3','item-row','receiving-item-row','align-items-center');
         row.innerHTML = `
             <div class="col item-col">
                 <select name="items-${index}-item" id="items-${index}-item" class="form-control item-select">${itemOptions}</select>

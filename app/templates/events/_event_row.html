@@ -12,7 +12,7 @@
     </td>
     <td class="col-event-closed" data-label="Closed">{{ 'Yes' if e.closed else 'No' }}</td>
     <td class="col-event-actions" data-label="Actions">
-        <div class="d-flex flex-column flex-sm-row flex-wrap gap-1">
+        <div class="mobile-actions app-action-stack">
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.view_event', event_id=e.id) }}">View</a>
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.edit_event', event_id=e.id) }}">Edit</a>
         </div>

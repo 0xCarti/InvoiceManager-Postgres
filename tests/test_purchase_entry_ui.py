@@ -27,6 +27,8 @@ def test_purchase_order_templates_expose_fast_add_actions():
         )
 
     assert "New purchase orders start as Requested." in create_content
+    assert create_content.count("app-form-card") >= 2
+    assert edit_content.count("app-form-card") >= 2
 
 
 def test_purchase_order_templates_expose_vendor_sku_field():
@@ -53,6 +55,9 @@ def test_purchase_order_form_script_keeps_a_ready_blank_row():
     assert 'event.key === "Enter"' in content
     assert "ensureTrailingBlankRow();" in content
     assert 'vendorSkuLabel.textContent = "Vendor SKU";' in content
+    assert 'row.classList.add(\n                "row",\n                "g-3"' in content
+    assert '"col-xl-4"' in content
+    assert '"col-xl-2"' in content
 
 
 def test_receive_invoice_template_shows_inline_deposit_field():
@@ -63,6 +68,8 @@ def test_receive_invoice_template_shows_inline_deposit_field():
     assert 'placeholder="Deposit"' in content
     assert "Add container deposit" not in content
     assert "toggle-deposit" not in content
+    assert "Invoice Details" in content
+    assert 'class="app-metric-grid"' in content
 
 
 def test_receive_invoice_template_exposes_vendor_sku_field():

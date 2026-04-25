@@ -3,16 +3,21 @@
 {% from 'macros/filter_modal.html' import filter_modal %}
 
 {% block content %}
-<div class="container mt-5">
-    <h2>Spoilage</h2>
-    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+<div class="container mt-5 mobile-list-page app-page-shell">
+    <div class="app-page-header">
+        <div class="app-page-header-copy">
+            <h2 class="mb-1">Spoilage</h2>
+            <p class="text-muted mb-0">Review spoilage movements in a single toolbar and table layout instead of split controls.</p>
+        </div>
+    </div>
+    <div class="mobile-toolbar">
         <div class="d-flex flex-wrap gap-2">
             <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#filterModal">
                 Filters
             </button>
             <button type="button" data-action="print" class="btn btn-secondary">Print</button>
         </div>
-        <div class="text-md-end">
+        <div class="ms-md-auto">
             {{ column_visibility_dropdown(
                 table_id='spoilage-table',
                 storage_key='spoilageTableColumnVisibility',
@@ -27,7 +32,7 @@
         </div>
     </div>
 
-    <div class="table-responsive">
+    <div class="table-responsive mobile-table-wrap">
         <table class="table sortable" id="spoilage-table">
             <thead>
                 <tr>

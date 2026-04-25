@@ -1,17 +1,18 @@
 {% extends 'base.html' %}
 {% block content %}
-<div class="row">
-    <div class="col-12">
-        <h1 class="h4 mb-3">Vendor Item Aliases</h1>
-        <p class="text-muted">Link vendor SKUs and descriptions to inventory items so future purchase-order imports map automatically.</p>
+<div class="container mt-4 app-page-shell">
+<div class="app-page-header">
+    <div class="app-page-header-copy">
+        <h1 class="h4 mb-1">Vendor Item Aliases</h1>
+        <p class="text-muted mb-0">Link vendor SKUs and descriptions to inventory items so future purchase-order imports map automatically.</p>
         {% if not can_manage_vendor_item_aliases %}
         <div class="alert alert-info">You have view-only access to vendor item aliases. Create, edit, and delete actions are hidden.</div>
         {% endif %}
     </div>
 </div>
 <div class="row">
-    <div class="col-lg-5">
-        <div class="card mb-4">
+    <div class="col-lg-4">
+        <div class="card app-card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span>
                     {% if can_manage_vendor_item_aliases %}
@@ -91,8 +92,8 @@
             </div>
         </div>
     </div>
-    <div class="col-lg-7">
-        <div class="card mb-4">
+    <div class="col-lg-8">
+        <div class="card app-card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span>Saved Aliases</span>
                 <span class="badge bg-secondary">

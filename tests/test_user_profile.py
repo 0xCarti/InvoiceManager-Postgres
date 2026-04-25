@@ -52,6 +52,8 @@ def test_profile_page_renders_password_toggles(client, app):
     assert b'Toggle new password visibility' in response.data
     assert b'Toggle confirm password visibility' in response.data
     assert b'js/password_toggle.js' in response.data
+    assert b'app-page-shell' in response.data
+    assert response.data.count(b'profile-section-card') >= 5
 
 
 def test_admin_view_and_change_user_password(client, app):

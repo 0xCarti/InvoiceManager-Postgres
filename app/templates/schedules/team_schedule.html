@@ -171,11 +171,11 @@
     }
 </style>
 
-<div class="container-fluid px-0">
+<div class="container-fluid px-0 app-page-shell">
     {% include 'schedules/_schedule_tabs.html' %}
 
-    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-        <div>
+    <div class="app-page-header">
+        <div class="app-page-header-copy">
             <h1 class="h4 mb-1">Team Schedule</h1>
             <div class="text-muted small">
                 {% if all_departments_mode %}
@@ -188,6 +188,7 @@
                 | {{ 'By Position' if view_mode == 'position' else 'By User' }} View
             </div>
         </div>
+        <div class="app-page-header-actions">
         {% if schedule_week %}
         <div class="d-flex flex-wrap gap-2">
             {% if show_seen_status and (current_seen_count or can_team_access) %}
@@ -270,9 +271,10 @@
             {% endif %}
         </div>
         {% endif %}
+        </div>
     </div>
 
-    <div class="card mb-3">
+    <div class="card app-card mb-3">
         <div class="card-body">
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
                 <div class="btn-group schedule-view-toggle" role="group" aria-label="Schedule view mode">
@@ -385,7 +387,7 @@
     {% if schedule_week %}
     <div class="row g-3 mb-3">
         <div class="col-12 col-md-4 col-xl-3">
-            <div class="card h-100">
+            <div class="card app-card h-100">
                 <div class="card-body">
                     <div class="text-muted small">Scheduled Labor</div>
                     <div class="fs-4 fw-semibold">${{ '%.2f'|format(board_total_labor) }}</div>
@@ -393,7 +395,7 @@
             </div>
         </div>
         <div class="col-12 col-md-4 col-xl-3">
-            <div class="card h-100">
+            <div class="card app-card h-100">
                 <div class="card-body">
                     <div class="text-muted small">Assigned Shifts</div>
                     <div class="fs-4 fw-semibold">{{ board_assigned_shift_count }}</div>
@@ -401,7 +403,7 @@
             </div>
         </div>
         <div class="col-12 col-md-4 col-xl-3">
-            <div class="card h-100">
+            <div class="card app-card h-100">
                 <div class="card-body">
                     <div class="text-muted small">Open / Tradeboard</div>
                     <div class="fs-4 fw-semibold">{{ board_open_shift_count }}</div>

@@ -687,8 +687,7 @@
             const row = document.createElement("div");
             row.classList.add(
                 "row",
-                "g-2",
-                "mt-2",
+                "g-3",
                 "item-row",
                 "purchase-order-item-row",
                 "align-items-start"
@@ -697,7 +696,7 @@
             const itemCol = document.createElement("div");
             itemCol.classList.add(
                 "col-12",
-                "col-md",
+                "col-xl-4",
                 "position-relative",
                 "purchase-order-item-search-column"
             );
@@ -706,8 +705,7 @@
             itemLabel.classList.add(
                 "form-label",
                 "form-label-sm",
-                "mb-1",
-                "d-md-none"
+                "mb-1"
             );
             const itemInputId = `items-${index}-item-label`;
             itemLabel.setAttribute("for", itemInputId);
@@ -787,7 +785,8 @@
             const glCodeCol = document.createElement("div");
             glCodeCol.classList.add(
                 "col-12",
-                "col-md-auto",
+                "col-sm-6",
+                "col-xl-2",
                 "gl-code-column",
                 "purchase-order-gl-code-column"
             );
@@ -795,8 +794,7 @@
             glCodeLabel.classList.add(
                 "form-label",
                 "form-label-sm",
-                "mb-1",
-                "d-md-none"
+                "mb-1"
             );
             glCodeLabel.textContent = "GL Code";
             glCodeCol.appendChild(glCodeLabel);
@@ -812,13 +810,12 @@
             glCodeCol.appendChild(glCodeBadge);
 
             const unitCol = document.createElement("div");
-            unitCol.classList.add("col-8", "col-md", "purchase-order-unit-column");
+            unitCol.classList.add("col-12", "col-sm-6", "col-xl-2", "purchase-order-unit-column");
             const unitLabel = document.createElement("label");
             unitLabel.classList.add(
                 "form-label",
                 "form-label-sm",
-                "mb-1",
-                "d-md-none"
+                "mb-1"
             );
             const unitSelectId = `items-${index}-unit`;
             unitLabel.setAttribute("for", unitSelectId);
@@ -857,7 +854,8 @@
             const vendorSkuCol = document.createElement("div");
             vendorSkuCol.classList.add(
                 "col-12",
-                "col-md-2",
+                "col-sm-6",
+                "col-xl-2",
                 "purchase-order-sku-column"
             );
             const vendorSkuLabel = document.createElement("label");
@@ -880,16 +878,16 @@
 
             const quantityCol = document.createElement("div");
             quantityCol.classList.add(
-                "col-4",
-                "col-md-1",
+                "col-12",
+                "col-sm-6",
+                "col-xl-1",
                 "purchase-order-quantity-column"
             );
             const quantityLabel = document.createElement("label");
             quantityLabel.classList.add(
                 "form-label",
                 "form-label-sm",
-                "mb-1",
-                "d-md-none"
+                "mb-1"
             );
             const quantityInputId = `items-${index}-quantity`;
             quantityLabel.setAttribute("for", quantityInputId);
@@ -911,7 +909,7 @@
             const actionsCol = document.createElement("div");
             actionsCol.classList.add(
                 "col-12",
-                "col-md-auto",
+                "col-xl-1",
                 "purchase-order-item-actions"
             );
             const actionsWrap = document.createElement("div");

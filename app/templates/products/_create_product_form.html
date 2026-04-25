@@ -9,7 +9,7 @@
 <div id="{{ product_form_id }}" class="product-form" data-role="product-form" data-embedded="1">
 {% endif %}
     {{ form.hidden_tag() }}
-    <div class="row">
+    <div class="row g-3">
         <div class="col-md-6 mb-3">
             {{ form.name.label(class="form-label") }}
             {{ form.name(class="form-control") }}
@@ -29,7 +29,7 @@
             {% endfor %}
         </div>
     </div>
-    <div class="row">
+    <div class="row g-3">
         <div class="col-md-6 mb-3">
             {{ form.cost.label(class="form-label") }}
             <div class="d-flex flex-column flex-sm-row align-items-sm-center gap-2">
@@ -57,7 +57,7 @@
             <div class="form-text">Revenue account recorded when this product is sold.</div>
         </div>
     </div>
-    <div class="row">
+    <div class="row g-3">
         <div class="col-md-6 mb-3">
             {{ form.recipe_yield_quantity.label(class="form-label") }}
             {{ form.recipe_yield_quantity(class="form-control", id="recipe_yield_quantity") }}
@@ -101,12 +101,14 @@
                 <button type="button" class="btn btn-danger remove-item">Remove</button>
             </div>
         </div>
-        {% endfor %}
+    {% endfor %}
     </div>
-    <button type="button" class="btn btn-secondary" data-role="add-item">Add Item</button>
-    {% if show_submit %}
-        <button type="submit" class="btn btn-primary">Submit</button>
-    {% endif %}
+    <div class="app-form-actions mt-3">
+        <button type="button" class="btn btn-secondary" data-role="add-item">Add Item</button>
+        {% if show_submit %}
+            <button type="submit" class="btn btn-primary">Submit</button>
+        {% endif %}
+    </div>
 {% if not embedded %}
 </form>
 {% else %}

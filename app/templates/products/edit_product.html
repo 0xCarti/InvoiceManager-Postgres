@@ -3,11 +3,18 @@
 {% block title %}Edit Product{% endblock %}
 
 {% block content %}
-<div class="container mt-5">
-    <h2>Edit Product</h2>
-    {% set form_action = url_for('product.edit_product', product_id=product_id) %}
-    {% set form_id = 'edit-product-form-page' %}
-    {% include 'products/_edit_product_tabs.html' with context %}
+<div class="container mt-5 app-page-shell">
+    <div class="app-page-header">
+        <div class="app-page-header-copy">
+            <h2 class="mb-1">Edit Product</h2>
+            <p class="text-muted mb-0">Recipe, vendor mappings, and terminal mappings now sit inside a cleaner tabbed editor with more breathing room.</p>
+        </div>
+    </div>
+    <div class="app-form-card">
+        {% set form_action = url_for('product.edit_product', product_id=product_id) %}
+        {% set form_id = 'edit-product-form-page' %}
+        {% include 'products/_edit_product_tabs.html' with context %}
+    </div>
 </div>
 <script nonce="{{ csp_nonce }}">
     document.addEventListener('DOMContentLoaded', function () {

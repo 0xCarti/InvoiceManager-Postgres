@@ -1,0 +1,142 @@
+[
+  {
+    "name": "transfers",
+    "url": "https://im.brycecotton.ca/transfers",
+    "title": "AssetFlow",
+    "heading": "Transfers",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\transfers.png"
+  },
+  {
+    "name": "sales_import_review",
+    "url": "https://im.brycecotton.ca/controlpanel/sales-imports?search=&status=pending",
+    "title": "AssetFlow",
+    "heading": "Sales Imports",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\sales_import_review.png"
+  },
+  {
+    "name": "communications",
+    "url": "https://im.brycecotton.ca/communications",
+    "title": "AssetFlow",
+    "heading": "Communications",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\communications.png"
+  },
+  {
+    "name": "messages",
+    "url": "https://im.brycecotton.ca/communications/messages",
+    "title": "AssetFlow",
+    "heading": "Messages",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\messages.png"
+  },
+  {
+    "name": "events",
+    "url": "https://im.brycecotton.ca/events?type=&name_contains=&name_not_contains=&date_filter=&start_date_from=&start_date_to=&end_date_from=&end_date_to=&closed_status=open",
+    "title": "AssetFlow",
+    "heading": "Events",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\events.png"
+  },
+  {
+    "name": "invoices",
+    "url": "https://im.brycecotton.ca/view_invoices",
+    "title": "AssetFlow",
+    "heading": "Invoices",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\invoices.png"
+  },
+  {
+    "name": "items",
+    "url": "https://im.brycecotton.ca/items",
+    "title": "AssetFlow",
+    "heading": "Items",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\items.png"
+  },
+  {
+    "name": "locations",
+    "url": "https://im.brycecotton.ca/locations",
+    "title": "AssetFlow",
+    "heading": "Locations",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\locations.png"
+  },
+  {
+    "name": "menus",
+    "url": "https://im.brycecotton.ca/menus",
+    "title": "AssetFlow",
+    "heading": "Menus",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\menus.png"
+  },
+  {
+    "name": "products",
+    "url": "https://im.brycecotton.ca/products",
+    "title": "AssetFlow",
+    "heading": "Products",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\products.png"
+  },
+  {
+    "name": "purchase_invoices",
+    "url": "https://im.brycecotton.ca/purchase_invoices",
+    "title": "AssetFlow",
+    "heading": "Purchase Invoices",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\purchase_invoices.png"
+  },
+  {
+    "name": "purchase_orders",
+    "url": "https://im.brycecotton.ca/purchase_orders",
+    "title": "AssetFlow",
+    "heading": "Purchase Orders",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\purchase_orders.png"
+  },
+  {
+    "name": "schedules",
+    "url": "https://im.brycecotton.ca/schedules",
+    "title": "AssetFlow",
+    "heading": "Team Schedule",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\schedules.png"
+  },
+  {
+    "name": "spoilage",
+    "url": "https://im.brycecotton.ca/spoilage",
+    "title": "AssetFlow",
+    "heading": "Spoilage",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\spoilage.png"
+  },
+  {
+    "name": "purchase_inventory_summary_report",
+    "url": "https://im.brycecotton.ca/reports/purchase-inventory-summary",
+    "title": "AssetFlow",
+    "heading": "Purchase Inventory Summary",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\purchase_inventory_summary_report.png"
+  },
+  {
+    "name": "settings",
+    "url": "https://im.brycecotton.ca/controlpanel/settings",
+    "title": "AssetFlow",
+    "heading": "Application Settings",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\settings.png"
+  },
+  {
+    "name": "data_imports",
+    "url": "https://im.brycecotton.ca/controlpanel/imports",
+    "title": "AssetFlow",
+    "heading": "Data Imports",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\data_imports.png"
+  },
+  {
+    "name": "vendor_item_aliases",
+    "url": "https://im.brycecotton.ca/controlpanel/vendor-item-aliases",
+    "title": "AssetFlow",
+    "heading": "Vendor Item Aliases",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\vendor_item_aliases.png"
+  },
+  {
+    "name": "permissions",
+    "url": "https://im.brycecotton.ca/controlpanel/permissions",
+    "title": "AssetFlow",
+    "heading": "Permission Catalog",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\permissions.png"
+  },
+  {
+    "name": "profile",
+    "url": "https://im.brycecotton.ca/auth/profile",
+    "title": "AssetFlow",
+    "heading": "User Profile",
+    "file": "C:\\Users\\bryce\\Desktop\\IM\\InvoiceManager-Postgres\\artifacts\\ui_audit_2026-04-24\\profile.png"
+  }
+]

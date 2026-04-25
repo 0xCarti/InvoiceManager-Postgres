@@ -1,5 +1,132 @@
 /* Shared mobile responsiveness helpers used across the app templates. */
 
+.app-page-shell {
+    display: grid;
+    gap: 1.25rem;
+}
+
+.app-page-shell > * {
+    min-width: 0;
+}
+
+.app-page-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.app-page-header-copy {
+    min-width: 0;
+    max-width: 48rem;
+}
+
+.app-page-header-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.app-toolbar-panel,
+.app-form-card,
+.app-card {
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    border-radius: 1rem;
+    background: var(--bs-body-bg);
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+}
+
+.app-toolbar-panel {
+    padding: 0.95rem 1rem;
+    background: linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgba(255, 255, 255, 0.96) 100%);
+}
+
+.app-form-card,
+.app-card {
+    padding: 1.25rem;
+}
+
+.app-card > .card-body,
+.app-card > .card-header {
+    border-color: rgba(17, 24, 39, 0.08);
+}
+
+.app-card > .card-header {
+    background: linear-gradient(180deg, rgba(248, 250, 252, 0.94) 0%, rgba(255, 255, 255, 0.98) 100%);
+}
+
+.app-form-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.app-form-grid > * {
+    min-width: 0;
+}
+
+.app-form-grid .form-group,
+.app-form-grid .mb-3 {
+    margin-bottom: 0;
+}
+
+.app-form-grid .narrow-field {
+    max-width: none;
+}
+
+.app-form-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.app-badge-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.app-metric-grid {
+    display: grid;
+    gap: 0.9rem;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.app-metric-card {
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    border-radius: 0.9rem;
+    background: linear-gradient(180deg, rgba(248, 250, 252, 0.92) 0%, rgba(255, 255, 255, 0.98) 100%);
+    padding: 0.95rem 1rem;
+}
+
+.app-action-stack {
+    display: grid;
+    gap: 0.45rem;
+    align-content: start;
+}
+
+.app-action-stack > * {
+    min-width: 0;
+}
+
+.app-action-stack > form {
+    margin: 0;
+}
+
+.app-action-stack > .btn,
+.app-action-stack > form .btn,
+.app-action-stack > .dropdown > .btn {
+    width: 100%;
+}
+
+.app-action-stack > form .btn.btn-link {
+    width: auto;
+}
+
 .page-header-stack,
 .mobile-header-wrap {
     display: flex;
@@ -58,6 +185,92 @@
     flex: 1 1 16rem;
 }
 
+.mobile-list-page {
+    display: grid;
+    gap: 1rem;
+}
+
+.mobile-list-page .mobile-toolbar,
+.mobile-list-page .mobile-pagination-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.mobile-list-page .mobile-toolbar {
+    padding: 0.95rem 1rem;
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    border-radius: 1rem;
+    background: linear-gradient(180deg, rgba(248, 250, 252, 0.96) 0%, rgba(255, 255, 255, 0.96) 100%);
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+}
+
+.mobile-list-page .mobile-toolbar > * {
+    min-width: 0;
+}
+
+.mobile-list-page .mobile-toolbar .dropdown-menu {
+    max-height: min(22rem, 60vh);
+    overflow-y: auto;
+}
+
+.mobile-list-page .mobile-table-wrap {
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    border-radius: 1rem;
+    background: var(--bs-body-bg);
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+    overflow: hidden;
+}
+
+.mobile-list-page .mobile-table-wrap .table {
+    margin-bottom: 0;
+}
+
+.mobile-list-page .mobile-table-wrap thead th {
+    background: color-mix(in srgb, var(--bs-body-bg) 92%, var(--bs-primary) 8%);
+}
+
+.mobile-list-page .mobile-pagination-controls {
+    padding-top: 0.15rem;
+}
+
+.mobile-list-page .mobile-pagination-controls .pagination {
+    flex-wrap: wrap;
+}
+
+.mobile-list-page .mobile-pagination-controls form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin-left: auto;
+}
+
+.mobile-list-page .mobile-pagination-controls .form-select {
+    width: auto;
+    min-width: 5rem;
+}
+
+.mobile-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    align-items: center;
+}
+
+.mobile-actions form {
+    margin: 0;
+}
+
+.mobile-actions .btn {
+    white-space: nowrap;
+}
+
+.mobile-actions.app-action-stack {
+    display: grid;
+}
+
 .table-mobile-wrap th,
 .table-mobile-wrap td {
     white-space: normal;
@@ -91,6 +304,95 @@
 .purchase-order-gl-code-column .gl-code-display {
     white-space: normal;
     overflow-wrap: anywhere;
+}
+
+.purchase-order-form-grid,
+.receive-form-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.purchase-order-form-grid .form-group,
+.receive-form-grid .form-group {
+    margin-bottom: 0;
+}
+
+.purchase-order-items-list,
+.receiving-items-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.purchase-order-item-row,
+.receiving-item-row {
+    margin: 0;
+    padding: 1rem;
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    border-radius: 0.95rem;
+    background: linear-gradient(180deg, rgba(248, 250, 252, 0.9) 0%, rgba(255, 255, 255, 0.98) 100%);
+    box-shadow: 0 10px 22px rgba(15, 23, 42, 0.04);
+}
+
+.purchase-order-item-row [class*="col-"],
+.receiving-item-row [class*="col-"] {
+    min-width: 0;
+}
+
+.purchase-order-item-row .item-search,
+.purchase-order-item-row .unit-select,
+.purchase-order-item-row .vendor-sku-field,
+.purchase-order-item-row .quantity,
+.receiving-item-row .item-select,
+.receiving-item-row .unit-select,
+.receiving-item-row .quantity,
+.receiving-item-row .vendor-sku,
+.receiving-item-row .cost,
+.receiving-item-row .deposit {
+    min-height: 2.625rem;
+}
+
+.purchase-order-item-actions .d-flex,
+.receiving-item-row .move-button-stack {
+    width: 100%;
+}
+
+.receiving-item-row .optional-panel {
+    margin-top: 0.5rem;
+}
+
+.product-form [data-role="item-list"] {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.product-form .item-row {
+    margin-bottom: 0;
+    padding: 0.95rem;
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    border-radius: 0.95rem;
+    background: linear-gradient(180deg, rgba(248, 250, 252, 0.86) 0%, rgba(255, 255, 255, 0.98) 100%);
+}
+
+.product-form .item-suggestions {
+    margin-top: 0.35rem;
+    max-height: 12rem;
+    overflow-y: auto;
+}
+
+.unit-row {
+    margin-left: 0;
+    margin-right: 0;
+    padding: 0.9rem;
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    border-radius: 0.85rem;
+    background: rgba(248, 250, 252, 0.72);
+}
+
+.item-barcode-scanner {
+    box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
 }
 
 .barcode-row .scan-barcode,
@@ -188,6 +490,22 @@
     .mobile-toolbar > *,
     .mobile-filter-toolbar > * {
         flex: 1 1 100%;
+        width: 100%;
+    }
+
+    .app-page-header,
+    .app-page-header-actions,
+    .app-form-actions {
+        align-items: stretch;
+    }
+
+    .app-page-header-actions,
+    .app-form-actions {
+        width: 100%;
+    }
+
+    .app-page-header-actions > *,
+    .app-form-actions > * {
         width: 100%;
     }
 
@@ -322,12 +640,6 @@
         grid-template-columns: 1fr;
     }
 
-    .purchase-order-items-list {
-        display: flex;
-        flex-direction: column;
-        gap: 0.85rem;
-    }
-
     .purchase-order-item-row {
         margin-top: 0 !important;
         margin-left: 0;
@@ -373,6 +685,34 @@
     .purchase-order-item-actions .btn {
         flex: 1 1 0;
         min-height: 44px;
+    }
+
+    .receiving-item-row {
+        padding: 0.9rem;
+    }
+
+    .receiving-item-row .line-total-col {
+        margin-top: 0.25rem;
+    }
+
+    .receiving-item-row .move-button-stack .btn,
+    .receiving-item-row .remove-item,
+    .receiving-item-row .toggle-optional {
+        min-height: 44px;
+    }
+
+    .receiving-item-row .move-button-stack {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.5rem;
+    }
+
+    .product-form .item-row {
+        padding: 0.9rem;
+    }
+
+    .product-form .item-row [class*="col"] {
+        width: 100%;
     }
 
     .purchase-order-quick-add {

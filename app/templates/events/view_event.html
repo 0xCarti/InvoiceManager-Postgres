@@ -1,32 +1,41 @@
 {% extends 'base.html' %}
 {% block content %}
 {% set unconfirmed_count = event.locations | selectattr('confirmed', 'equalto', False) | list | length %}
-<div class="container mt-4">
-    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
-        <div>
+<div class="container mt-4 app-page-shell">
+    <div class="app-page-header">
+        <div class="app-page-header-copy">
             <h2 class="mb-1">{{ event.name }}</h2>
             <p class="text-muted mb-0">Event detail and location workflow</p>
         </div>
-        <div class="d-grid d-sm-flex flex-wrap gap-2">
+        <div class="app-page-header-actions">
             <a class="btn btn-outline-secondary" href="{{ url_for('event.edit_event', event_id=event.id) }}">Edit Event</a>
         </div>
     </div>
-    <div class="d-flex flex-column flex-md-row flex-wrap align-items-stretch align-items-md-center gap-2 mb-3">
-        <span class="badge rounded-pill text-bg-light border">Start: {{ event.start_date }}</span>
-        <span class="badge rounded-pill text-bg-light border">End: {{ event.end_date }}</span>
-        <span class="badge rounded-pill text-bg-light border">Type: {{ event_type_label }}</span>
-        <span class="badge rounded-pill text-bg-light border">
-            Estimated Sales:
-            {% if event.estimated_sales is not none %}${{ '{:,.2f}'.format(event.estimated_sales) }}{% else %}Not set{% endif %}
-        </span>
-        <span class="badge rounded-pill text-bg-light border">
-            Actual Confirmed Sales:
-            {% if confirmed_sales %}${{ '{:,.2f}'.format(confirmed_sales.amount) }}{% else %}Not available{% endif %}
-        </span>
-        <span class="badge rounded-pill text-bg-light border">
-            Physical vs Terminal Variance:
-            {% if physical_terminal_variance is not none %}${{ '{:,.2f}'.format(physical_terminal_variance) }}{% else %}Not available{% endif %}
-        </span>
+    <div class="app-metric-grid">
+        <div class="app-metric-card">
+            <div class="text-muted small">Start</div>
+            <div class="fw-semibold">{{ event.start_date }}</div>
+        </div>
+        <div class="app-metric-card">
+            <div class="text-muted small">End</div>
+            <div class="fw-semibold">{{ event.end_date }}</div>
+        </div>
+        <div class="app-metric-card">
+            <div class="text-muted small">Type</div>
+            <div class="fw-semibold">{{ event_type_label }}</div>
+        </div>
+        <div class="app-metric-card">
+            <div class="text-muted small">Estimated Sales</div>
+            <div class="fw-semibold">{% if event.estimated_sales is not none %}${{ '{:,.2f}'.format(event.estimated_sales) }}{% else %}Not set{% endif %}</div>
+        </div>
+        <div class="app-metric-card">
+            <div class="text-muted small">Actual Confirmed Sales</div>
+            <div class="fw-semibold">{% if confirmed_sales %}${{ '{:,.2f}'.format(confirmed_sales.amount) }}{% else %}Not available{% endif %}</div>
+        </div>
+        <div class="app-metric-card">
+            <div class="text-muted small">Physical vs Terminal Variance</div>
+            <div class="fw-semibold">{% if physical_terminal_variance is not none %}${{ '{:,.2f}'.format(physical_terminal_variance) }}{% else %}Not available{% endif %}</div>
+        </div>
     </div>
     {% if terminal_sales_conflicts %}
     <div class="alert alert-warning" role="alert">
@@ -41,7 +50,7 @@
         {% endfor %}
     </div>
     {% endif %}
-    <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 mb-3">
+    <div class="mobile-toolbar app-toolbar-panel">
         {% if not event.closed %}
         <a class="btn btn-primary" href="{{ url_for('event.add_location', event_id=event.id) }}">Add Location</a>
         {% endif %}
@@ -93,7 +102,7 @@
         {{ opening_form.hidden_tag() }}
     </form>
     {% endif %}
-        <div class="table-responsive">
+        <div class="table-responsive mobile-table-wrap">
             <table class="table table-sm align-middle" id="locations-table">
                 <thead>
                     <tr>
@@ -143,7 +152,7 @@
                         </td>
                         <td class="text-break">
                             {% if not el.confirmed and not event.closed %}
-                                <div class="d-flex flex-column gap-1">
+                                <div class="app-action-stack">
                                     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.stand_sheet', event_id=event.id, location_id=el.location_id) }}">Stand Sheet</a>
                                 {% if el.location %}
                                     <a
@@ -163,8 +172,8 @@
                                 <a class="btn btn-sm btn-success" href="{{ url_for('event.confirm_location', event_id=event.id, el_id=el.id) }}">Confirm</a>
                                 </div>
                             {% else %}
-                                <div class="d-flex flex-column gap-1">
-                                    <span class="text-muted">Stand Sheet | Terminal Sales</span>
+                                <div class="app-action-stack">
+                                    <span class="text-muted small">Stand Sheet | Terminal Sales</span>
                                 {% if el.location %}
                                     <a
                                         href="#"
@@ -182,7 +191,7 @@
                                         <form
                                             method="post"
                                             action="{{ url_for('event.undo_confirm_location', event_id=event.id, el_id=el.id) }}"
-                                            class="d-inline"
+                                            class="d-inline m-0"
                                         >
                                             {{ undo_form.hidden_tag() }}
                                             {{ undo_form.submit(class_='btn btn-link p-0 align-baseline text-decoration-none') }}
