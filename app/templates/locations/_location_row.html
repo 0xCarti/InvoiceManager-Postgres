@@ -10,11 +10,17 @@
     </td>
     <td class="col-location-actions">
         <div class="mobile-actions app-action-stack">
+            {% if can_access_endpoint('locations.edit_location', 'GET') %}
             <button type="button" class="btn btn-info btn-sm edit-location-btn" data-id="{{ location.id }}">Edit</button>
+            {% endif %}
             <a href="{{ url_for('locations.view_stand_sheet', location_id=location.id) }}" class="btn btn-secondary btn-sm">Stand Sheet</a>
+            {% if can_access_endpoint('locations.location_items', 'GET') %}
             <a href="{{ url_for('locations.location_items', location_id=location.id) }}" class="btn btn-outline-secondary btn-sm">Manage Items</a>
+            {% endif %}
             <a href="{{ url_for('notes.entity_notes', entity_type='location', entity_id=location.id) }}" class="btn btn-outline-secondary btn-sm">Notes</a>
+            {% if can_access_endpoint('locations.copy_location_items', 'POST') %}
             <button type="button" class="btn btn-warning btn-sm copy-location-btn" data-id="{{ location.id }}">Copy Stand Sheet</button>
+            {% endif %}
             {% if can_access_endpoint('locations.delete_location', 'POST') %}
             <form action="{{ url_for('locations.delete_location', location_id=location.id) }}" method="post" class="d-inline">
                 {{ delete_form.hidden_tag() }}

@@ -187,6 +187,125 @@ def test_schedule_setup_and_user_settings_flow(client, app):
         ).first()
 
 
+def test_schedule_setup_hides_manage_controls_for_pay_rate_only_users(client, app):
+    with app.app_context():
+        viewer = User(
+            email="schedule-pay-rate-viewer@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        department = Department(name="Read Only Ops", active=True)
+        position = ShiftPosition(
+            department=department,
+            name="Reader",
+            active=True,
+        )
+        target_user = User(
+            email="schedule-target@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add_all([viewer, department, position, target_user])
+        db.session.commit()
+        grant_permissions(
+            viewer,
+            "schedules.manage_pay_rates",
+            group_name="Schedule Pay Rates Only",
+            description="Can edit pay rates without setup access.",
+        )
+        db.session.add(
+            UserDepartmentMembership(
+                user_id=viewer.id,
+                department_id=department.id,
+                role="manager",
+                is_primary=True,
+            )
+        )
+        db.session.commit()
+        target_user_id = target_user.id
+
+    with client:
+        login(client, "schedule-pay-rate-viewer@example.com", "pass")
+        response = client.get("/schedules/setup", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert b"Add Department" not in response.data
+    assert b"Add Position" not in response.data
+    assert b'name="action" value="toggle_department"' not in response.data
+    assert b'name="action" value="toggle_position"' not in response.data
+    assert b"User Scheduling Profiles" in response.data
+
+
+def test_schedule_user_settings_hide_setup_controls_for_pay_rate_only_users(client, app):
+    with app.app_context():
+        viewer = User(
+            email="schedule-pay-rate-viewer-2@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        department = Department(name="Pay Rates Only", active=True)
+        position = ShiftPosition(
+            department=department,
+            name="Counter",
+            active=True,
+        )
+        target_user = User(
+            email="schedule-settings-target@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add_all([viewer, department, position, target_user])
+        db.session.flush()
+        db.session.add(
+            UserDepartmentMembership(
+                user_id=target_user.id,
+                department_id=department.id,
+                role="assistant",
+                is_primary=True,
+                can_auto_assign=True,
+            )
+        )
+        db.session.add(
+            UserPositionEligibility(
+                user_id=target_user.id,
+                position_id=position.id,
+                priority=10,
+                active=True,
+            )
+        )
+        db.session.commit()
+        grant_permissions(
+            viewer,
+            "schedules.manage_pay_rates",
+            group_name="Schedule User Pay Rates Only",
+            description="Can edit pay rates without setup access.",
+        )
+        db.session.add(
+            UserDepartmentMembership(
+                user_id=viewer.id,
+                department_id=department.id,
+                role="manager",
+                is_primary=True,
+            )
+        )
+        db.session.commit()
+        target_user_id = target_user.id
+
+    with client:
+        login(client, "schedule-pay-rate-viewer-2@example.com", "pass")
+        response = client.get(f"/schedules/users/{target_user_id}", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert b"Hourly Rate" in response.data
+    assert b"Save Scheduling Settings" in response.data
+    assert b"Schedule Enabled" not in response.data
+    assert b"Schedule Notes" not in response.data
+    assert b'name="action" value="add_membership"' not in response.data
+    assert b'name="action" value="add_eligibility"' not in response.data
+    assert b'name="action" value="remove_membership"' not in response.data
+    assert b'name="action" value="remove_eligibility"' not in response.data
+
+
 def test_team_schedule_can_create_and_publish_shift(client, app):
     employee_id = create_user(app, "shift-worker@example.com")
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")

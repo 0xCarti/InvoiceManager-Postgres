@@ -5,6 +5,9 @@
 {% block title %}View Vendors{% endblock %}
 
 {% block content %}
+{% set can_create_vendors = can_access_endpoint('vendor.create_vendor', 'POST') %}
+{% set can_edit_vendors = can_access_endpoint('vendor.edit_vendor', 'GET') %}
+{% set can_delete_vendors = can_access_endpoint('vendor.delete_vendor', 'POST') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-toolbar,
@@ -49,7 +52,9 @@
             <p class="text-muted mb-0">Browse and manage vendor records</p>
         </div>
         <div>
+            {% if can_create_vendors %}
             <button type="button" class="btn btn-primary" id="createVendorBtn">Create Vendor</button>
+            {% endif %}
         </div>
     </div>
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3 mobile-toolbar">
@@ -116,6 +121,7 @@
     </div>
 </div>
 
+{% if can_create_vendors %}
 <!-- Vendor Modal -->
 <div class="modal fade" id="vendorModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
@@ -172,4 +178,5 @@ document.getElementById('createVendorBtn').addEventListener('click', function() 
     });
 });
 </script>
+{% endif %}
 {% endblock %}

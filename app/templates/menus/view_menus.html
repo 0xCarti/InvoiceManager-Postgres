@@ -2,6 +2,9 @@
 {% from 'macros/column_visibility.html' import column_visibility_dropdown %}
 {% block content %}
 {% set can_delete_menus = can_access_endpoint('menu.delete_menu', 'POST') %}
+{% set can_create_menus = can_access_endpoint('menu.add_menu', 'GET') %}
+{% set can_edit_menus = can_access_endpoint('menu.edit_menu', 'GET') %}
+{% set can_assign_menus = can_access_endpoint('menu.assign_menu', 'GET') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-toolbar,
@@ -47,7 +50,9 @@
             <p class="text-muted mb-0">Manage menu definitions and assignments</p>
         </div>
         <div>
+            {% if can_create_menus %}
             <a href="{{ url_for('menu.add_menu') }}" class="btn btn-primary">Create Menu</a>
+            {% endif %}
         </div>
     </div>
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3 mobile-toolbar">
@@ -141,8 +146,12 @@
                     </td>
                     <td class="col-menu-actions text-end">
                         <div class="mobile-actions mobile-card-actions">
+                            {% if can_edit_menus %}
                             <a href="{{ url_for('menu.edit_menu', menu_id=menu.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                            {% endif %}
+                            {% if can_assign_menus %}
                             <a href="{{ url_for('menu.assign_menu', menu_id=menu.id) }}" class="btn btn-sm btn-outline-primary">Assign</a>
+                            {% endif %}
                             {% if can_delete_menus %}
                             <form method="post" action="{{ url_for('menu.delete_menu', menu_id=menu.id) }}" class="d-inline">
                                 {{ delete_form.hidden_tag() }}

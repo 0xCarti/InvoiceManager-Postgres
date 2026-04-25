@@ -3,6 +3,12 @@
 {% from 'macros/filter_modal.html' import filter_modal %}
 
 {% block content %}
+{% set can_create_locations = can_access_endpoint('locations.add_location', 'GET') %}
+{% set can_edit_locations = can_access_endpoint('locations.edit_location', 'GET') %}
+{% set can_bulk_update_locations = can_access_endpoint('locations.bulk_update_locations', 'GET') %}
+{% set can_copy_location_items = can_access_endpoint('locations.copy_location_items', 'POST') %}
+{% set can_email_stand_sheets = can_access_endpoint('locations.email_stand_sheets', 'POST') %}
+{% set can_manage_location_items = can_access_endpoint('locations.location_items', 'GET') %}
 {% set can_delete_locations = can_access_endpoint('locations.delete_location', 'POST') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
@@ -48,11 +54,16 @@
             <p class="text-muted mb-0">Manage active and archived locations</p>
         </div>
         <div class="app-page-header-actions">
+            {% if can_create_locations %}
             <button id="addLocationBtn" class="btn btn-primary" type="button">Add New Location</button>
+            {% endif %}
         </div>
     </div>
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3 mobile-toolbar">
+        {% if can_bulk_update_locations %}
         <button type="button" class="btn btn-outline-secondary" id="bulkEditLocationsBtn" disabled>Bulk Edit</button>
+        {% endif %}
+        {% if can_email_stand_sheets %}
         <button
             type="button"
             class="btn btn-outline-secondary"
@@ -63,6 +74,7 @@
         >
             Email Stand Sheets
         </button>
+        {% endif %}
         <div class="dropdown d-md-none">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                 More actions
@@ -238,11 +250,14 @@
         {% endif %}
     </div>
 {% endcall %}
+{% if can_create_locations or can_edit_locations %}
 <div class="modal fade" id="locationModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content"></div>
     </div>
 </div>
+{% endif %}
+{% if can_bulk_update_locations %}
 <div class="modal fade" id="locationBulkModal" tabindex="-1" aria-hidden="true" data-url="{{ url_for('locations.bulk_update_locations') }}">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
@@ -254,6 +269,8 @@
         </div>
     </div>
 </div>
+{% endif %}
+{% if can_copy_location_items %}
 <!-- Copy Stand Sheet Modal -->
 <div class="modal fade" id="copyModal" tabindex="-1" aria-labelledby="copyModalLabel" aria-hidden="true">
     <div class="modal-dialog">
@@ -274,14 +291,18 @@
         </div>
     </div>
 </div>
+{% endif %}
+{% if can_email_stand_sheets %}
 {% include 'shared/email_stand_sheet_modal.html' %}
+{% endif %}
 <script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function() {
     const csrfToken = document.getElementById('csrf_token').value;
     const locationModalElement = document.getElementById('locationModal');
     const $locationModal = $('#locationModal');
-    const locationModal = new bootstrap.Modal(locationModalElement);
-    const copyModal = new bootstrap.Modal(document.getElementById('copyModal'));
+    const locationModal = locationModalElement ? new bootstrap.Modal(locationModalElement) : null;
+    const copyModalElement = document.getElementById('copyModal');
+    const copyModal = copyModalElement ? new bootstrap.Modal(copyModalElement) : null;
     const productSearchUrl = "{{ url_for('product.search_products') }}";
     let currentSourceId = null;
 
@@ -418,22 +439,31 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function loadLocationForm(url) {
+        if (!url || !locationModalElement) {
+            return;
+        }
         $.get(url, function(data) {
             const modalContent = $locationModal.find('.modal-content');
             modalContent.html(data);
             initProductSelector($locationModal);
-            locationModal.show();
+            if (locationModal) {
+                locationModal.show();
+            }
         });
     }
 
+    {% if can_create_locations %}
     $('#addLocationBtn').on('click', function() {
         loadLocationForm('{{ url_for('locations.add_location') }}');
     });
+    {% endif %}
 
+    {% if can_edit_locations %}
     $(document).on('click', '.edit-location-btn', function() {
         const id = $(this).data('id');
         loadLocationForm(`/locations/edit/${id}`);
     });
+    {% endif %}
 
     $(document).on('submit', '#locationForm', function(e) {
         e.preventDefault();
@@ -470,17 +500,22 @@ document.addEventListener('DOMContentLoaded', function() {
     function addRow(loc) {
         const menuLabel = loc.menu_name ? loc.menu_name : '<span class="text-muted">No Menu</span>';
         const notesUrl = `/notes/location/${loc.id}`;
-        const locationLabel = escapeAttribute(loc.name || 'this location');
         const row = `<tr id="location-row-${loc.id}" data-id="${loc.id}">
             <td class=\"col-select\"><input type=\"checkbox\" name=\"location_ids\" value=\"${loc.id}\" style=\"transform: scale(1.5);\"></td>
             <td class=\"col-location-name\">${loc.name}</td>
             <td class=\"col-location-menu\">${menuLabel}</td>
             <td class=\"col-location-actions\">
+                {% if can_edit_locations %}
                 <button type=\"button\" class=\"btn btn-info edit-location-btn\" data-id=\"${loc.id}\">Edit</button>
+                {% endif %}
                 <a href=\"/locations/${loc.id}/stand_sheet\" class=\"btn btn-secondary\">Stand Sheet</a>
+                {% if can_manage_location_items %}
                 <a href=\"/locations/${loc.id}/items\" class=\"btn btn-outline-secondary\">Manage Items</a>
+                {% endif %}
                 <a href=\"${notesUrl}\" class=\"btn btn-outline-secondary\">Notes</a>
+                {% if can_copy_location_items %}
                 <button type=\"button\" class=\"btn btn-warning copy-location-btn\" data-id=\"${loc.id}\">Copy Stand Sheet</button>
+                {% endif %}
                 {% if can_delete_locations %}
                 <form action=\"/locations/delete/${loc.id}\" method=\"post\" class=\"d-inline\">
                     <input type=\"hidden\" name=\"csrf_token\" value=\"${csrfToken}\">
@@ -602,6 +637,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    {% if can_copy_location_items %}
     $(document).on('click', '.copy-location-btn', function() {
         currentSourceId = $(this).data('id');
         const options = $('#locations-table tbody tr').map(function() {
@@ -613,7 +649,9 @@ document.addEventListener('DOMContentLoaded', function() {
             return `<div class="form-check"><input class="form-check-input" type="checkbox" value="${id}" id="copy-${id}"><label class="form-check-label" for="copy-${id}">${name}</label></div>`;
         }).get().join('');
         $('#copyLocationList').html(options || '<p class="text-muted">No other locations available.</p>');
-        copyModal.show();
+        if (copyModal) {
+            copyModal.show();
+        }
     });
 
     $('#copyForm').on('submit', function(e) {
@@ -640,6 +678,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     });
+    {% endif %}
 });
 </script>
 {% endblock %}

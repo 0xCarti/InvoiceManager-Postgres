@@ -3,6 +3,8 @@ from types import SimpleNamespace
 from flask import Flask
 
 from app.permissions import (
+    ENDPOINT_METHOD_PERMISSION_RULES,
+    ENDPOINT_PERMISSION_RULES,
     get_default_landing_endpoint,
     get_permission_categories,
     user_can_access_endpoint,
@@ -66,6 +68,16 @@ def test_user_can_access_endpoint_requires_matching_permission():
         "communication.message_detail",
     )
     assert not user_can_access_endpoint(
+        DummyUser("events.reports"),
+        "event.email_bulk_stand_sheets",
+        "POST",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("events.email_stand_sheets"),
+        "event.email_bulk_stand_sheets",
+        "POST",
+    )
+    assert not user_can_access_endpoint(
         DummyUser("purchase_orders.view"),
         "purchase.mark_purchase_order_ordered",
         "POST",
@@ -96,6 +108,26 @@ def test_user_can_access_endpoint_requires_matching_permission():
     assert user_can_access_endpoint(
         DummyUser("schedules.manage_templates"),
         "schedule.template_detail",
+        "POST",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("signage.view"),
+        "signage.view_signage_media_assets",
+        "POST",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("signage.manage_media"),
+        "signage.view_signage_media_assets",
+        "POST",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("signage.manage_displays"),
+        "signage.add_board_template",
+        "POST",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("signage.manage_board_templates"),
+        "signage.add_board_template",
         "POST",
     )
 
@@ -135,3 +167,45 @@ def test_permission_categories_include_system_admin_section():
     assert "Transfers" in labels
     assert "Permission Groups" in labels
     assert "Permissions" in labels
+
+
+def test_all_non_public_registered_endpoints_have_permission_rules(app):
+    exempt_endpoints = {
+        "admin.zerothreat",
+        "auth.login",
+        "auth.logout",
+        "auth.profile",
+        "auth.reset_request",
+        "auth.reset_token",
+        "auth.toggle_favorite",
+        "bootstrap.static",
+        "mailgun.inbound_mailgun",
+        "menu.menu_feed",
+        "preferences.save_filter_preferences",
+        "security_txt",
+        "signage.player_heartbeat",
+        "signage.player_manifest",
+        "signage.player_page",
+        "signage.player_short_page",
+        "signage.signage_media_file",
+        "signage.tizen_activate",
+        "signage.tizen_launcher",
+        "static",
+    }
+    covered_methods = {"GET", "POST", "PUT", "PATCH", "DELETE"}
+
+    missing = []
+    for rule in app.url_map.iter_rules():
+        endpoint = rule.endpoint
+        if endpoint in exempt_endpoints:
+            continue
+        if endpoint in ENDPOINT_PERMISSION_RULES:
+            continue
+        if any(
+            (endpoint, method) in ENDPOINT_METHOD_PERMISSION_RULES
+            for method in covered_methods
+        ):
+            continue
+        missing.append(endpoint)
+
+    assert sorted(missing) == []

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+{% set can_manage_media = can_access_endpoint('signage.view_signage_media_assets', 'POST') %}
 <div class="container my-4">
     <style>
         .board-editor-shell { background: linear-gradient(145deg, #eef4fb 0%, #d7e5f6 100%); }
@@ -93,7 +94,9 @@
             <p class="text-muted mb-0">Design a reusable canvas with draggable menu, text, image, and video blocks.</p>
         </div>
         <div class="d-flex gap-2">
+            {% if can_manage_media %}
             <a href="{{ url_for('signage.view_signage_media_assets') }}" class="btn btn-outline-primary">Manage Media</a>
+            {% endif %}
             <a href="{{ url_for('signage.view_board_templates') }}" class="btn btn-outline-secondary">Back to Templates</a>
         </div>
     </div>

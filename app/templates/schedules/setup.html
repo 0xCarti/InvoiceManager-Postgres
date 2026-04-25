@@ -11,6 +11,13 @@
         </div>
     </div>
 
+    {% if not can_manage_setup %}
+    <div class="alert alert-info mb-3">
+        Department and position management controls are hidden because you do not have scheduling setup permission.
+    </div>
+    {% endif %}
+
+    {% if can_manage_setup %}
     <div class="row g-3 mb-3">
         <div class="col-12 col-xl-4">
             <div class="card h-100">
@@ -27,7 +34,7 @@
                                 {{ department_form.active.label(class_='form-check-label') }}
                             </div>
                         </div>
-                        <div class="col-12"><button type="submit" class="btn btn-primary" {% if not can_manage_setup %}disabled{% endif %}>Add Department</button></div>
+                        <div class="col-12"><button type="submit" class="btn btn-primary">Add Department</button></div>
                     </form>
                 </div>
             </div>
@@ -51,12 +58,13 @@
                                 {{ position_form.active.label(class_='form-check-label') }}
                             </div>
                         </div>
-                        <div class="col-12"><button type="submit" class="btn btn-primary" {% if not can_manage_setup %}disabled{% endif %}>Add Position</button></div>
+                        <div class="col-12"><button type="submit" class="btn btn-primary">Add Position</button></div>
                     </form>
                 </div>
             </div>
         </div>
     </div>
+    {% endif %}
 
     <div class="row g-3">
         <div class="col-12 col-xl-4">
@@ -65,23 +73,25 @@
                     <h2 class="h5">Departments</h2>
                     <div class="table-responsive">
                         <table class="table table-sm align-middle">
-                            <thead><tr><th>Name</th><th>Status</th><th></th></tr></thead>
+                            <thead><tr><th>Name</th><th>Status</th>{% if can_manage_setup %}<th></th>{% endif %}</tr></thead>
                             <tbody>
                                 {% for department in departments %}
                                 <tr>
                                     <td>{{ department.name }}</td>
                                     <td>{{ 'Active' if department.active else 'Inactive' }}</td>
+                                    {% if can_manage_setup %}
                                     <td class="text-end">
                                         <form method="post">
                                             {{ action_form.hidden_tag() }}
                                             <input type="hidden" name="action" value="toggle_department">
                                             <input type="hidden" name="department_id" value="{{ department.id }}">
-                                            <button type="submit" class="btn btn-sm btn-outline-secondary" {% if not can_manage_setup %}disabled{% endif %}>Toggle</button>
+                                            <button type="submit" class="btn btn-sm btn-outline-secondary">Toggle</button>
                                         </form>
                                     </td>
+                                    {% endif %}
                                 </tr>
                                 {% else %}
-                                <tr><td colspan="3" class="text-muted">No departments yet.</td></tr>
+                                <tr><td colspan="{{ 3 if can_manage_setup else 2 }}" class="text-muted">No departments yet.</td></tr>
                                 {% endfor %}
                             </tbody>
                         </table>
@@ -96,23 +106,25 @@
                     <h2 class="h5">Positions</h2>
                     <div class="table-responsive">
                         <table class="table table-sm align-middle">
-                            <thead><tr><th>Position</th><th>Department</th><th></th></tr></thead>
+                            <thead><tr><th>Position</th><th>Department</th>{% if can_manage_setup %}<th></th>{% endif %}</tr></thead>
                             <tbody>
                                 {% for position in positions %}
                                 <tr>
                                     <td>{{ position.name }}<div class="small text-muted">{{ 'Active' if position.active else 'Inactive' }}</div></td>
                                     <td>{{ position.department.name }}</td>
+                                    {% if can_manage_setup %}
                                     <td class="text-end">
                                         <form method="post">
                                             {{ action_form.hidden_tag() }}
                                             <input type="hidden" name="action" value="toggle_position">
                                             <input type="hidden" name="position_id" value="{{ position.id }}">
-                                            <button type="submit" class="btn btn-sm btn-outline-secondary" {% if not can_manage_setup %}disabled{% endif %}>Toggle</button>
+                                            <button type="submit" class="btn btn-sm btn-outline-secondary">Toggle</button>
                                         </form>
                                     </td>
+                                    {% endif %}
                                 </tr>
                                 {% else %}
-                                <tr><td colspan="3" class="text-muted">No positions yet.</td></tr>
+                                <tr><td colspan="{{ 3 if can_manage_setup else 2 }}" class="text-muted">No positions yet.</td></tr>
                                 {% endfor %}
                             </tbody>
                         </table>

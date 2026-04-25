@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% block content %}
 {% set can_remove_location_items = can_access_endpoint('locations.delete_location_item', 'POST') %}
+{% set can_manage_location_items = can_access_endpoint('locations.location_items', 'POST') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-pagination-controls {
@@ -36,7 +37,7 @@
         </a>
     </div>
 </div>
-{% if can_add_items %}
+{% if can_manage_location_items and can_add_items %}
 <form method="post" action="{{ url_for('locations.add_location_item', location_id=location.id) }}" class="row g-2 align-items-end mb-4">
     {{ add_form.hidden_tag() }}
     <input type="hidden" name="page" value="{{ entries.page }}">
@@ -60,10 +61,17 @@
     </div>
 </form>
 {% else %}
+{% if not can_manage_location_items %}
+<div class="alert alert-info" role="status">
+    Location item management controls are hidden because you do not have permission to edit location items.
+</div>
+{% elif not can_add_items %}
 <div class="alert alert-info" role="status">
     All active items are already assigned to this location.
 </div>
 {% endif %}
+{% endif %}
+{% if can_manage_location_items %}
 <form method="post" class="mb-3">
     {{ form.hidden_tag() }}
     <div class="table-responsive mobile-table-wrap">
@@ -133,7 +141,52 @@
     </div>
     <button type="submit" class="btn btn-primary">Save Changes</button>
 </form>
-    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3 mobile-pagination-controls">
+{% else %}
+<div class="table-responsive mobile-table-wrap">
+    <table class="table align-middle">
+        <thead>
+            <tr>
+                <th>Item</th>
+                <th>Expected Count</th>
+                <th>Purchase GL Code</th>
+                <th class="text-end">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for entry in entries.items %}
+            <tr>
+                <td><a href="{{ url_for('item.view_item', item_id=entry.item_id) }}">{{ entry.item.name }}</a></td>
+                <td>{{ entry.expected_count }}</td>
+                <td>
+                    {% if entry.purchase_gl_code %}
+                        {{ entry.purchase_gl_code.code }}{% if entry.purchase_gl_code.description %} - {{ entry.purchase_gl_code.description }}{% endif %}
+                    {% else %}
+                        {% set default_gl = entry.item.purchase_gl_code %}
+                        Use Item Default
+                        {% if default_gl and default_gl.code %}
+                            ({{ default_gl.code }}{% if default_gl.description %} - {{ default_gl.description }}{% endif %})
+                        {% endif %}
+                    {% endif %}
+                </td>
+                <td class="text-end">
+                    {% if entry.is_protected %}
+                        <span class="text-muted" title="This item comes from a product recipe and cannot be removed.">Locked</span>
+                    {% else %}
+                        <span class="text-muted">View only</span>
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+            <tr>
+                <td><strong>Total</strong></td>
+                <td><strong>{{ '{:,.2f}'.format(total or 0) }}</strong></td>
+                <td colspan="2"></td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+{% endif %}
+<div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3 mobile-pagination-controls">
     <nav aria-label="Location item pagination">
         <ul class="pagination mb-0">
             <li class="page-item {% if not entries.has_prev %}disabled{% endif %}">

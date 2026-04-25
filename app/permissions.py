@@ -120,6 +120,18 @@ PERMISSION_DEFINITIONS: tuple[PermissionDefinition, ...] = (
         "Manage Playlists",
         "Create, edit, archive, and delete signage playlists.",
     ),
+    _perm(
+        "signage.manage_board_templates",
+        "signage",
+        "Manage Board Templates",
+        "Create, edit, archive, and delete signage board templates.",
+    ),
+    _perm(
+        "signage.manage_media",
+        "signage",
+        "Manage Signage Media",
+        "Upload and delete signage media assets.",
+    ),
     _perm("products.view", "products", "View Products", "View products and product lists."),
     _perm("products.create", "products", "Create Products", "Create products."),
     _perm("products.edit", "products", "Edit Products", "Edit products."),
@@ -165,6 +177,12 @@ PERMISSION_DEFINITIONS: tuple[PermissionDefinition, ...] = (
     _perm("events.confirm_locations", "events", "Confirm Event Locations", "Confirm and unconfirm event locations."),
     _perm("events.close", "events", "Close Events", "Close events."),
     _perm("events.reports", "events", "Event Reports", "View event reports, sheets, and exports."),
+    _perm(
+        "events.email_stand_sheets",
+        "events",
+        "Email Event Stand Sheets",
+        "Email stand sheets for event locations.",
+    ),
     _perm("reports.customer_invoices", "reports", "Customer Invoice Report", "Run the customer invoice report."),
     _perm("reports.received_invoices", "reports", "Received Invoice Report", "Run the received invoice report."),
     _perm("reports.purchase_inventory_summary", "reports", "Purchase Inventory Summary", "Run the purchase inventory summary report."),
@@ -319,18 +337,18 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     ),
     "signage.delete_playlist": requirement(any_of=("signage.manage_playlists",)),
     "signage.view_board_templates": requirement(
-        any_of=("signage.view", "signage.manage_displays")
+        any_of=("signage.view", "signage.manage_board_templates")
     ),
     "signage.view_signage_media_assets": requirement(
-        any_of=("signage.view", "signage.manage_displays")
+        any_of=("signage.view", "signage.manage_media")
     ),
-    "signage.add_board_template": requirement(any_of=("signage.manage_displays",)),
-    "signage.edit_board_template": requirement(any_of=("signage.manage_displays",)),
+    "signage.add_board_template": requirement(any_of=("signage.manage_board_templates",)),
+    "signage.edit_board_template": requirement(any_of=("signage.manage_board_templates",)),
     "signage.toggle_board_template_archive": requirement(
-        any_of=("signage.manage_displays",)
+        any_of=("signage.manage_board_templates",)
     ),
-    "signage.delete_board_template": requirement(any_of=("signage.manage_displays",)),
-    "signage.delete_signage_media": requirement(any_of=("signage.manage_displays",)),
+    "signage.delete_board_template": requirement(any_of=("signage.manage_board_templates",)),
+    "signage.delete_signage_media": requirement(any_of=("signage.manage_media",)),
     "customer.view_customers": requirement(any_of=("customers.view",)),
     "customer.create_customer": requirement(any_of=("customers.create",)),
     "customer.edit_customer": requirement(any_of=("customers.edit",)),
@@ -411,7 +429,7 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "event.sustainability_dashboard_csv": requirement(any_of=("events.reports",)),
     "event.count_sheet": requirement(any_of=("events.reports",)),
     "event.bulk_stand_sheets": requirement(any_of=("events.reports",)),
-    "event.email_bulk_stand_sheets": requirement(any_of=("events.reports",)),
+    "event.email_bulk_stand_sheets": requirement(any_of=("events.email_stand_sheets",)),
     "event.bulk_count_sheets": requirement(any_of=("events.reports",)),
     "event.close_event": requirement(any_of=("events.close",)),
     "event.inventory_report": requirement(any_of=("events.reports",)),
@@ -613,7 +631,7 @@ ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] =
         )
     ),
     ("signage.view_signage_media_assets", "POST"): requirement(
-        any_of=("signage.manage_displays",)
+        any_of=("signage.manage_media",)
     ),
     ("item.bulk_update_items", "GET"): requirement(any_of=("items.bulk_update",)),
     ("item.bulk_update_items", "POST"): requirement(any_of=("items.bulk_update",)),
@@ -1003,6 +1021,37 @@ def sync_permission_data(session) -> None:
     if legacy_backfill_setting is not None:
         session.delete(legacy_backfill_setting)
         changed = True
+
+    split_backfill_pairs = (
+        ("events.reports", ("events.email_stand_sheets",)),
+        (
+            "signage.manage_displays",
+            ("signage.manage_board_templates", "signage.manage_media"),
+        ),
+    )
+    split_codes = {
+        code
+        for source_code, target_codes in split_backfill_pairs
+        for code in (source_code, *target_codes)
+    }
+    permissions_for_backfill = {
+        permission.code: permission
+        for permission in Permission.query.filter(Permission.code.in_(split_codes)).all()
+    }
+    for group in PermissionGroup.query.all():
+        group_codes = {permission.code for permission in group.permissions}
+        for source_code, target_codes in split_backfill_pairs:
+            if source_code not in group_codes:
+                continue
+            for target_code in target_codes:
+                if target_code in group_codes:
+                    continue
+                permission = permissions_for_backfill.get(target_code)
+                if permission is None:
+                    continue
+                group.permissions.append(permission)
+                group_codes.add(target_code)
+                changed = True
 
     if changed:
         session.commit()

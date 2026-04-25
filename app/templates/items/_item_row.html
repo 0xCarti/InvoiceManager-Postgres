@@ -44,9 +44,15 @@
     <td class="col-actions">
         <div class="mobile-actions mobile-card-actions app-action-stack">
             <a href="{{ url_for('item.view_item', item_id=item.id) }}" class="btn btn-primary btn-sm">View</a>
+            {% if can_access_endpoint('item.edit_item', 'GET') %}
             <button type="button" class="btn btn-secondary btn-sm edit-item-btn" data-item-id="{{ item.id }}">Edit</button>
+            {% endif %}
+            {% if can_access_endpoint('item.copy_item', 'GET') %}
             <button type="button" class="btn btn-secondary btn-sm copy-item-btn" data-item-id="{{ item.id }}">Copy</button>
+            {% endif %}
+            {% if can_access_endpoint('item.item_locations', 'GET') %}
             <a href="{{ url_for('item.item_locations', item_id=item.id) }}" class="btn btn-info btn-sm">Locations</a>
+            {% endif %}
         </div>
     </td>
 </tr>

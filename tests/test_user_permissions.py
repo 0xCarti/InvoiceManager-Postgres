@@ -64,6 +64,41 @@ def test_permission_sync_removes_legacy_full_access_group(app):
         assert Setting.query.filter_by(name="PERMISSIONS_BACKFILL_DONE").first() is None
 
 
+def test_permission_sync_backfills_split_permissions_for_existing_groups(app):
+    with app.app_context():
+        event_reports = Permission.query.filter_by(code="events.reports").first()
+        signage_manage_displays = Permission.query.filter_by(
+            code="signage.manage_displays"
+        ).first()
+        assert event_reports is not None
+        assert signage_manage_displays is not None
+
+        legacy_group = PermissionGroup(
+            name="Legacy Event and Signage Access",
+            description="Verifies split permission backfill behavior.",
+        )
+        legacy_group.permissions = [event_reports, signage_manage_displays]
+        db.session.add(legacy_group)
+        db.session.commit()
+
+        sync_permission_data(db.session)
+        db.session.expire_all()
+
+        reloaded_group = PermissionGroup.query.filter_by(
+            name="Legacy Event and Signage Access"
+        ).first()
+        assert reloaded_group is not None
+        assert {
+            permission.code for permission in reloaded_group.permissions
+        } >= {
+            "events.reports",
+            "events.email_stand_sheets",
+            "signage.manage_displays",
+            "signage.manage_board_templates",
+            "signage.manage_media",
+        }
+
+
 def test_user_without_permission_groups_is_redirected_to_profile_and_blocked_from_restricted_routes(
     client, app
 ):

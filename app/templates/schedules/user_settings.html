@@ -15,6 +15,16 @@
         <a class="btn btn-outline-secondary" href="{{ url_for('schedule.setup') }}">Back to Setup</a>
     </div>
 
+    {% if can_manage_pay_rates and not can_manage_setup %}
+    <div class="alert alert-info mb-3">
+        You can update pay-rate fields only. Scheduling setup controls are hidden.
+    </div>
+    {% elif can_manage_setup and not can_manage_pay_rates %}
+    <div class="alert alert-info mb-3">
+        You can update scheduling setup fields only. Pay-rate controls are hidden.
+    </div>
+    {% endif %}
+
     <div class="row g-3">
         <div class="col-12 col-xl-5">
             <div class="card h-100">
@@ -23,6 +33,7 @@
                     <form method="post" class="row g-2">
                         {{ profile_form.hidden_tag() }}
                         <input type="hidden" name="action" value="save_profile">
+                        {% if can_manage_pay_rates %}
                         <div class="col-12 col-md-4">{{ profile_form.hourly_rate.label(class_='form-label') }}{{ profile_form.hourly_rate(class_='form-control') }}</div>
                         <div class="col-12 col-md-4">{{ profile_form.desired_weekly_hours.label(class_='form-label') }}{{ profile_form.desired_weekly_hours(class_='form-control') }}</div>
                         <div class="col-12 col-md-4">{{ profile_form.max_weekly_hours.label(class_='form-label') }}{{ profile_form.max_weekly_hours(class_='form-control') }}</div>
@@ -31,14 +42,19 @@
                                 Auto-assign aims for the preferred weekly hours. If max weekly hours is blank or 0, the preferred hours are used as the auto-assign limit.
                             </div>
                         </div>
+                        {% endif %}
+                        {% if can_manage_setup %}
                         <div class="col-12">
                             <div class="form-check">
-                                {{ profile_form.schedule_enabled(class_='form-check-input', disabled=not can_manage_setup) }}
+                                {{ profile_form.schedule_enabled(class_='form-check-input') }}
                                 {{ profile_form.schedule_enabled.label(class_='form-check-label') }}
                             </div>
                         </div>
-                        <div class="col-12">{{ profile_form.schedule_notes.label(class_='form-label') }}{{ profile_form.schedule_notes(class_='form-control', rows='4', disabled=not can_manage_setup) }}</div>
-                        <div class="col-12"><button type="submit" class="btn btn-primary" {% if not (can_manage_setup or can_manage_pay_rates) %}disabled{% endif %}>Save Scheduling Settings</button></div>
+                        <div class="col-12">{{ profile_form.schedule_notes.label(class_='form-label') }}{{ profile_form.schedule_notes(class_='form-control', rows='4') }}</div>
+                        {% endif %}
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-primary">Save Scheduling Settings</button>
+                        </div>
                     </form>
                 </div>
             </div>
@@ -48,6 +64,7 @@
             <div class="card h-100">
                 <div class="card-body">
                     <h2 class="h5">Department Memberships</h2>
+                    {% if can_manage_setup %}
                     <form method="post" class="row g-2 align-items-end mb-3">
                         {{ membership_form.hidden_tag() }}
                         <input type="hidden" name="action" value="add_membership">
@@ -56,7 +73,7 @@
                         <div class="col-12 col-md-5">{{ membership_form.reports_to_user_id.label(class_='form-label') }}{{ membership_form.reports_to_user_id(class_='form-select') }}</div>
                         <div class="col-12">
                             <div class="form-check">
-                                {{ membership_form.can_auto_assign(class_='form-check-input', disabled=not can_manage_setup) }}
+                                {{ membership_form.can_auto_assign(class_='form-check-input') }}
                                 {{ membership_form.can_auto_assign.label(class_='form-check-label') }}
                             </div>
                         </div>
@@ -71,8 +88,13 @@
                                 {{ membership_form.is_primary.label(class_='form-check-label') }}
                             </div>
                         </div>
-                        <div class="col-12"><button type="submit" class="btn btn-primary" {% if not can_manage_setup %}disabled{% endif %}>Add Membership</button></div>
+                        <div class="col-12"><button type="submit" class="btn btn-primary">Add Membership</button></div>
                     </form>
+                    {% else %}
+                    <div class="alert alert-info">
+                        Department memberships and position eligibility are hidden because you do not have scheduling setup permission.
+                    </div>
+                    {% endif %}
 
                     <div class="table-responsive">
                         <table class="table table-sm align-middle">
@@ -82,6 +104,7 @@
                                 <tr>
                                     <td>{{ membership.department.name }}{% if membership.is_primary %}<div class="small text-muted">Primary</div>{% endif %}</td>
                                     <td>
+                                        {% if can_manage_setup %}
                                         <form method="post" class="d-flex gap-2 align-items-center">
                                             {{ action_form.hidden_tag() }}
                                             <input type="hidden" name="action" value="update_membership_role">
@@ -93,12 +116,15 @@
                                                 class="form-control form-control-sm"
                                                 value="{{ membership.role }}"
                                                 list="membership-role-suggestions"
-                                                {% if not can_manage_setup %}disabled{% endif %}
                                             >
-                                            <button type="submit" class="btn btn-sm btn-outline-secondary" {% if not can_manage_setup %}disabled{% endif %}>Save</button>
+                                            <button type="submit" class="btn btn-sm btn-outline-secondary">Save</button>
                                         </form>
+                                        {% else %}
+                                        {{ membership.role }}
+                                        {% endif %}
                                     </td>
                                     <td>
+                                        {% if can_manage_setup %}
                                         <form method="post" class="d-flex justify-content-center">
                                             {{ action_form.hidden_tag() }}
                                             <input type="hidden" name="action" value="update_membership_role">
@@ -106,26 +132,32 @@
                                             <input type="hidden" name="role" value="{{ membership.role }}">
                                             <div class="form-check">
                                                 <input
-                                                    type="checkbox"
-                                                    class="form-check-input"
-                                                    name="can_auto_assign"
-                                                    value="1"
-                                                    onchange="this.form.submit()"
+                                                type="checkbox"
+                                                class="form-check-input"
+                                                name="can_auto_assign"
+                                                value="1"
+                                                onchange="this.form.submit()"
                                                     {% if membership.can_auto_assign %}checked{% endif %}
-                                                    {% if not can_manage_setup %}disabled{% endif %}
                                                 >
                                             </div>
                                         </form>
+                                        {% else %}
+                                        {{ 'Yes' if membership.can_auto_assign else 'No' }}
+                                        {% endif %}
                                     </td>
                                     <td>{{ membership.reports_to.email if membership.reports_to else '' }}</td>
+                                    {% if can_manage_setup %}
                                     <td class="text-end">
                                         <form method="post">
                                             {{ action_form.hidden_tag() }}
                                             <input type="hidden" name="action" value="remove_membership">
                                             <input type="hidden" name="membership_id" value="{{ membership.id }}">
-                                            <button type="submit" class="btn btn-sm btn-outline-danger" {% if not can_manage_setup %}disabled{% endif %}>Remove</button>
+                                            <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
                                         </form>
                                     </td>
+                                    {% else %}
+                                    <td></td>
+                                    {% endif %}
                                 </tr>
                                 {% else %}
                                 <tr><td colspan="5" class="text-muted">No department memberships.</td></tr>
@@ -142,6 +174,7 @@
                     <hr>
 
                     <h2 class="h5">Position Eligibility</h2>
+                    {% if can_manage_setup %}
                     <form method="post" class="row g-2 align-items-end mb-3">
                         {{ eligibility_form.hidden_tag() }}
                         <input type="hidden" name="action" value="add_eligibility">
@@ -153,8 +186,9 @@
                                 {{ eligibility_form.active.label(class_='form-check-label') }}
                             </div>
                         </div>
-                        <div class="col-12"><button type="submit" class="btn btn-primary" {% if not can_manage_setup %}disabled{% endif %}>Add Position</button></div>
+                        <div class="col-12"><button type="submit" class="btn btn-primary">Add Position</button></div>
                     </form>
+                    {% endif %}
 
                     <div class="table-responsive">
                         <table class="table table-sm align-middle">
@@ -165,14 +199,18 @@
                                     <td>{{ eligibility.position.name }}</td>
                                     <td>{{ eligibility.position.department.name }}</td>
                                     <td>{{ eligibility.priority }}</td>
+                                    {% if can_manage_setup %}
                                     <td class="text-end">
                                         <form method="post">
                                             {{ action_form.hidden_tag() }}
                                             <input type="hidden" name="action" value="remove_eligibility">
                                             <input type="hidden" name="eligibility_id" value="{{ eligibility.id }}">
-                                            <button type="submit" class="btn btn-sm btn-outline-danger" {% if not can_manage_setup %}disabled{% endif %}>Remove</button>
+                                            <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
                                         </form>
                                     </td>
+                                    {% else %}
+                                    <td></td>
+                                    {% endif %}
                                 </tr>
                                 {% else %}
                                 <tr><td colspan="4" class="text-muted">No positions assigned.</td></tr>

@@ -14,6 +14,7 @@ EVENT_PERMISSION_CODES = (
     "events.confirm_locations",
     "events.close",
     "events.reports",
+    "events.email_stand_sheets",
 )
 
 ITEM_PERMISSION_CODES = (
@@ -50,6 +51,8 @@ SIGNAGE_PERMISSION_CODES = (
     "signage.view",
     "signage.manage_displays",
     "signage.manage_playlists",
+    "signage.manage_board_templates",
+    "signage.manage_media",
 )
 
 

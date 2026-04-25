@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block content %}
+{% set can_manage_location_items = can_access_endpoint('item.item_locations', 'POST') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-pagination-controls {
@@ -25,6 +26,7 @@
         <p class="text-muted mb-0">Review location counts and per-location purchase GL overrides in the same aligned table pattern as other inventory pages.</p>
     </div>
 </div>
+{% if can_manage_location_items %}
 <form method="post" class="mb-3">
     {{ form.hidden_tag() }}
     <div class="table-responsive mobile-table-wrap">
@@ -75,6 +77,46 @@
     </div>
     <button type="submit" class="btn btn-primary">Save Changes</button>
 </form>
+{% else %}
+<div class="alert alert-info" role="status">
+    Location-level GL overrides are hidden because you do not have permission to edit location items.
+</div>
+<div class="table-responsive mobile-table-wrap">
+    <table class="table align-middle">
+        <thead>
+            <tr>
+                <th>Location</th>
+                <th>Quantity</th>
+                <th>Purchase GL Code</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for e in entries.items %}
+            <tr>
+                <td>{{ e.location.name }}</td>
+                <td>{{ e.expected_count }}</td>
+                <td>
+                    {% if e.purchase_gl_code %}
+                        {{ e.purchase_gl_code.code }}{% if e.purchase_gl_code.description %} - {{ e.purchase_gl_code.description }}{% endif %}
+                    {% else %}
+                        {% set default_gl = item.purchase_gl_code %}
+                        Use Item Default
+                        {% if default_gl and default_gl.code %}
+                            ({{ default_gl.code }}{% if default_gl.description %} - {{ default_gl.description }}{% endif %})
+                        {% endif %}
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+            <tr>
+                <td><strong>Total</strong></td>
+                <td><strong>{{ '{:,.2f}'.format(total or 0) }}</strong></td>
+                <td></td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+{% endif %}
 <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3 mobile-pagination-controls">
     <nav aria-label="Location pagination">
         <ul class="pagination mb-0">

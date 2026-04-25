@@ -18,9 +18,13 @@
         {% if product.locations %}
             {% for location in product.locations %}
                 <div>
+                    {% if can_access_endpoint('locations.edit_location', 'GET') %}
                     <a href="{{ url_for('locations.edit_location', location_id=location.id) }}" class="link-primary text-decoration-none">
                         {{ location.name }}
                     </a>
+                    {% else %}
+                    <span>{{ location.name }}</span>
+                    {% endif %}
                 </div>
             {% endfor %}
         {% else %}
@@ -56,11 +60,11 @@
     <td class="col-product-actions">
         {% set menu_ns = namespace(entries=[]) %}
         {% for menu in product.menus %}
-            {% set menu_ns.entries = menu_ns.entries + [{'name': menu.name, 'url': url_for('menu.edit_menu', menu_id=menu.id)}] %}
+            {% set menu_ns.entries = menu_ns.entries + [{'name': menu.name, 'url': url_for('menu.edit_menu', menu_id=menu.id) if can_access_endpoint('menu.edit_menu', 'GET') else none}] %}
         {% endfor %}
         {% set location_ns = namespace(entries=[]) %}
         {% for location in product.locations %}
-            {% set location_ns.entries = location_ns.entries + [{'name': location.name, 'url': url_for('locations.edit_location', location_id=location.id)}] %}
+            {% set location_ns.entries = location_ns.entries + [{'name': location.name, 'url': url_for('locations.edit_location', location_id=location.id) if can_access_endpoint('locations.edit_location', 'GET') else none}] %}
         {% endfor %}
         <div class="mobile-actions mobile-card-actions app-action-stack">
             <button type="button"
@@ -79,11 +83,15 @@
                     data-product-locations='{{ location_ns.entries | tojson }}'>
                 View Locations
             </button>
+            {% if can_access_endpoint('product.edit_product', 'GET') %}
             <a href="{{ url_for('product.edit_product', product_id=product.id) }}"
                class="btn btn-primary btn-sm edit-product-link"
                data-product-id="{{ product.id }}">Edit</a>
+            {% endif %}
             <a href="{{ url_for('notes.entity_notes', entity_type='product', entity_id=product.id) }}" class="btn btn-outline-secondary btn-sm">Notes</a>
+            {% if can_access_endpoint('product.copy_product', 'GET') %}
             <a href="{{ url_for('product.copy_product', product_id=product.id) }}" class="btn btn-secondary btn-sm">Copy</a>
+            {% endif %}
             {% if can_access_endpoint('product.delete_product', 'POST') %}
             <form action="{{ url_for('product.delete_product', product_id=product.id) }}" method="post" class="d-inline-block">
                 {{ delete_form.hidden_tag() }}

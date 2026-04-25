@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+{% set can_manage_media = can_access_endpoint('signage.view_signage_media_assets', 'POST') %}
 <div class="container my-4">
     {% include "signage/_nav.html" %}
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
@@ -9,6 +10,7 @@
         </div>
     </div>
 
+    {% if can_manage_media %}
     <form
         method="post"
         enctype="multipart/form-data"
@@ -54,6 +56,11 @@
             </div>
         </div>
     </form>
+    {% else %}
+    <div class="alert alert-info mb-4">
+        You have view-only access to the media library. Upload and delete actions are hidden.
+    </div>
+    {% endif %}
 
     {% if assets %}
     <div class="row g-3">
@@ -90,6 +97,7 @@
                         <input type="text" class="form-control form-control-sm" readonly value="{{ request.url_root[:-1] }}{{ entry.public_url }}">
                     </div>
 
+                    {% if can_manage_media %}
                     <div class="mt-auto d-flex justify-content-end">
                         <form method="post" action="{{ url_for('signage.delete_signage_media', asset_id=asset.id) }}">
                             {{ action_form.hidden_tag() }}
@@ -102,6 +110,7 @@
                             </button>
                         </form>
                     </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -111,5 +120,7 @@
     <div class="alert alert-info">No media assets have been uploaded yet.</div>
     {% endif %}
 </div>
+{% if can_manage_media %}
 <script src="{{ url_for('static', filename='js/signage_media_upload.js') }}"></script>
+{% endif %}
 {% endblock %}

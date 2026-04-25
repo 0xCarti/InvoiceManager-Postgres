@@ -15,6 +15,7 @@ from app.models import (
     ProductRecipeItem,
     User,
 )
+from tests.permission_helpers import grant_permissions
 from tests.utils import login
 
 
@@ -578,6 +579,92 @@ def test_location_items_cannot_remove_recipe_item(client, app):
         assert LocationStandItem.query.filter_by(
             location_id=location_id, item_id=protected_item_id
         ).count() == 1
+
+
+def test_item_locations_hide_editable_gl_controls_for_view_only_users(client, app):
+    email, _, _ = setup_data(app)
+    with app.app_context():
+        item = Item.query.filter_by(name="Flour").first()
+        assert item is not None
+        location = Location(name="Read Only Location")
+        db.session.add(location)
+        db.session.flush()
+        db.session.add(
+            LocationStandItem(
+                location_id=location.id,
+                item_id=item.id,
+                expected_count=8,
+            )
+        )
+        viewer = User(
+            email="item-locations-viewer@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add(viewer)
+        db.session.commit()
+        grant_permissions(
+            viewer,
+            "items.view",
+            group_name="Item Locations View Only",
+            description="Can review item locations without editing them.",
+        )
+        item_id = item.id
+
+    with client:
+        login(client, "item-locations-viewer@example.com", "pass")
+        response = client.get(f"/items/{item_id}/locations", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert b"Save Changes" not in response.data
+    assert b'name="location_gl_code_' not in response.data
+    assert b"Use Item Default" in response.data
+
+
+def test_location_items_hide_add_remove_and_gl_override_controls_for_view_only_users(
+    client, app
+):
+    email, _, _ = setup_data(app)
+    with app.app_context():
+        location = Location(name="Read Only Warehouse")
+        extra_item = Item(name="View Only Napkins", base_unit="each")
+        db.session.add_all([location, extra_item])
+        db.session.flush()
+        db.session.add(
+            LocationStandItem(
+                location_id=location.id,
+                item_id=extra_item.id,
+                expected_count=5,
+            )
+        )
+        viewer = User(
+            email="location-items-viewer@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add(viewer)
+        db.session.commit()
+        grant_permissions(
+            viewer,
+            "locations.view",
+            group_name="Location Items View Only",
+            description="Can review location items without editing them.",
+        )
+        location_id = location.id
+
+    with client:
+        login(client, "location-items-viewer@example.com", "pass")
+        response = client.get(
+            f"/locations/{location_id}/items",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"Save Changes" not in response.data
+    assert b"/items/add" not in response.data
+    assert b'name="location_gl_code_' not in response.data
+    assert b"Remove" not in response.data
+    assert b"View only" in response.data
 
 
 def test_copy_stand_sheet_overwrites_and_supports_multiple_targets(client, app):

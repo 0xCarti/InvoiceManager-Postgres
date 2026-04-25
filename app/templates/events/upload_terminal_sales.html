@@ -1,6 +1,8 @@
 {% extends 'base.html' %}
 {% block content %}
 <h2>Upload Terminal Sales for {{ event.name }}</h2>
+{% set can_create_products = can_access_endpoint('product.ajax_create_product', 'POST') %}
+{% set can_quick_add_items = can_access_endpoint('item.quick_add_item', 'POST') %}
 
 {% set wizard_stage = wizard_stage if wizard_stage is defined else 'upload' %}
 {% set resolving_issues = wizard_stage == 'menus' and current_issue is defined and current_issue %}
@@ -403,7 +405,7 @@
                     <div class="card-body">
                         <p class="text-muted small mb-3">
                             Start typing to search by product name, then choose the matching product
-                            or use the buttons to skip or create a new product.
+                            or use the button to skip this product.
                         </p>
                         <datalist id="terminal-product-options">
                             {% for option in search_options %}
@@ -451,21 +453,27 @@
                                     <button type="button" class="btn btn-outline-secondary btn-sm" data-action="skip">
                                         Skip this product
                                     </button>
+                                    {% if can_create_products %}
                                     <button type="button" class="btn btn-outline-primary btn-sm" data-action="create">
                                         Create a new product
                                     </button>
+                                    {% endif %}
                                 </div>
                                 <div class="form-text" data-role="selection-status"></div>
                                 <div class="form-text text-danger d-none" data-role="selection-error">
-                                    Select a product from the suggestions or choose Skip/Create.
+                                    Select a product from the suggestions or choose Skip.
                                 </div>
                                 {% if product.price is not none %}
                                     <div class="form-text">
+                                        {% if can_create_products %}
                                         Creating a new product will use the sale price of ${{ '%.2f'|format(product.price) }} from the uploaded file.
+                                        {% endif %}
                                     </div>
                                 {% else %}
                                     <div class="form-text">
+                                        {% if can_create_products %}
                                         Creating a new product will use the uploaded sale price when available; otherwise the price will default to $0.00.
+                                        {% endif %}
                                     </div>
                                 {% endif %}
                             </div>
@@ -478,9 +486,13 @@
                     <div class="card-body" data-countable-selection>
                         <p class="text-muted small mb-3">
                             Choose the countable inventory item that should be added to the
-                            stand sheet when creating each new product. Use the
-                            <span class="fw-semibold">Create new item</span> links if you need to
+                            stand sheet when creating each new product.
+                            {% if can_quick_add_items %}
+                            Use the <span class="fw-semibold">Create new item</span> links if you need to
                             add an item that does not exist yet.
+                            {% else %}
+                            Use existing items only.
+                            {% endif %}
                         </p>
                             {% if countable_selection_errors %}
                                 <div class="alert alert-danger" role="alert">
@@ -512,6 +524,7 @@
                                                 </option>
                                             {% endfor %}
                                         </select>
+                                        {% if can_quick_add_items %}
                                         <button type="button"
                                                 class="btn btn-link btn-sm p-0"
                                                 data-countable-action="quick-add-item"
@@ -519,6 +532,7 @@
                                                 aria-label="Create a new item for {{ entry.product_name }}">
                                             Create new item
                                         </button>
+                                        {% endif %}
                                     </div>
                                 </div>
                             {% endfor %}
@@ -830,6 +844,7 @@
         </div>
     </div>
 {% endif %}
+{% if can_create_products %}
 <div class="modal fade" id="terminalCreateProductModal" tabindex="-1" aria-labelledby="terminalCreateProductModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-xl">
         <div class="modal-content">
@@ -847,6 +862,7 @@
         </div>
     </div>
 </div>
+{% endif %}
 {% if mapping_payload and product_mapping_preview %}
 <script src="{{ url_for('static', filename='js/terminal_product_preview_toggle.js') }}" defer></script>
 {% endif %}
@@ -856,7 +872,7 @@
 {% if mapping_payload and product_resolution_required and wizard_stage == 'products' %}
 <script src="{{ url_for('static', filename='js/terminal_sales_mapping.js') }}" defer></script>
 {% endif %}
-{% if countable_products %}
+{% if countable_products and can_quick_add_items %}
 {% include 'purchase_orders/_create_item_modal.html' %}
 <script src="{{ url_for('static', filename='js/countable_item_quick_create.js') }}" defer></script>
 {% endif %}

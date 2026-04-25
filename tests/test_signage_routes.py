@@ -17,6 +17,7 @@ from app.models import (
     SignageMediaAsset,
     User,
 )
+from tests.permission_helpers import grant_permissions
 from tests.permission_helpers import grant_signage_permissions
 from tests.utils import login
 
@@ -655,6 +656,42 @@ def test_signage_user_can_upload_media_asset(client, app):
         assert asset is not None
         assert asset.media_type == SignageMediaAsset.TYPE_IMAGE
         assert Path(asset.storage_path).exists()
+
+
+def test_signage_view_only_users_do_not_see_media_upload_or_delete_controls(client, app):
+    with app.app_context():
+        user = User(
+            email="signage-viewer@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add(user)
+        asset = _create_signage_media_asset(
+            app,
+            filename="view-only.png",
+            content=b"png-data",
+            media_type=SignageMediaAsset.TYPE_IMAGE,
+        )
+        db.session.commit()
+        grant_permissions(
+            user,
+            "signage.view",
+            group_name="Signage View Only",
+            description="Can review signage assets without managing them.",
+        )
+        asset_id = asset.id
+
+    with client:
+        login(client, "signage-viewer@example.com", "pass")
+        response = client.get("/signage/media", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert b"Media Library" in response.data
+    assert b"You have view-only access to the media library." in response.data
+    assert b"signage-media-upload-form" not in response.data
+    assert b"signage-media-browse-btn" not in response.data
+    assert b"Delete" not in response.data
+    assert f"/signage/media/{asset_id}/delete".encode("utf-8") not in response.data
 
 
 def test_signage_media_delete_blocked_when_template_uses_asset(client, app):

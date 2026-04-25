@@ -3,6 +3,8 @@
 {% from 'macros/filter_modal.html' import filter_modal %}
 {% block title %}GL Codes{% endblock %}
 {% block content %}
+{% set can_create_gl_codes = can_access_endpoint('glcode.ajax_create_gl_code', 'POST') %}
+{% set can_edit_gl_codes = can_access_endpoint('glcode.ajax_update_gl_code', 'POST') %}
 {% set can_delete_gl_codes = can_access_endpoint('glcode.delete_gl_code', 'POST') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
@@ -48,7 +50,9 @@
             <p class="text-muted mb-0">Manage general ledger codes used across the app</p>
         </div>
         <div>
+            {% if can_create_gl_codes %}
             <button id="add-gl-code" type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#glCodeModal">Add GL Code</button>
+            {% endif %}
         </div>
     </div>
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3 mobile-toolbar">
@@ -122,7 +126,9 @@
                 <td class="col-gl-description gl-description">{{ code.description or '' }}</td>
                 <td class="col-gl-actions">
                     <div class="mobile-actions">
+                        {% if can_edit_gl_codes %}
                         <button type="button" class="btn btn-secondary btn-sm edit-gl-code" data-id="{{ code.id }}" data-code="{{ code.code }}" data-description="{{ code.description or '' }}">Edit</button>
+                        {% endif %}
                         {% if can_delete_gl_codes %}
                         <form action="{{ url_for('glcode.delete_gl_code', code_id=code.id) }}" method="post" class="d-inline">
                             {{ delete_form.hidden_tag() }}
@@ -169,6 +175,7 @@
     </div>
 </div>
 
+{% if can_create_gl_codes %}
 <div class="modal fade" id="glCodeModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -252,7 +259,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td class="col-gl-description gl-description">${data.description}</td>
                     <td class="col-gl-actions">
                         <div class="mobile-actions">
+                        {% if can_edit_gl_codes %}
                         <button type="button" class="btn btn-secondary btn-sm edit-gl-code" data-id="${data.id}" data-code="${data.code}" data-description="${data.description}">Edit</button>
+                        {% endif %}
                         {% if can_delete_gl_codes %}
                         <form action="/gl_codes/${data.id}/delete" method="post" class="d-inline">
                             <input type="hidden" name="csrf_token" value="${csrfToken}">
@@ -274,5 +283,6 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 </script>
+{% endif %}
 
 {% endblock %}

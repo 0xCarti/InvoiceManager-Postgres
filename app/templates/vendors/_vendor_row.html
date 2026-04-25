@@ -4,7 +4,9 @@
     <td class="col-vendor-pst">{{ 'Yes' if vendor.pst_exempt else 'No' }}</td>
     <td class="col-vendor-actions">
         <div class="mobile-actions">
+            {% if can_access_endpoint('vendor.edit_vendor', 'GET') %}
             <a href="{{ url_for('vendor.edit_vendor', vendor_id=vendor.id) }}" class="btn btn-primary btn-sm">Edit</a>
+            {% endif %}
             <a href="{{ url_for('notes.entity_notes', entity_type='vendor', entity_id=vendor.id) }}" class="btn btn-outline-secondary btn-sm">Notes</a>
             {% if can_access_endpoint('vendor.delete_vendor', 'POST') %}
             <form action="{{ url_for('vendor.delete_vendor', vendor_id=vendor.id) }}" method="post" class="d-inline">

@@ -4,6 +4,17 @@
 {% block title %}View Products{% endblock %}
 
 {% block content %}
+{% set can_create_products = can_access_endpoint('product.ajax_create_product', 'POST') %}
+{% set can_edit_products = can_access_endpoint('product.edit_product', 'GET') %}
+{% set can_copy_products = can_access_endpoint('product.copy_product', 'GET') %}
+{% set can_bulk_update_products = can_access_endpoint('product.bulk_update_products', 'GET') %}
+{% set can_bulk_set_cost = can_access_endpoint('product.bulk_set_cost_from_recipe', 'POST') %}
+{% set can_product_reports = namespace(
+    recipe=can_access_endpoint('report.product_recipe_report', 'GET'),
+    sales=can_access_endpoint('report.product_sales_report', 'GET'),
+    stock=can_access_endpoint('report.product_stock_usage_report', 'GET'),
+    forecast=can_access_endpoint('report.department_sales_forecast', 'GET')
+) %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-toolbar,
@@ -48,12 +59,18 @@
             <p class="text-muted mb-0">Manage product pricing, recipes, and sales configuration</p>
         </div>
         <div class="app-page-header-actions">
+            {% if can_create_products %}
             <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createProductModal">Create Product</button>
+            {% endif %}
         </div>
     </div>
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3 mobile-toolbar">
+        {% if can_bulk_set_cost %}
         <button type="submit" class="btn btn-warning" form="bulk-cost-form">Set Cost From Recipe</button>
+        {% endif %}
+        {% if can_bulk_update_products %}
         <button type="button" class="btn btn-outline-secondary" id="bulkEditProductsBtn" disabled>Bulk Edit</button>
+        {% endif %}
         <div class="dropdown d-md-none">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                 More actions
@@ -63,15 +80,25 @@
             </ul>
         </div>
         <div class="dropdown">
+            {% if can_product_reports.recipe or can_product_reports.sales or can_product_reports.stock or can_product_reports.forecast %}
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                 Reports
             </button>
             <ul class="dropdown-menu dropdown-menu-end">
+                {% if can_product_reports.recipe %}
                 <li><a class="dropdown-item" href="{{ url_for('report.product_recipe_report') }}">Recipe Report</a></li>
+                {% endif %}
+                {% if can_product_reports.sales %}
                 <li><a class="dropdown-item" href="{{ url_for('report.product_sales_report') }}">Revenue Report</a></li>
+                {% endif %}
+                {% if can_product_reports.stock %}
                 <li><a class="dropdown-item" href="{{ url_for('report.product_stock_usage_report') }}">Stock Usage Report</a></li>
+                {% endif %}
+                {% if can_product_reports.forecast %}
                 <li><a class="dropdown-item" href="{{ url_for('report.department_sales_forecast') }}">Department Sales Forecast</a></li>
+                {% endif %}
             </ul>
+            {% endif %}
         </div>
         <div>
             <div class="dropdown d-inline-block mb-3 me-2" data-column-visibility data-table-id="product-table" data-storage-key="productTableColumnVisibility">
@@ -166,6 +193,40 @@
         <button type="button" class="btn btn-outline-secondary d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</button>
     </div>
 
+    {% if can_create_products %}
+    <!-- Create Product Modal -->
+    <div class="modal fade" id="createProductModal" tabindex="-1" aria-labelledby="createProductModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="createProductModalLabel">Create Product</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    {% set form_action = url_for('product.ajax_create_product') %}
+                    {% set form_id = 'create-product-form' %}
+                    {% include 'products/_create_product_form.html' %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if can_bulk_update_products %}
+    <div class="modal fade" id="productBulkModal" tabindex="-1" aria-hidden="true" data-url="{{ url_for('product.bulk_update_products') }}">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Bulk Edit Products</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" data-role="bulk-form"></div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if can_edit_products %}
     <!-- Edit Product Modal -->
     <div class="modal fade" id="editProductModal" tabindex="-1" aria-labelledby="editProductModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-lg">
@@ -178,6 +239,7 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
     <!-- Filter Modal -->
     {% call filter_modal(
@@ -261,33 +323,6 @@
         </div>
     {% endcall %}
 
-    <!-- Create Product Modal -->
-    <div class="modal fade" id="createProductModal" tabindex="-1" aria-labelledby="createProductModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="createProductModalLabel">Create Product</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    {% set form_action = url_for('product.ajax_create_product') %}
-                    {% set form_id = 'create-product-form' %}
-                    {% include 'products/_create_product_form.html' %}
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="modal fade" id="productBulkModal" tabindex="-1" aria-hidden="true" data-url="{{ url_for('product.bulk_update_products') }}">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Bulk Edit Products</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body" data-role="bulk-form"></div>
-            </div>
-        </div>
-    </div>
     {% if selected_sales_gl_codes or selected_customer %}
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
         <span class="text-muted small">Active filters:</span>
@@ -773,15 +808,21 @@ document.addEventListener('DOMContentLoaded', function() {
         const list = document.createElement('ul');
         list.className = 'list-unstyled mb-0';
         items.forEach(item => {
-            if (!item || !item.name || !item.url) {
+            if (!item || !item.name) {
                 return;
             }
             const li = document.createElement('li');
-            const link = document.createElement('a');
-            link.href = item.url;
-            link.textContent = item.name;
-            link.className = 'link-primary';
-            li.appendChild(link);
+            if (item.url) {
+                const link = document.createElement('a');
+                link.href = item.url;
+                link.textContent = item.name;
+                link.className = 'link-primary';
+                li.appendChild(link);
+            } else {
+                const text = document.createElement('span');
+                text.textContent = item.name;
+                li.appendChild(text);
+            }
             list.appendChild(li);
         });
         if (!list.childElementCount) {

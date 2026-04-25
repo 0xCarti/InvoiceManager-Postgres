@@ -1,6 +1,20 @@
 {% extends 'base.html' %}
 {% block content %}
 {% set unconfirmed_count = event.locations | selectattr('confirmed', 'equalto', False) | list | length %}
+{% set can_manage_locations = can_access_endpoint('event.update_opening_counts', 'POST') %}
+{% set can_add_location = can_access_endpoint('event.add_location') %}
+{% set can_view_stand_sheets = can_access_endpoint('event.bulk_stand_sheets') %}
+{% set can_email_stand_sheets = can_access_endpoint('event.email_bulk_stand_sheets', 'POST') %}
+{% set can_view_closed_event_report = can_access_endpoint('event.closed_event_report') %}
+{% set can_view_count_sheets = can_access_endpoint('event.bulk_count_sheets') %}
+{% set can_upload_sales = can_access_endpoint('event.upload_terminal_sales') %}
+{% set can_close_event = can_access_endpoint('event.close_event', 'POST') %}
+{% set can_view_locations = can_access_endpoint('locations.edit_location') %}
+{% set can_view_stand_sheet = can_access_endpoint('event.stand_sheet') %}
+{% set can_view_scan_counts = can_access_endpoint('event.scan_counts') %}
+{% set can_add_terminal_sale = can_access_endpoint('event.add_terminal_sale') %}
+{% set can_confirm_locations = can_access_endpoint('event.confirm_location') %}
+{% set can_undo_confirm_locations = can_access_endpoint('event.undo_confirm_location', 'POST') %}
 <div class="container mt-4 app-page-shell">
     <div class="app-page-header">
         <div class="app-page-header-copy">
@@ -8,7 +22,9 @@
             <p class="text-muted mb-0">Event detail and location workflow</p>
         </div>
         <div class="app-page-header-actions">
+            {% if can_access_endpoint('event.edit_event') %}
             <a class="btn btn-outline-secondary" href="{{ url_for('event.edit_event', event_id=event.id) }}">Edit Event</a>
+            {% endif %}
         </div>
     </div>
     <div class="app-metric-grid">
@@ -51,10 +67,13 @@
     </div>
     {% endif %}
     <div class="mobile-toolbar app-toolbar-panel">
-        {% if not event.closed %}
+        {% if not event.closed and can_add_location %}
         <a class="btn btn-primary" href="{{ url_for('event.add_location', event_id=event.id) }}">Add Location</a>
         {% endif %}
+        {% if can_view_stand_sheets %}
         <a class="btn btn-outline-secondary" href="{{ url_for('event.bulk_stand_sheets', event_id=event.id) }}">Stand Sheets</a>
+        {% endif %}
+        {% if can_email_stand_sheets %}
         <button
             type="button"
             class="btn btn-outline-secondary"
@@ -66,23 +85,26 @@
         >
             Email Stand Sheets
         </button>
+        {% endif %}
+        {% if can_view_closed_event_report or can_view_count_sheets %}
         <div class="dropdown">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                 Reports
             </button>
             <ul class="dropdown-menu dropdown-menu-end">
-                {% if event.closed %}
+                {% if event.closed and can_view_closed_event_report %}
                 <li><a class="dropdown-item" href="{{ url_for('event.closed_event_report', event_id=event.id) }}">Closed Event Report</a></li>
                 {% endif %}
-                {% if event.event_type == 'inventory' %}
+                {% if event.event_type == 'inventory' and can_view_count_sheets %}
                 <li><a class="dropdown-item" href="{{ url_for('event.bulk_count_sheets', event_id=event.id) }}">Count Sheets</a></li>
                 {% endif %}
             </ul>
         </div>
-        {% if event.closed %}
         {% endif %}
-        {% if not event.closed %}
+        {% if not event.closed and can_upload_sales %}
         <a class="btn btn-outline-secondary" href="{{ url_for('event.upload_terminal_sales', event_id=event.id) }}">Upload Sales</a>
+        {% endif %}
+        {% if not event.closed and can_close_event %}
         {% if unconfirmed_count == 0 %}
         <form method="post" action="{{ url_for('event.close_event', event_id=event.id) }}" class="d-inline">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -93,7 +115,7 @@
         {% endif %}
         {% endif %}
     </div>
-    {% if not event.closed %}
+    {% if not event.closed and can_manage_locations %}
     <form
         id="opening-counts-form"
         method="post"
@@ -104,9 +126,9 @@
     {% endif %}
         <div class="table-responsive mobile-table-wrap">
             <table class="table table-sm align-middle" id="locations-table">
-                <thead>
-                    <tr>
-                        {% if not event.closed %}
+        <thead>
+            <tr>
+                        {% if not event.closed and can_manage_locations %}
                             <th scope="col">Select</th>
                         {% endif %}
                         <th scope="col">Location</th>
@@ -116,7 +138,7 @@
                 <tbody>
                 {% for el in event.locations %}
                     <tr>
-                        {% if not event.closed %}
+                        {% if not event.closed and can_manage_locations %}
                         <td class="text-center">
                             {% if not el.confirmed %}
                                 <div class="form-check m-0 d-flex justify-content-center">
@@ -137,7 +159,11 @@
                         {% endif %}
                         <td class="text-break">
                             {% if el.location %}
+                                {% if can_view_locations %}
                                 <a href="{{ url_for('locations.edit_location', location_id=el.location_id, next=request.full_path) }}">{{ el.location.name }}</a>
+                                {% else %}
+                                <span>{{ el.location.name }}</span>
+                                {% endif %}
                                 {% if terminal_sales_conflicts_by_location.get(el.location_id) %}
                                     <div class="text-danger small mt-1">
                                         POS sales overlap another event on the same day.
@@ -153,8 +179,10 @@
                         <td class="text-break">
                             {% if not el.confirmed and not event.closed %}
                                 <div class="app-action-stack">
+                                    {% if can_view_stand_sheet %}
                                     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.stand_sheet', event_id=event.id, location_id=el.location_id) }}">Stand Sheet</a>
-                                {% if el.location %}
+                                    {% endif %}
+                                {% if el.location and can_email_stand_sheets %}
                                     <a
                                         href="#"
                                         class="btn btn-sm btn-outline-secondary"
@@ -164,17 +192,23 @@
                                         data-location-ids="{{ el.location_id }}"
                                     >Email Stand Sheet</a>
                                 {% endif %}
-                                {% if event.event_type == 'inventory' %}
+                                {% if event.event_type == 'inventory' and can_view_count_sheets %}
                                     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.count_sheet', event_id=event.id, location_id=el.location_id) }}">Count Sheet</a>
+                                {% endif %}
+                                {% if event.event_type == 'inventory' and can_view_scan_counts %}
                                     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.scan_counts', event_id=event.id, location_id=el.location_id) }}">Scan Counts</a>
                                 {% endif %}
+                                {% if can_add_terminal_sale %}
                                 <a class="btn btn-sm btn-outline-primary" href="{{ url_for('event.add_terminal_sale', event_id=event.id, el_id=el.id) }}">Enter Sales</a>
+                                {% endif %}
+                                {% if can_confirm_locations %}
                                 <a class="btn btn-sm btn-success" href="{{ url_for('event.confirm_location', event_id=event.id, el_id=el.id) }}">Confirm</a>
+                                {% endif %}
                                 </div>
                             {% else %}
                                 <div class="app-action-stack">
                                     <span class="text-muted small">Stand Sheet | Terminal Sales</span>
-                                {% if el.location %}
+                                {% if el.location and can_email_stand_sheets %}
                                     <a
                                         href="#"
                                         class="btn btn-sm btn-outline-secondary"
@@ -186,7 +220,7 @@
                                 {% endif %}
                                 {% if el.confirmed %}
                                     <span class="badge bg-secondary">Confirmed</span>
-                                    {% if not event.closed %}
+                                    {% if not event.closed and can_undo_confirm_locations %}
                                         {% set undo_form = undo_confirm_form_factory() %}
                                         <form
                                             method="post"
@@ -208,11 +242,15 @@
         </div>
         {% if not event.closed %}
         <div class="mt-3">
+            {% if can_manage_locations %}
             {{ opening_form.submit(class='btn btn-outline-primary', disabled=(unconfirmed_count == 0), form='opening-counts-form') }}
+            {% endif %}
         </div>
     {% endif %}
 </div>
+{% if can_email_stand_sheets %}
 {% include 'shared/email_stand_sheet_modal.html' %}
+{% endif %}
 {% endblock %}
 {% block scripts %}
     {{ super() }}

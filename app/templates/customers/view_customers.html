@@ -5,6 +5,8 @@
 {% block title %}View Customers{% endblock %}
 
 {% block content %}
+{% set can_create_customers = can_access_endpoint('customer.create_customer_modal', 'POST') %}
+{% set can_edit_customers = can_access_endpoint('customer.edit_customer', 'GET') %}
 {% set can_delete_customers = can_access_endpoint('customer.delete_customer', 'POST') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
@@ -50,7 +52,9 @@
             <p class="text-muted mb-0">Browse and manage customer records</p>
         </div>
         <div>
+            {% if can_create_customers %}
             <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createCustomerModal">Create Customer</button>
+            {% endif %}
         </div>
     </div>
 
@@ -153,7 +157,9 @@
                 <td class="col-customer-pst">{{ 'Yes' if customer.pst_exempt else 'No' }}</td>
                 <td class="col-customer-actions">
                     <div class="mobile-actions">
+                        {% if can_edit_customers %}
                         <a href="{{ url_for('customer.edit_customer', customer_id=customer.id) }}" class="btn btn-primary btn-sm">Edit</a>
+                        {% endif %}
                         <a href="{{ url_for('notes.entity_notes', entity_type='customer', entity_id=customer.id) }}" class="btn btn-outline-secondary btn-sm">Notes</a>
                         {% if can_delete_customers %}
                         <form action="{{ url_for('customer.delete_customer', customer_id=customer.id) }}" method="post" class="d-inline">
@@ -200,6 +206,7 @@
         </form>
     </div>
 
+    {% if can_create_customers %}
     <!-- Create Customer Modal -->
     <div class="modal fade" id="createCustomerModal" tabindex="-1" aria-labelledby="createCustomerModalLabel" aria-hidden="true">
         <div class="modal-dialog">
@@ -247,5 +254,6 @@
         });
     });
     </script>
+    {% endif %}
 </div>
 {% endblock %}
