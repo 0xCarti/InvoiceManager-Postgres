@@ -239,8 +239,14 @@ def test_view_only_purchase_order_page_hides_manage_actions(client, app):
         html = _strip_scripts(response.get_data(as_text=True))
         assert "/purchase_orders/create" not in html
         assert 'data-bs-target="#uploadPurchaseOrderModal"' not in html
+        assert 'id="uploadPurchaseOrderModal"' not in html
+        assert 'id="upload-po-form"' not in html
         assert "View Recommendations" not in html
         assert "Merge selected" not in html
+        assert 'id="merge-selected-btn"' not in html
+        assert 'id="merge-selection-alert"' not in html
+        assert "Select (open)" not in html
+        assert 'class="form-check-input po-select"' not in html
         assert "Forecast Purchase Costs" not in html
         assert "/purchase_orders/edit/" not in html
         assert f"/purchase_orders/{workflow['purchase_order_id']}/receive" not in html
@@ -293,6 +299,10 @@ def test_view_only_transfer_pages_hide_manage_actions(client, app):
         assert response.status_code == 200
         html = _strip_scripts(response.get_data(as_text=True))
         assert 'data-bs-target="#addTransferModal"' not in html
+        assert 'id="addTransferModal"' not in html
+        assert 'id="add-transfer-form"' not in html
+        assert 'id="editTransferModal"' not in html
+        assert 'id="edit-transfer-form"' not in html
         assert "Generate Report" not in html
         assert "View Last Report" not in html
         assert "edit-transfer-btn" not in html

@@ -11,6 +11,7 @@
 {% set can_recipe_cost_calculator = can_access_endpoint('item.recipe_cost_calculator', 'GET') %}
 {% set can_bulk_delete_items = can_access_endpoint('item.bulk_delete_items', 'POST') %}
 {% set can_purchase_cost_forecast = can_access_endpoint('report.purchase_cost_forecast', 'GET') %}
+{% set can_select_items = can_bulk_update_items or can_bulk_delete_items %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-toolbar,
@@ -276,7 +277,9 @@
         <table class="table sortable table-mobile-card" id="itemsTable">
             <thead>
                 <tr>
+                    {% if can_select_items %}
                     <th scope="col" class="col-select"><input type="checkbox" id="select-all" style="transform: scale(1.5);"></th>
+                    {% endif %}
                     <th scope="col" class="col-id" data-type="number">ID</th>
                     <th scope="col" class="col-name">Name</th>
                     <th scope="col" class="col-base-unit">Base Unit</th>

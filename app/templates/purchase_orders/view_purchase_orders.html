@@ -12,6 +12,7 @@
 {% set can_view_purchase_cost_forecast = can_access_endpoint('report.purchase_cost_forecast') %}
 {% set can_view_purchase_inventory_summary = can_access_endpoint('report.purchase_inventory_summary') %}
 {% set has_purchase_order_reports = can_view_purchase_cost_forecast or can_view_purchase_inventory_summary %}
+{% set can_select_purchase_orders = can_merge_purchase_orders %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-toolbar,
@@ -187,7 +188,9 @@
             </button>
         </div>        
     </div>
+    {% if can_select_purchase_orders %}
     <div id="merge-selection-alert" class="alert alert-warning d-none" role="alert"></div>
+    {% endif %}
 
     <!-- Filter Modal -->
     {% call filter_modal(
@@ -270,7 +273,9 @@
     <table class="table sortable table-mobile-card" id="purchase-orders-table">
         <thead>
             <tr>
+                {% if can_select_purchase_orders %}
                 <th class="text-center">Select (open)</th>
+                {% endif %}
                 <th class="col-po-id" data-type="number">ID</th>
                 <th class="col-po-vendor">Vendor</th>
                 <th class="col-po-vendor-name">Vendor (Recorded)</th>
@@ -290,6 +295,7 @@
         <tbody id="po-table-body">
         {% for order in orders.items %}
             <tr data-id="{{ order.id }}" data-vendor="{{ order.vendor_id }}" data-order-date="{{ order.order_date }}" data-expected-date="{{ order.expected_date }}" data-delivery="{{ order.delivery_charge }}">
+                {% if can_select_purchase_orders %}
                 <td class="text-center">
                     {% if not order.received %}
                     <input class="form-check-input po-select" type="checkbox" value="{{ order.id }}" data-vendor="{{ order.vendor_id }}" data-vendor-name="{{ (order.vendor.first_name ~ ' ' ~ order.vendor.last_name) if order.vendor else order.vendor_name or 'Vendor ' ~ order.vendor_id }}" data-expected-date="{{ order.expected_date.strftime('%Y-%m-%d') if order.expected_date else ''}}" data-order-number="{{ order.order_number or '' }}" data-expected-total="{{ '%.2f'|format(order.expected_total_cost) if order.expected_total_cost is not none else '' }}" data-received="0">
@@ -297,6 +303,7 @@
                     <span class="text-muted" title="Received purchase orders cannot be merged">—</span>
                     {% endif %}
                 </td>
+                {% endif %}
                 <td class="col-po-id" data-sort-value="{{ order.id }}">{{ order.id }}</td>
                 <td class="col-po-vendor">
                     {% if order.vendor %}
@@ -412,6 +419,7 @@
         </form>
     </div>
 </div>
+{% if can_upload_purchase_orders %}
 <div class="modal fade" id="uploadPurchaseOrderModal" tabindex="-1" aria-labelledby="uploadPurchaseOrderModalLabel" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -451,6 +459,7 @@
         </div>
     </div>
 </div>
+{% endif %}
 {% if can_merge_purchase_orders %}
 <div class="modal fade" id="mergeConfirmModal" tabindex="-1" aria-labelledby="mergeConfirmModalLabel" aria-hidden="true">
     <div class="modal-dialog">
@@ -495,7 +504,9 @@
 {% block scripts %}
 {{ super() }}
 <script src="{{ url_for('static', filename='js/date_pickers.js') }}"></script>
+{% if can_upload_purchase_orders %}
 <script src="{{ url_for('static', filename='js/purchase_order_upload.js') }}"></script>
+{% endif %}
 <script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function() {
     initDatePickers({

@@ -1,5 +1,8 @@
 <tr id="location-row-{{ location.id }}" data-id="{{ location.id }}">
+    {% set can_select_locations = can_access_endpoint('locations.bulk_update_locations', 'GET') or can_access_endpoint('locations.email_stand_sheets', 'POST') %}
+    {% if can_select_locations %}
     <td class="col-select"><input type="checkbox" name="location_ids" value="{{ location.id }}" style="transform: scale(1.5);"></td>
+    {% endif %}
     <td class="col-location-name">{{ location.name }}</td>
     <td class="col-location-menu">
         {% if location.current_menu %}

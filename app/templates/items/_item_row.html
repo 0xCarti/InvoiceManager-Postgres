@@ -1,5 +1,8 @@
 <tr id="item-row-{{ item.id }}">
+    {% set can_select_items = can_access_endpoint('item.bulk_update_items', 'GET') or can_access_endpoint('item.bulk_delete_items', 'POST') %}
+    {% if can_select_items %}
     <td class="col-select"><input type="checkbox" name="item_ids" value="{{ item.id }}" style="transform: scale(1.5);"></td>
+    {% endif %}
     <td class="col-id" data-sort-value="{{ item.id }}">{{ item.id }}</td>
     <td class="col-name">{{ item.name }}</td>
     <td class="col-base-unit">{{ item.base_unit or '—' }}</td>

@@ -9,6 +9,7 @@
 {% set can_copy_products = can_access_endpoint('product.copy_product', 'GET') %}
 {% set can_bulk_update_products = can_access_endpoint('product.bulk_update_products', 'GET') %}
 {% set can_bulk_set_cost = can_access_endpoint('product.bulk_set_cost_from_recipe', 'POST') %}
+{% set can_select_products = can_bulk_update_products or can_bulk_set_cost %}
 {% set can_product_reports = namespace(
     recipe=can_access_endpoint('report.product_recipe_report', 'GET'),
     sales=can_access_endpoint('report.product_sales_report', 'GET'),
@@ -340,7 +341,9 @@
         <table class="table sortable table-mobile-card" id="product-table">
         <thead>
             <tr>
+                {% if can_select_products %}
                 <th class="col-select"><input type="checkbox" id="select-all-products" style="transform: scale(1.5);"></th>
+                {% endif %}
                 <th class="col-product-id" data-type="number">ID</th>
                 <th class="col-product-name">Name</th>
                 <th class="col-product-price" data-type="number">Terminal/Event Sell Price</th>

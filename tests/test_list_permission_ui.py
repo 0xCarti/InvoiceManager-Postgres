@@ -83,9 +83,9 @@ def test_list_pages_hide_create_edit_bulk_and_report_controls(client, app):
             ("/customers", ["data-bs-target=\"#createCustomerModal\"", customer_edit_url, customer_delete_url]),
             ("/vendors", ["id=\"createVendorBtn\"", vendor_edit_url, "vendorModal"]),
             ("/menus", ["Create Menu", menu_edit_url, menu_assign_url]),
-            ("/items", ["id=\"createItemBtn\"", "id=\"bulkEditItemsBtn\"", "Import Items", "Delete Items", item_edit_url, item_copy_url, "id=\"itemModal\"", "id=\"itemBulkModal\""]),
-            ("/locations", ["id=\"addLocationBtn\"", "id=\"bulkEditLocationsBtn\"", "id=\"emailStandSheetsBtn\"", "id=\"locationModal\"", "id=\"locationBulkModal\"", "id=\"copyModal\"", location_edit_url]),
-            ("/products", ["data-bs-target=\"#createProductModal\"", "id=\"editProductModal\"", "id=\"productBulkModal\"", "id=\"bulkEditProductsBtn\"", "Set Cost From Recipe", "Recipe Report", "Revenue Report", "Stock Usage Report", "Department Sales Forecast", product_edit_url, product_copy_url, "/menus/edit/", "/locations/edit/"]),
+            ("/items", ["id=\"createItemBtn\"", "id=\"bulkEditItemsBtn\"", "id=\"select-all\"", "Import Items", "Delete Items", item_edit_url, item_copy_url, "id=\"itemModal\"", "id=\"itemBulkModal\""]),
+            ("/locations", ["id=\"addLocationBtn\"", "id=\"bulkEditLocationsBtn\"", "id=\"emailStandSheetsBtn\"", "id=\"select-all-locations\"", "id=\"locationModal\"", "id=\"locationBulkModal\"", "id=\"copyModal\"", location_edit_url]),
+            ("/products", ["data-bs-target=\"#createProductModal\"", "id=\"editProductModal\"", "id=\"productBulkModal\"", "id=\"bulkEditProductsBtn\"", "id=\"select-all-products\"", "Set Cost From Recipe", "Recipe Report", "Revenue Report", "Stock Usage Report", "Department Sales Forecast", product_edit_url, product_copy_url, "/menus/edit/", "/locations/edit/"]),
             ("/gl_codes", ["id=\"glCodeModal\"", "id=\"add-gl-code\"", "edit-gl-code"]),
         ]
 
@@ -110,6 +110,7 @@ def test_js_generated_row_markup_is_permission_gated(client, app):
         locations_html = client.get("/locations", follow_redirects=True).get_data(as_text=True)
         assert "edit-location-btn" not in locations_html
         assert "copy-location-btn" not in locations_html
+        assert 'name=\\"location_ids\\"' not in locations_html
 
         products_html = _strip_scripts(client.get("/products", follow_redirects=True).get_data(as_text=True))
         assert "/menus/edit/" not in products_html

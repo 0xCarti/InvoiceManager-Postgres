@@ -3,6 +3,7 @@
 
 {% block content %}
 {% set can_create_transfers = can_access_endpoint('transfer.add_transfer') %}
+{% set can_edit_transfers = can_access_endpoint('transfer.edit_transfer') %}
 {% set can_view_transfer_reports = can_access_endpoint('transfer.generate_report') or can_access_endpoint('transfer.view_report') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
@@ -150,6 +151,7 @@
     </div>
     {% endif %}
     </div>
+{% if can_create_transfers %}
 <!-- Add Transfer Modal -->
 <div class="modal fade" id="addTransferModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
@@ -188,7 +190,9 @@
     </div>
   </div>
 </div>
+{% endif %}
 
+{% if can_edit_transfers %}
 <!-- Edit Transfer Modal -->
 <div class="modal fade" id="editTransferModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
@@ -228,6 +232,7 @@
     </div>
   </div>
 </div>
+{% endif %}
 
 <!-- Search Modal -->
 <div class="modal fade" id="searchModal" tabindex="-1" aria-hidden="true">
@@ -275,27 +280,44 @@
         console.warn('Socket.io not available, skipping live transfer notifications.');
     }
 
+    const addItemInput = document.getElementById('add-item-name');
+    const addSuggestions = document.getElementById('add-suggestions');
+    const addItemList = document.getElementById('add-item-list');
+    const addTransferForm = document.getElementById('add-transfer-form');
+    const addTransferModalEl = document.getElementById('addTransferModal');
+    const editItemInput = document.getElementById('edit-item-name');
+    const editSuggestions = document.getElementById('edit-suggestions');
+    const editItemList = document.getElementById('edit-item-list');
+    const editTransferForm = document.getElementById('edit-transfer-form');
+    const editTransferModalEl = document.getElementById('editTransferModal');
+
     let addItemIndex = 0;
-    document.getElementById('add-item-name').addEventListener('input', function() {
-        const input = this.value.trim();
-        if (input === '') {
-            document.getElementById('add-suggestions').innerHTML = '';
-            return;
-        }
-        fetch('/items/search?term=' + encodeURIComponent(input))
-            .then(response => response.json())
-            .then(data => {
-                const suggestionsDiv = document.getElementById('add-suggestions');
-                suggestionsDiv.innerHTML = '';
-                data.forEach(function(item) {
-                    const suggestion = document.createElement('div');
-                    suggestion.textContent = item.name;
-                    suggestion.dataset.id = item.id;
-                    suggestion.classList.add('suggestion');
-                    suggestionsDiv.appendChild(suggestion);
+    if (addItemInput) {
+        addItemInput.addEventListener('input', function() {
+            const input = this.value.trim();
+            if (input === '') {
+                if (addSuggestions) {
+                    addSuggestions.innerHTML = '';
+                }
+                return;
+            }
+            fetch('/items/search?term=' + encodeURIComponent(input))
+                .then(response => response.json())
+                .then(data => {
+                    if (!addSuggestions) {
+                        return;
+                    }
+                    addSuggestions.innerHTML = '';
+                    data.forEach(function(item) {
+                        const suggestion = document.createElement('div');
+                        suggestion.textContent = item.name;
+                        suggestion.dataset.id = item.id;
+                        suggestion.classList.add('suggestion');
+                        addSuggestions.appendChild(suggestion);
+                    });
                 });
-            });
-    });
+        });
+    }
 
     document.addEventListener('click', function(event) {
         if (event.target && event.target.classList.contains('suggestion') && event.target.parentElement.id === 'add-suggestions') {
@@ -306,6 +328,9 @@
     });
 
     function addItemToList(id, name) {
+        if (!addItemList) {
+            return;
+        }
         fetch(`/items/${id}/units`).then(r => r.json()).then(data => {
             const listItem = TransferWorkflow.createRow({
                 prefix: 'add-items',
@@ -314,61 +339,77 @@
                 itemName: name,
                 unitsData: data,
             });
-            document.getElementById('add-item-list').appendChild(listItem);
-            document.getElementById('add-suggestions').innerHTML = '';
-            document.getElementById('add-item-name').value = '';
+            addItemList.appendChild(listItem);
+            if (addSuggestions) {
+                addSuggestions.innerHTML = '';
+            }
+            if (addItemInput) {
+                addItemInput.value = '';
+            }
             addItemIndex++;
         }).catch(error => {
             console.error('Error loading item units:', error);
         });
     }
 
-    document.getElementById('add-transfer-form').addEventListener('submit', function(e){
-        e.preventDefault();
-        fetch('/transfers/ajax_add', {
-            method: 'POST',
-            body: new FormData(this)
-        }).then(r => r.json()).then(data => {
-            if(data.success){
-                const table = document.getElementById('transfer-table');
-                table.querySelector('tbody').insertAdjacentHTML('afterbegin', data.html);
-                if (window.TableSort && typeof window.TableSort.bind === 'function') {
-                    window.TableSort.bind(table);
+    if (addTransferForm) {
+        addTransferForm.addEventListener('submit', function(e){
+            e.preventDefault();
+            fetch('/transfers/ajax_add', {
+                method: 'POST',
+                body: new FormData(this)
+            }).then(r => r.json()).then(data => {
+                if(data.success){
+                    const table = document.getElementById('transfer-table');
+                    table.querySelector('tbody').insertAdjacentHTML('afterbegin', data.html);
+                    if (window.TableSort && typeof window.TableSort.bind === 'function') {
+                        window.TableSort.bind(table);
+                    }
+                    attachEditEvents();
+                    const modal = addTransferModalEl ? bootstrap.Modal.getInstance(addTransferModalEl) : null;
+                    if (modal) {
+                        modal.hide();
+                    }
+                    this.reset();
+                    if (addItemList) {
+                        addItemList.innerHTML = '';
+                    }
+                    addItemIndex = 0;
+                }else{
+                    alert('Error adding transfer');
                 }
-                attachEditEvents();
-                var modal = bootstrap.Modal.getInstance(document.getElementById('addTransferModal'));
-                modal.hide();
-                this.reset();
-                document.getElementById('add-item-list').innerHTML = '';
-                addItemIndex = 0;
-            }else{
-                alert('Error adding transfer');
-            }
+            });
         });
-    });
+    }
 
     // Edit form functionality
     let editItemIndex = 0;
-    document.getElementById('edit-item-name').addEventListener('input', function() {
-        const input = this.value.trim();
-        if (input === '') {
-            document.getElementById('edit-suggestions').innerHTML = '';
-            return;
-        }
-        fetch('/items/search?term=' + encodeURIComponent(input))
-            .then(response => response.json())
-            .then(data => {
-                const suggestionsDiv = document.getElementById('edit-suggestions');
-                suggestionsDiv.innerHTML = '';
-                data.forEach(function(item) {
-                    const suggestion = document.createElement('div');
-                    suggestion.textContent = item.name;
-                    suggestion.dataset.id = item.id;
-                    suggestion.classList.add('suggestion');
-                    suggestionsDiv.appendChild(suggestion);
+    if (editItemInput) {
+        editItemInput.addEventListener('input', function() {
+            const input = this.value.trim();
+            if (input === '') {
+                if (editSuggestions) {
+                    editSuggestions.innerHTML = '';
+                }
+                return;
+            }
+            fetch('/items/search?term=' + encodeURIComponent(input))
+                .then(response => response.json())
+                .then(data => {
+                    if (!editSuggestions) {
+                        return;
+                    }
+                    editSuggestions.innerHTML = '';
+                    data.forEach(function(item) {
+                        const suggestion = document.createElement('div');
+                        suggestion.textContent = item.name;
+                        suggestion.dataset.id = item.id;
+                        suggestion.classList.add('suggestion');
+                        editSuggestions.appendChild(suggestion);
+                    });
                 });
-            });
-    });
+        });
+    }
 
     document.addEventListener('click', function(event) {
         if (event.target && event.target.classList.contains('suggestion') && event.target.parentElement.id === 'edit-suggestions') {
@@ -380,6 +421,9 @@
     });
 
     function addEditItem(item, index){
+        if (!editItemList) {
+            return;
+        }
         const rowIndex = typeof index === 'number' ? index : editItemIndex++;
         fetch(`/items/${item.id}/units`).then(r => r.json()).then(data => {
             const listItem = TransferWorkflow.createRow({
@@ -395,24 +439,29 @@
                     totalQuantity: item.quantity,
                 },
             });
-            document.getElementById('edit-item-list').appendChild(listItem);
+            editItemList.appendChild(listItem);
         }).catch(error => {
             console.error('Error loading item units:', error);
         });
     }
 
     function loadEditTransfer(id){
+        if (!editTransferForm || !editTransferModalEl) {
+            return;
+        }
         fetch(`/transfers/${id}/json`).then(r => r.json()).then(data => {
             document.getElementById('edit-transfer-id').value = data.id;
             document.getElementById('edit-from_location_id').value = data.from_location_id;
             document.getElementById('edit-to_location_id').value = data.to_location_id;
-            document.getElementById('edit-item-list').innerHTML = '';
+            if (editItemList) {
+                editItemList.innerHTML = '';
+            }
             editItemIndex = 0;
             data.items.forEach(function(it){
                 const rowIndex = editItemIndex++;
                 addEditItem(it, rowIndex);
             });
-            var modal = new bootstrap.Modal(document.getElementById('editTransferModal'));
+            var modal = new bootstrap.Modal(editTransferModalEl);
             modal.show();
         });
     }
@@ -426,26 +475,30 @@
     }
     attachEditEvents();
 
-    document.getElementById('edit-transfer-form').addEventListener('submit', function(e){
-        e.preventDefault();
-        var id = document.getElementById('edit-transfer-id').value;
-        fetch(`/transfers/ajax_edit/${id}`, {
-            method: 'POST',
-            body: new FormData(this)
-        }).then(r => r.json()).then(data => {
-            if(data.success){
-                var row = document.getElementById(`transfer-row-${data.id}`);
-                row.outerHTML = data.html;
-                if (window.TableSort && typeof window.TableSort.bind === 'function') {
-                    window.TableSort.bind(document.getElementById('transfer-table'));
+    if (editTransferForm) {
+        editTransferForm.addEventListener('submit', function(e){
+            e.preventDefault();
+            var id = document.getElementById('edit-transfer-id').value;
+            fetch(`/transfers/ajax_edit/${id}`, {
+                method: 'POST',
+                body: new FormData(this)
+            }).then(r => r.json()).then(data => {
+                if(data.success){
+                    var row = document.getElementById(`transfer-row-${data.id}`);
+                    row.outerHTML = data.html;
+                    if (window.TableSort && typeof window.TableSort.bind === 'function') {
+                        window.TableSort.bind(document.getElementById('transfer-table'));
+                    }
+                    attachEditEvents();
+                    const modal = editTransferModalEl ? bootstrap.Modal.getInstance(editTransferModalEl) : null;
+                    if (modal) {
+                        modal.hide();
+                    }
+                } else {
+                    alert('Error updating transfer');
                 }
-                attachEditEvents();
-                var modal = bootstrap.Modal.getInstance(document.getElementById('editTransferModal'));
-                modal.hide();
-            } else {
-                alert('Error updating transfer');
-            }
+            });
         });
-    });
+    }
 </script>
 {% endblock %}

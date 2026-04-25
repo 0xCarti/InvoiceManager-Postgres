@@ -10,6 +10,7 @@
 {% set can_email_stand_sheets = can_access_endpoint('locations.email_stand_sheets', 'POST') %}
 {% set can_manage_location_items = can_access_endpoint('locations.location_items', 'GET') %}
 {% set can_delete_locations = can_access_endpoint('locations.delete_location', 'POST') %}
+{% set can_select_locations = can_bulk_update_locations or can_email_stand_sheets %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-toolbar,
@@ -133,7 +134,9 @@
     <table class="table sortable" id="locations-table">
         <thead>
             <tr>
+                {% if can_select_locations %}
                 <th scope="col" class="col-select"><input type="checkbox" id="select-all-locations" style="transform: scale(1.5);"></th>
+                {% endif %}
                 <th scope="col" class="col-location-name">Name</th>
                 <th scope="col" class="col-location-menu">Menu</th>
                 <th scope="col" class="col-location-actions">Actions</th>
@@ -501,7 +504,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const menuLabel = loc.menu_name ? loc.menu_name : '<span class="text-muted">No Menu</span>';
         const notesUrl = `/notes/location/${loc.id}`;
         const row = `<tr id="location-row-${loc.id}" data-id="${loc.id}">
+            {% if can_select_locations %}
             <td class=\"col-select\"><input type=\"checkbox\" name=\"location_ids\" value=\"${loc.id}\" style=\"transform: scale(1.5);\"></td>
+            {% endif %}
             <td class=\"col-location-name\">${loc.name}</td>
             <td class=\"col-location-menu\">${menuLabel}</td>
             <td class=\"col-location-actions\">

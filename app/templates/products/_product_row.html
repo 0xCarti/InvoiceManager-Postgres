@@ -1,5 +1,8 @@
 <tr id="product-row-{{ product.id }}">
+    {% set can_select_products = can_access_endpoint('product.bulk_update_products', 'GET') or can_access_endpoint('product.bulk_set_cost_from_recipe', 'POST') %}
+    {% if can_select_products %}
     <td class="col-select"><input type="checkbox" name="product_ids" value="{{ product.id }}" style="transform: scale(1.5);"></td>
+    {% endif %}
     <td class="col-product-id" data-sort-value="{{ product.id }}">{{ product.id }}</td>
     <td class="col-product-name">{{ product.name }}</td>
     <td class="col-product-price" data-sort-value="{{ '%.6f'|format(product.price or 0) }}">{{ '%.2f'|format(product.price or 0) }}</td>
