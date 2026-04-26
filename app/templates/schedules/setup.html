@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="container-fluid px-0">
+<div class="container-fluid px-3 px-lg-0 mobile-list-page app-page-shell">
     {% include 'schedules/_schedule_tabs.html' %}
 
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
@@ -72,15 +72,15 @@
                 <div class="card-body">
                     <h2 class="h5">Departments</h2>
                     <div class="table-responsive">
-                        <table class="table table-sm align-middle">
+                        <table class="table table-sm align-middle table-mobile-card">
                             <thead><tr><th>Name</th><th>Status</th>{% if can_manage_setup %}<th></th>{% endif %}</tr></thead>
                             <tbody>
                                 {% for department in departments %}
                                 <tr>
-                                    <td>{{ department.name }}</td>
+                                    <td class="mobile-card-primary">{{ department.name }}</td>
                                     <td>{{ 'Active' if department.active else 'Inactive' }}</td>
                                     {% if can_manage_setup %}
-                                    <td class="text-end">
+                                    <td class="text-end mobile-card-actions">
                                         <form method="post">
                                             {{ action_form.hidden_tag() }}
                                             <input type="hidden" name="action" value="toggle_department">
@@ -105,15 +105,15 @@
                 <div class="card-body">
                     <h2 class="h5">Positions</h2>
                     <div class="table-responsive">
-                        <table class="table table-sm align-middle">
+                        <table class="table table-sm align-middle table-mobile-card">
                             <thead><tr><th>Position</th><th>Department</th>{% if can_manage_setup %}<th></th>{% endif %}</tr></thead>
                             <tbody>
                                 {% for position in positions %}
                                 <tr>
-                                    <td>{{ position.name }}<div class="small text-muted">{{ 'Active' if position.active else 'Inactive' }}</div></td>
+                                    <td class="mobile-card-primary">{{ position.name }}<div class="small text-muted">{{ 'Active' if position.active else 'Inactive' }}</div></td>
                                     <td>{{ position.department.name }}</td>
                                     {% if can_manage_setup %}
-                                    <td class="text-end">
+                                    <td class="text-end mobile-card-actions">
                                         <form method="post">
                                             {{ action_form.hidden_tag() }}
                                             <input type="hidden" name="action" value="toggle_position">

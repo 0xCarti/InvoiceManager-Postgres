@@ -1586,6 +1586,844 @@ class Vendor(db.Model):
     __table_args__ = (db.Index("ix_vendor_archived", "archived"),)
 
 
+class EquipmentCategory(db.Model):
+    __tablename__ = "equipment_category"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    archived = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        server_default=func.now(),
+    )
+
+    models = relationship(
+        "EquipmentModel",
+        back_populates="category",
+        order_by="EquipmentModel.manufacturer.asc(), EquipmentModel.name.asc()",
+    )
+
+    __table_args__ = (
+        db.Index("ix_equipment_category_archived", "archived"),
+        db.Index(
+            "uix_equipment_category_name_active",
+            "name",
+            unique=True,
+            postgresql_where=db.text("archived = false"),
+        ),
+    )
+
+
+class EquipmentModel(db.Model):
+    __tablename__ = "equipment_model"
+
+    id = db.Column(db.Integer, primary_key=True)
+    category_id = db.Column(
+        db.Integer, db.ForeignKey("equipment_category.id"), nullable=False
+    )
+    manufacturer = db.Column(db.String(120), nullable=False)
+    name = db.Column(db.String(120), nullable=False)
+    model_number = db.Column(db.String(120), nullable=True)
+    description = db.Column(db.Text, nullable=True)
+    archived = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        server_default=func.now(),
+    )
+
+    category = relationship("EquipmentCategory", back_populates="models")
+    assets = relationship(
+        "EquipmentAsset",
+        back_populates="equipment_model",
+        order_by="EquipmentAsset.asset_tag.asc()",
+    )
+
+    @property
+    def display_name(self) -> str:
+        parts = [self.manufacturer, self.name]
+        if self.model_number:
+            parts.append(self.model_number)
+        return " ".join(part for part in parts if part)
+
+    __table_args__ = (
+        db.Index("ix_equipment_model_archived", "archived"),
+        db.Index("ix_equipment_model_category_id", "category_id"),
+        db.Index(
+            "uix_equipment_model_identity_active",
+            "category_id",
+            "manufacturer",
+            "name",
+            "model_number",
+            unique=True,
+            postgresql_where=db.text("archived = false"),
+        ),
+    )
+
+
+class EquipmentIntakeBatch(db.Model):
+    __tablename__ = "equipment_intake_batch"
+
+    SOURCE_MANUAL = "manual"
+    SOURCE_PURCHASE_ORDER = "purchase_order"
+    SOURCE_PURCHASE_INVOICE = "purchase_invoice"
+    SOURCE_SNIPE_IT = "snipe_it"
+
+    SOURCE_TYPE_CHOICES = (
+        (SOURCE_MANUAL, "Manual Entry"),
+        (SOURCE_PURCHASE_ORDER, "Linked Purchase Order"),
+        (SOURCE_PURCHASE_INVOICE, "Linked Purchase Invoice"),
+        (SOURCE_SNIPE_IT, "Snipe-IT Import"),
+    )
+
+    STATUS_OPEN = "open"
+    STATUS_PARTIAL = "partial"
+    STATUS_RECEIVED = "received"
+    STATUS_CANCELLED = "cancelled"
+
+    STATUS_CHOICES = (
+        (STATUS_OPEN, "Open"),
+        (STATUS_PARTIAL, "Partially Received"),
+        (STATUS_RECEIVED, "Received"),
+        (STATUS_CANCELLED, "Cancelled"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    equipment_model_id = db.Column(
+        db.Integer, db.ForeignKey("equipment_model.id"), nullable=False
+    )
+    purchase_vendor_id = db.Column(
+        db.Integer, db.ForeignKey("vendor.id"), nullable=True
+    )
+    vendor_name = db.Column(db.String(160), nullable=True)
+    purchase_order_id = db.Column(
+        db.Integer, db.ForeignKey("purchase_order.id"), nullable=True
+    )
+    purchase_invoice_id = db.Column(
+        db.Integer, db.ForeignKey("purchase_invoice.id"), nullable=True
+    )
+    purchase_order_reference = db.Column(db.String(100), nullable=True)
+    purchase_invoice_reference = db.Column(db.String(100), nullable=True)
+    source_type = db.Column(
+        db.String(32),
+        nullable=False,
+        default=SOURCE_MANUAL,
+        server_default=SOURCE_MANUAL,
+    )
+    status = db.Column(
+        db.String(20),
+        nullable=False,
+        default=STATUS_OPEN,
+        server_default=STATUS_OPEN,
+    )
+    expected_quantity = db.Column(
+        db.Integer, nullable=False, default=1, server_default="1"
+    )
+    unit_cost = db.Column(db.Float, nullable=True)
+    order_date = db.Column(db.Date, nullable=True)
+    expected_received_on = db.Column(db.Date, nullable=True)
+    received_on = db.Column(db.Date, nullable=True)
+    location_id = db.Column(
+        db.Integer, db.ForeignKey("location.id"), nullable=True
+    )
+    assigned_user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id"), nullable=True
+    )
+    notes = db.Column(db.Text, nullable=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        server_default=func.now(),
+    )
+
+    equipment_model = relationship("EquipmentModel")
+    purchase_vendor = relationship("Vendor", foreign_keys=[purchase_vendor_id])
+    purchase_order = relationship("PurchaseOrder", backref="equipment_intake_batches")
+    purchase_invoice = relationship(
+        "PurchaseInvoice", backref="equipment_intake_batches"
+    )
+    location = relationship("Location", foreign_keys=[location_id])
+    assigned_user = relationship("User", foreign_keys=[assigned_user_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    assets = relationship(
+        "EquipmentAsset",
+        back_populates="intake_batch",
+        order_by="EquipmentAsset.asset_tag.asc()",
+    )
+
+    @property
+    def model_display_name(self) -> str:
+        if self.equipment_model is None:
+            return ""
+        return self.equipment_model.display_name
+
+    @property
+    def vendor_display_name(self) -> str:
+        if self.purchase_vendor is not None:
+            first = self.purchase_vendor.first_name or ""
+            last = self.purchase_vendor.last_name or ""
+            label = f"{first} {last}".strip()
+            if label:
+                return label
+        return (self.vendor_name or "").strip()
+
+    @property
+    def order_reference_label(self) -> str:
+        if self.purchase_order is not None:
+            return self.purchase_order.order_number or f"PO #{self.purchase_order.id}"
+        return (self.purchase_order_reference or "").strip()
+
+    @property
+    def invoice_reference_label(self) -> str:
+        if self.purchase_invoice is not None:
+            return (
+                self.purchase_invoice.invoice_number
+                or f"Invoice #{self.purchase_invoice.id}"
+            )
+        return (self.purchase_invoice_reference or "").strip()
+
+    @property
+    def source_type_label(self) -> str:
+        return dict(self.SOURCE_TYPE_CHOICES).get(
+            self.source_type, self.source_type.replace("_", " ").title()
+        )
+
+    @property
+    def status_label(self) -> str:
+        return dict(self.STATUS_CHOICES).get(
+            self.status, self.status.replace("_", " ").title()
+        )
+
+    @property
+    def status_badge_class(self) -> str:
+        return {
+            self.STATUS_OPEN: "text-bg-secondary",
+            self.STATUS_PARTIAL: "text-bg-warning",
+            self.STATUS_RECEIVED: "text-bg-success",
+            self.STATUS_CANCELLED: "text-bg-dark",
+        }.get(self.status, "text-bg-secondary")
+
+    @property
+    def received_asset_count(self) -> int:
+        return len(self.assets or [])
+
+    @property
+    def remaining_quantity(self) -> int:
+        return max(int(self.expected_quantity or 0) - self.received_asset_count, 0)
+
+    @property
+    def total_expected_cost(self) -> float | None:
+        if self.unit_cost is None:
+            return None
+        return float(self.expected_quantity or 0) * float(self.unit_cost or 0.0)
+
+    @property
+    def total_received_cost(self) -> float | None:
+        costs = [float(asset.cost) for asset in self.assets if asset.cost is not None]
+        if costs:
+            return sum(costs)
+        if self.unit_cost is None:
+            return None
+        return float(self.received_asset_count) * float(self.unit_cost or 0.0)
+
+    @property
+    def display_name(self) -> str:
+        reference = self.invoice_reference_label or self.order_reference_label
+        if reference:
+            return f"{self.model_display_name} - {reference}"
+        return f"{self.model_display_name} - Batch #{self.id}"
+
+    def sync_status(self) -> None:
+        if self.status == self.STATUS_CANCELLED:
+            return
+        received_count = self.received_asset_count
+        expected_quantity = int(self.expected_quantity or 0)
+        if received_count <= 0:
+            self.status = self.STATUS_OPEN
+        elif expected_quantity > received_count:
+            self.status = self.STATUS_PARTIAL
+        else:
+            self.status = self.STATUS_RECEIVED
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "source_type IN ('manual', 'purchase_order', 'purchase_invoice', 'snipe_it')",
+            name="ck_equipment_intake_batch_source_type",
+        ),
+        db.CheckConstraint(
+            "status IN ('open', 'partial', 'received', 'cancelled')",
+            name="ck_equipment_intake_batch_status",
+        ),
+        db.CheckConstraint(
+            "expected_quantity >= 1",
+            name="ck_equipment_intake_batch_expected_quantity",
+        ),
+        db.Index("ix_equipment_intake_batch_model_id", "equipment_model_id"),
+        db.Index("ix_equipment_intake_batch_vendor_id", "purchase_vendor_id"),
+        db.Index("ix_equipment_intake_batch_order_id", "purchase_order_id"),
+        db.Index("ix_equipment_intake_batch_invoice_id", "purchase_invoice_id"),
+        db.Index("ix_equipment_intake_batch_status", "status"),
+        db.Index("ix_equipment_intake_batch_source_type", "source_type"),
+        db.Index("ix_equipment_intake_batch_order_date", "order_date"),
+        db.Index("ix_equipment_intake_batch_received_on", "received_on"),
+        db.Index("ix_equipment_intake_batch_location_id", "location_id"),
+        db.Index("ix_equipment_intake_batch_assigned_user_id", "assigned_user_id"),
+        db.Index("ix_equipment_intake_batch_created_by_id", "created_by_id"),
+    )
+
+
+class EquipmentAsset(db.Model):
+    __tablename__ = "equipment_asset"
+
+    REMINDER_WINDOW_DAYS = 30
+
+    STATUS_OPERATIONAL = "operational"
+    STATUS_NEEDS_SERVICE = "needs_service"
+    STATUS_OUT_OF_SERVICE = "out_of_service"
+    STATUS_RETIRED = "retired"
+    STATUS_DISPOSED = "disposed"
+    STATUS_LOST = "lost"
+
+    STATUS_CHOICES = (
+        (STATUS_OPERATIONAL, "Operational"),
+        (STATUS_NEEDS_SERVICE, "Needs Service"),
+        (STATUS_OUT_OF_SERVICE, "Out of Service"),
+        (STATUS_RETIRED, "Retired"),
+        (STATUS_DISPOSED, "Disposed"),
+        (STATUS_LOST, "Lost"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    equipment_model_id = db.Column(
+        db.Integer, db.ForeignKey("equipment_model.id"), nullable=False
+    )
+    name = db.Column(db.String(120), nullable=True)
+    asset_tag = db.Column(db.String(64), nullable=False)
+    serial_number = db.Column(db.String(128), nullable=True)
+    description = db.Column(db.Text, nullable=True)
+    status = db.Column(
+        db.String(32),
+        nullable=False,
+        default=STATUS_OPERATIONAL,
+        server_default=STATUS_OPERATIONAL,
+    )
+    acquired_on = db.Column(db.Date, nullable=True)
+    warranty_expires_on = db.Column(db.Date, nullable=True)
+    cost = db.Column(db.Float, nullable=True)
+    purchase_vendor_id = db.Column(
+        db.Integer, db.ForeignKey("vendor.id"), nullable=True
+    )
+    service_vendor_id = db.Column(
+        db.Integer, db.ForeignKey("vendor.id"), nullable=True
+    )
+    service_contact_name = db.Column(db.String(120), nullable=True)
+    service_contact_email = db.Column(db.String(255), nullable=True)
+    service_contact_phone = db.Column(db.String(50), nullable=True)
+    service_contract_name = db.Column(db.String(120), nullable=True)
+    service_contract_reference = db.Column(db.String(120), nullable=True)
+    service_contract_expires_on = db.Column(db.Date, nullable=True)
+    service_contract_notes = db.Column(db.Text, nullable=True)
+    service_interval_days = db.Column(db.Integer, nullable=True)
+    last_service_on = db.Column(db.Date, nullable=True)
+    next_service_due_on = db.Column(db.Date, nullable=True)
+    equipment_intake_batch_id = db.Column(
+        db.Integer, db.ForeignKey("equipment_intake_batch.id"), nullable=True
+    )
+    location_id = db.Column(
+        db.Integer, db.ForeignKey("location.id"), nullable=True
+    )
+    sublocation = db.Column(db.String(120), nullable=True)
+    assigned_user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id"), nullable=True
+    )
+    archived = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        server_default=func.now(),
+    )
+
+    equipment_model = relationship("EquipmentModel", back_populates="assets")
+    intake_batch = relationship("EquipmentIntakeBatch", back_populates="assets")
+    purchase_vendor = relationship("Vendor", foreign_keys=[purchase_vendor_id])
+    service_vendor = relationship("Vendor", foreign_keys=[service_vendor_id])
+    location = relationship("Location", foreign_keys=[location_id])
+    assigned_user = relationship("User", foreign_keys=[assigned_user_id])
+    maintenance_issues = relationship(
+        "EquipmentMaintenanceIssue",
+        back_populates="equipment_asset",
+        cascade="all, delete-orphan",
+        order_by="EquipmentMaintenanceIssue.created_at.desc()",
+    )
+
+    @property
+    def category(self):
+        return self.equipment_model.category if self.equipment_model else None
+
+    @property
+    def model_display_name(self) -> str:
+        if self.equipment_model is None:
+            return ""
+        return self.equipment_model.display_name
+
+    @property
+    def display_name(self) -> str:
+        return self.name or self.model_display_name or self.asset_tag
+
+    @property
+    def status_label(self) -> str:
+        return dict(self.STATUS_CHOICES).get(self.status, self.status.title())
+
+    @property
+    def status_badge_class(self) -> str:
+        return {
+            self.STATUS_OPERATIONAL: "text-bg-success",
+            self.STATUS_NEEDS_SERVICE: "text-bg-warning",
+            self.STATUS_OUT_OF_SERVICE: "text-bg-danger",
+            self.STATUS_RETIRED: "text-bg-secondary",
+            self.STATUS_DISPOSED: "text-bg-dark",
+            self.STATUS_LOST: "text-bg-danger",
+        }.get(self.status, "text-bg-secondary")
+
+    @property
+    def custodian_label(self) -> str:
+        if self.assigned_user is None:
+            return ""
+        return self.assigned_user.display_label
+
+    @property
+    def location_label(self) -> str:
+        parts = []
+        if self.location is not None:
+            parts.append(self.location.name)
+        if self.sublocation:
+            parts.append(self.sublocation)
+        return " / ".join(part for part in parts if part)
+
+    @property
+    def service_due_date(self):
+        if self.next_service_due_on is not None:
+            return self.next_service_due_on
+        if self.last_service_on is None or not self.service_interval_days:
+            return None
+        return self.last_service_on + timedelta(days=int(self.service_interval_days))
+
+    @property
+    def service_due_state(self) -> str:
+        due_on = self.service_due_date
+        if due_on is None:
+            return "unscheduled"
+        today = date_cls.today()
+        if due_on < today:
+            return "overdue"
+        if due_on <= today + timedelta(days=self.REMINDER_WINDOW_DAYS):
+            return "due_soon"
+        return "scheduled"
+
+    @property
+    def service_due_label(self) -> str:
+        labels = {
+            "unscheduled": "Not Scheduled",
+            "overdue": "Service Overdue",
+            "due_soon": "Service Due Soon",
+            "scheduled": "Service Scheduled",
+        }
+        return labels.get(self.service_due_state, "Service")
+
+    @property
+    def service_due_badge_class(self) -> str:
+        return {
+            "unscheduled": "text-bg-secondary",
+            "overdue": "text-bg-danger",
+            "due_soon": "text-bg-warning",
+            "scheduled": "text-bg-success",
+        }.get(self.service_due_state, "text-bg-secondary")
+
+    @property
+    def warranty_state(self) -> str:
+        if self.warranty_expires_on is None:
+            return "none"
+        today = date_cls.today()
+        if self.warranty_expires_on < today:
+            return "expired"
+        if self.warranty_expires_on <= today + timedelta(days=self.REMINDER_WINDOW_DAYS):
+            return "expiring_soon"
+        return "covered"
+
+    @property
+    def warranty_label(self) -> str:
+        labels = {
+            "none": "No Warranty Date",
+            "expired": "Warranty Expired",
+            "expiring_soon": "Warranty Expiring Soon",
+            "covered": "Warranty Active",
+        }
+        return labels.get(self.warranty_state, "Warranty")
+
+    @property
+    def warranty_badge_class(self) -> str:
+        return {
+            "none": "text-bg-secondary",
+            "expired": "text-bg-danger",
+            "expiring_soon": "text-bg-warning",
+            "covered": "text-bg-success",
+        }.get(self.warranty_state, "text-bg-secondary")
+
+    @property
+    def service_contract_state(self) -> str:
+        if self.service_contract_expires_on is None:
+            return "none"
+        today = date_cls.today()
+        if self.service_contract_expires_on < today:
+            return "expired"
+        if self.service_contract_expires_on <= today + timedelta(
+            days=self.REMINDER_WINDOW_DAYS
+        ):
+            return "expiring_soon"
+        return "active"
+
+    @property
+    def service_contract_label(self) -> str:
+        return {
+            "none": "No Contract Date",
+            "expired": "Contract Expired",
+            "expiring_soon": "Contract Due Soon",
+            "active": "Contract Active",
+        }.get(self.service_contract_state, "Contract")
+
+    @property
+    def service_contract_badge_class(self) -> str:
+        return {
+            "none": "text-bg-secondary",
+            "expired": "text-bg-danger",
+            "expiring_soon": "text-bg-warning",
+            "active": "text-bg-success",
+        }.get(self.service_contract_state, "text-bg-secondary")
+
+    @property
+    def open_maintenance_issues(self) -> list["EquipmentMaintenanceIssue"]:
+        return [issue for issue in self.maintenance_issues if issue.is_open]
+
+    @property
+    def open_maintenance_issue_count(self) -> int:
+        return len(self.open_maintenance_issues)
+
+    @property
+    def needs_attention(self) -> bool:
+        return bool(
+            self.open_maintenance_issue_count
+            or self.service_due_state in {"overdue", "due_soon"}
+            or self.warranty_state in {"expired", "expiring_soon"}
+        )
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "status IN ('operational', 'needs_service', 'out_of_service', 'retired', 'disposed', 'lost')",
+            name="ck_equipment_asset_status",
+        ),
+        db.Index("ix_equipment_asset_archived", "archived"),
+        db.Index("ix_equipment_asset_status", "status"),
+        db.Index("ix_equipment_asset_model_id", "equipment_model_id"),
+        db.Index("ix_equipment_asset_purchase_vendor_id", "purchase_vendor_id"),
+        db.Index("ix_equipment_asset_service_vendor_id", "service_vendor_id"),
+        db.Index("ix_equipment_asset_intake_batch_id", "equipment_intake_batch_id"),
+        db.Index("ix_equipment_asset_location_id", "location_id"),
+        db.Index("ix_equipment_asset_assigned_user_id", "assigned_user_id"),
+        db.Index("uix_equipment_asset_tag", "asset_tag", unique=True),
+        db.Index(
+            "uix_equipment_asset_serial_number",
+            "serial_number",
+            unique=True,
+        ),
+    )
+
+
+class EquipmentMaintenanceIssue(db.Model):
+    __tablename__ = "equipment_maintenance_issue"
+
+    DUE_SOON_DAYS = 7
+
+    STATUS_OPEN = "open"
+    STATUS_IN_PROGRESS = "in_progress"
+    STATUS_WAITING_VENDOR = "waiting_vendor"
+    STATUS_RESOLVED = "resolved"
+    STATUS_CANCELLED = "cancelled"
+
+    STATUS_CHOICES = (
+        (STATUS_OPEN, "Open"),
+        (STATUS_IN_PROGRESS, "In Progress"),
+        (STATUS_WAITING_VENDOR, "Waiting On Vendor"),
+        (STATUS_RESOLVED, "Resolved"),
+        (STATUS_CANCELLED, "Cancelled"),
+    )
+    OPEN_STATUSES = {STATUS_OPEN, STATUS_IN_PROGRESS, STATUS_WAITING_VENDOR}
+
+    PRIORITY_LOW = "low"
+    PRIORITY_MEDIUM = "medium"
+    PRIORITY_HIGH = "high"
+    PRIORITY_CRITICAL = "critical"
+
+    PRIORITY_CHOICES = (
+        (PRIORITY_LOW, "Low"),
+        (PRIORITY_MEDIUM, "Medium"),
+        (PRIORITY_HIGH, "High"),
+        (PRIORITY_CRITICAL, "Critical"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    equipment_asset_id = db.Column(
+        db.Integer, db.ForeignKey("equipment_asset.id"), nullable=False
+    )
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    priority = db.Column(
+        db.String(20),
+        nullable=False,
+        default=PRIORITY_MEDIUM,
+        server_default=PRIORITY_MEDIUM,
+    )
+    status = db.Column(
+        db.String(20),
+        nullable=False,
+        default=STATUS_OPEN,
+        server_default=STATUS_OPEN,
+    )
+    reported_on = db.Column(
+        db.Date,
+        nullable=False,
+        default=date_cls.today,
+        server_default=func.current_date(),
+    )
+    due_on = db.Column(db.Date, nullable=True)
+    assigned_user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id"), nullable=True
+    )
+    assigned_vendor_id = db.Column(
+        db.Integer, db.ForeignKey("vendor.id"), nullable=True
+    )
+    parts_cost = db.Column(db.Float, nullable=True)
+    labor_cost = db.Column(db.Float, nullable=True)
+    downtime_started_on = db.Column(db.Date, nullable=True)
+    downtime_resolved_on = db.Column(db.Date, nullable=True)
+    resolved_on = db.Column(db.Date, nullable=True)
+    resolution_summary = db.Column(db.Text, nullable=True)
+    reopened_count = db.Column(
+        db.Integer, nullable=False, default=0, server_default="0"
+    )
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        server_default=func.now(),
+    )
+
+    equipment_asset = relationship(
+        "EquipmentAsset", back_populates="maintenance_issues"
+    )
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    assigned_user = relationship("User", foreign_keys=[assigned_user_id])
+    assigned_vendor = relationship("Vendor", foreign_keys=[assigned_vendor_id])
+    updates = relationship(
+        "EquipmentMaintenanceUpdate",
+        back_populates="issue",
+        cascade="all, delete-orphan",
+        order_by="EquipmentMaintenanceUpdate.created_at.desc()",
+    )
+
+    @property
+    def status_label(self) -> str:
+        return dict(self.STATUS_CHOICES).get(self.status, self.status.title())
+
+    @property
+    def status_badge_class(self) -> str:
+        return {
+            self.STATUS_OPEN: "text-bg-warning",
+            self.STATUS_IN_PROGRESS: "text-bg-primary",
+            self.STATUS_WAITING_VENDOR: "text-bg-info",
+            self.STATUS_RESOLVED: "text-bg-success",
+            self.STATUS_CANCELLED: "text-bg-secondary",
+        }.get(self.status, "text-bg-secondary")
+
+    @property
+    def priority_label(self) -> str:
+        return dict(self.PRIORITY_CHOICES).get(
+            self.priority, self.priority.title()
+        )
+
+    @property
+    def priority_badge_class(self) -> str:
+        return {
+            self.PRIORITY_LOW: "text-bg-secondary",
+            self.PRIORITY_MEDIUM: "text-bg-info",
+            self.PRIORITY_HIGH: "text-bg-warning",
+            self.PRIORITY_CRITICAL: "text-bg-danger",
+        }.get(self.priority, "text-bg-secondary")
+
+    @property
+    def is_open(self) -> bool:
+        return self.status in self.OPEN_STATUSES
+
+    @property
+    def total_cost(self) -> float | None:
+        if self.parts_cost is None and self.labor_cost is None:
+            return None
+        return float(self.parts_cost or 0.0) + float(self.labor_cost or 0.0)
+
+    @property
+    def due_state(self) -> str:
+        if self.due_on is None:
+            return "none"
+        if not self.is_open:
+            return "closed"
+        today = date_cls.today()
+        if self.due_on < today:
+            return "overdue"
+        if self.due_on <= today + timedelta(days=self.DUE_SOON_DAYS):
+            return "due_soon"
+        return "scheduled"
+
+    @property
+    def due_state_label(self) -> str:
+        return {
+            "none": "No Due Date",
+            "closed": "Closed",
+            "overdue": "Overdue",
+            "due_soon": "Due Soon",
+            "scheduled": "Scheduled",
+        }.get(self.due_state, "Scheduled")
+
+    @property
+    def display_name(self) -> str:
+        asset_tag = self.equipment_asset.asset_tag if self.equipment_asset else "Asset"
+        return f"{asset_tag} - {self.title}"
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "priority IN ('low', 'medium', 'high', 'critical')",
+            name="ck_equipment_maintenance_issue_priority",
+        ),
+        db.CheckConstraint(
+            "status IN ('open', 'in_progress', 'waiting_vendor', 'resolved', 'cancelled')",
+            name="ck_equipment_maintenance_issue_status",
+        ),
+        db.Index("ix_equipment_maintenance_issue_asset_id", "equipment_asset_id"),
+        db.Index("ix_equipment_maintenance_issue_status", "status"),
+        db.Index("ix_equipment_maintenance_issue_priority", "priority"),
+        db.Index("ix_equipment_maintenance_issue_due_on", "due_on"),
+        db.Index("ix_equipment_maintenance_issue_assigned_user", "assigned_user_id"),
+        db.Index(
+            "ix_equipment_maintenance_issue_assigned_vendor",
+            "assigned_vendor_id",
+        ),
+        db.Index("ix_equipment_maintenance_issue_created_by", "created_by_id"),
+    )
+
+
+class EquipmentMaintenanceUpdate(db.Model):
+    __tablename__ = "equipment_maintenance_update"
+
+    EVENT_CREATED = "created"
+    EVENT_EDITED = "edited"
+    EVENT_COMMENT = "comment"
+    EVENT_STATUS_CHANGED = "status_changed"
+
+    EVENT_CHOICES = (
+        (EVENT_CREATED, "Created"),
+        (EVENT_EDITED, "Edited"),
+        (EVENT_COMMENT, "Update"),
+        (EVENT_STATUS_CHANGED, "Status Changed"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    issue_id = db.Column(
+        db.Integer, db.ForeignKey("equipment_maintenance_issue.id"), nullable=False
+    )
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    event_type = db.Column(
+        db.String(32),
+        nullable=False,
+        default=EVENT_COMMENT,
+        server_default=EVENT_COMMENT,
+    )
+    message = db.Column(db.Text, nullable=True)
+    previous_status = db.Column(db.String(20), nullable=True)
+    new_status = db.Column(db.String(20), nullable=True)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+
+    issue = relationship("EquipmentMaintenanceIssue", back_populates="updates")
+    user = relationship("User", foreign_keys=[user_id])
+
+    @property
+    def event_label(self) -> str:
+        return dict(self.EVENT_CHOICES).get(
+            self.event_type, self.event_type.replace("_", " ").title()
+        )
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "event_type IN ('created', 'edited', 'comment', 'status_changed')",
+            name="ck_equipment_maintenance_update_event_type",
+        ),
+        db.Index("ix_equipment_maintenance_update_issue_id", "issue_id"),
+        db.Index("ix_equipment_maintenance_update_user_id", "user_id"),
+        db.Index("ix_equipment_maintenance_update_created_at", "created_at"),
+    )
+
+
 class GLCode(db.Model):
     __tablename__ = "gl_code"
     id = db.Column(db.Integer, primary_key=True)

@@ -1,0 +1,51 @@
+{% extends "shared/form_page.html" %}
+{% import "macros/forms.html" as forms %}
+
+{% block form_subtitle %}
+<p class="text-muted mb-0">{{ subtitle }}</p>
+{% endblock %}
+
+{% block form_content %}
+<form method="POST" class="app-page-shell">
+    {{ form.hidden_tag() }}
+
+    <div class="mb-4">
+        <h3 class="h5 mb-3">Batch Basics</h3>
+        <div class="row g-3">
+            <div class="col-md-6">{{ forms.render_field(form.equipment_model_id) }}</div>
+            <div class="col-md-3">{{ forms.render_field(form.source_type) }}</div>
+            <div class="col-md-3">{{ forms.render_field(form.expected_quantity) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.unit_cost) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.order_date) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.expected_received_on) }}</div>
+        </div>
+    </div>
+
+    <div class="mb-4">
+        <h3 class="h5 mb-3">Purchasing References</h3>
+        <div class="row g-3">
+            <div class="col-md-6">{{ forms.render_field(form.purchase_vendor_id) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.vendor_name) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.purchase_order_id) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.purchase_order_reference) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.purchase_invoice_id) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.purchase_invoice_reference) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.received_on) }}</div>
+        </div>
+    </div>
+
+    <div class="mb-4">
+        <h3 class="h5 mb-3">Receiving Defaults</h3>
+        <div class="row g-3">
+            <div class="col-md-6">{{ forms.render_field(form.location_id) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.assigned_user_id) }}</div>
+            <div class="col-12">{{ forms.render_field(form.notes) }}</div>
+        </div>
+    </div>
+
+    <div class="d-flex flex-wrap gap-2">
+        <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('equipment.view_equipment_intake') }}">Cancel</a>
+    </div>
+</form>
+{% endblock %}

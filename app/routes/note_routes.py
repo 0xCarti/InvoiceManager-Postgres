@@ -14,6 +14,8 @@ from app.forms import CSRFOnlyForm, DeleteForm, NoteForm
 from app.permissions import user_can_access_endpoint
 from app.models import (
     Customer,
+    EquipmentAsset,
+    EquipmentIntakeBatch,
     Invoice,
     Item,
     Location,
@@ -74,6 +76,32 @@ ENTITY_CONFIG: dict[str, EntityConfig] = {
             obj.name,
         ),
         activity_getter=lambda obj: f"item {obj.name}",
+    ),
+    "equipment": EntityConfig(
+        model=EquipmentAsset,
+        label="Equipment",
+        access_endpoint="equipment.view_equipment",
+        name_getter=lambda obj: obj.display_name,
+        parse_identifier=lambda raw: int(raw),
+        identifier_getter=lambda obj: str(obj.id),
+        back_getter=lambda obj: (
+            url_for("equipment.view_equipment_asset", asset_id=obj.id),
+            obj.display_name,
+        ),
+        activity_getter=lambda obj: f"equipment {obj.asset_tag}",
+    ),
+    "equipment_intake": EntityConfig(
+        model=EquipmentIntakeBatch,
+        label="Equipment Intake Batch",
+        access_endpoint="equipment.view_equipment_intake",
+        name_getter=lambda obj: obj.display_name,
+        parse_identifier=lambda raw: int(raw),
+        identifier_getter=lambda obj: str(obj.id),
+        back_getter=lambda obj: (
+            url_for("equipment.view_equipment_intake_batch", batch_id=obj.id),
+            obj.display_name,
+        ),
+        activity_getter=lambda obj: f"equipment intake batch {obj.id}",
     ),
     "product": EntityConfig(
         model=Product,

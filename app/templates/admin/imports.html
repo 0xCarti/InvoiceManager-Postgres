@@ -33,5 +33,18 @@
         </div>
     </form>
     {% endfor %}
+    {% if can_access_endpoint('equipment.import_equipment_from_snipe_it', 'GET') %}
+    <div class="app-form-card app-page-shell">
+        <div class="app-page-header">
+            <div class="app-page-header-copy">
+                <h3 class="h5 mb-1">Snipe-IT Equipment Import</h3>
+                <p class="text-muted mb-0">Open the dedicated equipment import tool for Snipe-IT CSV exports. This creates intake batches and equipment assets together.</p>
+            </div>
+        </div>
+        <div class="app-form-actions">
+            <a href="{{ url_for('equipment.import_equipment_from_snipe_it') }}" class="btn btn-primary">Open Equipment Import</a>
+        </div>
+    </div>
+    {% endif %}
 </div>
 {% endblock %}

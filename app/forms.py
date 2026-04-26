@@ -8,7 +8,7 @@ from zoneinfo import available_timezones
 from flask import g
 from flask_wtf import FlaskForm
 from flask_wtf.file import FileAllowed, FileRequired
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import selectinload
 from wtforms import (
     BooleanField,
@@ -45,6 +45,11 @@ from app.models import (
     BoardTemplate,
     BoardTemplateBlock,
     Department,
+    EquipmentAsset,
+    EquipmentCategory,
+    EquipmentIntakeBatch,
+    EquipmentMaintenanceIssue,
+    EquipmentModel,
     Display,
     Event,
     EventLocation,
@@ -57,6 +62,8 @@ from app.models import (
     Playlist,
     PlaylistItem,
     Product,
+    PurchaseInvoice,
+    PurchaseOrder,
     ScheduleTemplate,
     ShiftPosition,
     SignageMediaAsset,
@@ -437,6 +444,172 @@ def load_active_user_choices():
     users = User.query.filter_by(active=True).all()
     users = sorted(users, key=lambda user: (user.sort_key, user.email.casefold()))
     return [(user.id, user.display_label) for user in users]
+
+
+def load_location_choices(include_blank: bool = True):
+    """Return location choices for selection fields."""
+
+    locations = Location.query.order_by(Location.name).all()
+    choices = [
+        (location.id, f"{location.name} (archived)" if location.archived else location.name)
+        for location in locations
+    ]
+    if include_blank:
+        return [(0, "No Location")] + choices
+    return choices
+
+
+def load_vendor_choices(include_blank: bool = True):
+    """Return vendor choices for selection fields."""
+
+    vendors = Vendor.query.order_by(Vendor.first_name, Vendor.last_name).all()
+    choices = [
+        (
+            vendor.id,
+            (
+                f"{vendor.first_name} {vendor.last_name}".strip()
+                + (" (archived)" if vendor.archived else "")
+            ).strip(),
+        )
+        for vendor in vendors
+    ]
+    if include_blank:
+        return [(0, "No Vendor")] + choices
+    return choices
+
+
+def load_equipment_category_choices(include_blank: bool = True):
+    """Return equipment category choices for selection fields."""
+
+    categories = EquipmentCategory.query.order_by(EquipmentCategory.name).all()
+    choices = [
+        (
+            category.id,
+            f"{category.name} (archived)" if category.archived else category.name,
+        )
+        for category in categories
+    ]
+    if include_blank:
+        return [(0, "No Category")] + choices
+    return choices
+
+
+def load_equipment_model_choices(include_blank: bool = True):
+    """Return equipment model choices for selection fields."""
+
+    models = (
+        EquipmentModel.query.options(selectinload(EquipmentModel.category))
+        .order_by(
+            EquipmentModel.manufacturer.asc(),
+            EquipmentModel.name.asc(),
+            EquipmentModel.model_number.asc(),
+        )
+        .all()
+    )
+    choices = [
+        (
+            equipment_model.id,
+            (
+                f"{equipment_model.category.name if equipment_model.category else 'Uncategorized'}"
+                f" - {equipment_model.display_name}"
+                f"{' (archived)' if equipment_model.archived else ''}"
+            ),
+        )
+        for equipment_model in models
+    ]
+    if include_blank:
+        return [(0, "No Model")] + choices
+    return choices
+
+
+def load_equipment_asset_choices(include_blank: bool = True):
+    """Return equipment asset choices for selection fields."""
+
+    assets = (
+        EquipmentAsset.query.options(
+            selectinload(EquipmentAsset.equipment_model).selectinload(
+                EquipmentModel.category
+            )
+        )
+        .order_by(EquipmentAsset.asset_tag.asc())
+        .all()
+    )
+    choices = [
+        (
+            asset.id,
+            (
+                f"{asset.asset_tag} - {asset.display_name}"
+                f"{' (archived)' if asset.archived else ''}"
+            ),
+        )
+        for asset in assets
+    ]
+    if include_blank:
+        return [(0, "No Equipment")] + choices
+    return choices
+
+
+def load_purchase_order_choices(include_blank: bool = True):
+    """Return purchase order choices for selection fields."""
+
+    orders = (
+        PurchaseOrder.query.options(selectinload(PurchaseOrder.vendor))
+        .order_by(PurchaseOrder.order_date.desc(), PurchaseOrder.id.desc())
+        .all()
+    )
+    choices = []
+    for purchase_order in orders:
+        vendor_label = ""
+        if purchase_order.vendor is not None:
+            vendor_label = (
+                f"{purchase_order.vendor.first_name} {purchase_order.vendor.last_name}"
+            ).strip()
+        elif purchase_order.vendor_name:
+            vendor_label = purchase_order.vendor_name
+        order_reference = purchase_order.order_number or f"PO #{purchase_order.id}"
+        suffix = f" - {vendor_label}" if vendor_label else ""
+        status = f" ({purchase_order.status.title()})" if purchase_order.status else ""
+        choices.append((purchase_order.id, f"{order_reference}{suffix}{status}"))
+    if include_blank:
+        return [(0, "No Purchase Order")] + choices
+    return choices
+
+
+def load_purchase_invoice_choices(include_blank: bool = True):
+    """Return purchase invoice choices for selection fields."""
+
+    invoices = (
+        PurchaseInvoice.query.options(
+            selectinload(PurchaseInvoice.purchase_order).selectinload(
+                PurchaseOrder.vendor
+            )
+        )
+        .order_by(PurchaseInvoice.received_date.desc(), PurchaseInvoice.id.desc())
+        .all()
+    )
+    choices = []
+    for invoice in invoices:
+        invoice_reference = invoice.invoice_number or f"Invoice #{invoice.id}"
+        vendor_label = ""
+        purchase_order = invoice.purchase_order
+        if purchase_order is not None and purchase_order.vendor is not None:
+            vendor_label = (
+                f"{purchase_order.vendor.first_name} {purchase_order.vendor.last_name}"
+            ).strip()
+        elif invoice.vendor_name:
+            vendor_label = invoice.vendor_name
+        po_reference = ""
+        if purchase_order is not None:
+            po_reference = purchase_order.order_number or f"PO #{purchase_order.id}"
+        detail_bits = [invoice_reference]
+        if po_reference:
+            detail_bits.append(po_reference)
+        if vendor_label:
+            detail_bits.append(vendor_label)
+        choices.append((invoice.id, " - ".join(detail_bits)))
+    if include_blank:
+        return [(0, "No Purchase Invoice")] + choices
+    return choices
 
 
 def load_schedule_membership_role_suggestions() -> list[str]:
@@ -1537,6 +1710,935 @@ class CustomerForm(FlaskForm):
     submit = SubmitField("Submit")
 
 
+class EquipmentCategoryForm(FlaskForm):
+    name = StringField(
+        "Category Name",
+        validators=[DataRequired(), Length(max=100)],
+    )
+    description = TextAreaField(
+        "Description",
+        validators=[Optional(), Length(max=2000)],
+    )
+    submit = SubmitField("Save Category")
+
+    def __init__(self, *args, **kwargs):
+        self.obj_id = kwargs.pop("obj_id", None)
+        super().__init__(*args, **kwargs)
+
+    def validate_name(self, field):
+        normalized = (field.data or "").strip()
+        if not normalized:
+            raise ValidationError("Category name is required.")
+        field.data = normalized
+        query = EquipmentCategory.query.filter(
+            func.lower(EquipmentCategory.name) == normalized.lower(),
+            EquipmentCategory.archived.is_(False),
+        )
+        if self.obj_id is not None:
+            query = query.filter(EquipmentCategory.id != self.obj_id)
+        if query.first() is not None:
+            raise ValidationError("An equipment category with this name already exists.")
+
+
+class EquipmentModelForm(FlaskForm):
+    category_id = SelectField(
+        "Category",
+        coerce=int,
+        validators=[DataRequired()],
+        validate_choice=False,
+    )
+    manufacturer = StringField(
+        "Manufacturer",
+        validators=[DataRequired(), Length(max=120)],
+    )
+    name = StringField(
+        "Model Name",
+        validators=[DataRequired(), Length(max=120)],
+    )
+    model_number = StringField(
+        "Model Number",
+        validators=[Optional(), Length(max=120)],
+    )
+    description = TextAreaField(
+        "Description",
+        validators=[Optional(), Length(max=2000)],
+    )
+    submit = SubmitField("Save Model")
+
+    def __init__(self, *args, **kwargs):
+        self.obj_id = kwargs.pop("obj_id", None)
+        super().__init__(*args, **kwargs)
+        self.category_id.choices = load_equipment_category_choices(include_blank=False)
+
+    def validate_category_id(self, field):
+        if db.session.get(EquipmentCategory, field.data) is None:
+            raise ValidationError("Select a valid equipment category.")
+
+    def validate(self, **kwargs):
+        valid = super().validate(**kwargs)
+        if not valid:
+            return False
+
+        manufacturer = (self.manufacturer.data or "").strip()
+        name = (self.name.data or "").strip()
+        model_number = (self.model_number.data or "").strip() or None
+
+        if not manufacturer:
+            self.manufacturer.errors.append("Manufacturer is required.")
+            return False
+        if not name:
+            self.name.errors.append("Model name is required.")
+            return False
+
+        self.manufacturer.data = manufacturer
+        self.name.data = name
+        self.model_number.data = model_number
+
+        query = EquipmentModel.query.filter(
+            EquipmentModel.category_id == self.category_id.data,
+            func.lower(EquipmentModel.manufacturer) == manufacturer.lower(),
+            func.lower(EquipmentModel.name) == name.lower(),
+            EquipmentModel.archived.is_(False),
+        )
+        if model_number:
+            query = query.filter(
+                func.lower(func.coalesce(EquipmentModel.model_number, ""))
+                == model_number.lower()
+            )
+        else:
+            query = query.filter(EquipmentModel.model_number.is_(None))
+        if self.obj_id is not None:
+            query = query.filter(EquipmentModel.id != self.obj_id)
+        if query.first() is not None:
+            self.name.errors.append(
+                "An equipment model with this category, manufacturer, and model number already exists."
+            )
+            return False
+        return True
+
+
+class EquipmentAssetForm(FlaskForm):
+    equipment_model_id = SelectField(
+        "Equipment Model",
+        coerce=int,
+        validators=[DataRequired()],
+        validate_choice=False,
+    )
+    name = StringField(
+        "Equipment Name",
+        validators=[Optional(), Length(max=120)],
+    )
+    asset_tag = StringField(
+        "Asset Tag",
+        validators=[DataRequired(), Length(max=64)],
+    )
+    serial_number = StringField(
+        "Serial Number",
+        validators=[Optional(), Length(max=128)],
+    )
+    status = SelectField(
+        "Status",
+        validators=[DataRequired()],
+        choices=EquipmentAsset.STATUS_CHOICES,
+    )
+    description = TextAreaField(
+        "Description",
+        validators=[Optional(), Length(max=4000)],
+    )
+    acquired_on = FlexibleDateField("Acquired On", validators=[Optional()])
+    warranty_expires_on = FlexibleDateField(
+        "Warranty Expires On", validators=[Optional()]
+    )
+    cost = DecimalField(
+        "Cost",
+        validators=[Optional(), NumberRange(min=0)],
+        places=2,
+    )
+    purchase_vendor_id = SelectField(
+        "Purchased From",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    service_vendor_id = SelectField(
+        "Service Vendor",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    service_contact_name = StringField(
+        "Service Contact Name",
+        validators=[Optional(), Length(max=120)],
+    )
+    service_contact_email = StringField(
+        "Service Contact Email",
+        validators=[Optional(), Email(), Length(max=255)],
+    )
+    service_contact_phone = StringField(
+        "Service Contact Phone",
+        validators=[Optional(), Length(max=50)],
+    )
+    service_contract_name = StringField(
+        "Service Contract Name",
+        validators=[Optional(), Length(max=120)],
+    )
+    service_contract_reference = StringField(
+        "Service Contract Reference",
+        validators=[Optional(), Length(max=120)],
+    )
+    service_contract_expires_on = FlexibleDateField(
+        "Service Contract Expires On", validators=[Optional()]
+    )
+    service_interval_days = IntegerField(
+        "Service Interval (days)",
+        validators=[Optional(), NumberRange(min=1)],
+    )
+    last_service_on = FlexibleDateField("Last Service On", validators=[Optional()])
+    next_service_due_on = FlexibleDateField(
+        "Next Service Due On", validators=[Optional()]
+    )
+    service_contract_notes = TextAreaField(
+        "Service Contract Notes",
+        validators=[Optional(), Length(max=2000)],
+    )
+    location_id = SelectField(
+        "Location",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    sublocation = StringField(
+        "Sublocation / Room / Station",
+        validators=[Optional(), Length(max=120)],
+    )
+    assigned_user_id = SelectField(
+        "Current Custodian",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    submit = SubmitField("Save Equipment")
+
+    def __init__(self, *args, **kwargs):
+        self.obj_id = kwargs.pop("obj_id", None)
+        super().__init__(*args, **kwargs)
+        self.equipment_model_id.choices = load_equipment_model_choices(
+            include_blank=False
+        )
+        self.purchase_vendor_id.choices = load_vendor_choices()
+        self.service_vendor_id.choices = load_vendor_choices()
+        self.location_id.choices = load_location_choices()
+        self.assigned_user_id.choices = [(0, "No Custodian")] + load_active_user_choices()
+
+    def validate_equipment_model_id(self, field):
+        if db.session.get(EquipmentModel, field.data) is None:
+            raise ValidationError("Select a valid equipment model.")
+
+    def validate_asset_tag(self, field):
+        normalized = (field.data or "").strip()
+        if not normalized:
+            raise ValidationError("Asset tag is required.")
+        field.data = normalized
+        query = EquipmentAsset.query.filter(
+            func.lower(EquipmentAsset.asset_tag) == normalized.lower()
+        )
+        if self.obj_id is not None:
+            query = query.filter(EquipmentAsset.id != self.obj_id)
+        if query.first() is not None:
+            raise ValidationError("This asset tag is already in use.")
+
+    def validate_serial_number(self, field):
+        normalized = (field.data or "").strip() or None
+        field.data = normalized
+        if not normalized:
+            return
+        query = EquipmentAsset.query.filter(
+            func.lower(EquipmentAsset.serial_number) == normalized.lower()
+        )
+        if self.obj_id is not None:
+            query = query.filter(EquipmentAsset.id != self.obj_id)
+        if query.first() is not None:
+            raise ValidationError("This serial number is already in use.")
+
+    def validate_purchase_vendor_id(self, field):
+        if field.data and db.session.get(Vendor, field.data) is None:
+            raise ValidationError("Select a valid purchase vendor.")
+
+    def validate_service_vendor_id(self, field):
+        if field.data and db.session.get(Vendor, field.data) is None:
+            raise ValidationError("Select a valid service vendor.")
+
+    def validate_location_id(self, field):
+        if field.data and db.session.get(Location, field.data) is None:
+            raise ValidationError("Select a valid location.")
+
+    def validate_assigned_user_id(self, field):
+        if field.data and db.session.get(User, field.data) is None:
+            raise ValidationError("Select a valid user.")
+
+    def validate(self, **kwargs):
+        valid = super().validate(**kwargs)
+        if not valid:
+            return False
+
+        self.name.data = (self.name.data or "").strip() or None
+        self.description.data = (self.description.data or "").strip() or None
+        self.service_contact_name.data = (
+            (self.service_contact_name.data or "").strip() or None
+        )
+        self.service_contact_email.data = (
+            (self.service_contact_email.data or "").strip() or None
+        )
+        self.service_contact_phone.data = (
+            (self.service_contact_phone.data or "").strip() or None
+        )
+        self.service_contract_name.data = (
+            (self.service_contract_name.data or "").strip() or None
+        )
+        self.service_contract_reference.data = (
+            (self.service_contract_reference.data or "").strip() or None
+        )
+        self.service_contract_notes.data = (
+            (self.service_contract_notes.data or "").strip() or None
+        )
+        self.sublocation.data = (self.sublocation.data or "").strip() or None
+
+        if (
+            self.last_service_on.data
+            and self.next_service_due_on.data
+            and self.next_service_due_on.data < self.last_service_on.data
+        ):
+            self.next_service_due_on.errors.append(
+                "Next service due date must be on or after the last service date."
+            )
+            return False
+
+        if (
+            self.acquired_on.data
+            and self.last_service_on.data
+            and self.last_service_on.data < self.acquired_on.data
+        ):
+            self.last_service_on.errors.append(
+                "Last service date cannot be before the acquired date."
+            )
+            return False
+
+        if (
+            self.service_contract_expires_on.data
+            and self.acquired_on.data
+            and self.service_contract_expires_on.data < self.acquired_on.data
+        ):
+            self.service_contract_expires_on.errors.append(
+                "Service contract expiry cannot be before the acquired date."
+            )
+            return False
+
+        return True
+
+
+class EquipmentIntakeBatchForm(FlaskForm):
+    equipment_model_id = SelectField(
+        "Equipment Model",
+        coerce=int,
+        validators=[DataRequired()],
+        validate_choice=False,
+    )
+    source_type = SelectField(
+        "Source",
+        validators=[DataRequired()],
+        choices=EquipmentIntakeBatch.SOURCE_TYPE_CHOICES,
+    )
+    expected_quantity = IntegerField(
+        "Planned Quantity",
+        validators=[DataRequired(), NumberRange(min=1)],
+        default=1,
+    )
+    unit_cost = DecimalField(
+        "Expected Unit Cost",
+        validators=[Optional(), NumberRange(min=0)],
+        places=2,
+    )
+    purchase_vendor_id = SelectField(
+        "Purchased From",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    vendor_name = StringField(
+        "Recorded Vendor Name",
+        validators=[Optional(), Length(max=160)],
+    )
+    purchase_order_id = SelectField(
+        "Linked Purchase Order",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    purchase_order_reference = StringField(
+        "Purchase Order Reference",
+        validators=[Optional(), Length(max=100)],
+    )
+    purchase_invoice_id = SelectField(
+        "Linked Purchase Invoice",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    purchase_invoice_reference = StringField(
+        "Purchase Invoice Reference",
+        validators=[Optional(), Length(max=100)],
+    )
+    order_date = FlexibleDateField("Order Date", validators=[Optional()])
+    expected_received_on = FlexibleDateField(
+        "Expected Receive Date", validators=[Optional()]
+    )
+    received_on = FlexibleDateField("Received On", validators=[Optional()])
+    location_id = SelectField(
+        "Default Location",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    assigned_user_id = SelectField(
+        "Default Custodian",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    notes = TextAreaField(
+        "Notes",
+        validators=[Optional(), Length(max=4000)],
+    )
+    submit = SubmitField("Save Intake Batch")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.equipment_model_id.choices = load_equipment_model_choices(
+            include_blank=False
+        )
+        self.purchase_vendor_id.choices = load_vendor_choices()
+        self.purchase_order_id.choices = load_purchase_order_choices()
+        self.purchase_invoice_id.choices = load_purchase_invoice_choices()
+        self.location_id.choices = load_location_choices()
+        self.assigned_user_id.choices = [(0, "No Custodian")] + load_active_user_choices()
+
+    def validate_equipment_model_id(self, field):
+        if db.session.get(EquipmentModel, field.data) is None:
+            raise ValidationError("Select a valid equipment model.")
+
+    def validate_purchase_vendor_id(self, field):
+        if field.data and db.session.get(Vendor, field.data) is None:
+            raise ValidationError("Select a valid purchase vendor.")
+
+    def validate_purchase_order_id(self, field):
+        if field.data and db.session.get(PurchaseOrder, field.data) is None:
+            raise ValidationError("Select a valid purchase order.")
+
+    def validate_purchase_invoice_id(self, field):
+        if field.data and db.session.get(PurchaseInvoice, field.data) is None:
+            raise ValidationError("Select a valid purchase invoice.")
+
+    def validate_location_id(self, field):
+        if field.data and db.session.get(Location, field.data) is None:
+            raise ValidationError("Select a valid location.")
+
+    def validate_assigned_user_id(self, field):
+        if field.data and db.session.get(User, field.data) is None:
+            raise ValidationError("Select a valid user.")
+
+    def validate(self, **kwargs):
+        valid = super().validate(**kwargs)
+        if not valid:
+            return False
+
+        self.vendor_name.data = (self.vendor_name.data or "").strip() or None
+        self.purchase_order_reference.data = (
+            (self.purchase_order_reference.data or "").strip() or None
+        )
+        self.purchase_invoice_reference.data = (
+            (self.purchase_invoice_reference.data or "").strip() or None
+        )
+        self.notes.data = (self.notes.data or "").strip() or None
+
+        if (
+            self.expected_received_on.data
+            and self.order_date.data
+            and self.expected_received_on.data < self.order_date.data
+        ):
+            self.expected_received_on.errors.append(
+                "Expected receive date cannot be before the order date."
+            )
+            return False
+
+        if (
+            self.received_on.data
+            and self.order_date.data
+            and self.received_on.data < self.order_date.data
+        ):
+            self.received_on.errors.append(
+                "Received date cannot be before the order date."
+            )
+            return False
+
+        purchase_order = (
+            db.session.get(PurchaseOrder, self.purchase_order_id.data)
+            if self.purchase_order_id.data
+            else None
+        )
+        purchase_invoice = (
+            db.session.get(PurchaseInvoice, self.purchase_invoice_id.data)
+            if self.purchase_invoice_id.data
+            else None
+        )
+
+        if (
+            purchase_order is not None
+            and purchase_invoice is not None
+            and purchase_invoice.purchase_order_id != purchase_order.id
+        ):
+            self.purchase_invoice_id.errors.append(
+                "The selected purchase invoice does not belong to the selected purchase order."
+            )
+            return False
+
+        if self.source_type.data == EquipmentIntakeBatch.SOURCE_PURCHASE_ORDER:
+            if not self.purchase_order_id.data and not self.purchase_order_reference.data:
+                self.purchase_order_reference.errors.append(
+                    "Provide a linked purchase order or a purchase order reference."
+                )
+                return False
+
+        if self.source_type.data == EquipmentIntakeBatch.SOURCE_PURCHASE_INVOICE:
+            if not self.purchase_invoice_id.data and not self.purchase_invoice_reference.data:
+                self.purchase_invoice_reference.errors.append(
+                    "Provide a linked purchase invoice or a purchase invoice reference."
+                )
+                return False
+
+        return True
+
+
+class EquipmentIntakeReceiveForm(FlaskForm):
+    quantity = IntegerField(
+        "Quantity To Receive",
+        validators=[DataRequired(), NumberRange(min=1)],
+        default=1,
+    )
+    asset_tag_prefix = StringField(
+        "Generated Asset Tag Prefix",
+        validators=[Optional(), Length(max=32)],
+    )
+    starting_number = IntegerField(
+        "Starting Number",
+        validators=[Optional(), NumberRange(min=1)],
+    )
+    number_width = IntegerField(
+        "Number Width",
+        validators=[Optional(), NumberRange(min=1, max=8)],
+        default=3,
+    )
+    name_prefix = StringField(
+        "Generated Name Prefix",
+        validators=[Optional(), Length(max=120)],
+    )
+    asset_rows = TextAreaField(
+        "Asset Rows",
+        validators=[Optional(), Length(max=12000)],
+        description="Optional CSV-style rows: asset tag, serial number, name, sublocation.",
+    )
+    status = SelectField(
+        "Asset Status",
+        validators=[DataRequired()],
+        choices=EquipmentAsset.STATUS_CHOICES,
+        default=EquipmentAsset.STATUS_OPERATIONAL,
+    )
+    acquired_on = FlexibleDateField("Acquired On", validators=[Optional()])
+    warranty_expires_on = FlexibleDateField(
+        "Warranty Expires On", validators=[Optional()]
+    )
+    cost = DecimalField(
+        "Per-Asset Cost Override",
+        validators=[Optional(), NumberRange(min=0)],
+        places=2,
+    )
+    location_id = SelectField(
+        "Location",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    sublocation = StringField(
+        "Sublocation",
+        validators=[Optional(), Length(max=120)],
+    )
+    assigned_user_id = SelectField(
+        "Custodian",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    submit = SubmitField("Receive Assets")
+
+    def __init__(self, *args, **kwargs):
+        self.batch = kwargs.pop("batch", None)
+        super().__init__(*args, **kwargs)
+        self.location_id.choices = load_location_choices()
+        self.assigned_user_id.choices = [(0, "No Custodian")] + load_active_user_choices()
+        self._parsed_asset_rows: list[dict[str, str | None]] = []
+
+    @property
+    def parsed_asset_rows(self) -> list[dict[str, str | None]]:
+        return list(self._parsed_asset_rows)
+
+    def validate_location_id(self, field):
+        if field.data and db.session.get(Location, field.data) is None:
+            raise ValidationError("Select a valid location.")
+
+    def validate_assigned_user_id(self, field):
+        if field.data and db.session.get(User, field.data) is None:
+            raise ValidationError("Select a valid user.")
+
+    def _parse_asset_rows(self) -> list[dict[str, str | None]]:
+        parsed_rows: list[dict[str, str | None]] = []
+        raw_rows = (self.asset_rows.data or "").splitlines()
+        for line_number, raw_row in enumerate(raw_rows, start=1):
+            cleaned = raw_row.strip()
+            if not cleaned:
+                continue
+            parts = [part.strip() for part in cleaned.split(",")]
+            if not parts or not parts[0]:
+                self.asset_rows.errors.append(
+                    f"Row {line_number} must start with an asset tag."
+                )
+                return []
+            if len(parts) > 4:
+                self.asset_rows.errors.append(
+                    f"Row {line_number} supports at most 4 comma-separated values."
+                )
+                return []
+            while len(parts) < 4:
+                parts.append("")
+            parsed_rows.append(
+                {
+                    "asset_tag": parts[0] or None,
+                    "serial_number": parts[1] or None,
+                    "name": parts[2] or None,
+                    "sublocation": parts[3] or None,
+                }
+            )
+        return parsed_rows
+
+    def validate(self, **kwargs):
+        valid = super().validate(**kwargs)
+        if not valid:
+            return False
+
+        self.asset_tag_prefix.data = (self.asset_tag_prefix.data or "").strip() or None
+        self.name_prefix.data = (self.name_prefix.data or "").strip() or None
+        self.sublocation.data = (self.sublocation.data or "").strip() or None
+        self._parsed_asset_rows = self._parse_asset_rows()
+        if self.asset_rows.errors:
+            return False
+
+        if self.batch is not None and self.quantity.data:
+            remaining_quantity = self.batch.remaining_quantity
+            if remaining_quantity > 0 and self.quantity.data > remaining_quantity:
+                self.quantity.errors.append(
+                    f"Only {remaining_quantity} asset(s) remain on this intake batch."
+                )
+                return False
+
+        if self._parsed_asset_rows:
+            if len(self._parsed_asset_rows) != self.quantity.data:
+                self.asset_rows.errors.append(
+                    "The number of asset rows must match the quantity to receive."
+                )
+                return False
+        elif not self.asset_tag_prefix.data or self.starting_number.data is None:
+            self.asset_rows.errors.append(
+                "Provide asset rows or supply an asset tag prefix and starting number."
+            )
+            return False
+
+        asset_tags: list[str] = []
+        serial_numbers: list[str] = []
+        if self._parsed_asset_rows:
+            asset_tags = [
+                str(row["asset_tag"]).strip()
+                for row in self._parsed_asset_rows
+                if row.get("asset_tag")
+            ]
+            serial_numbers = [
+                str(row["serial_number"]).strip()
+                for row in self._parsed_asset_rows
+                if row.get("serial_number")
+            ]
+        else:
+            width = self.number_width.data or 3
+            start = self.starting_number.data or 1
+            asset_tags = [
+                f"{self.asset_tag_prefix.data}{str(start + offset).zfill(width)}"
+                for offset in range(int(self.quantity.data or 0))
+            ]
+
+        if len(asset_tags) != len(set(tag.casefold() for tag in asset_tags)):
+            self.asset_rows.errors.append("Generated asset tags must be unique.")
+            return False
+
+        if len(serial_numbers) != len(set(serial.casefold() for serial in serial_numbers)):
+            self.asset_rows.errors.append("Serial numbers must be unique within this batch.")
+            return False
+
+        existing_tags = {
+            asset.asset_tag.casefold()
+            for asset in EquipmentAsset.query.filter(
+                func.lower(EquipmentAsset.asset_tag).in_(
+                    [tag.casefold() for tag in asset_tags]
+                )
+            ).all()
+        }
+        if existing_tags:
+            self.asset_rows.errors.append(
+                "One or more asset tags already exist in the system."
+            )
+            return False
+
+        if serial_numbers:
+            existing_serials = {
+                asset.serial_number.casefold()
+                for asset in EquipmentAsset.query.filter(
+                    EquipmentAsset.serial_number.is_not(None),
+                    func.lower(EquipmentAsset.serial_number).in_(
+                        [serial.casefold() for serial in serial_numbers]
+                    ),
+                ).all()
+                if asset.serial_number
+            }
+            if existing_serials:
+                self.asset_rows.errors.append(
+                    "One or more serial numbers already exist in the system."
+                )
+                return False
+
+        if (
+            self.warranty_expires_on.data
+            and self.acquired_on.data
+            and self.warranty_expires_on.data < self.acquired_on.data
+        ):
+            self.warranty_expires_on.errors.append(
+                "Warranty expiry cannot be before the acquired date."
+            )
+            return False
+
+        return True
+
+
+class EquipmentSnipeItImportForm(FlaskForm):
+    file = FileField(
+        "Snipe-IT CSV Export",
+        validators=[FileRequired(), FileAllowed({"csv"}, "CSV only!")],
+    )
+    default_category_name = StringField(
+        "Default Category",
+        validators=[DataRequired(), Length(max=100)],
+        default="Imported Equipment",
+    )
+    create_missing_locations = BooleanField(
+        "Create missing locations",
+        default=True,
+    )
+    update_existing = BooleanField(
+        "Update existing assets when asset tags already exist",
+        default=True,
+    )
+    submit = SubmitField("Run Import")
+
+    def validate_default_category_name(self, field):
+        normalized = (field.data or "").strip()
+        if not normalized:
+            raise ValidationError("Default category is required.")
+        field.data = normalized
+
+
+class EquipmentMaintenanceIssueForm(FlaskForm):
+    equipment_asset_id = SelectField(
+        "Equipment Asset",
+        coerce=int,
+        validators=[DataRequired()],
+        validate_choice=False,
+    )
+    title = StringField(
+        "Issue Title",
+        validators=[DataRequired(), Length(max=200)],
+    )
+    description = TextAreaField(
+        "Issue Description",
+        validators=[Optional(), Length(max=4000)],
+    )
+    priority = SelectField(
+        "Priority",
+        validators=[DataRequired()],
+        choices=EquipmentMaintenanceIssue.PRIORITY_CHOICES,
+    )
+    status = SelectField(
+        "Status",
+        validators=[DataRequired()],
+        choices=EquipmentMaintenanceIssue.STATUS_CHOICES,
+    )
+    reported_on = FlexibleDateField(
+        "Reported On",
+        validators=[DataRequired()],
+        default=date.today,
+    )
+    due_on = FlexibleDateField("Due On", validators=[Optional()])
+    assigned_user_id = SelectField(
+        "Assigned Staff",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    assigned_vendor_id = SelectField(
+        "Assigned Vendor",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    parts_cost = DecimalField(
+        "Parts Cost",
+        validators=[Optional(), NumberRange(min=0)],
+        places=2,
+    )
+    labor_cost = DecimalField(
+        "Labor Cost",
+        validators=[Optional(), NumberRange(min=0)],
+        places=2,
+    )
+    downtime_started_on = FlexibleDateField(
+        "Downtime Started On", validators=[Optional()]
+    )
+    downtime_resolved_on = FlexibleDateField(
+        "Downtime Ended On", validators=[Optional()]
+    )
+    resolved_on = FlexibleDateField("Resolved On", validators=[Optional()])
+    resolution_summary = TextAreaField(
+        "Resolution Summary",
+        validators=[Optional(), Length(max=4000)],
+    )
+    submit = SubmitField("Save Issue")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.equipment_asset_id.choices = load_equipment_asset_choices(
+            include_blank=False
+        )
+        self.assigned_user_id.choices = [(0, "Unassigned")] + load_active_user_choices()
+        self.assigned_vendor_id.choices = load_vendor_choices()
+
+    def validate_equipment_asset_id(self, field):
+        if db.session.get(EquipmentAsset, field.data) is None:
+            raise ValidationError("Select a valid equipment asset.")
+
+    def validate_assigned_user_id(self, field):
+        if field.data and db.session.get(User, field.data) is None:
+            raise ValidationError("Select a valid assigned user.")
+
+    def validate_assigned_vendor_id(self, field):
+        if field.data and db.session.get(Vendor, field.data) is None:
+            raise ValidationError("Select a valid assigned vendor.")
+
+    def validate(self, **kwargs):
+        valid = super().validate(**kwargs)
+        if not valid:
+            return False
+
+        self.title.data = (self.title.data or "").strip()
+        self.description.data = (self.description.data or "").strip() or None
+        self.resolution_summary.data = (
+            (self.resolution_summary.data or "").strip() or None
+        )
+
+        if not self.title.data:
+            self.title.errors.append("Issue title is required.")
+            return False
+
+        if (
+            self.due_on.data
+            and self.reported_on.data
+            and self.due_on.data < self.reported_on.data
+        ):
+            self.due_on.errors.append(
+                "Due date must be on or after the reported date."
+            )
+            return False
+
+        if (
+            self.downtime_started_on.data
+            and self.downtime_resolved_on.data
+            and self.downtime_resolved_on.data < self.downtime_started_on.data
+        ):
+            self.downtime_resolved_on.errors.append(
+                "Downtime end date must be on or after the downtime start date."
+            )
+            return False
+
+        if (
+            self.resolved_on.data
+            and self.reported_on.data
+            and self.resolved_on.data < self.reported_on.data
+        ):
+            self.resolved_on.errors.append(
+                "Resolved date must be on or after the reported date."
+            )
+            return False
+
+        if (
+            self.status.data == EquipmentMaintenanceIssue.STATUS_RESOLVED
+            and not self.resolved_on.data
+        ):
+            self.resolved_on.data = date.today()
+
+        return True
+
+
+class EquipmentMaintenanceUpdateForm(FlaskForm):
+    message = TextAreaField(
+        "Update",
+        validators=[Optional(), Length(max=4000)],
+    )
+    status = SelectField(
+        "Status",
+        validators=[Optional()],
+        choices=[("", "Keep current status")]
+        + list(EquipmentMaintenanceIssue.STATUS_CHOICES),
+    )
+    submit = SubmitField("Add Update")
+
+    def validate(self, **kwargs):
+        valid = super().validate(**kwargs)
+        if not valid:
+            return False
+        self.message.data = (self.message.data or "").strip() or None
+        if not self.message.data and not self.status.data:
+            self.message.errors.append(
+                "Add a note or choose a status change."
+            )
+            return False
+        return True
+
+
 class ProductForm(FlaskForm):
     name = StringField("Name", validators=[DataRequired()])
     gl_code = SelectField("GL Code", validators=[Optional()])
@@ -1883,6 +2985,74 @@ class ReceivedInvoiceReportForm(FlaskForm):
     start_date = DateField("Start Date", validators=[DataRequired()])
     end_date = DateField("End Date", validators=[DataRequired()])
     submit = SubmitField("Generate Report")
+
+
+class EquipmentProcurementReportForm(FlaskForm):
+    start_date = DateField("Start Date", validators=[Optional()])
+    end_date = DateField("End Date", validators=[Optional()])
+    category_id = SelectField(
+        "Category",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    equipment_model_id = SelectField(
+        "Equipment Model",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    purchase_vendor_id = SelectField(
+        "Vendor",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    location_id = SelectField(
+        "Location",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
+    )
+    source_type = SelectField(
+        "Source",
+        choices=[("all", "All")] + list(EquipmentIntakeBatch.SOURCE_TYPE_CHOICES),
+        default="all",
+        validators=[Optional()],
+    )
+    status = SelectField(
+        "Status",
+        choices=[("all", "All")] + list(EquipmentIntakeBatch.STATUS_CHOICES),
+        default="all",
+        validators=[Optional()],
+    )
+    submit = SubmitField("Generate Report")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.category_id.choices = load_equipment_category_choices()
+        self.equipment_model_id.choices = load_equipment_model_choices()
+        self.purchase_vendor_id.choices = load_vendor_choices()
+        self.location_id.choices = load_location_choices()
+
+    def validate(self, **kwargs):
+        valid = super().validate(**kwargs)
+        if not valid:
+            return False
+        if (
+            self.start_date.data
+            and self.end_date.data
+            and self.start_date.data > self.end_date.data
+        ):
+            self.end_date.errors.append(
+                "End date must be on or after the start date."
+            )
+            return False
+        return True
 
 
 # forms.py

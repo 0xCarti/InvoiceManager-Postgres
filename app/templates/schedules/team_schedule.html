@@ -169,9 +169,32 @@
             text-align: right;
         }
     }
+
+    @media (max-width: 767.98px) {
+        .schedule-page-actions,
+        .schedule-filter-actions,
+        .schedule-page-actions > *,
+        .schedule-page-actions .btn,
+        .schedule-page-actions form,
+        .schedule-filter-actions > *,
+        .schedule-filter-actions .btn,
+        .schedule-filter-actions form {
+            width: 100%;
+        }
+
+        .schedule-view-toggle {
+            display: flex;
+            width: 100%;
+        }
+
+        .schedule-view-toggle .btn {
+            flex: 1 1 0;
+            min-width: 0;
+        }
+    }
 </style>
 
-<div class="container-fluid px-0 app-page-shell">
+<div class="container-fluid px-3 px-lg-0 app-page-shell">
     {% include 'schedules/_schedule_tabs.html' %}
 
     <div class="app-page-header">
@@ -190,7 +213,7 @@
         </div>
         <div class="app-page-header-actions">
         {% if schedule_week %}
-        <div class="d-flex flex-wrap gap-2">
+        <div class="d-flex flex-wrap gap-2 schedule-page-actions">
             {% if show_seen_status and (current_seen_count or can_team_access) %}
             <span class="badge text-bg-light border">Seen Current Version: {{ current_seen_count }}/{{ visible_users|length }}</span>
             {% endif %}
@@ -367,7 +390,7 @@
                         <label class="form-label">Week Starting</label>
                         <input type="date" name="week_start" class="form-control" value="{{ schedule_week.week_start.isoformat() if schedule_week else '' }}">
                     </div>
-                    <div class="col-12 col-md-auto d-flex flex-wrap gap-2">
+                    <div class="col-12 col-md-auto d-flex flex-wrap gap-2 schedule-filter-actions">
                         {% if previous_week %}
                         <a class="btn btn-outline-secondary" href="{{ url_for('schedule.team_schedule', department_id=selected_department_filter_value, user_id=(selected_user_filter_value or None) if view_mode == 'user' else None, week_start=previous_week.isoformat(), view_mode=view_mode, filter_event_id=(selected_event_filter_value or None) if view_mode == 'position' else None, filter_location_id=(selected_location_filter_value or None) if view_mode == 'position' else None) }}">Previous</a>
                         {% endif %}
@@ -777,6 +800,55 @@
                 <div class="schedule-shift-card mb-2">
                     <div class="fw-semibold">{{ shift.start_time.strftime('%H:%M') }} - {{ shift.end_time.strftime('%H:%M') }}</div>
                     <div class="small">{{ shift.position.name }}</div>
+                    {% if show_department_names and shift.position and shift.position.department %}
+                    <div class="small text-muted">{{ shift.position.department.name }}</div>
+                    {% endif %}
+                    <div class="small text-muted">{{ '%.2f'|format(shift.paid_hours or 0.0) }} paid hrs</div>
+                    {% if shift.notes %}
+                    <div class="small mt-1">{{ shift.notes }}</div>
+                    {% endif %}
+                    {% if shift_form or (selected_department and current_user.has_permission('schedules.delete') and not schedule_week.is_published) %}
+                    <div class="d-flex flex-wrap gap-2 mt-2">
+                        {% if shift_form %}
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-outline-secondary"
+                            data-bs-toggle="modal"
+                            data-bs-target="#scheduleShiftModal"
+                            data-open-shift-modal
+                            data-department-id="{{ shift.position.department_id if shift.position else 0 }}"
+                            data-shift-id="{{ shift.id }}"
+                            data-shift-date="{{ shift.shift_date.isoformat() }}"
+                            data-assigned-user-id="{{ shift.assigned_user_id or 0 }}"
+                            data-position-id="{{ shift.position_id }}"
+                            data-assignment-mode="{{ shift.assignment_mode }}"
+                            data-start-time="{{ shift.start_time.strftime('%H:%M') }}"
+                            data-end-time="{{ shift.end_time.strftime('%H:%M') }}"
+                            data-paid-hours="{{ '%.2f'|format(shift.paid_hours or 0.0) }}"
+                            data-paid-hours-manual="{{ 1 if shift.paid_hours_manual else 0 }}"
+                            data-location-id="{{ shift.location_id or 0 }}"
+                            data-event-id="{{ shift.event_id or 0 }}"
+                            data-notes="{{ shift.notes or '' }}"
+                            data-color="{{ shift.color or '' }}"
+                            data-is-locked="{{ 1 if shift.is_locked else 0 }}"
+                        >
+                            Edit
+                        </button>
+                        {% endif %}
+                        {% if selected_department and current_user.has_permission('schedules.delete') and not schedule_week.is_published %}
+                        <form method="post" class="d-inline-flex flex-grow-1">
+                            {{ action_form.hidden_tag() }}
+                            <input type="hidden" name="action" value="delete_shift">
+                            <input type="hidden" name="shift_id" value="{{ shift.id }}">
+                            <input type="hidden" name="department_id" value="{{ selected_department.id }}">
+                            <input type="hidden" name="week_start" value="{{ schedule_week.week_start.isoformat() }}">
+                            <input type="hidden" name="user_id" value="{{ selected_user_filter_value }}">
+                            <input type="hidden" name="view_mode" value="{{ view_mode }}">
+                            <button type="submit" class="btn btn-sm btn-outline-danger w-100">Delete</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                    {% endif %}
                 </div>
                 {% else %}
                 <div class="small text-muted">No shifts.</div>

@@ -1,0 +1,18 @@
+{% extends "shared/form_page.html" %}
+{% import "macros/forms.html" as forms %}
+
+{% block form_subtitle %}
+<p class="text-muted mb-0">Group equipment models into reusable categories such as POS, refrigeration, or facilities.</p>
+{% endblock %}
+
+{% block form_content %}
+<form method="POST">
+    {{ form.hidden_tag() }}
+    {{ forms.render_field(form.name) }}
+    {{ forms.render_field(form.description) }}
+    <div class="d-flex flex-wrap gap-2">
+        <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('equipment.view_equipment_catalog') }}">Cancel</a>
+    </div>
+</form>
+{% endblock %}

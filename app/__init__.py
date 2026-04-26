@@ -257,6 +257,9 @@ BASE_UNIT_CONVERSIONS = {}
 NAV_LINKS = {
     "transfer.view_transfers": "Transfers",
     "item.view_items": "Items",
+    "equipment.view_equipment": "Equipment",
+    "equipment.view_equipment_intake": "Equipment Intake",
+    "equipment.view_equipment_maintenance": "Equipment Maintenance",
     "locations.view_locations": "Locations",
     "menu.view_menus": "Menus",
     "signage.view_displays": "Displays",
@@ -336,6 +339,9 @@ NAV_GROUPS = (
         "Catalog",
         (
             ("item.view_items", "Items"),
+            ("equipment.view_equipment", "Equipment"),
+            ("equipment.view_equipment_intake", "Equipment Intake"),
+            ("equipment.view_equipment_maintenance", "Equipment Maintenance"),
             ("product.view_products", "Products"),
             ("menu.view_menus", "Menus"),
             ("locations.view_locations", "Locations"),
@@ -374,6 +380,7 @@ NAV_GROUPS = (
             ("report.event_terminal_sales_report", "Event Terminal Sales Report"),
             ("report.event_spoilage_report", "Event Spoilage Report"),
             ("report.purchase_cost_forecast", "Forecasted Stock Item Sales"),
+            ("report.equipment_procurement_report", "Equipment Procurement Report"),
             ("report.customer_invoice_report", "Vendor Invoices Report"),
         ),
         False,
@@ -874,6 +881,7 @@ def create_app(args=None):
         from app.routes.auth_routes import admin, auth
         from app.routes.communication_routes import communication
         from app.routes.customer_routes import customer
+        from app.routes.equipment_routes import equipment
         from app.routes.event_routes import event
         from app.routes.glcode_routes import glcode_bp
         from app.routes.invoice_routes import invoice
@@ -904,6 +912,7 @@ def create_app(args=None):
         app.register_blueprint(signage_bp)
         app.register_blueprint(location)
         app.register_blueprint(item)
+        app.register_blueprint(equipment)
         app.register_blueprint(transfer)
         app.register_blueprint(spoilage)
         app.register_blueprint(admin)

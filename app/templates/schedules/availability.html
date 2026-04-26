@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="container-fluid px-0">
+<div class="container-fluid px-3 px-lg-0 mobile-list-page app-page-shell">
     {% include 'schedules/_schedule_tabs.html' %}
 
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
@@ -56,7 +56,7 @@
                         <div class="col-12"><button type="submit" class="btn btn-primary">Add Window</button></div>
                     </form>
                     <div class="table-responsive">
-                        <table class="table table-sm align-middle">
+                        <table class="table table-sm align-middle table-mobile-card">
                             <thead>
                                 <tr>
                                     <th>Day</th>
@@ -68,10 +68,10 @@
                             <tbody>
                                 {% for window in windows %}
                                 <tr>
-                                    <td>{{ weekday_labels[window.weekday] }}</td>
+                                    <td class="mobile-card-primary">{{ weekday_labels[window.weekday] }}</td>
                                     <td>{{ window.start_time.strftime('%H:%M') }} - {{ window.end_time.strftime('%H:%M') }}</td>
                                     <td>{{ window.note or '' }}</td>
-                                    <td class="text-end">
+                                    <td class="text-end mobile-card-actions">
                                         <form method="post">
                                             {{ action_form.hidden_tag() }}
                                             <input type="hidden" name="action" value="delete_window">
@@ -113,7 +113,7 @@
                         <div class="col-12"><button type="submit" class="btn btn-primary">Add Date Override</button></div>
                     </form>
                     <div class="table-responsive">
-                        <table class="table table-sm align-middle">
+                        <table class="table table-sm align-middle table-mobile-card">
                             <thead>
                                 <tr>
                                     <th>Range</th>
@@ -125,10 +125,10 @@
                             <tbody>
                                 {% for override_item in overrides %}
                                 <tr>
-                                    <td>{{ override_item.start_at.strftime('%Y-%m-%d %H:%M') }} - {{ override_item.end_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                    <td class="mobile-card-primary">{{ override_item.start_at.strftime('%Y-%m-%d %H:%M') }} - {{ override_item.end_at.strftime('%Y-%m-%d %H:%M') }}</td>
                                     <td>{{ 'Available' if override_item.is_available else 'Unavailable' }}</td>
                                     <td>{{ override_item.note or '' }}</td>
-                                    <td class="text-end">
+                                    <td class="text-end mobile-card-actions">
                                         <form method="post">
                                             {{ action_form.hidden_tag() }}
                                             <input type="hidden" name="action" value="delete_override">

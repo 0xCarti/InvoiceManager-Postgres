@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}Equipment Intake Batch #{{ batch.id }}{% endblock %}
+
+{% block content %}
+{% set can_manage_intake = can_access_endpoint('equipment.edit_equipment_intake_batch', 'GET') %}
+{% set can_view_notes = can_access_endpoint('notes.entity_notes', 'GET') %}
+{% set purchase_order_url = safe_url_for('purchase.edit_purchase_order', po_id=batch.purchase_order_id) if batch.purchase_order_id else None %}
+{% set purchase_invoice_url = safe_url_for('purchase.view_purchase_invoice', invoice_id=batch.purchase_invoice_id) if batch.purchase_invoice_id else None %}
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .mobile-list-page .intake-batch-actions > *,
+    .mobile-list-page .intake-batch-actions .btn,
+    .mobile-list-page .intake-batch-actions form {
+        width: 100%;
+    }
+}
+</style>
+<div class="container mt-5 mobile-list-page app-page-shell">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-start gap-3 mb-4">
+        <div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                <h2 class="mb-0">Intake Batch #{{ batch.id }}</h2>
+                <span class="badge {{ batch.status_badge_class }}">{{ batch.status_label }}</span>
+                <span class="badge text-bg-light border">{{ batch.source_type_label }}</span>
+            </div>
+            <p class="text-muted mb-0">{{ batch.display_name }}</p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 intake-batch-actions">
+            <a class="btn btn-outline-secondary" href="{{ url_for('equipment.view_equipment_intake') }}">Back to Intake</a>
+            {% if can_view_notes %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('notes.entity_notes', entity_type='equipment_intake', entity_id=batch.id) }}">Notes</a>
+            {% endif %}
+            {% if batch.remaining_quantity > 0 and can_manage_intake %}
+            <a class="btn btn-outline-primary" href="{{ url_for('equipment.receive_equipment_intake_batch', batch_id=batch.id) }}">Receive Assets</a>
+            {% endif %}
+            {% if can_manage_intake %}
+            <a class="btn btn-primary" href="{{ url_for('equipment.edit_equipment_intake_batch', batch_id=batch.id) }}">Edit</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-12 col-lg-6">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h3 class="h5 mb-3">Overview</h3>
+                    <dl class="row mb-0">
+                        <dt class="col-sm-4">Model</dt>
+                        <dd class="col-sm-8">{{ batch.model_display_name or '-' }}</dd>
+                        <dt class="col-sm-4">Category</dt>
+                        <dd class="col-sm-8">{{ batch.equipment_model.category.name if batch.equipment_model and batch.equipment_model.category else '-' }}</dd>
+                        <dt class="col-sm-4">Vendor</dt>
+                        <dd class="col-sm-8">{{ batch.vendor_display_name or '-' }}</dd>
+                        <dt class="col-sm-4">Expected Qty</dt>
+                        <dd class="col-sm-8">{{ batch.expected_quantity }}</dd>
+                        <dt class="col-sm-4">Received Qty</dt>
+                        <dd class="col-sm-8">{{ batch.received_asset_count }}</dd>
+                        <dt class="col-sm-4">Remaining</dt>
+                        <dd class="col-sm-8">{{ batch.remaining_quantity }}</dd>
+                        <dt class="col-sm-4">Unit Cost</dt>
+                        <dd class="col-sm-8">{% if batch.unit_cost is not none %}${{ '%.2f'|format(batch.unit_cost) }}{% else %}-{% endif %}</dd>
+                        <dt class="col-sm-4">Expected Cost</dt>
+                        <dd class="col-sm-8">{% if batch.total_expected_cost is not none %}${{ '%.2f'|format(batch.total_expected_cost) }}{% else %}-{% endif %}</dd>
+                        <dt class="col-sm-4">Received Cost</dt>
+                        <dd class="col-sm-8">{% if batch.total_received_cost is not none %}${{ '%.2f'|format(batch.total_received_cost) }}{% else %}-{% endif %}</dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-6">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h3 class="h5 mb-3">Linked Purchasing Context</h3>
+                    <dl class="row mb-0">
+                        <dt class="col-sm-5">Source</dt>
+                        <dd class="col-sm-7">{{ batch.source_type_label }}</dd>
+                        <dt class="col-sm-5">Purchase Order</dt>
+                        <dd class="col-sm-7">
+                            {% if purchase_order_url %}
+                            <a href="{{ purchase_order_url }}">{{ batch.order_reference_label }}</a>
+                            {% else %}
+                            {{ batch.order_reference_label or '-' }}
+                            {% endif %}
+                        </dd>
+                        <dt class="col-sm-5">Purchase Invoice</dt>
+                        <dd class="col-sm-7">
+                            {% if purchase_invoice_url %}
+                            <a href="{{ purchase_invoice_url }}">{{ batch.invoice_reference_label }}</a>
+                            {% else %}
+                            {{ batch.invoice_reference_label or '-' }}
+                            {% endif %}
+                        </dd>
+                        <dt class="col-sm-5">Order Date</dt>
+                        <dd class="col-sm-7">{{ batch.order_date or '-' }}</dd>
+                        <dt class="col-sm-5">Expected Receive</dt>
+                        <dd class="col-sm-7">{{ batch.expected_received_on or '-' }}</dd>
+                        <dt class="col-sm-5">Received On</dt>
+                        <dd class="col-sm-7">{{ batch.received_on or '-' }}</dd>
+                        <dt class="col-sm-5">Default Location</dt>
+                        <dd class="col-sm-7">{{ batch.location.name if batch.location else '-' }}</dd>
+                        <dt class="col-sm-5">Default Custodian</dt>
+                        <dd class="col-sm-7">{{ batch.assigned_user.display_label if batch.assigned_user else '-' }}</dd>
+                        <dt class="col-sm-5">Notes</dt>
+                        <dd class="col-sm-7">{{ batch.notes or '-' }}</dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                        <h3 class="h5 mb-0">Received Assets</h3>
+                        <span class="badge text-bg-light border">{{ batch.received_asset_count }} asset{% if batch.received_asset_count != 1 %}s{% endif %}</span>
+                    </div>
+                    {% if batch.assets %}
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-0 table-mobile-card">
+                            <thead>
+                                <tr>
+                                    <th>Asset Tag</th>
+                                    <th>Name</th>
+                                    <th>Status</th>
+                                    <th>Serial</th>
+                                    <th>Location</th>
+                                    <th>Custodian</th>
+                                    <th>Cost</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for asset in batch.assets %}
+                                <tr>
+                                    <td class="mobile-card-primary">{{ asset.asset_tag }}</td>
+                                    <td>{{ asset.display_name }}</td>
+                                    <td><span class="badge {{ asset.status_badge_class }}">{{ asset.status_label }}</span></td>
+                                    <td>{{ asset.serial_number or '-' }}</td>
+                                    <td>{{ asset.location_label or '-' }}</td>
+                                    <td>{{ asset.custodian_label or '-' }}</td>
+                                    <td>{% if asset.cost is not none %}${{ '%.2f'|format(asset.cost) }}{% else %}-{% endif %}</td>
+                                    <td class="text-end mobile-card-actions">
+                                        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('equipment.view_equipment_asset', asset_id=asset.id) }}">View</a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-0">No assets have been received into this batch yet.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

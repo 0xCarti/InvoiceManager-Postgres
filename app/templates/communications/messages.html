@@ -69,12 +69,40 @@
 }
 
 @media (max-width: 767.98px) {
+    .messages-page .messages-page-actions,
+    .messages-page .messages-page-actions .btn {
+        width: 100%;
+    }
+
+    .messages-page .mobile-toolbar,
+    .messages-page .messages-tabs,
+    .messages-page .messages-toolbar-stats {
+        width: 100%;
+    }
+
+    .messages-page .messages-tabs {
+        gap: 0.5rem;
+    }
+
+    .messages-page .messages-tabs .nav-item {
+        flex: 1 1 0;
+    }
+
+    .messages-page .messages-tabs .nav-link {
+        text-align: center;
+        width: 100%;
+    }
+
+    .messages-page .messages-toolbar-stats {
+        justify-content: space-between;
+    }
+
     .messages-page .messages-actions .btn {
         width: 100%;
     }
 }
 </style>
-<div class="container-fluid px-0 messages-page">
+<div class="container-fluid px-3 px-lg-0 messages-page mobile-list-page">
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
         <div class="messages-summary">
             <h1 class="h3 mb-1">Messages</h1>
@@ -82,7 +110,7 @@
                 Use this mailbox view when you want a clean message table with archive and delete controls, while the communications page stays focused on bulletins and the smaller inbox preview.
             </p>
         </div>
-        <div class="d-flex flex-wrap gap-2">
+        <div class="d-flex flex-wrap gap-2 messages-page-actions">
             <a class="btn btn-outline-secondary" href="{{ url_for('communication.center') }}">Open Communications</a>
             {% if can_send_direct %}
             <button
@@ -97,7 +125,7 @@
         </div>
     </div>
 
-    <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3 mobile-toolbar">
         <ul class="nav nav-pills messages-tabs">
             <li class="nav-item">
                 <a class="nav-link {% if active_mailbox == 'inbox' %}active{% endif %}" href="{{ url_for('communication.messages') }}">
@@ -112,7 +140,7 @@
                 </a>
             </li>
         </ul>
-        <div class="d-flex flex-wrap gap-2">
+        <div class="d-flex flex-wrap gap-2 messages-toolbar-stats">
             <span class="badge bg-primary">{{ unread_count }} unread</span>
             <span class="badge text-bg-secondary">{{ message_receipts_pagination.total }} shown</span>
         </div>
@@ -122,7 +150,7 @@
         <div class="card-body">
             {% if message_receipts_pagination.items %}
             <div class="table-responsive">
-                <table class="table table-hover align-middle messages-table mb-0">
+                <table class="table table-hover align-middle messages-table mb-0 table-mobile-card">
                     <thead>
                         <tr>
                             <th>Subject</th>
@@ -135,7 +163,7 @@
                     <tbody>
                         {% for receipt in message_receipts_pagination.items %}
                         <tr>
-                            <td class="text-wrap">
+                            <td class="text-wrap mobile-card-primary">
                                 <a
                                     class="messages-subject-link"
                                     href="{{ url_for('communication.message_detail', receipt_id=receipt.id, mailbox=active_mailbox if active_mailbox == 'archived' else None, message_page=message_page if message_page > 1 else None) }}"
@@ -156,7 +184,7 @@
                                 <span class="badge text-bg-light border">Read</span>
                                 {% endif %}
                             </td>
-                            <td>
+                            <td class="mobile-card-actions">
                                 <div class="messages-actions justify-content-end">
                                     {% if active_mailbox != 'archived' and receipt.read_at is none %}
                                     <form method="post">

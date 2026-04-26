@@ -1,0 +1,71 @@
+{% extends "shared/form_page.html" %}
+{% import "macros/forms.html" as forms %}
+
+{% block form_subtitle %}
+<p class="text-muted mb-0">{{ subtitle }}</p>
+{% endblock %}
+
+{% block form_content %}
+<form method="POST" class="app-page-shell">
+    {{ form.hidden_tag() }}
+
+    <div class="mb-4">
+        <h3 class="h5 mb-3">Identity</h3>
+        <div class="row g-3">
+            <div class="col-md-6">{{ forms.render_field(form.equipment_model_id) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.name) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.asset_tag) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.serial_number) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.status) }}</div>
+            <div class="col-12">{{ forms.render_field(form.description) }}</div>
+        </div>
+    </div>
+
+    <div class="mb-4">
+        <h3 class="h5 mb-3">Purchase and Warranty</h3>
+        <div class="row g-3">
+            <div class="col-md-4">{{ forms.render_field(form.cost) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.acquired_on) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.warranty_expires_on) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.purchase_vendor_id) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.service_vendor_id) }}</div>
+        </div>
+    </div>
+
+    <div class="mb-4">
+        <h3 class="h5 mb-3">Location and Custody</h3>
+        <div class="row g-3">
+            <div class="col-md-4">{{ forms.render_field(form.location_id) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.sublocation) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.assigned_user_id) }}</div>
+        </div>
+    </div>
+
+    <div class="mb-4">
+        <h3 class="h5 mb-3">Service Contact</h3>
+        <div class="row g-3">
+            <div class="col-md-4">{{ forms.render_field(form.service_contact_name) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.service_contact_email) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.service_contact_phone) }}</div>
+        </div>
+    </div>
+
+    <div class="mb-4">
+        <h3 class="h5 mb-3">Service Schedule and Contract</h3>
+        <div class="row g-3">
+            <div class="col-md-6">{{ forms.render_field(form.service_contract_name) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.service_contract_reference) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.service_contract_expires_on) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.service_interval_days) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.last_service_on) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.next_service_due_on) }}</div>
+            <div class="col-12">{{ forms.render_field(form.service_contract_notes) }}</div>
+        </div>
+    </div>
+
+    <div class="d-flex flex-wrap gap-2">
+        <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('equipment.view_equipment') }}">Cancel</a>
+    </div>
+</form>
+{% endblock %}

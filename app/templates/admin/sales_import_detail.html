@@ -5,6 +5,16 @@
 {% set can_create_locations = can_access_endpoint('locations.add_location', 'POST') %}
 {% set can_create_products = can_access_endpoint('product.create_product') %}
 {% set can_create_and_map = can_manage_sales_imports and can_create_products %}
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .sales-import-detail-page .sales-import-header-actions,
+    .sales-import-detail-page .sales-import-header-actions .btn,
+    .sales-import-detail-page .sales-import-header-actions form {
+        width: 100%;
+    }
+}
+</style>
+<div class="container mt-4 app-page-shell sales-import-detail-page">
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
         <h1 class="mb-1">Sales Import #{{ sales_import.id }}</h1>
@@ -43,7 +53,7 @@
         </p>
         {% endif %}
     </div>
-    <div class="d-grid gap-2 d-sm-flex flex-wrap">
+    <div class="d-grid gap-2 d-sm-flex flex-wrap sales-import-header-actions">
         {% if can_manage_sales_imports %}
         <form method="post">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -680,6 +690,7 @@
         <div class="alert alert-info mb-0">No locations are available for this import.</div>
         {% endif %}
     </div>
+</div>
 </div>
 
 {% if can_manage_sales_imports %}

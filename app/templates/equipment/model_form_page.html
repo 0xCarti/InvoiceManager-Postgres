@@ -1,0 +1,23 @@
+{% extends "shared/form_page.html" %}
+{% import "macros/forms.html" as forms %}
+
+{% block form_subtitle %}
+<p class="text-muted mb-0">Define the reusable manufacturer/model information that equipment assets are created from.</p>
+{% endblock %}
+
+{% block form_content %}
+<form method="POST">
+    {{ form.hidden_tag() }}
+    <div class="row g-3">
+        <div class="col-md-6">{{ forms.render_field(form.category_id) }}</div>
+        <div class="col-md-6">{{ forms.render_field(form.manufacturer) }}</div>
+        <div class="col-md-6">{{ forms.render_field(form.name) }}</div>
+        <div class="col-md-6">{{ forms.render_field(form.model_number) }}</div>
+        <div class="col-12">{{ forms.render_field(form.description) }}</div>
+    </div>
+    <div class="d-flex flex-wrap gap-2 mt-3">
+        <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('equipment.view_equipment_catalog') }}">Cancel</a>
+    </div>
+</form>
+{% endblock %}

@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Equipment Procurement Report</h2>
+    <p class="text-muted">Review equipment intake batches, linked purchasing references, received counts, and outstanding quantities.</p>
+
+    <form method="POST" class="row gy-3 align-items-end">
+        {{ form.hidden_tag() }}
+        <div class="col-md-3">
+            <label class="form-label" for="reportStartDate">{{ form.start_date.label.text }}</label>
+            {{ form.start_date(class="form-control", id="reportStartDate") }}
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="reportEndDate">{{ form.end_date.label.text }}</label>
+            {{ form.end_date(class="form-control", id="reportEndDate") }}
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="reportCategory">{{ form.category_id.label.text }}</label>
+            {{ form.category_id(class="form-select", id="reportCategory") }}
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="reportModel">{{ form.equipment_model_id.label.text }}</label>
+            {{ form.equipment_model_id(class="form-select", id="reportModel") }}
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="reportVendor">{{ form.purchase_vendor_id.label.text }}</label>
+            {{ form.purchase_vendor_id(class="form-select", id="reportVendor") }}
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="reportLocation">{{ form.location_id.label.text }}</label>
+            {{ form.location_id(class="form-select", id="reportLocation") }}
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="reportSource">{{ form.source_type.label.text }}</label>
+            {{ form.source_type(class="form-select", id="reportSource") }}
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="reportStatus">{{ form.status.label.text }}</label>
+            {{ form.status(class="form-select", id="reportStatus") }}
+        </div>
+        <div class="col-12">
+            <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
+        </div>
+    </form>
+
+    {% if report_rows is not none %}
+    <hr class="my-4">
+    {% if report_rows %}
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-3">
+        <div>
+            <h4 class="mb-1">Batch Results</h4>
+            <p class="mb-0 text-muted">{{ report_rows|length }} batch{% if report_rows|length != 1 %}es{% endif %} matched the current filters.</p>
+        </div>
+        <div class="d-flex flex-wrap gap-3">
+            <span class="fw-bold">Expected: {{ totals.expected_quantity }}</span>
+            <span class="fw-bold">Received: {{ totals.received_quantity }}</span>
+            <span class="fw-bold">Remaining: {{ totals.remaining_quantity }}</span>
+            <span class="fw-bold">Expected Cost: ${{ '%.2f'|format(totals.expected_cost) }}</span>
+            <span class="fw-bold">Received Cost: ${{ '%.2f'|format(totals.received_cost) }}</span>
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-striped table-bordered align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Batch</th>
+                    <th>Model</th>
+                    <th>Vendor</th>
+                    <th>Source</th>
+                    <th>Status</th>
+                    <th>PO Ref</th>
+                    <th>Invoice Ref</th>
+                    <th>Expected Qty</th>
+                    <th>Received Qty</th>
+                    <th>Remaining</th>
+                    <th>Unit Cost</th>
+                    <th>Expected Cost</th>
+                    <th>Received Cost</th>
+                    <th>Dates</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in report_rows %}
+                {% set batch = row.batch %}
+                <tr>
+                    <td><a href="{{ url_for('equipment.view_equipment_intake_batch', batch_id=batch.id) }}">#{{ batch.id }}</a></td>
+                    <td>{{ batch.model_display_name }}</td>
+                    <td>{{ batch.vendor_display_name or '-' }}</td>
+                    <td>{{ batch.source_type_label }}</td>
+                    <td>{{ batch.status_label }}</td>
+                    <td>{{ batch.order_reference_label or '-' }}</td>
+                    <td>{{ batch.invoice_reference_label or '-' }}</td>
+                    <td>{{ batch.expected_quantity }}</td>
+                    <td>{{ batch.received_asset_count }}</td>
+                    <td>{{ batch.remaining_quantity }}</td>
+                    <td>{% if batch.unit_cost is not none %}${{ '%.2f'|format(batch.unit_cost) }}{% else %}-{% endif %}</td>
+                    <td>${{ '%.2f'|format(row.expected_cost) }}</td>
+                    <td>${{ '%.2f'|format(row.received_cost) }}</td>
+                    <td>
+                        <div>Order: {{ batch.order_date or '-' }}</div>
+                        <div>Received: {{ batch.received_on or '-' }}</div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="alert alert-info" role="alert">
+        No equipment intake batches matched the selected criteria.
+    </div>
+    {% endif %}
+    {% endif %}
+</div>
+{% endblock %}

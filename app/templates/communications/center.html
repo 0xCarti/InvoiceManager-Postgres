@@ -219,13 +219,24 @@
 }
 
 @media (max-width: 575.98px) {
+    .communications-page .communications-hero-actions,
+    .communications-page .communications-hero-actions .btn,
+    .communications-page .communications-hero-actions .dropdown,
+    .communications-page .communications-hero-actions .dropdown > .btn {
+        width: 100%;
+    }
+
+    .communications-page .communications-hero-stats {
+        width: 100%;
+    }
+
     .communications-page .communications-stat-pill {
         width: 100%;
         justify-content: center;
     }
 }
 </style>
-<div class="container-fluid px-0 communications-page">
+<div class="container-fluid px-3 px-lg-0 communications-page">
     <div class="card communications-hero border-0 shadow-sm mb-4">
         <div class="card-body p-4">
             <div class="d-flex flex-column flex-xl-row justify-content-between gap-3">
@@ -237,7 +248,7 @@
                     </p>
                 </div>
                 <div class="d-flex flex-column align-items-xl-end gap-3">
-                    <div class="d-flex flex-wrap gap-2 justify-content-xl-end">
+                    <div class="d-flex flex-wrap gap-2 justify-content-xl-end communications-hero-actions">
                         {% if can_access_endpoint('communication.messages') %}
                         <a class="btn btn-outline-secondary" href="{{ url_for('communication.messages') }}">View Messages</a>
                         {% endif %}
@@ -273,7 +284,7 @@
                         </button>
                         {% endif %}
                     </div>
-                    <div class="d-flex flex-wrap gap-2 justify-content-xl-end">
+                    <div class="d-flex flex-wrap gap-2 justify-content-xl-end communications-hero-stats">
                         <span class="communications-stat-pill">
                             <strong>{{ bulletin_receipts_pagination.total }}</strong>
                             bulletin{% if bulletin_receipts_pagination.total != 1 %}s{% endif %}

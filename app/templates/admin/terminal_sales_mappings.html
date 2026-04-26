@@ -1,5 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .mobile-list-page .terminal-mapping-actions,
+    .mobile-list-page .terminal-mapping-actions .btn,
+    .mobile-list-page .terminal-mapping-actions form {
+        width: 100%;
+    }
+}
+</style>
+<div class="container mt-4 mobile-list-page app-page-shell">
 <div class="row">
     <div class="col-12">
         <h1 class="mb-3">Terminal Sales Mappings</h1>
@@ -26,7 +36,7 @@
                 <form method="post">
                     {{ product_form.hidden_tag() }}
                     <div class="table-responsive">
-                        <table class="table table-sm table-striped align-middle mb-3">
+                        <table class="table table-sm table-striped align-middle mb-3 table-mobile-card">
                             <thead>
                                 <tr>
                                     {% if can_manage_terminal_sales_mappings %}
@@ -49,7 +59,7 @@
                                                {% if alias.id in (product_form.selected_ids.data or []) %}checked{% endif %}>
                                     </td>
                                     {% endif %}
-                                    <td class="text-wrap">{{ alias.source_name }}</td>
+                                    <td class="text-wrap mobile-card-primary">{{ alias.source_name }}</td>
                                     <td class="text-wrap">{{ alias.product.name if alias.product else 'Unknown product' }}</td>
                                     <td>
                                         {% if alias.created_at %}
@@ -64,7 +74,7 @@
                         </table>
                     </div>
                     {% if can_manage_terminal_sales_mappings %}
-                    <div class="d-flex flex-wrap gap-2">
+                    <div class="d-flex flex-wrap gap-2 terminal-mapping-actions mobile-card-actions">
                         <button type="submit" name="{{ product_form.delete_selected.name }}" value="y" class="btn btn-danger">Delete Selected</button>
                         <button type="submit" name="{{ product_form.delete_all.name }}" value="y" class="btn btn-outline-danger"
                                 data-confirm-message="Delete all stored product mappings? This cannot be undone.">
@@ -92,7 +102,7 @@
                 <form method="post">
                     {{ location_form.hidden_tag() }}
                     <div class="table-responsive">
-                        <table class="table table-sm table-striped align-middle mb-3">
+                        <table class="table table-sm table-striped align-middle mb-3 table-mobile-card">
                             <thead>
                                 <tr>
                                     {% if can_manage_terminal_sales_mappings %}
@@ -115,7 +125,7 @@
                                                {% if alias.id in (location_form.selected_ids.data or []) %}checked{% endif %}>
                                     </td>
                                     {% endif %}
-                                    <td class="text-wrap">{{ alias.source_name }}</td>
+                                    <td class="text-wrap mobile-card-primary">{{ alias.source_name }}</td>
                                     <td class="text-wrap">{{ alias.location.name if alias.location else 'Unknown location' }}</td>
                                     <td>
                                         {% if alias.created_at %}
@@ -130,7 +140,7 @@
                         </table>
                     </div>
                     {% if can_manage_terminal_sales_mappings %}
-                    <div class="d-flex flex-wrap gap-2">
+                    <div class="d-flex flex-wrap gap-2 terminal-mapping-actions mobile-card-actions">
                         <button type="submit" name="{{ location_form.delete_selected.name }}" value="y" class="btn btn-danger">Delete Selected</button>
                         <button type="submit" name="{{ location_form.delete_all.name }}" value="y" class="btn btn-outline-danger"
                                 data-confirm-message="Delete all stored location mappings? This cannot be undone.">
@@ -145,5 +155,6 @@
             </div>
         </div>
     </div>
+</div>
 </div>
 {% endblock %}

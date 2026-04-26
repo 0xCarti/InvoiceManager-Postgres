@@ -83,6 +83,86 @@ def test_user_can_access_endpoint_requires_matching_permission():
         "POST",
     )
     assert user_can_access_endpoint(
+        DummyUser("equipment.view"),
+        "equipment.view_equipment",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("equipment.view"),
+        "equipment.view_equipment_intake",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("equipment.view"),
+        "equipment.view_equipment_maintenance",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("equipment.view"),
+        "equipment.view_equipment_maintenance_issue",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("equipment.view"),
+        "equipment.create_equipment_asset",
+        "POST",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("equipment.view", "equipment.create"),
+        "equipment.create_equipment_asset",
+        "POST",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("equipment.print_labels"),
+        "equipment.print_equipment_labels",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("equipment.view", "equipment.print_labels"),
+        "equipment.print_equipment_labels",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("equipment.view"),
+        "equipment.create_equipment_intake_batch",
+        "POST",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("equipment.view", "equipment.manage_intake"),
+        "equipment.create_equipment_intake_batch",
+        "POST",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("equipment.view", "equipment.manage_intake"),
+        "equipment.receive_equipment_intake_batch",
+        "POST",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("equipment.view"),
+        "equipment.import_equipment_from_snipe_it",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("equipment.view", "equipment.import"),
+        "equipment.import_equipment_from_snipe_it",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("equipment.view"),
+        "equipment.view_equipment_catalog",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("equipment.view", "equipment.manage_models"),
+        "equipment.view_equipment_catalog",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("equipment.view"),
+        "equipment.create_equipment_maintenance_issue",
+        "POST",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("equipment.view", "equipment.manage_maintenance"),
+        "equipment.create_equipment_maintenance_issue",
+        "POST",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("equipment.view", "equipment.manage_maintenance"),
+        "equipment.add_equipment_maintenance_update",
+        "POST",
+    )
+    assert user_can_access_endpoint(
         DummyUser("purchase_orders.view", "purchase_orders.mark_ordered"),
         "purchase.mark_purchase_order_ordered",
         "POST",
@@ -91,6 +171,10 @@ def test_user_can_access_endpoint_requires_matching_permission():
         DummyUser("purchase_orders.view", "purchase_orders.edit"),
         "purchase.mark_purchase_order_ordered",
         "POST",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("reports.equipment_procurement"),
+        "report.equipment_procurement_report",
     )
     assert user_can_access_endpoint(
         DummyUser("schedules.manage_templates"),

@@ -1,0 +1,50 @@
+{% extends "shared/form_page.html" %}
+{% import "macros/forms.html" as forms %}
+
+{% block form_subtitle %}
+<p class="text-muted mb-0">{{ batch.display_name }}</p>
+<div class="d-flex flex-wrap gap-2 mt-2">
+    <span class="badge {{ batch.status_badge_class }}">{{ batch.status_label }}</span>
+    <span class="badge text-bg-light border">Expected: {{ batch.expected_quantity }}</span>
+    <span class="badge text-bg-light border">Received: {{ batch.received_asset_count }}</span>
+    <span class="badge text-bg-light border">Remaining: {{ batch.remaining_quantity }}</span>
+</div>
+{% endblock %}
+
+{% block form_content %}
+<form method="POST" class="app-page-shell">
+    {{ form.hidden_tag() }}
+
+    <div class="mb-4">
+        <h3 class="h5 mb-3">Receive Settings</h3>
+        <div class="row g-3">
+            <div class="col-md-3">{{ forms.render_field(form.quantity) }}</div>
+            <div class="col-md-3">{{ forms.render_field(form.status) }}</div>
+            <div class="col-md-3">{{ forms.render_field(form.acquired_on) }}</div>
+            <div class="col-md-3">{{ forms.render_field(form.warranty_expires_on) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.cost) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.location_id) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.assigned_user_id) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.sublocation) }}</div>
+        </div>
+    </div>
+
+    <div class="mb-4">
+        <h3 class="h5 mb-3">Asset Generation</h3>
+        <p class="text-muted">Either paste one line per asset in the asset rows field, or leave that blank and generate tags automatically.</p>
+        <div class="row g-3">
+            <div class="col-12">{{ forms.render_field(form.asset_rows) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.asset_tag_prefix) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.starting_number) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.number_width) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.name_prefix) }}</div>
+        </div>
+        <div class="form-text mt-2">Asset row format: <code>asset_tag, serial_number, name, sublocation</code></div>
+    </div>
+
+    <div class="d-flex flex-wrap gap-2">
+        <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('equipment.view_equipment_intake_batch', batch_id=batch.id) }}">Cancel</a>
+    </div>
+</form>
+{% endblock %}

@@ -22,6 +22,7 @@ from flask_login import login_required
 from app import db
 from app.forms import (
     DepartmentSalesForecastForm,
+    EquipmentProcurementReportForm,
     EventSpoilageReportForm,
     InventoryVarianceReportForm,
     PurchaseCostForecastForm,
@@ -35,6 +36,9 @@ from app.forms import (
 )
 from app.models import (
     Customer,
+    EquipmentCategory,
+    EquipmentIntakeBatch,
+    EquipmentModel,
     Event,
     EventLocation,
     EventStandSheetItem,
@@ -2751,4 +2755,106 @@ def purchase_cost_forecast():
         totals=totals,
         forecast_days=forecast_days,
         lookback_days=lookback_days,
+    )
+
+
+@report.route("/reports/equipment-procurement", methods=["GET", "POST"])
+@login_required
+def equipment_procurement_report():
+    """Report equipment intake batches and their received asset counts."""
+
+    form = EquipmentProcurementReportForm()
+    report_rows = None
+    totals = {
+        "expected_quantity": 0,
+        "received_quantity": 0,
+        "remaining_quantity": 0,
+        "expected_cost": 0.0,
+        "received_cost": 0.0,
+    }
+
+    if form.validate_on_submit():
+        query = (
+            EquipmentIntakeBatch.query.options(
+                selectinload(EquipmentIntakeBatch.equipment_model).selectinload(
+                    EquipmentModel.category
+                ),
+                selectinload(EquipmentIntakeBatch.purchase_vendor),
+                selectinload(EquipmentIntakeBatch.purchase_order),
+                selectinload(EquipmentIntakeBatch.purchase_invoice),
+                selectinload(EquipmentIntakeBatch.location),
+                selectinload(EquipmentIntakeBatch.assigned_user),
+                selectinload(EquipmentIntakeBatch.assets),
+            )
+            .join(
+                EquipmentModel,
+                EquipmentModel.id == EquipmentIntakeBatch.equipment_model_id,
+            )
+            .join(
+                EquipmentCategory,
+                EquipmentCategory.id == EquipmentModel.category_id,
+            )
+        )
+
+        if form.start_date.data:
+            query = query.filter(
+                func.coalesce(
+                    EquipmentIntakeBatch.received_on,
+                    EquipmentIntakeBatch.order_date,
+                )
+                >= form.start_date.data
+            )
+        if form.end_date.data:
+            query = query.filter(
+                func.coalesce(
+                    EquipmentIntakeBatch.received_on,
+                    EquipmentIntakeBatch.order_date,
+                )
+                <= form.end_date.data
+            )
+        if form.category_id.data:
+            query = query.filter(EquipmentCategory.id == form.category_id.data)
+        if form.equipment_model_id.data:
+            query = query.filter(
+                EquipmentIntakeBatch.equipment_model_id == form.equipment_model_id.data
+            )
+        if form.purchase_vendor_id.data:
+            query = query.filter(
+                EquipmentIntakeBatch.purchase_vendor_id == form.purchase_vendor_id.data
+            )
+        if form.location_id.data:
+            query = query.filter(EquipmentIntakeBatch.location_id == form.location_id.data)
+        if form.source_type.data and form.source_type.data != "all":
+            query = query.filter(EquipmentIntakeBatch.source_type == form.source_type.data)
+        if form.status.data and form.status.data != "all":
+            query = query.filter(EquipmentIntakeBatch.status == form.status.data)
+
+        batches = query.order_by(
+            EquipmentIntakeBatch.received_on.desc(),
+            EquipmentIntakeBatch.order_date.desc(),
+            EquipmentIntakeBatch.id.desc(),
+        ).all()
+
+        report_rows = []
+        for batch in batches:
+            expected_cost = batch.total_expected_cost or 0.0
+            received_cost = batch.total_received_cost or 0.0
+            totals["expected_quantity"] += int(batch.expected_quantity or 0)
+            totals["received_quantity"] += int(batch.received_asset_count or 0)
+            totals["remaining_quantity"] += int(batch.remaining_quantity or 0)
+            totals["expected_cost"] += float(expected_cost)
+            totals["received_cost"] += float(received_cost)
+            report_rows.append(
+                {
+                    "batch": batch,
+                    "expected_cost": expected_cost,
+                    "received_cost": received_cost,
+                }
+            )
+
+    return render_template(
+        "report_equipment_procurement.html",
+        form=form,
+        report_rows=report_rows,
+        totals=totals,
     )

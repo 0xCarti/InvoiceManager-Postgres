@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+
+{% block title %}Equipment Catalog{% endblock %}
+
+{% block content %}
+{% set can_manage_categories = can_access_endpoint('equipment.create_equipment_category', 'GET') %}
+{% set can_manage_models = can_access_endpoint('equipment.create_equipment_model', 'GET') %}
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .mobile-list-page .catalog-page-actions > *,
+    .mobile-list-page .catalog-page-actions .btn,
+    .mobile-list-page .catalog-page-actions form {
+        width: 100%;
+    }
+
+    .mobile-list-page .mobile-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .375rem;
+    }
+
+    .mobile-list-page .mobile-actions .btn,
+    .mobile-list-page .mobile-actions form {
+        margin: 0 !important;
+    }
+}
+</style>
+<div class="container mt-5 mobile-list-page app-page-shell">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
+        <div>
+            <h2 class="mb-1">Equipment Catalog</h2>
+            <p class="text-muted mb-0">Maintain the reusable category and model records that equipment assets are built from.</p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 catalog-page-actions">
+            <a class="btn btn-outline-secondary" href="{{ url_for('equipment.view_equipment') }}">Back to Equipment</a>
+            {% if can_manage_categories %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('equipment.create_equipment_category') }}">Add Category</a>
+            {% endif %}
+            {% if can_manage_models %}
+            <a class="btn btn-primary" href="{{ url_for('equipment.create_equipment_model') }}">Add Model</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-12 col-xl-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+                        <div>
+                            <h3 class="h5 mb-1">Categories</h3>
+                            <p class="text-muted mb-0">High-level groupings such as refrigeration, IT, or POS.</p>
+                        </div>
+                        <span class="badge text-bg-light border">{{ categories|length }}</span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table align-middle table-mobile-card">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Models</th>
+                                    <th data-sortable="false">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for category in categories %}
+                                <tr>
+                                    <td class="mobile-card-primary">
+                                        <div class="fw-semibold">{{ category.name }}</div>
+                                        {% if category.archived %}
+                                        <span class="badge text-bg-secondary mt-1">Archived</span>
+                                        {% endif %}
+                                        {% if category.description %}
+                                        <div class="small text-muted">{{ category.description }}</div>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ category.models|length }}</td>
+                                    <td>
+                                        {% if can_manage_categories %}
+                                        <div class="mobile-actions mobile-card-actions">
+                                            <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('equipment.edit_equipment_category', category_id=category.id) }}">Edit</a>
+                                            {% if not category.archived %}
+                                            <form action="{{ url_for('equipment.archive_equipment_category', category_id=category.id) }}" method="post" class="d-inline">
+                                                {{ delete_form.hidden_tag() }}
+                                                <button type="submit" class="btn btn-danger btn-sm" data-confirm-message="Archive this equipment category?">Archive</button>
+                                            </form>
+                                            {% endif %}
+                                        </div>
+                                        {% else %}
+                                        <span class="text-muted small">Read only</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr>
+                                    <td colspan="3">No equipment categories found.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-xl-8">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+                        <div>
+                            <h3 class="h5 mb-1">Models</h3>
+                            <p class="text-muted mb-0">Reusable manufacturer/model definitions referenced by each physical asset.</p>
+                        </div>
+                        <span class="badge text-bg-light border">{{ models|length }}</span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table align-middle table-mobile-card">
+                            <thead>
+                                <tr>
+                                    <th>Category</th>
+                                    <th>Manufacturer</th>
+                                    <th>Model</th>
+                                    <th>Assets</th>
+                                    <th data-sortable="false">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for equipment_model in models %}
+                                <tr>
+                                    <td>{{ equipment_model.category.name if equipment_model.category else 'Uncategorized' }}</td>
+                                    <td>{{ equipment_model.manufacturer }}</td>
+                                    <td class="mobile-card-primary">
+                                        <div class="fw-semibold">{{ equipment_model.name }}</div>
+                                        {% if equipment_model.model_number %}
+                                        <div class="small text-muted">Model #: {{ equipment_model.model_number }}</div>
+                                        {% endif %}
+                                        {% if equipment_model.archived %}
+                                        <span class="badge text-bg-secondary mt-1">Archived</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ equipment_model.assets|length }}</td>
+                                    <td>
+                                        {% if can_manage_models %}
+                                        <div class="mobile-actions mobile-card-actions">
+                                            <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('equipment.edit_equipment_model', model_id=equipment_model.id) }}">Edit</a>
+                                            {% if not equipment_model.archived %}
+                                            <form action="{{ url_for('equipment.archive_equipment_model', model_id=equipment_model.id) }}" method="post" class="d-inline">
+                                                {{ delete_form.hidden_tag() }}
+                                                <button type="submit" class="btn btn-danger btn-sm" data-confirm-message="Archive this equipment model?">Archive</button>
+                                            </form>
+                                            {% endif %}
+                                        </div>
+                                        {% else %}
+                                        <span class="text-muted small">Read only</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr>
+                                    <td colspan="5">No equipment models found.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

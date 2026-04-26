@@ -1,0 +1,437 @@
+{% extends "base.html" %}
+{% from "macros/column_visibility.html" import column_visibility_dropdown %}
+{% from "macros/filter_modal.html" import filter_modal %}
+
+{% block title %}Equipment{% endblock %}
+
+{% block content %}
+{% set can_create_equipment = can_access_endpoint('equipment.create_equipment_asset', 'GET') %}
+{% set can_edit_equipment = can_access_endpoint('equipment.edit_equipment_asset', 'GET') %}
+{% set can_archive_equipment = can_access_endpoint('equipment.archive_equipment_asset', 'POST') %}
+{% set can_print_labels = can_access_endpoint('equipment.print_equipment_labels', 'GET') %}
+{% set can_view_catalog = can_access_endpoint('equipment.view_equipment_catalog', 'GET') %}
+{% set can_view_intake = can_access_endpoint('equipment.view_equipment_intake', 'GET') %}
+{% set can_import_equipment = can_access_endpoint('equipment.import_equipment_from_snipe_it', 'GET') %}
+{% set can_view_maintenance = can_access_endpoint('equipment.view_equipment_maintenance', 'GET') %}
+{% set can_manage_maintenance = can_access_endpoint('equipment.create_equipment_maintenance_issue', 'GET') %}
+{% set can_view_procurement_report = can_access_endpoint('report.equipment_procurement_report', 'GET') %}
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .mobile-list-page .mobile-toolbar,
+    .mobile-list-page .mobile-pagination-controls {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .mobile-list-page .mobile-toolbar > *,
+    .mobile-list-page .mobile-toolbar .btn,
+    .mobile-list-page .mobile-toolbar .dropdown,
+    .mobile-list-page .mobile-toolbar .dropdown > .btn,
+    .mobile-list-page .mobile-pagination-controls > *,
+    .mobile-list-page .mobile-pagination-controls form,
+    .mobile-list-page .mobile-pagination-controls .pagination {
+        width: 100%;
+    }
+    .mobile-list-page .mobile-table-wrap .table {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+    .mobile-list-page .mobile-table-wrap .table th,
+    .mobile-list-page .mobile-table-wrap .table td {
+        white-space: normal !important;
+        vertical-align: top;
+    }
+    .mobile-list-page .mobile-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .375rem;
+    }
+    .mobile-list-page .mobile-actions .btn,
+    .mobile-list-page .mobile-actions form {
+        margin: 0 !important;
+    }
+}
+</style>
+<div class="container mt-5 mobile-list-page">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Equipment</h2>
+            <p class="text-muted mb-0">Track physical assets, where they are, who has them, and print QR labels.</p>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            {% if can_view_intake %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('equipment.view_equipment_intake') }}">Intake</a>
+            {% endif %}
+            {% if can_view_maintenance %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('equipment.view_equipment_maintenance') }}">Maintenance Queue</a>
+            {% endif %}
+            {% if can_view_procurement_report %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('report.equipment_procurement_report') }}">Procurement Report</a>
+            {% endif %}
+            {% if can_import_equipment %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('equipment.import_equipment_from_snipe_it') }}">Import Snipe-IT CSV</a>
+            {% endif %}
+            {% if can_print_labels %}
+            <button
+                type="button"
+                class="btn btn-outline-secondary"
+                id="print-selected-labels"
+                data-print-label-url="{{ url_for('equipment.print_equipment_labels') }}"
+                disabled
+            >Print Selected Labels</button>
+            {% endif %}
+            {% if can_view_catalog %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('equipment.view_equipment_catalog') }}">Manage Catalog</a>
+            {% endif %}
+            {% if can_create_equipment %}
+            <a class="btn btn-primary" href="{{ url_for('equipment.create_equipment_asset') }}">Add Equipment</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3 mobile-toolbar">
+        <div class="dropdown d-md-none">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                More actions
+            </button>
+            <ul class="dropdown-menu">
+                <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#equipmentFilterModal">Filters</button></li>
+            </ul>
+        </div>
+        <div>
+            {{ column_visibility_dropdown(
+                table_id='equipmentTable',
+                storage_key='equipmentTableColumnVisibility',
+                columns=[
+                    {'id': 'toggle-equipment-tag', 'target': 'col-equipment-tag', 'label': 'Asset Tag', 'checked': True},
+                    {'id': 'toggle-equipment-name', 'target': 'col-equipment-name', 'label': 'Name', 'checked': True},
+                    {'id': 'toggle-equipment-category', 'target': 'col-equipment-category', 'label': 'Category', 'checked': True},
+                    {'id': 'toggle-equipment-model', 'target': 'col-equipment-model', 'label': 'Model', 'checked': True},
+                    {'id': 'toggle-equipment-status', 'target': 'col-equipment-status', 'label': 'Status', 'checked': True},
+                    {'id': 'toggle-equipment-attention', 'target': 'col-equipment-attention', 'label': 'Attention', 'checked': True},
+                    {'id': 'toggle-equipment-vendor', 'target': 'col-equipment-vendor', 'label': 'Purchased From', 'checked': True},
+                    {'id': 'toggle-equipment-location', 'target': 'col-equipment-location', 'label': 'Location', 'checked': True},
+                    {'id': 'toggle-equipment-custodian', 'target': 'col-equipment-custodian', 'label': 'Custodian', 'checked': True},
+                    {'id': 'toggle-equipment-serial', 'target': 'col-equipment-serial', 'label': 'Serial', 'checked': True},
+                    {'id': 'toggle-equipment-cost', 'target': 'col-equipment-cost', 'label': 'Cost', 'checked': True},
+                    {'id': 'toggle-equipment-actions', 'target': 'col-equipment-actions', 'label': 'Actions', 'checked': True},
+                ]
+            ) }}
+        </div>
+        <button type="button" class="btn btn-outline-secondary d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#equipmentFilterModal">Filters</button>
+    </div>
+
+    {% call filter_modal(
+        'equipmentFilterModal',
+        'Equipment Filters',
+        form_id='equipment-filter-form',
+        form_action=url_for('equipment.view_equipment'),
+        method='get',
+        reset_url=url_for('equipment.view_equipment'),
+        scope=request.endpoint,
+        save_defaults=True
+    ) %}
+        <div class="mb-3">
+            <label for="search_query" class="form-label">Search</label>
+            <input type="text" id="search_query" name="search_query" class="form-control" value="{{ search_query or '' }}" placeholder="Asset tag, serial, model, category">
+        </div>
+        <div class="mb-3">
+            <label for="match_mode" class="form-label">Match Mode</label>
+            <select id="match_mode" name="match_mode" class="form-select">
+                <option value="exact" {% if match_mode == 'exact' %}selected{% endif %}>Exact</option>
+                <option value="startswith" {% if match_mode == 'startswith' %}selected{% endif %}>Starts with</option>
+                <option value="contains" {% if match_mode == 'contains' %}selected{% endif %}>Contains</option>
+                <option value="not_contains" {% if match_mode == 'not_contains' %}selected{% endif %}>Does not contain</option>
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="status" class="form-label">Status</label>
+            <select id="status" name="status" class="form-select">
+                <option value="all" {% if status == 'all' %}selected{% endif %}>All statuses</option>
+                {% for status_code, status_label in status_choices %}
+                <option value="{{ status_code }}" {% if status == status_code %}selected{% endif %}>{{ status_label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="archived" class="form-label">Record State</label>
+            <select id="archived" name="archived" class="form-select">
+                <option value="active" {% if archived == 'active' %}selected{% endif %}>Active only</option>
+                <option value="archived" {% if archived == 'archived' %}selected{% endif %}>Archived only</option>
+                <option value="all" {% if archived == 'all' %}selected{% endif %}>All records</option>
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="attention_state" class="form-label">Attention</label>
+            <select id="attention_state" name="attention_state" class="form-select">
+                <option value="all" {% if attention_state == 'all' %}selected{% endif %}>All assets</option>
+                <option value="needs_attention" {% if attention_state == 'needs_attention' %}selected{% endif %}>Needs attention</option>
+                <option value="clear" {% if attention_state == 'clear' %}selected{% endif %}>No active reminders</option>
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="category_id" class="form-label">Category</label>
+            <select id="category_id" name="category_id" class="form-select">
+                <option value="">All categories</option>
+                {% for category in categories %}
+                <option value="{{ category.id }}" {% if category_id == category.id %}selected{% endif %}>{{ category.name }}{% if category.archived %} (archived){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="model_id" class="form-label">Model</label>
+            <select id="model_id" name="model_id" class="form-select">
+                <option value="">All models</option>
+                {% for equipment_model in models %}
+                <option value="{{ equipment_model.id }}" {% if model_id == equipment_model.id %}selected{% endif %}>{{ equipment_model.display_name }}{% if equipment_model.archived %} (archived){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="purchase_vendor_id" class="form-label">Purchased From</label>
+            <select id="purchase_vendor_id" name="purchase_vendor_id" class="form-select">
+                <option value="">All vendors</option>
+                {% for vendor in vendors %}
+                <option value="{{ vendor.id }}" {% if purchase_vendor_id == vendor.id %}selected{% endif %}>{{ vendor.first_name }} {{ vendor.last_name }}{% if vendor.archived %} (archived){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="location_id" class="form-label">Location</label>
+            <select id="location_id" name="location_id" class="form-select">
+                <option value="">All locations</option>
+                {% for location in locations %}
+                <option value="{{ location.id }}" {% if location_id == location.id %}selected{% endif %}>{{ location.name }}{% if location.archived %} (archived){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="assigned_user_id" class="form-label">Custodian</label>
+            <select id="assigned_user_id" name="assigned_user_id" class="form-select">
+                <option value="">All custodians</option>
+                {% for user in users %}
+                <option value="{{ user.id }}" {% if assigned_user_id == user.id %}selected{% endif %}>{{ user.display_label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    {% endcall %}
+
+    {% if search_query or status != 'all' or archived != 'active' or attention_state != 'all' or selected_category or selected_model or selected_vendor or selected_location or selected_user %}
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="text-muted small">Active filters:</span>
+        {% if search_query %}
+        <span class="badge rounded-pill text-bg-light border">Search: {{ search_query }}</span>
+        {% endif %}
+        {% if status != 'all' %}
+        <span class="badge rounded-pill text-bg-light border">Status: {{ status.replace('_', ' ')|title }}</span>
+        {% endif %}
+        {% if archived != 'active' %}
+        <span class="badge rounded-pill text-bg-light border">Records: {{ archived|title }}</span>
+        {% endif %}
+        {% if attention_state != 'all' %}
+        <span class="badge rounded-pill text-bg-light border">Attention: {{ 'Needs attention' if attention_state == 'needs_attention' else 'No active reminders' }}</span>
+        {% endif %}
+        {% if selected_category %}
+        <span class="badge rounded-pill text-bg-light border">Category: {{ selected_category.name }}</span>
+        {% endif %}
+        {% if selected_model %}
+        <span class="badge rounded-pill text-bg-light border">Model: {{ selected_model.display_name }}</span>
+        {% endif %}
+        {% if selected_vendor %}
+        <span class="badge rounded-pill text-bg-light border">Purchased From: {{ selected_vendor.first_name }} {{ selected_vendor.last_name }}</span>
+        {% endif %}
+        {% if selected_location %}
+        <span class="badge rounded-pill text-bg-light border">Location: {{ selected_location.name }}</span>
+        {% endif %}
+        {% if selected_user %}
+        <span class="badge rounded-pill text-bg-light border">Custodian: {{ selected_user.display_label }}</span>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="table-responsive mobile-table-wrap">
+        <table class="table sortable" id="equipmentTable">
+            <thead>
+                <tr>
+                    {% if can_print_labels %}
+                    <th scope="col" data-sortable="false">
+                        <input type="checkbox" id="select-all-equipment" aria-label="Select all equipment for printing">
+                    </th>
+                    {% endif %}
+                    <th scope="col" class="col-equipment-tag">Asset Tag</th>
+                    <th scope="col" class="col-equipment-name">Name</th>
+                    <th scope="col" class="col-equipment-category">Category</th>
+                    <th scope="col" class="col-equipment-model">Model</th>
+                    <th scope="col" class="col-equipment-status">Status</th>
+                    <th scope="col" class="col-equipment-attention">Attention</th>
+                    <th scope="col" class="col-equipment-vendor">Purchased From</th>
+                    <th scope="col" class="col-equipment-location">Location</th>
+                    <th scope="col" class="col-equipment-custodian">Custodian</th>
+                    <th scope="col" class="col-equipment-serial">Serial</th>
+                    <th scope="col" class="col-equipment-cost">Cost</th>
+                    <th scope="col" class="col-equipment-actions" data-sortable="false">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for asset in assets.items %}
+                <tr>
+                    {% if can_print_labels %}
+                    <td>
+                        <input type="checkbox" class="equipment-select" value="{{ asset.id }}" aria-label="Select {{ asset.asset_tag }} for printing">
+                    </td>
+                    {% endif %}
+                    <td class="col-equipment-tag">
+                        <div class="fw-semibold">{{ asset.asset_tag }}</div>
+                        {% if asset.archived %}
+                        <span class="badge text-bg-secondary mt-1">Archived</span>
+                        {% endif %}
+                    </td>
+                    <td class="col-equipment-name">{{ asset.display_name }}</td>
+                    <td class="col-equipment-category">{{ asset.category.name if asset.category else 'Uncategorized' }}</td>
+                    <td class="col-equipment-model">{{ asset.model_display_name or '-' }}</td>
+                    <td class="col-equipment-status">
+                        <span class="badge {{ asset.status_badge_class }}">{{ asset.status_label }}</span>
+                    </td>
+                    <td class="col-equipment-attention">
+                        {% set open_issue_count = open_issue_count_map.get(asset.id, 0) %}
+                        <div class="d-flex flex-wrap gap-1">
+                            {% if open_issue_count %}
+                            <span class="badge text-bg-warning">{{ open_issue_count }} Open Issue{% if open_issue_count != 1 %}s{% endif %}</span>
+                            {% endif %}
+                            {% if asset.service_due_state in ['overdue', 'due_soon'] %}
+                            <span class="badge {{ asset.service_due_badge_class }}">{{ asset.service_due_label }}</span>
+                            {% endif %}
+                            {% if asset.warranty_state in ['expired', 'expiring_soon'] %}
+                            <span class="badge {{ asset.warranty_badge_class }}">{{ asset.warranty_label }}</span>
+                            {% endif %}
+                            {% if asset.service_contract_state in ['expired', 'expiring_soon'] %}
+                            <span class="badge {{ asset.service_contract_badge_class }}">{{ asset.service_contract_label }}</span>
+                            {% endif %}
+                            {% if not open_issue_count and not asset.needs_attention %}
+                            <span class="text-muted">Clear</span>
+                            {% endif %}
+                        </div>
+                    </td>
+                    <td class="col-equipment-vendor">{{ asset.purchase_vendor.first_name ~ ' ' ~ asset.purchase_vendor.last_name if asset.purchase_vendor else '-' }}</td>
+                    <td class="col-equipment-location">{{ asset.location_label or '-' }}</td>
+                    <td class="col-equipment-custodian">{{ asset.custodian_label or '-' }}</td>
+                    <td class="col-equipment-serial">{{ asset.serial_number or '-' }}</td>
+                    <td class="col-equipment-cost">{% if asset.cost is not none %}${{ '%.2f'|format(asset.cost) }}{% else %}-{% endif %}</td>
+                    <td class="col-equipment-actions">
+                        <div class="mobile-actions">
+                            <a href="{{ url_for('equipment.view_equipment_asset', asset_id=asset.id) }}" class="btn btn-outline-secondary btn-sm">View</a>
+                            <a href="{{ url_for('notes.entity_notes', entity_type='equipment', entity_id=asset.id) }}" class="btn btn-outline-secondary btn-sm">Notes</a>
+                            {% if can_view_maintenance %}
+                            <a href="{{ url_for('equipment.view_equipment_maintenance', asset_id=asset.id) }}" class="btn btn-outline-secondary btn-sm">Maintenance</a>
+                            {% endif %}
+                            {% if can_manage_maintenance %}
+                            <a href="{{ url_for('equipment.create_equipment_maintenance_issue', asset_id=asset.id) }}" class="btn btn-outline-secondary btn-sm">Report Issue</a>
+                            {% endif %}
+                            {% if can_edit_equipment %}
+                            <a href="{{ url_for('equipment.edit_equipment_asset', asset_id=asset.id) }}" class="btn btn-primary btn-sm">Edit</a>
+                            {% endif %}
+                            {% if can_print_labels %}
+                            <a href="{{ url_for('equipment.print_equipment_labels', equipment_id=asset.id) }}" class="btn btn-outline-secondary btn-sm" target="_blank" rel="noopener">Label</a>
+                            {% endif %}
+                            {% if can_archive_equipment %}
+                            <form action="{{ url_for('equipment.archive_equipment_asset', asset_id=asset.id) }}" method="post" class="d-inline">
+                                {{ delete_form.hidden_tag() }}
+                                <button type="submit" class="btn btn-danger btn-sm" data-confirm-message="Archive this equipment asset?">Archive</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="{% if can_print_labels %}13{% else %}12{% endif %}">No equipment assets found.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3 mobile-pagination-controls">
+        <nav aria-label="Equipment pagination">
+            <ul class="pagination mb-0">
+                <li class="page-item {% if not assets.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('equipment.view_equipment', page=assets.prev_num if assets.has_prev else 1, **pagination_args) }}"{% if not assets.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link">Page {{ assets.page }} of {{ assets.pages }}</span>
+                </li>
+                <li class="page-item {% if not assets.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('equipment.view_equipment', page=assets.next_num if assets.has_next else assets.pages or 1, **pagination_args) }}"{% if not assets.has_next %} tabindex="-1" aria-disabled="true"{% endif %}>Next</a>
+                </li>
+            </ul>
+        </nav>
+        <form method="get" class="d-flex align-items-center gap-2">
+            {% for key, values in request.args.lists() %}
+                {% if key not in ['page', 'per_page'] %}
+                    {% for value in values %}
+                        <input type="hidden" name="{{ key }}" value="{{ value }}">
+                    {% endfor %}
+                {% endif %}
+            {% endfor %}
+            <input type="hidden" name="page" value="1">
+            <label for="equipment-per-page" class="form-label mb-0">Rows per page</label>
+            <select id="equipment-per-page" name="per_page" class="form-select js-auto-submit">
+                {% for option in PAGINATION_SIZES %}
+                    <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+</div>
+
+{% if can_print_labels %}
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('DOMContentLoaded', function() {
+    const checkboxes = Array.from(document.querySelectorAll('.equipment-select'));
+    const selectAll = document.getElementById('select-all-equipment');
+    const printButton = document.getElementById('print-selected-labels');
+    if (!printButton || !checkboxes.length) {
+        if (selectAll) {
+            selectAll.disabled = true;
+        }
+        return;
+    }
+
+    function updatePrintState() {
+        const checked = checkboxes.filter((checkbox) => checkbox.checked);
+        printButton.disabled = checked.length === 0;
+        if (selectAll) {
+            selectAll.checked = checked.length === checkboxes.length && checkboxes.length > 0;
+            selectAll.indeterminate = checked.length > 0 && checked.length < checkboxes.length;
+        }
+    }
+
+    if (selectAll) {
+        selectAll.addEventListener('change', function() {
+            checkboxes.forEach((checkbox) => {
+                checkbox.checked = selectAll.checked;
+            });
+            updatePrintState();
+        });
+    }
+
+    checkboxes.forEach((checkbox) => {
+        checkbox.addEventListener('change', updatePrintState);
+    });
+
+    printButton.addEventListener('click', function() {
+        const params = new URLSearchParams();
+        checkboxes
+            .filter((checkbox) => checkbox.checked)
+            .forEach((checkbox) => params.append('equipment_id', checkbox.value));
+        if (!params.toString()) {
+            return;
+        }
+        window.open(printButton.dataset.printLabelUrl + '?' + params.toString(), '_blank', 'noopener');
+    });
+
+    updatePrintState();
+});
+</script>
+{% endif %}
+{% endblock %}

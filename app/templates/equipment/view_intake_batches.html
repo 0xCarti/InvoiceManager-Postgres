@@ -1,0 +1,319 @@
+{% extends "base.html" %}
+{% from "macros/column_visibility.html" import column_visibility_dropdown %}
+{% from "macros/filter_modal.html" import filter_modal %}
+
+{% block title %}Equipment Intake{% endblock %}
+
+{% block content %}
+{% set can_manage_intake = can_access_endpoint('equipment.create_equipment_intake_batch', 'GET') %}
+{% set can_import_equipment = can_access_endpoint('equipment.import_equipment_from_snipe_it', 'GET') %}
+{% set can_view_procurement_report = can_access_endpoint('report.equipment_procurement_report', 'GET') %}
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .mobile-list-page .mobile-toolbar,
+    .mobile-list-page .mobile-pagination-controls {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .mobile-list-page .mobile-toolbar > *,
+    .mobile-list-page .mobile-toolbar .btn,
+    .mobile-list-page .mobile-toolbar .dropdown,
+    .mobile-list-page .mobile-toolbar .dropdown > .btn,
+    .mobile-list-page .mobile-pagination-controls > *,
+    .mobile-list-page .mobile-pagination-controls form,
+    .mobile-list-page .mobile-pagination-controls .pagination {
+        width: 100%;
+    }
+    .mobile-list-page .mobile-table-wrap .table {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+    .mobile-list-page .mobile-table-wrap .table th,
+    .mobile-list-page .mobile-table-wrap .table td {
+        white-space: normal !important;
+        vertical-align: top;
+    }
+    .mobile-list-page .mobile-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .375rem;
+    }
+}
+</style>
+<div class="container mt-5 mobile-list-page">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Equipment Intake</h2>
+            <p class="text-muted mb-0">Track purchase-linked equipment batches, receive serialized assets, and keep purchasing context attached to each asset.</p>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            {% if can_view_procurement_report %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('report.equipment_procurement_report') }}">Procurement Report</a>
+            {% endif %}
+            {% if can_import_equipment %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('equipment.import_equipment_from_snipe_it') }}">Import Snipe-IT CSV</a>
+            {% endif %}
+            {% if can_manage_intake %}
+            <a class="btn btn-primary" href="{{ url_for('equipment.create_equipment_intake_batch') }}">Create Intake Batch</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3 mobile-toolbar">
+        <div class="dropdown d-md-none">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                More actions
+            </button>
+            <ul class="dropdown-menu">
+                <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#equipmentIntakeFilterModal">Filters</button></li>
+            </ul>
+        </div>
+        <div>
+            {{ column_visibility_dropdown(
+                table_id='equipmentIntakeTable',
+                storage_key='equipmentIntakeTableColumnVisibility',
+                columns=[
+                    {'id': 'toggle-intake-id', 'target': 'col-intake-id', 'label': 'Batch ID', 'checked': True},
+                    {'id': 'toggle-intake-model', 'target': 'col-intake-model', 'label': 'Model', 'checked': True},
+                    {'id': 'toggle-intake-source', 'target': 'col-intake-source', 'label': 'Source', 'checked': True},
+                    {'id': 'toggle-intake-status', 'target': 'col-intake-status', 'label': 'Status', 'checked': True},
+                    {'id': 'toggle-intake-quantity', 'target': 'col-intake-quantity', 'label': 'Quantity', 'checked': True},
+                    {'id': 'toggle-intake-vendor', 'target': 'col-intake-vendor', 'label': 'Vendor', 'checked': True},
+                    {'id': 'toggle-intake-order', 'target': 'col-intake-order', 'label': 'PO Ref', 'checked': True},
+                    {'id': 'toggle-intake-invoice', 'target': 'col-intake-invoice', 'label': 'Invoice Ref', 'checked': True},
+                    {'id': 'toggle-intake-dates', 'target': 'col-intake-dates', 'label': 'Dates', 'checked': True},
+                    {'id': 'toggle-intake-location', 'target': 'col-intake-location', 'label': 'Location', 'checked': True},
+                    {'id': 'toggle-intake-actions', 'target': 'col-intake-actions', 'label': 'Actions', 'checked': True},
+                ]
+            ) }}
+        </div>
+        <button type="button" class="btn btn-outline-secondary d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#equipmentIntakeFilterModal">Filters</button>
+    </div>
+
+    {% call filter_modal(
+        'equipmentIntakeFilterModal',
+        'Equipment Intake Filters',
+        form_id='equipment-intake-filter-form',
+        form_action=url_for('equipment.view_equipment_intake'),
+        method='get',
+        reset_url=url_for('equipment.view_equipment_intake'),
+        scope=request.endpoint,
+        save_defaults=True
+    ) %}
+        <div class="mb-3">
+            <label for="search_query" class="form-label">Search</label>
+            <input type="text" id="search_query" name="search_query" class="form-control" value="{{ search_query or '' }}" placeholder="Model, vendor, PO ref, invoice ref">
+        </div>
+        <div class="mb-3">
+            <label for="match_mode" class="form-label">Match Mode</label>
+            <select id="match_mode" name="match_mode" class="form-select">
+                <option value="exact" {% if match_mode == 'exact' %}selected{% endif %}>Exact</option>
+                <option value="startswith" {% if match_mode == 'startswith' %}selected{% endif %}>Starts with</option>
+                <option value="contains" {% if match_mode == 'contains' %}selected{% endif %}>Contains</option>
+                <option value="not_contains" {% if match_mode == 'not_contains' %}selected{% endif %}>Does not contain</option>
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="source_type" class="form-label">Source</label>
+            <select id="source_type" name="source_type" class="form-select">
+                <option value="all" {% if source_type == 'all' %}selected{% endif %}>All sources</option>
+                {% for source_code, source_label in source_type_choices %}
+                <option value="{{ source_code }}" {% if source_type == source_code %}selected{% endif %}>{{ source_label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="status" class="form-label">Status</label>
+            <select id="status" name="status" class="form-select">
+                <option value="all" {% if status == 'all' %}selected{% endif %}>All statuses</option>
+                {% for status_code, status_label in status_choices %}
+                <option value="{{ status_code }}" {% if status == status_code %}selected{% endif %}>{{ status_label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="category_id" class="form-label">Category</label>
+            <select id="category_id" name="category_id" class="form-select">
+                <option value="">All categories</option>
+                {% for category in categories %}
+                <option value="{{ category.id }}" {% if category_id == category.id %}selected{% endif %}>{{ category.name }}{% if category.archived %} (archived){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="model_id" class="form-label">Model</label>
+            <select id="model_id" name="model_id" class="form-select">
+                <option value="">All models</option>
+                {% for equipment_model in models %}
+                <option value="{{ equipment_model.id }}" {% if model_id == equipment_model.id %}selected{% endif %}>{{ equipment_model.display_name }}{% if equipment_model.archived %} (archived){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="purchase_vendor_id" class="form-label">Vendor</label>
+            <select id="purchase_vendor_id" name="purchase_vendor_id" class="form-select">
+                <option value="">All vendors</option>
+                {% for vendor in vendors %}
+                <option value="{{ vendor.id }}" {% if purchase_vendor_id == vendor.id %}selected{% endif %}>{{ vendor.first_name }} {{ vendor.last_name }}{% if vendor.archived %} (archived){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="location_id" class="form-label">Location</label>
+            <select id="location_id" name="location_id" class="form-select">
+                <option value="">All locations</option>
+                {% for location in locations %}
+                <option value="{{ location.id }}" {% if location_id == location.id %}selected{% endif %}>{{ location.name }}{% if location.archived %} (archived){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+    {% endcall %}
+
+    {% if search_query or source_type != 'all' or status != 'all' or selected_category or selected_model or selected_vendor or selected_location %}
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="text-muted small">Active filters:</span>
+        {% if search_query %}
+        <span class="badge rounded-pill text-bg-light border">Search: {{ search_query }}</span>
+        {% endif %}
+        {% if source_type != 'all' %}
+        <span class="badge rounded-pill text-bg-light border">Source: {{ source_type.replace('_', ' ')|title }}</span>
+        {% endif %}
+        {% if status != 'all' %}
+        <span class="badge rounded-pill text-bg-light border">Status: {{ status.replace('_', ' ')|title }}</span>
+        {% endif %}
+        {% if selected_category %}
+        <span class="badge rounded-pill text-bg-light border">Category: {{ selected_category.name }}</span>
+        {% endif %}
+        {% if selected_model %}
+        <span class="badge rounded-pill text-bg-light border">Model: {{ selected_model.display_name }}</span>
+        {% endif %}
+        {% if selected_vendor %}
+        <span class="badge rounded-pill text-bg-light border">Vendor: {{ selected_vendor.first_name }} {{ selected_vendor.last_name }}</span>
+        {% endif %}
+        {% if selected_location %}
+        <span class="badge rounded-pill text-bg-light border">Location: {{ selected_location.name }}</span>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="table-responsive mobile-table-wrap">
+        <table class="table sortable" id="equipmentIntakeTable">
+            <thead>
+                <tr>
+                    <th scope="col" class="col-intake-id">Batch</th>
+                    <th scope="col" class="col-intake-model">Model</th>
+                    <th scope="col" class="col-intake-source">Source</th>
+                    <th scope="col" class="col-intake-status">Status</th>
+                    <th scope="col" class="col-intake-quantity">Quantity</th>
+                    <th scope="col" class="col-intake-vendor">Vendor</th>
+                    <th scope="col" class="col-intake-order">PO Ref</th>
+                    <th scope="col" class="col-intake-invoice">Invoice Ref</th>
+                    <th scope="col" class="col-intake-dates">Dates</th>
+                    <th scope="col" class="col-intake-location">Location</th>
+                    <th scope="col" class="col-intake-actions" data-sortable="false">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for batch in batches.items %}
+                <tr>
+                    <td class="col-intake-id">
+                        <div class="fw-semibold">#{{ batch.id }}</div>
+                        <div class="text-muted small">{{ batch.display_name }}</div>
+                    </td>
+                    <td class="col-intake-model">
+                        <div>{{ batch.model_display_name or '-' }}</div>
+                        <div class="text-muted small">{{ batch.equipment_model.category.name if batch.equipment_model and batch.equipment_model.category else '-' }}</div>
+                    </td>
+                    <td class="col-intake-source">{{ batch.source_type_label }}</td>
+                    <td class="col-intake-status"><span class="badge {{ batch.status_badge_class }}">{{ batch.status_label }}</span></td>
+                    <td class="col-intake-quantity">
+                        <div>Expected: {{ batch.expected_quantity }}</div>
+                        <div>Received: {{ batch.received_asset_count }}</div>
+                        <div class="text-muted small">Remaining: {{ batch.remaining_quantity }}</div>
+                    </td>
+                    <td class="col-intake-vendor">{{ batch.vendor_display_name or '-' }}</td>
+                    <td class="col-intake-order">{{ batch.order_reference_label or '-' }}</td>
+                    <td class="col-intake-invoice">{{ batch.invoice_reference_label or '-' }}</td>
+                    <td class="col-intake-dates">
+                        <div>Order: {{ batch.order_date or '-' }}</div>
+                        <div>Expected: {{ batch.expected_received_on or '-' }}</div>
+                        <div>Received: {{ batch.received_on or '-' }}</div>
+                    </td>
+                    <td class="col-intake-location">
+                        {% if batch.location %}
+                        {{ batch.location.name }}
+                        {% else %}
+                        -
+                        {% endif %}
+                    </td>
+                    <td class="col-intake-actions">
+                        <div class="mobile-actions">
+                            <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('equipment.view_equipment_intake_batch', batch_id=batch.id) }}">View</a>
+                            {% if can_manage_intake %}
+                            {% if batch.remaining_quantity > 0 %}
+                            <a class="btn btn-outline-primary btn-sm" href="{{ url_for('equipment.receive_equipment_intake_batch', batch_id=batch.id) }}">Receive</a>
+                            {% endif %}
+                            <a class="btn btn-primary btn-sm" href="{{ url_for('equipment.edit_equipment_intake_batch', batch_id=batch.id) }}">Edit</a>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="11" class="text-center text-muted py-4">No equipment intake batches matched the current filters.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mt-3 mobile-pagination-controls">
+        <form method="get" class="d-flex align-items-center gap-2">
+            {% for key, values in request.args.lists() %}
+                {% if key not in ['page', 'per_page'] %}
+                    {% for value in values %}
+            <input type="hidden" name="{{ key }}" value="{{ value }}">
+                    {% endfor %}
+                {% endif %}
+            {% endfor %}
+            <input type="hidden" name="page" value="1">
+            <label for="equipmentIntakePerPage" class="form-label mb-0">Rows per page</label>
+            <select id="equipmentIntakePerPage" name="per_page" class="form-select form-select-sm" onchange="this.form.submit()">
+                {% for size in PAGINATION_SIZES %}
+                <option value="{{ size }}" {% if per_page == size %}selected{% endif %}>{{ size }}</option>
+                {% endfor %}
+            </select>
+        </form>
+        {% if batches.pages > 1 %}
+        <nav aria-label="Equipment intake pagination">
+            <ul class="pagination mb-0">
+                {% if batches.has_prev %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('equipment.view_equipment_intake', page=batches.prev_num, **pagination_args) }}">Previous</a>
+                </li>
+                {% else %}
+                <li class="page-item disabled"><span class="page-link">Previous</span></li>
+                {% endif %}
+                {% for page_num in batches.iter_pages(left_edge=1, left_current=1, right_current=2, right_edge=1) %}
+                    {% if page_num %}
+                    <li class="page-item {% if page_num == batches.page %}active{% endif %}">
+                        <a class="page-link" href="{{ url_for('equipment.view_equipment_intake', page=page_num, **pagination_args) }}">{{ page_num }}</a>
+                    </li>
+                    {% else %}
+                    <li class="page-item disabled"><span class="page-link">…</span></li>
+                    {% endif %}
+                {% endfor %}
+                {% if batches.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('equipment.view_equipment_intake', page=batches.next_num, **pagination_args) }}">Next</a>
+                </li>
+                {% else %}
+                <li class="page-item disabled"><span class="page-link">Next</span></li>
+                {% endif %}
+            </ul>
+        </nav>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

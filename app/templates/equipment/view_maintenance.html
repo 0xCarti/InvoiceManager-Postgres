@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+{% from "macros/column_visibility.html" import column_visibility_dropdown %}
+{% from "macros/filter_modal.html" import filter_modal %}
+
+{% block title %}Equipment Maintenance{% endblock %}
+
+{% block content %}
+{% set can_manage_maintenance = can_access_endpoint('equipment.create_equipment_maintenance_issue', 'GET') %}
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .mobile-list-page .mobile-toolbar,
+    .mobile-list-page .mobile-pagination-controls {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .mobile-list-page .mobile-toolbar > *,
+    .mobile-list-page .mobile-toolbar .btn,
+    .mobile-list-page .mobile-toolbar .dropdown,
+    .mobile-list-page .mobile-toolbar .dropdown > .btn,
+    .mobile-list-page .mobile-pagination-controls > *,
+    .mobile-list-page .mobile-pagination-controls form,
+    .mobile-list-page .mobile-pagination-controls .pagination {
+        width: 100%;
+    }
+}
+</style>
+<div class="container mt-5 mobile-list-page">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Equipment Maintenance</h2>
+            <p class="text-muted mb-0">Track open issues, due dates, service ownership, and maintenance history.</p>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-outline-secondary" href="{{ url_for('equipment.view_equipment') }}">Back to Equipment</a>
+            {% if can_manage_maintenance %}
+            <a class="btn btn-primary" href="{{ url_for('equipment.create_equipment_maintenance_issue') }}">Report Issue</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3 mobile-toolbar">
+        <div>
+            {{ column_visibility_dropdown(
+                table_id='equipmentMaintenanceTable',
+                storage_key='equipmentMaintenanceTableColumnVisibility',
+                columns=[
+                    {'id': 'toggle-maint-issue', 'target': 'col-maint-issue', 'label': 'Issue', 'checked': True},
+                    {'id': 'toggle-maint-asset', 'target': 'col-maint-asset', 'label': 'Asset', 'checked': True},
+                    {'id': 'toggle-maint-priority', 'target': 'col-maint-priority', 'label': 'Priority', 'checked': True},
+                    {'id': 'toggle-maint-status', 'target': 'col-maint-status', 'label': 'Status', 'checked': True},
+                    {'id': 'toggle-maint-due', 'target': 'col-maint-due', 'label': 'Due', 'checked': True},
+                    {'id': 'toggle-maint-user', 'target': 'col-maint-user', 'label': 'Assigned Staff', 'checked': True},
+                    {'id': 'toggle-maint-vendor', 'target': 'col-maint-vendor', 'label': 'Assigned Vendor', 'checked': True},
+                    {'id': 'toggle-maint-reported', 'target': 'col-maint-reported', 'label': 'Reported', 'checked': True},
+                    {'id': 'toggle-maint-cost', 'target': 'col-maint-cost', 'label': 'Cost', 'checked': True},
+                    {'id': 'toggle-maint-actions', 'target': 'col-maint-actions', 'label': 'Actions', 'checked': True},
+                ]
+            ) }}
+        </div>
+        <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#equipmentMaintenanceFilterModal">Filters</button>
+    </div>
+
+    {% call filter_modal(
+        'equipmentMaintenanceFilterModal',
+        'Maintenance Filters',
+        form_id='equipment-maintenance-filter-form',
+        form_action=url_for('equipment.view_equipment_maintenance'),
+        method='get',
+        reset_url=url_for('equipment.view_equipment_maintenance'),
+        scope=request.endpoint,
+        save_defaults=True
+    ) %}
+        <div class="mb-3">
+            <label for="search_query" class="form-label">Search</label>
+            <input type="text" id="search_query" name="search_query" class="form-control" value="{{ search_query or '' }}" placeholder="Issue title, description, asset tag">
+        </div>
+        <div class="mb-3">
+            <label for="match_mode" class="form-label">Match Mode</label>
+            <select id="match_mode" name="match_mode" class="form-select">
+                <option value="exact" {% if match_mode == 'exact' %}selected{% endif %}>Exact</option>
+                <option value="startswith" {% if match_mode == 'startswith' %}selected{% endif %}>Starts with</option>
+                <option value="contains" {% if match_mode == 'contains' %}selected{% endif %}>Contains</option>
+                <option value="not_contains" {% if match_mode == 'not_contains' %}selected{% endif %}>Does not contain</option>
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="status" class="form-label">Status</label>
+            <select id="status" name="status" class="form-select">
+                <option value="open" {% if status == 'open' %}selected{% endif %}>Open issues only</option>
+                <option value="all" {% if status == 'all' %}selected{% endif %}>All statuses</option>
+                {% for status_code, status_label in status_choices %}
+                <option value="{{ status_code }}" {% if status == status_code %}selected{% endif %}>{{ status_label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="priority" class="form-label">Priority</label>
+            <select id="priority" name="priority" class="form-select">
+                <option value="all" {% if priority == 'all' %}selected{% endif %}>All priorities</option>
+                {% for priority_code, priority_label in priority_choices %}
+                <option value="{{ priority_code }}" {% if priority == priority_code %}selected{% endif %}>{{ priority_label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="due_state" class="form-label">Due State</label>
+            <select id="due_state" name="due_state" class="form-select">
+                <option value="all" {% if due_state == 'all' %}selected{% endif %}>All due states</option>
+                <option value="overdue" {% if due_state == 'overdue' %}selected{% endif %}>Overdue</option>
+                <option value="due_soon" {% if due_state == 'due_soon' %}selected{% endif %}>Due soon</option>
+                <option value="no_due_date" {% if due_state == 'no_due_date' %}selected{% endif %}>No due date</option>
+                <option value="closed" {% if due_state == 'closed' %}selected{% endif %}>Closed issues</option>
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="asset_id" class="form-label">Asset</label>
+            <select id="asset_id" name="asset_id" class="form-select">
+                <option value="">All assets</option>
+                {% for asset in assets %}
+                <option value="{{ asset.id }}" {% if asset_id == asset.id %}selected{% endif %}>{{ asset.asset_tag }} - {{ asset.display_name }}{% if asset.archived %} (archived){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="assigned_user_id" class="form-label">Assigned Staff</label>
+            <select id="assigned_user_id" name="assigned_user_id" class="form-select">
+                <option value="">All staff</option>
+                {% for user in users %}
+                <option value="{{ user.id }}" {% if assigned_user_id == user.id %}selected{% endif %}>{{ user.display_label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="assigned_vendor_id" class="form-label">Assigned Vendor</label>
+            <select id="assigned_vendor_id" name="assigned_vendor_id" class="form-select">
+                <option value="">All vendors</option>
+                {% for vendor in vendors %}
+                <option value="{{ vendor.id }}" {% if assigned_vendor_id == vendor.id %}selected{% endif %}>{{ vendor.first_name }} {{ vendor.last_name }}{% if vendor.archived %} (archived){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+    {% endcall %}
+
+    {% if search_query or status != 'open' or priority != 'all' or due_state != 'all' or selected_asset or selected_user or selected_vendor %}
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="text-muted small">Active filters:</span>
+        {% if search_query %}
+        <span class="badge rounded-pill text-bg-light border">Search: {{ search_query }}</span>
+        {% endif %}
+        {% if status != 'open' %}
+        <span class="badge rounded-pill text-bg-light border">Status: {{ status.replace('_', ' ')|title }}</span>
+        {% endif %}
+        {% if priority != 'all' %}
+        <span class="badge rounded-pill text-bg-light border">Priority: {{ priority|title }}</span>
+        {% endif %}
+        {% if due_state != 'all' %}
+        <span class="badge rounded-pill text-bg-light border">Due: {{ due_state.replace('_', ' ')|title }}</span>
+        {% endif %}
+        {% if selected_asset %}
+        <span class="badge rounded-pill text-bg-light border">Asset: {{ selected_asset.asset_tag }}</span>
+        {% endif %}
+        {% if selected_user %}
+        <span class="badge rounded-pill text-bg-light border">Assigned Staff: {{ selected_user.display_label }}</span>
+        {% endif %}
+        {% if selected_vendor %}
+        <span class="badge rounded-pill text-bg-light border">Assigned Vendor: {{ selected_vendor.first_name }} {{ selected_vendor.last_name }}</span>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="table-responsive">
+        <table class="table sortable" id="equipmentMaintenanceTable">
+            <thead>
+                <tr>
+                    <th scope="col" class="col-maint-issue">Issue</th>
+                    <th scope="col" class="col-maint-asset">Asset</th>
+                    <th scope="col" class="col-maint-priority">Priority</th>
+                    <th scope="col" class="col-maint-status">Status</th>
+                    <th scope="col" class="col-maint-due">Due</th>
+                    <th scope="col" class="col-maint-user">Assigned Staff</th>
+                    <th scope="col" class="col-maint-vendor">Assigned Vendor</th>
+                    <th scope="col" class="col-maint-reported">Reported</th>
+                    <th scope="col" class="col-maint-cost">Cost</th>
+                    <th scope="col" class="col-maint-actions" data-sortable="false">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for issue in issues.items %}
+                <tr>
+                    <td class="col-maint-issue">
+                        <div class="fw-semibold">{{ issue.title }}</div>
+                        <div class="text-muted small">#{{ issue.id }}</div>
+                    </td>
+                    <td class="col-maint-asset">
+                        <div class="fw-semibold">{{ issue.equipment_asset.asset_tag }}</div>
+                        <div class="text-muted small">{{ issue.equipment_asset.display_name }}</div>
+                    </td>
+                    <td class="col-maint-priority"><span class="badge {{ issue.priority_badge_class }}">{{ issue.priority_label }}</span></td>
+                    <td class="col-maint-status"><span class="badge {{ issue.status_badge_class }}">{{ issue.status_label }}</span></td>
+                    <td class="col-maint-due">
+                        <div>{{ issue.due_on or '-' }}</div>
+                        {% if issue.due_state in ['overdue', 'due_soon'] %}
+                        <span class="text-{{ 'danger' if issue.due_state == 'overdue' else 'warning' }} small">{{ issue.due_state_label }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="col-maint-user">{{ issue.assigned_user.display_label if issue.assigned_user else '-' }}</td>
+                    <td class="col-maint-vendor">{{ issue.assigned_vendor.first_name ~ ' ' ~ issue.assigned_vendor.last_name if issue.assigned_vendor else '-' }}</td>
+                    <td class="col-maint-reported">{{ issue.reported_on }}</td>
+                    <td class="col-maint-cost">{% if issue.total_cost is not none %}${{ '%.2f'|format(issue.total_cost) }}{% else %}-{% endif %}</td>
+                    <td class="col-maint-actions">
+                        <div class="d-flex flex-wrap gap-2">
+                            <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('equipment.view_equipment_maintenance_issue', issue_id=issue.id) }}">View</a>
+                            {% if can_manage_maintenance %}
+                            <a class="btn btn-primary btn-sm" href="{{ url_for('equipment.edit_equipment_maintenance_issue', issue_id=issue.id) }}">Edit</a>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="10">No maintenance issues found.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3 mobile-pagination-controls">
+        <nav aria-label="Equipment maintenance pagination">
+            <ul class="pagination mb-0">
+                <li class="page-item {% if not issues.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('equipment.view_equipment_maintenance', page=issues.prev_num if issues.has_prev else 1, **pagination_args) }}"{% if not issues.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link">Page {{ issues.page }} of {{ issues.pages }}</span>
+                </li>
+                <li class="page-item {% if not issues.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('equipment.view_equipment_maintenance', page=issues.next_num if issues.has_next else issues.pages or 1, **pagination_args) }}"{% if not issues.has_next %} tabindex="-1" aria-disabled="true"{% endif %}>Next</a>
+                </li>
+            </ul>
+        </nav>
+        <form method="get" class="d-flex align-items-center gap-2">
+            {% for key, values in request.args.lists() %}
+                {% if key not in ['page', 'per_page'] %}
+                    {% for value in values %}
+                        <input type="hidden" name="{{ key }}" value="{{ value }}">
+                    {% endfor %}
+                {% endif %}
+            {% endfor %}
+            <input type="hidden" name="page" value="1">
+            <label for="equipment-maintenance-per-page" class="form-label mb-0">Rows per page</label>
+            <select id="equipment-maintenance-per-page" name="per_page" class="form-select js-auto-submit">
+                {% for option in PAGINATION_SIZES %}
+                    <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,7 +1,15 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="container-fluid px-0">
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .schedule-inline-form .form-control,
+    .schedule-inline-form .btn {
+        width: 100%;
+    }
+}
+</style>
+<div class="container-fluid px-3 px-lg-0 mobile-list-page app-page-shell">
     {% include 'schedules/_schedule_tabs.html' %}
 
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
@@ -97,15 +105,15 @@
                     {% endif %}
 
                     <div class="table-responsive">
-                        <table class="table table-sm align-middle">
+                        <table class="table table-sm align-middle table-mobile-card">
                             <thead><tr><th>Department</th><th>Role</th><th>Auto Assign</th><th>Supervisor</th><th></th></tr></thead>
                             <tbody>
                                 {% for membership in target_user.department_memberships %}
                                 <tr>
-                                    <td>{{ membership.department.name }}{% if membership.is_primary %}<div class="small text-muted">Primary</div>{% endif %}</td>
+                                    <td class="mobile-card-primary">{{ membership.department.name }}{% if membership.is_primary %}<div class="small text-muted">Primary</div>{% endif %}</td>
                                     <td>
                                         {% if can_manage_setup %}
-                                        <form method="post" class="d-flex gap-2 align-items-center">
+                                        <form method="post" class="d-flex flex-wrap gap-2 align-items-center schedule-inline-form">
                                             {{ action_form.hidden_tag() }}
                                             <input type="hidden" name="action" value="update_membership_role">
                                             <input type="hidden" name="membership_id" value="{{ membership.id }}">
@@ -147,7 +155,7 @@
                                     </td>
                                     <td>{{ membership.reports_to.email if membership.reports_to else '' }}</td>
                                     {% if can_manage_setup %}
-                                    <td class="text-end">
+                                    <td class="text-end mobile-card-actions">
                                         <form method="post">
                                             {{ action_form.hidden_tag() }}
                                             <input type="hidden" name="action" value="remove_membership">
@@ -191,16 +199,16 @@
                     {% endif %}
 
                     <div class="table-responsive">
-                        <table class="table table-sm align-middle">
+                        <table class="table table-sm align-middle table-mobile-card">
                             <thead><tr><th>Position</th><th>Department</th><th>Priority</th><th></th></tr></thead>
                             <tbody>
                                 {% for eligibility in target_user.position_eligibilities %}
                                 <tr>
-                                    <td>{{ eligibility.position.name }}</td>
+                                    <td class="mobile-card-primary">{{ eligibility.position.name }}</td>
                                     <td>{{ eligibility.position.department.name }}</td>
                                     <td>{{ eligibility.priority }}</td>
                                     {% if can_manage_setup %}
-                                    <td class="text-end">
+                                    <td class="text-end mobile-card-actions">
                                         <form method="post">
                                             {{ action_form.hidden_tag() }}
                                             <input type="hidden" name="action" value="remove_eligibility">

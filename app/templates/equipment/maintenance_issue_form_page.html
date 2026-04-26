@@ -1,0 +1,50 @@
+{% extends "shared/form_page.html" %}
+{% import "macros/forms.html" as forms %}
+
+{% block form_subtitle %}
+<p class="text-muted mb-0">{{ subtitle }}</p>
+{% endblock %}
+
+{% block form_content %}
+<form method="POST" class="app-page-shell">
+    {{ form.hidden_tag() }}
+
+    <div class="mb-4">
+        <h3 class="h5 mb-3">Issue</h3>
+        <div class="row g-3">
+            <div class="col-md-6">{{ forms.render_field(form.equipment_asset_id) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.title) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.priority) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.status) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.reported_on) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.due_on) }}</div>
+            <div class="col-12">{{ forms.render_field(form.description) }}</div>
+        </div>
+    </div>
+
+    <div class="mb-4">
+        <h3 class="h5 mb-3">Assignment and Cost</h3>
+        <div class="row g-3">
+            <div class="col-md-6">{{ forms.render_field(form.assigned_user_id) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.assigned_vendor_id) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.parts_cost) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.labor_cost) }}</div>
+        </div>
+    </div>
+
+    <div class="mb-4">
+        <h3 class="h5 mb-3">Downtime and Resolution</h3>
+        <div class="row g-3">
+            <div class="col-md-4">{{ forms.render_field(form.downtime_started_on) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.downtime_resolved_on) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.resolved_on) }}</div>
+            <div class="col-12">{{ forms.render_field(form.resolution_summary) }}</div>
+        </div>
+    </div>
+
+    <div class="d-flex flex-wrap gap-2">
+        <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('equipment.view_equipment_maintenance') }}">Cancel</a>
+    </div>
+</form>
+{% endblock %}

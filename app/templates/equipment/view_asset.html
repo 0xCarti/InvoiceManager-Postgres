@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+
+{% block title %}{{ asset.asset_tag }}{% endblock %}
+
+{% block content %}
+{% set can_edit_equipment = can_access_endpoint('equipment.edit_equipment_asset', 'GET') %}
+{% set can_archive_equipment = can_access_endpoint('equipment.archive_equipment_asset', 'POST') %}
+{% set can_print_labels = can_access_endpoint('equipment.print_equipment_labels', 'GET') %}
+{% set can_view_maintenance = can_access_endpoint('equipment.view_equipment_maintenance', 'GET') %}
+{% set can_manage_maintenance = can_access_endpoint('equipment.create_equipment_maintenance_issue', 'GET') %}
+{% set can_view_intake = can_access_endpoint('equipment.view_equipment_intake', 'GET') %}
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .mobile-list-page .asset-page-actions > *,
+    .mobile-list-page .asset-page-actions .btn,
+    .mobile-list-page .asset-page-actions form {
+        width: 100%;
+    }
+}
+</style>
+<div class="container mt-5 mobile-list-page app-page-shell">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-start gap-3 mb-4">
+        <div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                <h2 class="mb-0">{{ asset.asset_tag }}</h2>
+                <span class="badge {{ asset.status_badge_class }}">{{ asset.status_label }}</span>
+                {% if asset.needs_attention %}
+                <span class="badge text-bg-warning">Needs Attention</span>
+                {% endif %}
+                {% if asset.archived %}
+                <span class="badge text-bg-secondary">Archived</span>
+                {% endif %}
+            </div>
+            <p class="text-muted mb-0">{{ asset.display_name }}</p>
+            {% if asset.model_display_name and asset.model_display_name != asset.display_name %}
+            <p class="text-muted mb-0">{{ asset.model_display_name }}</p>
+            {% endif %}
+        </div>
+        <div class="d-flex flex-wrap gap-2 asset-page-actions">
+            <a class="btn btn-outline-secondary" href="{{ url_for('equipment.view_equipment') }}">Back to Equipment</a>
+            <a class="btn btn-outline-secondary" href="{{ url_for('notes.entity_notes', entity_type='equipment', entity_id=asset.id) }}">Notes</a>
+            {% if can_view_maintenance %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('equipment.view_equipment_maintenance', asset_id=asset.id) }}">Maintenance Queue</a>
+            {% endif %}
+            {% if can_view_intake and asset.intake_batch %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('equipment.view_equipment_intake_batch', batch_id=asset.intake_batch.id) }}">View Intake Batch</a>
+            {% endif %}
+            {% if can_manage_maintenance %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('equipment.create_equipment_maintenance_issue', asset_id=asset.id) }}">Report Issue</a>
+            {% endif %}
+            {% if can_print_labels %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('equipment.print_equipment_labels', equipment_id=asset.id) }}" target="_blank" rel="noopener">Print Label</a>
+            {% endif %}
+            {% if can_edit_equipment %}
+            <a class="btn btn-primary" href="{{ url_for('equipment.edit_equipment_asset', asset_id=asset.id) }}">Edit</a>
+            {% endif %}
+            {% if can_archive_equipment and not asset.archived %}
+            <form action="{{ url_for('equipment.archive_equipment_asset', asset_id=asset.id) }}" method="post" class="d-inline">
+                {{ delete_form.hidden_tag() }}
+                <button type="submit" class="btn btn-danger" data-confirm-message="Archive this equipment asset?">Archive</button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-12 col-lg-6">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h3 class="h5 mb-3">Overview</h3>
+                    <dl class="row mb-0">
+                        <dt class="col-sm-4">Category</dt>
+                        <dd class="col-sm-8">{{ asset.category.name if asset.category else '-' }}</dd>
+                        <dt class="col-sm-4">Model</dt>
+                        <dd class="col-sm-8">{{ asset.model_display_name or '-' }}</dd>
+                        <dt class="col-sm-4">Serial Number</dt>
+                        <dd class="col-sm-8">{{ asset.serial_number or '-' }}</dd>
+                        <dt class="col-sm-4">Acquired On</dt>
+                        <dd class="col-sm-8">{{ asset.acquired_on or '-' }}</dd>
+                        <dt class="col-sm-4">Warranty Expires</dt>
+                        <dd class="col-sm-8">
+                            {% if asset.warranty_expires_on %}
+                            <div>{{ asset.warranty_expires_on }}</div>
+                            <span class="badge {{ asset.warranty_badge_class }}">{{ asset.warranty_label }}</span>
+                            {% else %}
+                            -
+                            {% endif %}
+                        </dd>
+                        <dt class="col-sm-4">Cost</dt>
+                        <dd class="col-sm-8">{% if asset.cost is not none %}${{ '%.2f'|format(asset.cost) }}{% else %}-{% endif %}</dd>
+                        <dt class="col-sm-4">Intake Batch</dt>
+                        <dd class="col-sm-8">
+                            {% if asset.intake_batch %}
+                                {% if can_view_intake %}
+                                <a href="{{ url_for('equipment.view_equipment_intake_batch', batch_id=asset.intake_batch.id) }}">Batch #{{ asset.intake_batch.id }}</a>
+                                {% else %}
+                                Batch #{{ asset.intake_batch.id }}
+                                {% endif %}
+                            {% else %}
+                            -
+                            {% endif %}
+                        </dd>
+                        <dt class="col-sm-4">Description</dt>
+                        <dd class="col-sm-8">{{ asset.description or '-' }}</dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-6">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h3 class="h5 mb-3">Assignment and Service</h3>
+                    <dl class="row mb-0">
+                        <dt class="col-sm-4">Location</dt>
+                        <dd class="col-sm-8">{{ asset.location_label or '-' }}</dd>
+                        <dt class="col-sm-4">Custodian</dt>
+                        <dd class="col-sm-8">{{ asset.custodian_label or '-' }}</dd>
+                        <dt class="col-sm-4">Purchased From</dt>
+                        <dd class="col-sm-8">{{ purchase_vendor_name or (asset.intake_batch.vendor_display_name if asset.intake_batch else '-') or '-' }}</dd>
+                        <dt class="col-sm-4">PO Reference</dt>
+                        <dd class="col-sm-8">{{ asset.intake_batch.order_reference_label if asset.intake_batch else '-' }}</dd>
+                        <dt class="col-sm-4">Invoice Reference</dt>
+                        <dd class="col-sm-8">{{ asset.intake_batch.invoice_reference_label if asset.intake_batch else '-' }}</dd>
+                        <dt class="col-sm-4">Service Vendor</dt>
+                        <dd class="col-sm-8">{{ service_vendor_name or '-' }}</dd>
+                        <dt class="col-sm-4">Service Contact</dt>
+                        <dd class="col-sm-8">{{ asset.service_contact_name or '-' }}</dd>
+                        <dt class="col-sm-4">Service Email</dt>
+                        <dd class="col-sm-8">{{ asset.service_contact_email or '-' }}</dd>
+                        <dt class="col-sm-4">Service Phone</dt>
+                        <dd class="col-sm-8">{{ asset.service_contact_phone or '-' }}</dd>
+                        <dt class="col-sm-4">Updated</dt>
+                        <dd class="col-sm-8">{{ asset.updated_at|format_datetime('%Y-%m-%d %H:%M') }}</dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-6">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                        <h3 class="h5 mb-0">Service Schedule</h3>
+                        <div class="d-flex flex-wrap gap-2">
+                            <span class="badge {{ asset.service_due_badge_class }}">{{ asset.service_due_label }}</span>
+                            {% if asset.service_contract_expires_on %}
+                            <span class="badge {{ asset.service_contract_badge_class }}">{{ asset.service_contract_label }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <dl class="row mb-0">
+                        <dt class="col-sm-5">Contract Name</dt>
+                        <dd class="col-sm-7">{{ asset.service_contract_name or '-' }}</dd>
+                        <dt class="col-sm-5">Contract Reference</dt>
+                        <dd class="col-sm-7">{{ asset.service_contract_reference or '-' }}</dd>
+                        <dt class="col-sm-5">Contract Expires</dt>
+                        <dd class="col-sm-7">{{ asset.service_contract_expires_on or '-' }}</dd>
+                        <dt class="col-sm-5">Service Interval</dt>
+                        <dd class="col-sm-7">{% if asset.service_interval_days %}Every {{ asset.service_interval_days }} days{% else %}-{% endif %}</dd>
+                        <dt class="col-sm-5">Last Service</dt>
+                        <dd class="col-sm-7">{{ asset.last_service_on or '-' }}</dd>
+                        <dt class="col-sm-5">Next Service Due</dt>
+                        <dd class="col-sm-7">{{ asset.service_due_date or '-' }}</dd>
+                        <dt class="col-sm-5">Contract Notes</dt>
+                        <dd class="col-sm-7">{{ asset.service_contract_notes or '-' }}</dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-6">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                        <h3 class="h5 mb-0">Maintenance Summary</h3>
+                        <span class="badge {% if open_issue_count %}text-bg-warning{% else %}text-bg-success{% endif %}">
+                            {{ open_issue_count }} Open Issue{% if open_issue_count != 1 %}s{% endif %}
+                        </span>
+                    </div>
+                    {% if recent_issues %}
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-0 table-mobile-card">
+                            <thead>
+                                <tr>
+                                    <th>Issue</th>
+                                    <th>Status</th>
+                                    <th>Priority</th>
+                                    <th>Due</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for issue in recent_issues %}
+                                <tr>
+                                    <td class="mobile-card-primary">
+                                        <div class="fw-semibold">{{ issue.title }}</div>
+                                        <div class="text-muted small">#{{ issue.id }}</div>
+                                    </td>
+                                    <td><span class="badge {{ issue.status_badge_class }}">{{ issue.status_label }}</span></td>
+                                    <td><span class="badge {{ issue.priority_badge_class }}">{{ issue.priority_label }}</span></td>
+                                    <td>{{ issue.due_on or '-' }}</td>
+                                    <td class="text-end mobile-card-actions">
+                                        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('equipment.view_equipment_maintenance_issue', issue_id=issue.id) }}">View</a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-0">No maintenance issues have been logged for this asset yet.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

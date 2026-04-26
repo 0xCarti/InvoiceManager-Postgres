@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="container-fluid px-0">
+<div class="container-fluid px-3 px-lg-0 mobile-list-page app-page-shell">
     {% include 'schedules/_schedule_tabs.html' %}
 
     <div class="row g-3">
@@ -23,7 +23,7 @@
                     <hr>
                     <h2 class="h5">My Requests</h2>
                     <div class="table-responsive">
-                        <table class="table table-sm align-middle">
+                        <table class="table table-sm align-middle table-mobile-card">
                             <thead>
                                 <tr>
                                     <th>Dates</th>
@@ -35,10 +35,10 @@
                             <tbody>
                                 {% for request_obj in own_requests %}
                                 <tr>
-                                    <td>{{ request_obj.start_date }} - {{ request_obj.end_date }}</td>
+                                    <td class="mobile-card-primary">{{ request_obj.start_date }} - {{ request_obj.end_date }}</td>
                                     <td><span class="badge text-bg-{{ 'success' if request_obj.status == 'approved' else 'danger' if request_obj.status == 'denied' else 'secondary' }}">{{ request_obj.status|title }}</span></td>
                                     <td>{{ request_obj.reason }}</td>
-                                    <td class="text-end">
+                                    <td class="text-end mobile-card-actions">
                                         {% if request_obj.status == 'pending' %}
                                         <form method="post">
                                             {{ action_form.hidden_tag() }}
@@ -88,7 +88,7 @@
                     {% endif %}
 
                     <div class="table-responsive">
-                        <table class="table table-sm align-middle">
+                        <table class="table table-sm align-middle table-mobile-card">
                             <thead>
                                 <tr>
                                     <th>User</th>
@@ -101,7 +101,7 @@
                             <tbody>
                                 {% for request_obj in team_requests %}
                                 <tr>
-                                    <td>
+                                    <td class="mobile-card-primary">
                                         <div class="fw-semibold">{{ request_obj.user.name_or_email }}</div>
                                         {% if request_obj.user.preferred_name %}
                                         <div class="small text-muted">{{ request_obj.user.email }}</div>
@@ -110,7 +110,7 @@
                                     <td>{{ request_obj.start_date }} - {{ request_obj.end_date }}</td>
                                     <td><span class="badge text-bg-{{ 'success' if request_obj.status == 'approved' else 'danger' if request_obj.status == 'denied' else 'secondary' }}">{{ request_obj.status|title }}</span></td>
                                     <td>{{ request_obj.reason }}</td>
-                                    <td class="text-end">
+                                    <td class="text-end mobile-card-actions">
                                         <a class="btn btn-sm btn-outline-primary" href="{{ url_for('schedule.time_off', review_id=request_obj.id) }}">Review</a>
                                     </td>
                                 </tr>

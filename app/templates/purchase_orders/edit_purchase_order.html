@@ -3,6 +3,7 @@
 {% set can_quick_add_items = can_access_endpoint('item.quick_add_item', 'POST') %}
 {% set can_manage_item_units = can_access_endpoint('item.item_units', 'POST') %}
 {% set can_mark_purchase_orders = can_access_endpoint('purchase.mark_purchase_order_ordered', 'POST') %}
+{% set can_manage_equipment_intake = can_access_endpoint('equipment.create_equipment_intake_batch', 'GET') %}
 <div class="container mt-4 app-page-shell">
     <div class="app-page-header">
         <div class="app-page-header-copy">
@@ -12,6 +13,9 @@
         <div class="app-page-header-actions">
             <div class="d-flex flex-wrap align-items-center gap-2">
                 <span class="badge {{ po.purchase_status_badge_class }}">{{ po.purchase_status_label }}</span>
+                {% if can_manage_equipment_intake %}
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('equipment.create_equipment_intake_batch', purchase_order_id=po.id) }}">Create Equipment Intake</a>
+                {% endif %}
                 {% if po.can_mark_ordered and can_mark_purchase_orders %}
                 <form method="POST" action="{{ url_for('purchase.mark_purchase_order_ordered', po_id=po.id) }}" class="d-inline">
                     {{ mark_ordered_form.hidden_tag() }}

@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="container-fluid px-0">
+<div class="container-fluid px-3 px-lg-0 mobile-list-page app-page-shell">
     {% include 'schedules/_schedule_tabs.html' %}
 
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
@@ -30,7 +30,7 @@
                     <label class="form-label">Week Starting</label>
                     <input type="date" name="week_start" class="form-control" value="{{ schedule_week.week_start.isoformat() if schedule_week else '' }}">
                 </div>
-                <div class="col-12 col-md-auto d-flex gap-2">
+                <div class="col-12 col-md-auto d-flex flex-wrap gap-2">
                     {% if selected_department %}
                     <a class="btn btn-outline-secondary" href="{{ url_for('schedule.tradeboard', department_id=selected_department.id, week_start=previous_week.isoformat()) }}">Previous</a>
                     {% endif %}
@@ -50,7 +50,7 @@
                 <div class="card-body">
                     <h2 class="h5">Open / Tradeboard Shifts</h2>
                     <div class="table-responsive">
-                        <table class="table table-sm align-middle">
+                        <table class="table table-sm align-middle table-mobile-card">
                             <thead>
                                 <tr>
                                     <th>Date</th>
@@ -63,11 +63,11 @@
                             <tbody>
                                 {% for shift in shifts %}
                                 <tr>
-                                    <td>{{ shift.shift_date }}</td>
+                                    <td class="mobile-card-primary">{{ shift.shift_date }}</td>
                                     <td>{{ shift.start_time.strftime('%H:%M') }} - {{ shift.end_time.strftime('%H:%M') }}</td>
                                     <td>{{ shift.position.name }}</td>
                                     <td>{{ shift.assignment_mode|replace('_', ' ')|title }}</td>
-                                    <td class="text-end">
+                                    <td class="text-end mobile-card-actions">
                                         {% set my_claim = shift.tradeboard_claims|selectattr('user_id', 'equalto', current_user.id)|list|first %}
                                         {% if current_user.has_permission('schedules.claim_tradeboard') %}
                                             {% if my_claim and my_claim.status == 'pending' %}

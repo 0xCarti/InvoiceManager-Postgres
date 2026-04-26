@@ -1,0 +1,55 @@
+{% extends "shared/form_page.html" %}
+{% import "macros/forms.html" as forms %}
+
+{% block title %}Import Snipe-IT Equipment{% endblock %}
+
+{% block form_subtitle %}
+<p class="text-muted mb-0">Upload a Snipe-IT CSV export to create or refresh equipment assets and group them into received intake batches.</p>
+{% endblock %}
+
+{% block form_content %}
+<form method="POST" enctype="multipart/form-data" class="app-page-shell">
+    {{ form.hidden_tag() }}
+
+    <div class="mb-4">
+        <h3 class="h5 mb-3">Import File</h3>
+        <div class="row g-3">
+            <div class="col-md-6">{{ forms.render_field(form.file) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.default_category_name) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.create_missing_locations) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.update_existing) }}</div>
+        </div>
+    </div>
+
+    <div class="alert alert-info" role="alert">
+        Supported columns include asset tag, name, serial number, category, manufacturer, model, status, purchase date, purchase cost, supplier, location, assigned to, warranty expiry, PO reference, and invoice reference. Unknown columns are ignored.
+    </div>
+
+    {% if summary %}
+    <div class="card mb-4">
+        <div class="card-body">
+            <h3 class="h5 mb-3">Last Import Summary</h3>
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <span class="badge text-bg-success">{{ summary.created_count }} created</span>
+                <span class="badge text-bg-primary">{{ summary.updated_count }} updated</span>
+                <span class="badge text-bg-secondary">{{ summary.skipped_count }} skipped</span>
+                <span class="badge text-bg-light border">{{ summary.created_batch_count }} intake batch{% if summary.created_batch_count != 1 %}es{% endif %}</span>
+            </div>
+            {% if summary.warnings %}
+            <h4 class="h6">Warnings</h4>
+            <ul class="mb-0">
+                {% for warning in summary.warnings %}
+                <li>{{ warning }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="d-flex flex-wrap gap-2">
+        <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('equipment.view_equipment_intake') }}">Back to Intake</a>
+    </div>
+</form>
+{% endblock %}
