@@ -28,14 +28,22 @@
             Missing
             {% endif %}
         </p>
+        <div class="d-flex flex-wrap gap-2 mt-2">
+            {% if needs_mapping %}
+            <span class="badge text-bg-warning">Needs Mapping</span>
+            {% endif %}
+            {% if unresolved_price_count %}
+            <span class="badge text-bg-light border border-warning text-warning">Needs Price Review</span>
+            {% endif %}
+        </div>
         {% if sales_import.reversed_at %}
         <p class="text-muted mb-0 small">
-            Reversed by {{ sales_import.reverser.username if sales_import.reverser else ('User #' ~ sales_import.reversed_by) }}
+            Approval undone by {{ sales_import.reverser.username if sales_import.reverser else ('User #' ~ sales_import.reversed_by) }}
             at {{ sales_import.reversed_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}
             {% if sales_import.reversal_reason %}&middot; Reason: {{ sales_import.reversal_reason }}{% endif %}
         </p>
         {% endif %}
-        {% if sales_import.status == 'reversed' %}
+        {% if sales_import.reversed_at and sales_import.status == 'pending' %}
         <p class="text-muted mb-0 small">
             Review changes are unlocked. Fix mappings or pricing, then approve the import again when it is ready.
         </p>
@@ -47,9 +55,9 @@
             {% if sales_import.deletion_reason %}&middot; Reason: {{ sales_import.deletion_reason }}{% endif %}
         </p>
         {% endif %}
-        {% if sales_import.failure_reason and sales_import.status in ['failed', 'ignored'] %}
+        {% if sales_import.failure_reason and sales_import.status == 'ignored' %}
         <p class="text-muted mb-0 small">
-            {{ 'Failure reason' if sales_import.status == 'failed' else 'Ignored reason' }}: {{ sales_import.failure_reason }}
+            Status note: {{ sales_import.failure_reason }}
         </p>
         {% endif %}
     </div>
@@ -188,7 +196,7 @@
     All mappings and price checks are resolved. This import is ready for approval.
 </div>
 {% endif %}
-{% if sales_import.status == 'reversed' %}
+{% if sales_import.reversed_at and sales_import.status == 'pending' %}
 <div class="alert alert-info py-2">
     This import has been undone already. Review edits are available now, and approving it again will reapply the sales using the updated mappings.
 </div>
@@ -709,7 +717,7 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-2">This will reverse inventory updates using stored approval metadata and set this import to <strong>Reversed</strong> so you can review and approve it again.</p>
+                    <p class="mb-2">This will reverse inventory updates using stored approval metadata and return this import to <strong>Pending</strong> so you can review and approve it again.</p>
                     {% if reversal_warnings %}
                     <div class="alert alert-warning py-2 small">
                         <div class="fw-semibold">Potential negative inventory impact:</div>

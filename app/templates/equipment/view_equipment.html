@@ -14,6 +14,7 @@
 {% set can_import_equipment = can_access_endpoint('equipment.import_equipment_from_snipe_it', 'GET') %}
 {% set can_view_maintenance = can_access_endpoint('equipment.view_equipment_maintenance', 'GET') %}
 {% set can_manage_maintenance = can_access_endpoint('equipment.create_equipment_maintenance_issue', 'GET') %}
+{% set can_manage_custody = can_access_endpoint('equipment.view_equipment_asset_scan', 'GET') %}
 {% set can_view_procurement_report = can_access_endpoint('report.equipment_procurement_report', 'GET') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
@@ -108,6 +109,7 @@
                     {'id': 'toggle-equipment-category', 'target': 'col-equipment-category', 'label': 'Category', 'checked': True},
                     {'id': 'toggle-equipment-model', 'target': 'col-equipment-model', 'label': 'Model', 'checked': True},
                     {'id': 'toggle-equipment-status', 'target': 'col-equipment-status', 'label': 'Status', 'checked': True},
+                    {'id': 'toggle-equipment-custody', 'target': 'col-equipment-custody', 'label': 'Custody', 'checked': True},
                     {'id': 'toggle-equipment-attention', 'target': 'col-equipment-attention', 'label': 'Attention', 'checked': True},
                     {'id': 'toggle-equipment-vendor', 'target': 'col-equipment-vendor', 'label': 'Purchased From', 'checked': True},
                     {'id': 'toggle-equipment-location', 'target': 'col-equipment-location', 'label': 'Location', 'checked': True},
@@ -170,6 +172,14 @@
             </select>
         </div>
         <div class="mb-3">
+            <label for="custody_state" class="form-label">Custody</label>
+            <select id="custody_state" name="custody_state" class="form-select">
+                <option value="all" {% if custody_state == 'all' %}selected{% endif %}>All assets</option>
+                <option value="in_storage" {% if custody_state == 'in_storage' %}selected{% endif %}>In storage</option>
+                <option value="checked_out" {% if custody_state == 'checked_out' %}selected{% endif %}>Checked out</option>
+            </select>
+        </div>
+        <div class="mb-3">
             <label for="category_id" class="form-label">Category</label>
             <select id="category_id" name="category_id" class="form-select">
                 <option value="">All categories</option>
@@ -216,7 +226,7 @@
         </div>
     {% endcall %}
 
-    {% if search_query or status != 'all' or archived != 'active' or attention_state != 'all' or selected_category or selected_model or selected_vendor or selected_location or selected_user %}
+    {% if search_query or status != 'all' or archived != 'active' or attention_state != 'all' or custody_state != 'all' or selected_category or selected_model or selected_vendor or selected_location or selected_user %}
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
         <span class="text-muted small">Active filters:</span>
         {% if search_query %}
@@ -230,6 +240,9 @@
         {% endif %}
         {% if attention_state != 'all' %}
         <span class="badge rounded-pill text-bg-light border">Attention: {{ 'Needs attention' if attention_state == 'needs_attention' else 'No active reminders' }}</span>
+        {% endif %}
+        {% if custody_state != 'all' %}
+        <span class="badge rounded-pill text-bg-light border">Custody: {{ 'Checked out' if custody_state == 'checked_out' else 'In storage' }}</span>
         {% endif %}
         {% if selected_category %}
         <span class="badge rounded-pill text-bg-light border">Category: {{ selected_category.name }}</span>
@@ -263,6 +276,7 @@
                     <th scope="col" class="col-equipment-category">Category</th>
                     <th scope="col" class="col-equipment-model">Model</th>
                     <th scope="col" class="col-equipment-status">Status</th>
+                    <th scope="col" class="col-equipment-custody">Custody</th>
                     <th scope="col" class="col-equipment-attention">Attention</th>
                     <th scope="col" class="col-equipment-vendor">Purchased From</th>
                     <th scope="col" class="col-equipment-location">Location</th>
@@ -291,6 +305,14 @@
                     <td class="col-equipment-model">{{ asset.model_display_name or '-' }}</td>
                     <td class="col-equipment-status">
                         <span class="badge {{ asset.status_badge_class }}">{{ asset.status_label }}</span>
+                    </td>
+                    <td class="col-equipment-custody">
+                        <div class="d-flex flex-column gap-1">
+                            <span class="badge {{ asset.custody_badge_class }}">{{ asset.custody_state_label }}</span>
+                            {% if asset.home_location_label %}
+                            <span class="small text-muted">Home: {{ asset.home_location_label }}</span>
+                            {% endif %}
+                        </div>
                     </td>
                     <td class="col-equipment-attention">
                         {% set open_issue_count = open_issue_count_map.get(asset.id, 0) %}
@@ -321,6 +343,9 @@
                         <div class="mobile-actions">
                             <a href="{{ url_for('equipment.view_equipment_asset', asset_id=asset.id) }}" class="btn btn-outline-secondary btn-sm">View</a>
                             <a href="{{ url_for('notes.entity_notes', entity_type='equipment', entity_id=asset.id) }}" class="btn btn-outline-secondary btn-sm">Notes</a>
+                            {% if can_manage_custody %}
+                            <a href="{{ url_for('equipment.view_equipment_asset_scan', asset_id=asset.id) }}" class="btn btn-outline-secondary btn-sm">Scan</a>
+                            {% endif %}
                             {% if can_view_maintenance %}
                             <a href="{{ url_for('equipment.view_equipment_maintenance', asset_id=asset.id) }}" class="btn btn-outline-secondary btn-sm">Maintenance</a>
                             {% endif %}
@@ -344,7 +369,7 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="{% if can_print_labels %}13{% else %}12{% endif %}">No equipment assets found.</td>
+                    <td colspan="{% if can_print_labels %}14{% else %}13{% endif %}">No equipment assets found.</td>
                 </tr>
                 {% endfor %}
             </tbody>

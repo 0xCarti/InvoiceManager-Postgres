@@ -619,7 +619,7 @@ def test_admin_can_undo_one_event_linked_import_and_keep_later_event_sales(
             event_location_id=seeded["event_location_id"]
         ).one()
 
-        assert first_import.status == "reversed"
+        assert first_import.status == "pending"
         assert first_location.reversal_batch_id == first_import.reversal_batch_id
         assert second_import.status == "approved"
         assert len(terminal_sales) == 1
@@ -689,7 +689,7 @@ def test_sales_import_approval_blocked_for_unresolved_mappings(client, app):
 
     with app.app_context():
         sales_import = db.session.get(PosSalesImport, sales_import_id)
-        assert sales_import.status in {"pending", "needs_mapping"}
+        assert sales_import.status == "pending"
         assert sales_import.approved_at is None
 
 
@@ -1343,6 +1343,27 @@ def test_sales_imports_list_supports_search_filters_and_pagination_controls(
         assert b"morning-pending-sales.xls" not in response.data
         assert b"Already approved" in response.data
         assert b"Needs review" not in response.data
+        assert b'value="pending"' in response.data
+        assert b'value="approved"' in response.data
+        assert b'value="ignored"' in response.data
+        assert b'value="needs_mapping"' not in response.data
+        assert b'value="reversed"' not in response.data
+        assert b'value="failed"' not in response.data
+
+
+def test_sales_imports_list_shows_needs_mapping_flag_without_using_it_as_status(
+    client, app
+):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    _create_unresolved_sales_import(app, message_id="msg-list-needs-mapping")
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.get("/controlpanel/sales-imports", follow_redirects=True)
+        assert response.status_code == 200
+        assert b"Needs Mapping" in response.data
+        assert b"Status: Needs Mapping" not in response.data
 
 
 def test_sales_import_filters_can_be_saved_from_list_modal(client, app):
@@ -1541,7 +1562,7 @@ def test_admin_can_undo_approved_sales_import_and_restore_inventory(client, app)
         ).first()
         item = Item.query.filter_by(name="Patty").first()
 
-        assert sales_import.status == "reversed"
+        assert sales_import.status == "pending"
         assert sales_import.reversed_by is not None
         assert sales_import.reversed_at is not None
         assert sales_import.reversal_batch_id
@@ -2062,7 +2083,7 @@ def test_sales_import_undo_applies_reversal_only_once(client, app):
             item_id=item.id,
         ).one()
 
-        assert sales_import.status == "reversed"
+        assert sales_import.status == "pending"
         assert sales_import.reversed_by is not None
         assert sales_import.reversed_at is not None
         assert sales_import.reversal_reason == "undo once"

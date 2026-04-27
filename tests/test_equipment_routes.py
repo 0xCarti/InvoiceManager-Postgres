@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from io import BytesIO
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 from werkzeug.security import generate_password_hash
@@ -11,6 +11,7 @@ from app.models import (
     ActivityLog,
     EquipmentAsset,
     EquipmentCategory,
+    EquipmentCustodyEvent,
     EquipmentIntakeBatch,
     EquipmentMaintenanceIssue,
     EquipmentMaintenanceUpdate,
@@ -116,6 +117,7 @@ def _create_equipment_asset(
             [category, equipment_model, location, custodian, purchase_vendor]
         )
         db.session.flush()
+        home_location_id = asset_kwargs.pop("home_location_id", location.id)
         asset = EquipmentAsset(
             equipment_model=equipment_model,
             asset_tag=asset_tag,
@@ -124,6 +126,7 @@ def _create_equipment_asset(
             status=status,
             purchase_vendor_id=purchase_vendor.id,
             location_id=location.id,
+            home_location_id=home_location_id,
             assigned_user_id=custodian.id,
             **asset_kwargs,
         )
@@ -223,8 +226,10 @@ def test_equipment_crud_and_notes_flow(client, app):
                 "service_contact_email": "service@example.com",
                 "service_contact_phone": "555-0100",
                 "location_id": str(deps["location_id"]),
-                "sublocation": "Back hallway",
+                "home_location_id": str(deps["location_id"]),
                 "assigned_user_id": str(deps["custodian_id"]),
+                "label_qr_target": EquipmentAsset.QR_TARGET_SCAN,
+                "label_qr_custom_url": "",
             },
             follow_redirects=True,
         )
@@ -262,8 +267,10 @@ def test_equipment_crud_and_notes_flow(client, app):
                 "service_contact_email": "service@example.com",
                 "service_contact_phone": "555-0100",
                 "location_id": str(deps["location_id"]),
-                "sublocation": "Rear corridor",
+                "home_location_id": str(deps["location_id"]),
                 "assigned_user_id": str(deps["custodian_id"]),
+                "label_qr_target": EquipmentAsset.QR_TARGET_CUSTOM,
+                "label_qr_custom_url": "https://example.com/custom-eq/FRZ-001",
             },
             follow_redirects=True,
         )
@@ -281,7 +288,9 @@ def test_equipment_crud_and_notes_flow(client, app):
         asset = EquipmentAsset.query.filter_by(asset_tag="FRZ-001").one()
         assert asset.archived is True
         assert asset.status == EquipmentAsset.STATUS_NEEDS_SERVICE
-        assert asset.sublocation == "Rear corridor"
+        assert asset.home_location_id == deps["location_id"]
+        assert asset.label_qr_target == EquipmentAsset.QR_TARGET_CUSTOM
+        assert asset.label_qr_custom_url == "https://example.com/custom-eq/FRZ-001"
         assert Note.query.filter_by(
             entity_type="equipment", entity_id=str(asset.id)
         ).count() == 1
@@ -324,7 +333,9 @@ def test_equipment_list_filters_and_defaults(client, app, save_filter_defaults):
                     name="Front POS Printer",
                     status=EquipmentAsset.STATUS_OPERATIONAL,
                     location_id=location.id,
+                    home_location_id=location.id,
                     assigned_user_id=user.id,
+                    checked_out_at=datetime.utcnow(),
                 ),
                 EquipmentAsset(
                     equipment_model=model,
@@ -347,6 +358,11 @@ def test_equipment_list_filters_and_defaults(client, app, save_filter_defaults):
         assert searched.status_code == 200
         assert b"Front POS Printer" in searched.data
         assert b"Spare POS Printer" not in searched.data
+
+        checked_out = client.get("/equipment?custody_state=checked_out")
+        assert checked_out.status_code == 200
+        assert b"POS-001" in checked_out.data
+        assert b"POS-002" not in checked_out.data
 
         save_filter_defaults(
             "equipment.view_equipment",
@@ -371,6 +387,7 @@ def test_equipment_permissions_hide_management_ui_and_protect_notes(client, app)
         assert "Add Equipment" not in html
         assert "Manage Catalog" not in html
         assert "Print Selected Labels" not in html
+        assert "Scan" not in html
         assert f"/equipment/{asset_id}/edit" not in html
         assert f"/equipment/{asset_id}/archive" not in html
         assert f"/equipment/labels/print?equipment_id={asset_id}" not in html
@@ -380,6 +397,9 @@ def test_equipment_permissions_hide_management_ui_and_protect_notes(client, app)
         assert detail_page.status_code == 200
         detail_html = detail_page.get_data(as_text=True)
         assert "Print Label" not in detail_html
+        assert "Scan Page" not in detail_html
+        assert "Sign In" not in detail_html
+        assert "Sign Out" not in detail_html
         assert ">Edit<" not in detail_html
         assert ">Archive<" not in detail_html
         assert "Notes" in detail_html
@@ -390,6 +410,7 @@ def test_equipment_permissions_hide_management_ui_and_protect_notes(client, app)
         login(client, unprivileged_email, "pass")
         assert client.get("/equipment").status_code == 403
         assert client.get(f"/notes/equipment/{asset_id}").status_code == 403
+        assert client.get(f"/equipment/{asset_id}/scan").status_code == 403
 
 
 def test_equipment_maintenance_workflow_and_history(client, app):
@@ -652,10 +673,9 @@ def test_equipment_intake_receive_flow_and_notes(client, app):
                 "cost": "349.99",
                 "location_id": str(deps["location_id"]),
                 "assigned_user_id": str(deps["custodian_id"]),
-                "sublocation": "Prep Line",
                 "asset_rows": (
-                    "INT-001,SER-INT-001,Prep Cooler Left,Station A\n"
-                    "INT-002,SER-INT-002,Prep Cooler Right,Station B"
+                    "INT-001,SER-INT-001,Prep Cooler Left\n"
+                    "INT-002,SER-INT-002,Prep Cooler Right"
                 ),
             },
             follow_redirects=True,
@@ -686,6 +706,7 @@ def test_equipment_intake_receive_flow_and_notes(client, app):
         assert len(received_assets) == 2
         assert all(asset.equipment_intake_batch_id == batch_id for asset in received_assets)
         assert received_assets[0].location_id == deps["location_id"]
+        assert received_assets[0].home_location_id == deps["location_id"]
         assert received_assets[0].assigned_user_id == deps["custodian_id"]
 
         flush_activity_logs()
@@ -997,6 +1018,7 @@ def test_snipe_it_import_creates_batches_assets_and_updates_existing(client, app
 
         assert new_asset.serial_number == "SER-NEW-001"
         assert new_asset.location_id == import_location.id
+        assert new_asset.home_location_id == import_location.id
         assert new_asset.equipment_intake_batch_id is not None
         assert updated_asset.name == "Updated Existing Asset"
         assert updated_asset.serial_number == "SER-EXIST-001"
@@ -1048,6 +1070,135 @@ def test_equipment_label_print_route_returns_pdf_and_logs_activity(
             "Printed equipment label(s) for assets" in activity
             for activity in activities
         )
+
+
+def test_equipment_custody_scan_flow_and_qr_targets(client, app, monkeypatch):
+    manager_email = _create_user(
+        app,
+        "equipment-custody-manager@example.com",
+        "equipment.view",
+        "equipment.edit",
+        "equipment.manage_custody",
+        "equipment.print_labels",
+    )
+    asset_id = _create_equipment_asset(app, asset_tag="CHK-001")
+    captured_payloads = {}
+
+    def _fake_render(assets, qr_payloads):
+        captured_payloads.update(qr_payloads)
+        return b"%PDF-FAKE\ncustody"
+
+    monkeypatch.setattr(
+        "app.routes.equipment_routes.render_equipment_label_pdf",
+        _fake_render,
+    )
+
+    with client:
+        login(client, manager_email, "pass")
+
+        scan_page = client.get(f"/equipment/{asset_id}/scan")
+        assert scan_page.status_code == 200
+        assert b"Sign Out To Me" in scan_page.data
+
+        checkout = client.post(
+            f"/equipment/{asset_id}/check-out",
+            data={"submit": "1"},
+            follow_redirects=True,
+        )
+        assert checkout.status_code == 200
+        assert b"Equipment checked out." in checkout.data
+        assert b"Sign In" in checkout.data
+
+        checkin = client.post(
+            f"/equipment/{asset_id}/check-in",
+            data={"submit": "1"},
+            follow_redirects=True,
+        )
+        assert checkin.status_code == 200
+        assert b"Equipment checked in." in checkin.data
+        assert b"Sign Out To Me" in checkin.data
+
+        with app.app_context():
+            asset = db.session.get(EquipmentAsset, asset_id)
+            asset.label_qr_target = EquipmentAsset.QR_TARGET_SCAN
+            db.session.commit()
+
+        label_response = client.get(f"/equipment/labels/print?equipment_id={asset_id}")
+        assert label_response.status_code == 200
+        assert label_response.data.startswith(b"%PDF-FAKE")
+
+    with app.app_context():
+        asset = db.session.get(EquipmentAsset, asset_id)
+        user = User.query.filter_by(email=manager_email).one()
+        events = (
+            EquipmentCustodyEvent.query.filter_by(equipment_asset_id=asset_id)
+            .order_by(EquipmentCustodyEvent.created_at.asc())
+            .all()
+        )
+
+        assert asset.checked_out_at is None
+        assert asset.location_id == asset.home_location_id
+        assert asset.assigned_user_id is None
+        assert len(events) == 2
+        assert events[0].action == EquipmentCustodyEvent.ACTION_CHECK_OUT
+        assert events[0].to_assigned_user_id == user.id
+        assert events[1].action == EquipmentCustodyEvent.ACTION_CHECK_IN
+        assert events[1].to_location_id == asset.home_location_id
+        assert captured_payloads[asset_id].endswith(f"/equipment/{asset_id}/scan")
+
+        flush_activity_logs()
+        activities = [entry.activity for entry in ActivityLog.query.all()]
+        assert any("Checked out equipment CHK-001" in activity for activity in activities)
+        assert any("Checked in equipment CHK-001" in activity for activity in activities)
+
+
+def test_equipment_custody_permission_split_and_scan_visibility(client, app):
+    viewer_email = _create_user(app, "equipment-custody-viewer@example.com", "equipment.view")
+    custody_email = _create_user(
+        app,
+        "equipment-custody-only@example.com",
+        "equipment.manage_custody",
+    )
+    outsider_email = _create_user(app, "equipment-custody-outsider@example.com")
+    asset_id = _create_equipment_asset(app, asset_tag="SCAN-001")
+
+    with client:
+        login(client, viewer_email, "pass")
+        detail_page = client.get(f"/equipment/{asset_id}")
+        assert detail_page.status_code == 200
+        detail_html = detail_page.get_data(as_text=True)
+        assert "Scan Page" not in detail_html
+        assert "Sign Out" not in detail_html
+        assert client.get(f"/equipment/{asset_id}/scan").status_code == 403
+        assert (
+            client.post(f"/equipment/{asset_id}/check-out", data={"submit": "1"}).status_code
+            == 403
+        )
+
+        login(client, custody_email, "pass")
+        assert client.get("/equipment").status_code == 403
+        scan_page = client.get(f"/equipment/{asset_id}/scan")
+        assert scan_page.status_code == 200
+        assert b"Sign Out To Me" in scan_page.data
+
+        checkout = client.post(
+            f"/equipment/{asset_id}/check-out",
+            data={"submit": "1"},
+            follow_redirects=True,
+        )
+        assert checkout.status_code == 200
+        assert b"Equipment checked out." in checkout.data
+
+        checkin = client.post(
+            f"/equipment/{asset_id}/check-in",
+            data={"submit": "1"},
+            follow_redirects=True,
+        )
+        assert checkin.status_code == 200
+        assert b"Equipment checked in." in checkin.data
+
+        login(client, outsider_email, "pass")
+        assert client.get(f"/equipment/{asset_id}/scan").status_code == 403
 
 
 def test_render_equipment_label_pdf_returns_pdf_bytes():

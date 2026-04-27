@@ -167,7 +167,7 @@ def render_equipment_label_pdf(assets, qr_payloads: dict[int, str]) -> bytes:
             cursor_y -= 10
 
         pdf.setFont("Helvetica", 7)
-        pdf.drawString(qr_x, y + padding - 1, "Scan for asset details")
+        pdf.drawString(qr_x, y + padding - 1, "Scan equipment")
 
     pdf.save()
     data = buffer.getvalue()

@@ -131,6 +131,12 @@ PERMISSION_DEFINITIONS: tuple[PermissionDefinition, ...] = (
         "Generate printable equipment labels with QR codes.",
     ),
     _perm(
+        "equipment.manage_custody",
+        "equipment",
+        "Manage Equipment Custody",
+        "Use scan-based equipment sign in and sign out workflows.",
+    ),
+    _perm(
         "equipment.import",
         "equipment",
         "Import Equipment",
@@ -390,6 +396,15 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "equipment.print_equipment_labels": requirement(
         any_of=("equipment.print_labels",),
         all_of=("equipment.view",),
+    ),
+    "equipment.view_equipment_asset_scan": requirement(
+        any_of=("equipment.manage_custody",),
+    ),
+    "equipment.check_out_equipment_asset": requirement(
+        any_of=("equipment.manage_custody",),
+    ),
+    "equipment.check_in_equipment_asset": requirement(
+        any_of=("equipment.manage_custody",),
     ),
     "equipment.import_equipment_from_snipe_it": requirement(
         any_of=("equipment.import",),

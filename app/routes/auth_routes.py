@@ -2563,10 +2563,7 @@ def sales_imports():
 
     available_statuses = [
         "pending",
-        "needs_mapping",
         "approved",
-        "reversed",
-        "failed",
         "ignored",
     ]
     page = request.args.get("page", 1, type=int)
@@ -2642,6 +2639,7 @@ def sales_imports():
             else 0
         )
         import_record.issue_count = actionable_issue_count
+        import_record.needs_mapping = issue_state["needs_mapping"]
         import_record.can_direct_approve = (
             _sales_import_can_be_approved(import_record)
             and actionable_issue_count == 0
@@ -2677,12 +2675,9 @@ def _parse_sales_import_approval_changes(row: PosSalesImportRow) -> list[dict]:
 _SALES_IMPORT_PRICE_ACTIONS = {"file", "app", "custom", "skip"}
 _SALES_IMPORT_REVIEW_EDITABLE_STATUSES = {
     PosSalesImport.STATUS_PENDING,
-    PosSalesImport.STATUS_NEEDS_MAPPING,
-    PosSalesImport.STATUS_REVERSED,
 }
 _SALES_IMPORT_APPROVABLE_STATUSES = {
     PosSalesImport.STATUS_PENDING,
-    PosSalesImport.STATUS_REVERSED,
 }
 
 
@@ -2699,7 +2694,7 @@ def _sales_import_review_locked_message(import_record: PosSalesImport) -> str:
         return "Undo the approved import before changing review mappings or prices."
     if import_record.status == PosSalesImport.STATUS_DELETED:
         return "Deleted imports cannot be changed."
-    return "Review changes are only allowed while the import is pending approval or after an undo."
+    return "Review changes are only allowed while the import is pending approval."
 
 
 def _parse_sales_import_row_metadata(row: PosSalesImportRow) -> dict[str, Any]:
@@ -3486,23 +3481,12 @@ def _refresh_sales_import_mapping_status(
     import_record: PosSalesImport,
 ) -> dict[str, Any]:
     issue_state = _collect_sales_import_issue_state(import_record)
-    next_status = (
-        "needs_mapping"
-        if (
-            issue_state["unresolved_location_count"]
-            or issue_state["unresolved_event_location_count"]
-            or issue_state["unresolved_row_count"]
-        )
-        else "pending"
+    issue_state["needs_mapping"] = bool(
+        issue_state["unresolved_location_count"]
+        or issue_state["unresolved_event_location_count"]
+        or issue_state["unresolved_row_count"]
     )
-    status_changed = False
-    if (
-        import_record.status in {"pending", "needs_mapping"}
-        and import_record.status != next_status
-    ):
-        import_record.status = next_status
-        status_changed = True
-    issue_state["status_changed"] = status_changed
+    issue_state["status_changed"] = False
     return issue_state
 
 
@@ -3603,7 +3587,7 @@ def _approve_sales_import(import_id: int) -> bool:
 
         if not _sales_import_can_be_approved(locked_import):
             flash(
-                "Import approval is only allowed while the import status is Pending or Reversed.",
+                "Import approval is only allowed while the import status is Pending.",
                 "warning",
             )
             return False
@@ -4562,14 +4546,14 @@ def sales_import_detail(import_id: int):
                             row.approval_metadata = json.dumps(metadata)
                             row_change_count += 1
 
-                locked_import.status = "reversed"
+                locked_import.status = PosSalesImport.STATUS_PENDING
                 locked_import.reversed_by = current_user.id
                 locked_import.reversed_at = reversal_time
                 locked_import.reversal_batch_id = reversal_batch_id
                 locked_import.reversal_reason = reversal_reason
                 db.session.commit()
                 success_message = (
-                    "Import reversal complete. Review changes are unlocked and the import can be approved again."
+                    "Import reversal complete. The import is back in Pending review and can be approved again."
                 )
                 if row_change_count:
                     success_message += (
@@ -4645,6 +4629,7 @@ def sales_import_detail(import_id: int):
     unresolved_location_count = issue_state["unresolved_location_count"]
     unresolved_event_location_count = issue_state["unresolved_event_location_count"]
     unresolved_row_count = issue_state["unresolved_row_count"]
+    needs_mapping = issue_state["needs_mapping"]
 
     review_context = issue_state["review_context"]
     row_review_data = review_context["row_review_data"]
@@ -4778,6 +4763,7 @@ def sales_import_detail(import_id: int):
         direct_inventory_only_location_ids=direct_inventory_only_location_ids,
         event_assignment_labels=event_assignment_labels,
         event_assignment_messages=event_assignment_messages,
+        needs_mapping=needs_mapping,
         unresolved_location_count=unresolved_location_count,
         unresolved_event_location_count=unresolved_event_location_count,
         unresolved_row_count=unresolved_row_count,

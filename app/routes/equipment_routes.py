@@ -22,6 +22,7 @@ from app.forms import (
     DeleteForm,
     EquipmentAssetForm,
     EquipmentCategoryForm,
+    EquipmentCustodyActionForm,
     EquipmentIntakeBatchForm,
     EquipmentIntakeReceiveForm,
     EquipmentMaintenanceIssueForm,
@@ -32,6 +33,7 @@ from app.forms import (
 from app.models import (
     EquipmentAsset,
     EquipmentCategory,
+    EquipmentCustodyEvent,
     EquipmentIntakeBatch,
     EquipmentMaintenanceIssue,
     EquipmentMaintenanceUpdate,
@@ -66,6 +68,22 @@ def _vendor_name(vendor) -> str:
     return f"{vendor.first_name} {vendor.last_name}".strip()
 
 
+def _build_equipment_qr_payload(asset: EquipmentAsset) -> str:
+    if asset.label_qr_target == EquipmentAsset.QR_TARGET_CUSTOM:
+        return asset.label_qr_custom_url or asset.asset_tag
+    if asset.label_qr_target == EquipmentAsset.QR_TARGET_SCAN:
+        return url_for(
+            "equipment.view_equipment_asset_scan",
+            asset_id=asset.id,
+            _external=True,
+        )
+    return url_for(
+        "equipment.view_equipment_asset",
+        asset_id=asset.id,
+        _external=True,
+    )
+
+
 def _load_asset_or_404(asset_id: int) -> EquipmentAsset:
     asset = (
         EquipmentAsset.query.options(
@@ -87,6 +105,7 @@ def _load_asset_or_404(asset_id: int) -> EquipmentAsset:
             selectinload(EquipmentAsset.purchase_vendor),
             selectinload(EquipmentAsset.service_vendor),
             selectinload(EquipmentAsset.location),
+            selectinload(EquipmentAsset.home_location),
             selectinload(EquipmentAsset.assigned_user),
         )
         .filter(EquipmentAsset.id == asset_id)
@@ -290,8 +309,12 @@ def _apply_asset_form(asset: EquipmentAsset, form: EquipmentAssetForm) -> None:
             days=int(asset.service_interval_days)
         )
     asset.location_id = form.location_id.data or None
-    asset.sublocation = (form.sublocation.data or "").strip() or None
+    asset.home_location_id = form.home_location_id.data or asset.location_id or None
     asset.assigned_user_id = form.assigned_user_id.data or None
+    asset.label_qr_target = form.label_qr_target.data
+    asset.label_qr_custom_url = (
+        (form.label_qr_custom_url.data or "").strip() or None
+    )
 
 
 def _materialize_received_asset_rows(
@@ -305,7 +328,6 @@ def _materialize_received_asset_rows(
                     "asset_tag": (row.get("asset_tag") or "").strip() or None,
                     "serial_number": (row.get("serial_number") or "").strip() or None,
                     "name": (row.get("name") or "").strip() or None,
-                    "sublocation": (row.get("sublocation") or "").strip() or None,
                 }
             )
         return rows
@@ -325,10 +347,32 @@ def _materialize_received_asset_rows(
                     if name_prefix
                     else None
                 ),
-                "sublocation": None,
             }
         )
     return rows
+
+
+def _create_custody_event(
+    *,
+    asset: EquipmentAsset,
+    action: str,
+    performed_by_id: int | None,
+    from_location_id: int | None,
+    to_location_id: int | None,
+    from_assigned_user_id: int | None,
+    to_assigned_user_id: int | None,
+) -> None:
+    db.session.add(
+        EquipmentCustodyEvent(
+            equipment_asset=asset,
+            action=action,
+            performed_by_id=performed_by_id,
+            from_location_id=from_location_id,
+            to_location_id=to_location_id,
+            from_assigned_user_id=from_assigned_user_id,
+            to_assigned_user_id=to_assigned_user_id,
+        )
+    )
 
 
 def _apply_issue_status(
@@ -454,6 +498,7 @@ def view_equipment():
     location_id = request.args.get("location_id", type=int)
     assigned_user_id = request.args.get("assigned_user_id", type=int)
     attention_state = (request.args.get("attention_state") or "all").strip().lower()
+    custody_state = (request.args.get("custody_state") or "all").strip().lower()
 
     valid_statuses = {code for code, _label in EquipmentAsset.STATUS_CHOICES}
     if status not in valid_statuses | {"all"}:
@@ -462,6 +507,8 @@ def view_equipment():
         archived = "active"
     if attention_state not in {"all", "needs_attention", "clear"}:
         attention_state = "all"
+    if custody_state not in {"all", "in_storage", "checked_out"}:
+        custody_state = "all"
 
     open_issue_counts = _open_issue_count_subquery()
     attention_clause = or_(
@@ -478,6 +525,7 @@ def view_equipment():
             ),
             selectinload(EquipmentAsset.purchase_vendor),
             selectinload(EquipmentAsset.location),
+            selectinload(EquipmentAsset.home_location),
             selectinload(EquipmentAsset.assigned_user),
         )
         .join(EquipmentModel, EquipmentModel.id == EquipmentAsset.equipment_model_id)
@@ -536,6 +584,10 @@ def view_equipment():
         query = query.filter(
             EquipmentAsset.assigned_user_id == assigned_user_id
         )
+    if custody_state == "in_storage":
+        query = query.filter(EquipmentAsset.checked_out_at.is_(None))
+    elif custody_state == "checked_out":
+        query = query.filter(EquipmentAsset.checked_out_at.is_not(None))
     if attention_state == "needs_attention":
         query = query.filter(attention_clause)
     elif attention_state == "clear":
@@ -582,6 +634,7 @@ def view_equipment():
         location_id=location_id,
         assigned_user_id=assigned_user_id,
         attention_state=attention_state,
+        custody_state=custody_state,
         open_issue_count_map=open_issue_count_map,
         categories=EquipmentCategory.query.order_by(EquipmentCategory.name).all(),
         models=(
@@ -643,6 +696,7 @@ def create_equipment_asset():
 def view_equipment_asset(asset_id: int):
     asset = _load_asset_or_404(asset_id)
     delete_form = DeleteForm()
+    custody_form = EquipmentCustodyActionForm()
     recent_issues = (
         EquipmentMaintenanceIssue.query.options(
             selectinload(EquipmentMaintenanceIssue.assigned_user),
@@ -661,15 +715,140 @@ def view_equipment_asset(asset_id: int):
             ),
         ).count()
     )
+    recent_custody_events = (
+        EquipmentCustodyEvent.query.options(
+            selectinload(EquipmentCustodyEvent.performed_by),
+            selectinload(EquipmentCustodyEvent.from_location),
+            selectinload(EquipmentCustodyEvent.to_location),
+            selectinload(EquipmentCustodyEvent.from_assigned_user),
+            selectinload(EquipmentCustodyEvent.to_assigned_user),
+        )
+        .filter(EquipmentCustodyEvent.equipment_asset_id == asset.id)
+        .order_by(EquipmentCustodyEvent.created_at.desc())
+        .limit(8)
+        .all()
+    )
     return render_template(
         "equipment/view_asset.html",
         asset=asset,
         delete_form=delete_form,
+        custody_form=custody_form,
         purchase_vendor_name=_vendor_name(asset.purchase_vendor),
         service_vendor_name=_vendor_name(asset.service_vendor),
         recent_issues=recent_issues,
+        recent_custody_events=recent_custody_events,
         open_issue_count=open_issue_count,
     )
+
+
+@equipment.route("/equipment/<int:asset_id>/scan")
+@login_required
+def view_equipment_asset_scan(asset_id: int):
+    asset = _load_asset_or_404(asset_id)
+    custody_form = EquipmentCustodyActionForm()
+    latest_custody_event = (
+        EquipmentCustodyEvent.query.options(
+            selectinload(EquipmentCustodyEvent.performed_by),
+            selectinload(EquipmentCustodyEvent.from_location),
+            selectinload(EquipmentCustodyEvent.to_location),
+            selectinload(EquipmentCustodyEvent.from_assigned_user),
+            selectinload(EquipmentCustodyEvent.to_assigned_user),
+        )
+        .filter(EquipmentCustodyEvent.equipment_asset_id == asset.id)
+        .order_by(EquipmentCustodyEvent.created_at.desc())
+        .first()
+    )
+    return render_template(
+        "equipment/scan_asset.html",
+        asset=asset,
+        custody_form=custody_form,
+        latest_custody_event=latest_custody_event,
+    )
+
+
+@equipment.route("/equipment/<int:asset_id>/check-out", methods=["POST"])
+@login_required
+def check_out_equipment_asset(asset_id: int):
+    form = EquipmentCustodyActionForm()
+    if not form.validate_on_submit():
+        abort(400)
+    asset = _load_asset_or_404(asset_id)
+    if asset.archived:
+        flash("Archived equipment cannot be checked out.", "danger")
+        return redirect(url_for("equipment.view_equipment_asset_scan", asset_id=asset.id))
+    if asset.is_checked_out:
+        flash("This equipment is already checked out.", "info")
+        return redirect(url_for("equipment.view_equipment_asset_scan", asset_id=asset.id))
+    if asset.home_location_id is None and asset.location_id is None:
+        flash(
+            "Set a home storage location before checking out this equipment.",
+            "danger",
+        )
+        return redirect(url_for("equipment.view_equipment_asset_scan", asset_id=asset.id))
+
+    from_location_id = asset.location_id
+    from_assigned_user_id = asset.assigned_user_id
+    if asset.home_location_id is None and asset.location_id is not None:
+        asset.home_location_id = asset.location_id
+
+    asset.location_id = None
+    asset.assigned_user_id = current_user.id
+    asset.checked_out_at = datetime.utcnow()
+    _create_custody_event(
+        asset=asset,
+        action=EquipmentCustodyEvent.ACTION_CHECK_OUT,
+        performed_by_id=current_user.id,
+        from_location_id=from_location_id,
+        to_location_id=asset.location_id,
+        from_assigned_user_id=from_assigned_user_id,
+        to_assigned_user_id=asset.assigned_user_id,
+    )
+    db.session.commit()
+    log_activity(
+        f"Checked out equipment {asset.asset_tag} to {current_user.display_label}"
+    )
+    flash("Equipment checked out.", "success")
+    return redirect(url_for("equipment.view_equipment_asset_scan", asset_id=asset.id))
+
+
+@equipment.route("/equipment/<int:asset_id>/check-in", methods=["POST"])
+@login_required
+def check_in_equipment_asset(asset_id: int):
+    form = EquipmentCustodyActionForm()
+    if not form.validate_on_submit():
+        abort(400)
+    asset = _load_asset_or_404(asset_id)
+    if asset.archived:
+        flash("Archived equipment cannot be checked in.", "danger")
+        return redirect(url_for("equipment.view_equipment_asset_scan", asset_id=asset.id))
+    if not asset.is_checked_out:
+        flash("This equipment is already in storage.", "info")
+        return redirect(url_for("equipment.view_equipment_asset_scan", asset_id=asset.id))
+    if asset.home_location_id is None:
+        flash(
+            "Set a home storage location before signing this equipment back in.",
+            "danger",
+        )
+        return redirect(url_for("equipment.view_equipment_asset_scan", asset_id=asset.id))
+
+    from_location_id = asset.location_id
+    from_assigned_user_id = asset.assigned_user_id
+    asset.location_id = asset.home_location_id
+    asset.assigned_user_id = None
+    asset.checked_out_at = None
+    _create_custody_event(
+        asset=asset,
+        action=EquipmentCustodyEvent.ACTION_CHECK_IN,
+        performed_by_id=current_user.id,
+        from_location_id=from_location_id,
+        to_location_id=asset.location_id,
+        from_assigned_user_id=from_assigned_user_id,
+        to_assigned_user_id=asset.assigned_user_id,
+    )
+    db.session.commit()
+    log_activity(f"Checked in equipment {asset.asset_tag}")
+    flash("Equipment checked in.", "success")
+    return redirect(url_for("equipment.view_equipment_asset_scan", asset_id=asset.id))
 
 
 @equipment.route("/equipment/<int:asset_id>/edit", methods=["GET", "POST"])
@@ -682,6 +861,7 @@ def edit_equipment_asset(asset_id: int):
         form.purchase_vendor_id.data = asset.purchase_vendor_id or 0
         form.service_vendor_id.data = asset.service_vendor_id or 0
         form.location_id.data = asset.location_id or 0
+        form.home_location_id.data = asset.home_location_id or 0
         form.assigned_user_id.data = asset.assigned_user_id or 0
 
     if form.validate_on_submit():
@@ -1013,7 +1193,7 @@ def receive_equipment_intake_batch(batch_id: int):
                     cost=cost_value,
                     purchase_vendor_id=batch.purchase_vendor_id,
                     location_id=location_id,
-                    sublocation=row["sublocation"] or form.sublocation.data or None,
+                    home_location_id=location_id,
                     assigned_user_id=assigned_user_id,
                 )
             )
@@ -1613,11 +1793,7 @@ def print_equipment_labels():
 
     assets = _ordered_equipment_assets(ordered_ids)
     qr_payloads = {
-        asset.id: url_for(
-            "equipment.view_equipment_asset",
-            asset_id=asset.id,
-            _external=True,
-        )
+        asset.id: _build_equipment_qr_payload(asset)
         for asset in assets
     }
 

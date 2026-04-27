@@ -118,6 +118,24 @@ def test_user_can_access_endpoint_requires_matching_permission():
     )
     assert not user_can_access_endpoint(
         DummyUser("equipment.view"),
+        "equipment.view_equipment_asset_scan",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("equipment.manage_custody"),
+        "equipment.view_equipment_asset_scan",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("equipment.manage_custody"),
+        "equipment.check_out_equipment_asset",
+        "POST",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("equipment.manage_custody"),
+        "equipment.check_in_equipment_asset",
+        "POST",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("equipment.view"),
         "equipment.create_equipment_intake_batch",
         "POST",
     )

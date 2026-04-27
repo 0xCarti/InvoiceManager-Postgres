@@ -2,6 +2,8 @@ from decimal import Decimal
 from datetime import datetime, timezone as dt_timezone
 from pathlib import Path
 
+import pytest
+
 from app.models import (
     PosSalesImport,
     PosSalesImportLocation,
@@ -101,6 +103,30 @@ def test_ingest_pos_sales_attachment_ignores_files_with_no_locations_or_sales(
         assert PosSalesImportLocation.query.count() == 0
         assert PosSalesImportRow.query.count() == 0
         assert list((tmp_path / "mailgun_staging").glob("*")) == []
+
+
+def test_ingest_pos_sales_attachment_marks_parse_failures_as_ignored(
+    app, monkeypatch, tmp_path
+):
+    def _boom(*args, **kwargs):
+        raise ValueError("broken workbook")
+
+    monkeypatch.setattr(pos_sales_ingest, "stage_pos_sales_import", _boom)
+
+    with app.app_context():
+        with pytest.raises(ValueError, match="broken workbook"):
+            ingest_pos_sales_attachment(
+                source_provider="mailgun",
+                source_message_id="<broken-sales-message>",
+                filename="broken_sales.xls",
+                content=b"placeholder spreadsheet bytes",
+                storage_dir=tmp_path / "mailgun_staging",
+            )
+
+        staged_import = PosSalesImport.query.one()
+        assert staged_import.status == PosSalesImport.STATUS_IGNORED
+        assert staged_import.failure_reason == "Unable to parse POS spreadsheet attachment."
+        assert staged_import.attachment_storage_path
 
 
 def test_parse_rows_compute_unit_price_using_signed_discount():

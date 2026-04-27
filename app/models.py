@@ -1907,6 +1907,9 @@ class EquipmentAsset(db.Model):
     __tablename__ = "equipment_asset"
 
     REMINDER_WINDOW_DAYS = 30
+    QR_TARGET_DETAIL = "detail"
+    QR_TARGET_SCAN = "scan"
+    QR_TARGET_CUSTOM = "custom"
 
     STATUS_OPERATIONAL = "operational"
     STATUS_NEEDS_SERVICE = "needs_service"
@@ -1922,6 +1925,11 @@ class EquipmentAsset(db.Model):
         (STATUS_RETIRED, "Retired"),
         (STATUS_DISPOSED, "Disposed"),
         (STATUS_LOST, "Lost"),
+    )
+    QR_TARGET_CHOICES = (
+        (QR_TARGET_DETAIL, "Asset Detail Page"),
+        (QR_TARGET_SCAN, "Check In / Out Page"),
+        (QR_TARGET_CUSTOM, "Custom URL"),
     )
 
     id = db.Column(db.Integer, primary_key=True)
@@ -1963,10 +1971,21 @@ class EquipmentAsset(db.Model):
     location_id = db.Column(
         db.Integer, db.ForeignKey("location.id"), nullable=True
     )
+    home_location_id = db.Column(
+        db.Integer, db.ForeignKey("location.id"), nullable=True
+    )
     sublocation = db.Column(db.String(120), nullable=True)
     assigned_user_id = db.Column(
         db.Integer, db.ForeignKey("user.id"), nullable=True
     )
+    checked_out_at = db.Column(db.DateTime, nullable=True)
+    label_qr_target = db.Column(
+        db.String(20),
+        nullable=False,
+        default=QR_TARGET_DETAIL,
+        server_default=QR_TARGET_DETAIL,
+    )
+    label_qr_custom_url = db.Column(db.String(500), nullable=True)
     archived = db.Column(
         db.Boolean, default=False, nullable=False, server_default="0"
     )
@@ -1989,12 +2008,19 @@ class EquipmentAsset(db.Model):
     purchase_vendor = relationship("Vendor", foreign_keys=[purchase_vendor_id])
     service_vendor = relationship("Vendor", foreign_keys=[service_vendor_id])
     location = relationship("Location", foreign_keys=[location_id])
+    home_location = relationship("Location", foreign_keys=[home_location_id])
     assigned_user = relationship("User", foreign_keys=[assigned_user_id])
     maintenance_issues = relationship(
         "EquipmentMaintenanceIssue",
         back_populates="equipment_asset",
         cascade="all, delete-orphan",
         order_by="EquipmentMaintenanceIssue.created_at.desc()",
+    )
+    custody_events = relationship(
+        "EquipmentCustodyEvent",
+        back_populates="equipment_asset",
+        cascade="all, delete-orphan",
+        order_by="EquipmentCustodyEvent.created_at.desc()",
     )
 
     @property
@@ -2033,6 +2059,12 @@ class EquipmentAsset(db.Model):
         return self.assigned_user.display_label
 
     @property
+    def home_location_label(self) -> str:
+        if self.home_location is None:
+            return ""
+        return self.home_location.name
+
+    @property
     def location_label(self) -> str:
         parts = []
         if self.location is not None:
@@ -2040,6 +2072,28 @@ class EquipmentAsset(db.Model):
         if self.sublocation:
             parts.append(self.sublocation)
         return " / ".join(part for part in parts if part)
+
+    @property
+    def is_checked_out(self) -> bool:
+        return self.checked_out_at is not None
+
+    @property
+    def custody_state(self) -> str:
+        return "checked_out" if self.is_checked_out else "in_storage"
+
+    @property
+    def custody_state_label(self) -> str:
+        return "Checked Out" if self.is_checked_out else "In Storage"
+
+    @property
+    def custody_badge_class(self) -> str:
+        return "text-bg-warning" if self.is_checked_out else "text-bg-success"
+
+    @property
+    def label_qr_target_label(self) -> str:
+        return dict(self.QR_TARGET_CHOICES).get(
+            self.label_qr_target, self.label_qr_target.title()
+        )
 
     @property
     def service_due_date(self):
@@ -2162,6 +2216,10 @@ class EquipmentAsset(db.Model):
             "status IN ('operational', 'needs_service', 'out_of_service', 'retired', 'disposed', 'lost')",
             name="ck_equipment_asset_status",
         ),
+        db.CheckConstraint(
+            "label_qr_target IN ('detail', 'scan', 'custom')",
+            name="ck_equipment_asset_label_qr_target",
+        ),
         db.Index("ix_equipment_asset_archived", "archived"),
         db.Index("ix_equipment_asset_status", "status"),
         db.Index("ix_equipment_asset_model_id", "equipment_model_id"),
@@ -2169,13 +2227,76 @@ class EquipmentAsset(db.Model):
         db.Index("ix_equipment_asset_service_vendor_id", "service_vendor_id"),
         db.Index("ix_equipment_asset_intake_batch_id", "equipment_intake_batch_id"),
         db.Index("ix_equipment_asset_location_id", "location_id"),
+        db.Index("ix_equipment_asset_home_location_id", "home_location_id"),
         db.Index("ix_equipment_asset_assigned_user_id", "assigned_user_id"),
+        db.Index("ix_equipment_asset_checked_out_at", "checked_out_at"),
         db.Index("uix_equipment_asset_tag", "asset_tag", unique=True),
         db.Index(
             "uix_equipment_asset_serial_number",
             "serial_number",
             unique=True,
         ),
+    )
+
+
+class EquipmentCustodyEvent(db.Model):
+    __tablename__ = "equipment_custody_event"
+
+    ACTION_CHECK_OUT = "check_out"
+    ACTION_CHECK_IN = "check_in"
+
+    ACTION_CHOICES = (
+        (ACTION_CHECK_OUT, "Checked Out"),
+        (ACTION_CHECK_IN, "Checked In"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    equipment_asset_id = db.Column(
+        db.Integer, db.ForeignKey("equipment_asset.id"), nullable=False
+    )
+    action = db.Column(
+        db.String(20),
+        nullable=False,
+        default=ACTION_CHECK_OUT,
+        server_default=ACTION_CHECK_OUT,
+    )
+    performed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    from_location_id = db.Column(db.Integer, db.ForeignKey("location.id"), nullable=True)
+    to_location_id = db.Column(db.Integer, db.ForeignKey("location.id"), nullable=True)
+    from_assigned_user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id"), nullable=True
+    )
+    to_assigned_user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id"), nullable=True
+    )
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+
+    equipment_asset = relationship("EquipmentAsset", back_populates="custody_events")
+    performed_by = relationship("User", foreign_keys=[performed_by_id])
+    from_location = relationship("Location", foreign_keys=[from_location_id])
+    to_location = relationship("Location", foreign_keys=[to_location_id])
+    from_assigned_user = relationship("User", foreign_keys=[from_assigned_user_id])
+    to_assigned_user = relationship("User", foreign_keys=[to_assigned_user_id])
+
+    @property
+    def action_label(self) -> str:
+        return dict(self.ACTION_CHOICES).get(
+            self.action, self.action.replace("_", " ").title()
+        )
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "action IN ('check_out', 'check_in')",
+            name="ck_equipment_custody_event_action",
+        ),
+        db.Index("ix_equipment_custody_event_asset_id", "equipment_asset_id"),
+        db.Index("ix_equipment_custody_event_performed_by_id", "performed_by_id"),
+        db.Index("ix_equipment_custody_event_created_at", "created_at"),
     )
 
 
@@ -3738,12 +3859,14 @@ class TerminalSalesResolutionState(db.Model):
 
 class PosSalesImport(db.Model):
     STATUS_PENDING = "pending"
-    STATUS_NEEDS_MAPPING = "needs_mapping"
     STATUS_APPROVED = "approved"
-    STATUS_REVERSED = "reversed"
     STATUS_DELETED = "deleted"
-    STATUS_FAILED = "failed"
     STATUS_IGNORED = "ignored"
+    # Backward-compatible aliases for older review states that now collapse
+    # into the active pending/ignored workflow.
+    STATUS_NEEDS_MAPPING = STATUS_PENDING
+    STATUS_REVERSED = STATUS_PENDING
+    STATUS_FAILED = STATUS_IGNORED
 
     id = db.Column(db.Integer, primary_key=True)
     source_provider = db.Column(db.String(100), nullable=False)
@@ -3817,7 +3940,7 @@ class PosSalesImport(db.Model):
             name="uq_pos_sales_import_idempotency",
         ),
         db.CheckConstraint(
-            "status IN ('pending', 'needs_mapping', 'approved', 'reversed', 'deleted', 'failed', 'ignored')",
+            "status IN ('pending', 'approved', 'deleted', 'ignored')",
             name="ck_pos_sales_import_status",
         ),
         db.Index("ix_pos_sales_import_status_received_at", "status", "received_at"),

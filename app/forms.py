@@ -1904,15 +1904,18 @@ class EquipmentAssetForm(FlaskForm):
         validators=[Optional(), Length(max=2000)],
     )
     location_id = SelectField(
-        "Location",
+        "Current Location",
         coerce=int,
         validators=[Optional()],
         validate_choice=False,
         default=0,
     )
-    sublocation = StringField(
-        "Sublocation / Room / Station",
-        validators=[Optional(), Length(max=120)],
+    home_location_id = SelectField(
+        "Home Storage Location",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        default=0,
     )
     assigned_user_id = SelectField(
         "Current Custodian",
@@ -1920,6 +1923,17 @@ class EquipmentAssetForm(FlaskForm):
         validators=[Optional()],
         validate_choice=False,
         default=0,
+    )
+    label_qr_target = SelectField(
+        "Label QR Target",
+        validators=[DataRequired()],
+        choices=EquipmentAsset.QR_TARGET_CHOICES,
+        default=EquipmentAsset.QR_TARGET_DETAIL,
+    )
+    label_qr_custom_url = StringField(
+        "Custom QR URL",
+        validators=[Optional(), Length(max=500)],
+        description="Used only when Label QR Target is set to Custom URL.",
     )
     submit = SubmitField("Save Equipment")
 
@@ -1932,6 +1946,7 @@ class EquipmentAssetForm(FlaskForm):
         self.purchase_vendor_id.choices = load_vendor_choices()
         self.service_vendor_id.choices = load_vendor_choices()
         self.location_id.choices = load_location_choices()
+        self.home_location_id.choices = load_location_choices()
         self.assigned_user_id.choices = [(0, "No Custodian")] + load_active_user_choices()
 
     def validate_equipment_model_id(self, field):
@@ -1976,6 +1991,10 @@ class EquipmentAssetForm(FlaskForm):
         if field.data and db.session.get(Location, field.data) is None:
             raise ValidationError("Select a valid location.")
 
+    def validate_home_location_id(self, field):
+        if field.data and db.session.get(Location, field.data) is None:
+            raise ValidationError("Select a valid home storage location.")
+
     def validate_assigned_user_id(self, field):
         if field.data and db.session.get(User, field.data) is None:
             raise ValidationError("Select a valid user.")
@@ -2005,7 +2024,21 @@ class EquipmentAssetForm(FlaskForm):
         self.service_contract_notes.data = (
             (self.service_contract_notes.data or "").strip() or None
         )
-        self.sublocation.data = (self.sublocation.data or "").strip() or None
+        self.label_qr_custom_url.data = (
+            (self.label_qr_custom_url.data or "").strip() or None
+        )
+
+        if self.home_location_id.data == 0 and self.location_id.data:
+            self.home_location_id.data = self.location_id.data
+
+        if self.label_qr_target.data == EquipmentAsset.QR_TARGET_CUSTOM:
+            if not self.label_qr_custom_url.data:
+                self.label_qr_custom_url.errors.append(
+                    "Provide a custom QR URL when using the custom target."
+                )
+                return False
+        else:
+            self.label_qr_custom_url.data = None
 
         if (
             self.last_service_on.data
@@ -2101,7 +2134,7 @@ class EquipmentIntakeBatchForm(FlaskForm):
     )
     received_on = FlexibleDateField("Received On", validators=[Optional()])
     location_id = SelectField(
-        "Default Location",
+        "Default Storage Location",
         coerce=int,
         validators=[Optional()],
         validate_choice=False,
@@ -2253,7 +2286,7 @@ class EquipmentIntakeReceiveForm(FlaskForm):
     asset_rows = TextAreaField(
         "Asset Rows",
         validators=[Optional(), Length(max=12000)],
-        description="Optional CSV-style rows: asset tag, serial number, name, sublocation.",
+        description="Optional CSV-style rows: asset tag, serial number, name.",
     )
     status = SelectField(
         "Asset Status",
@@ -2271,15 +2304,11 @@ class EquipmentIntakeReceiveForm(FlaskForm):
         places=2,
     )
     location_id = SelectField(
-        "Location",
+        "Storage Location",
         coerce=int,
         validators=[Optional()],
         validate_choice=False,
         default=0,
-    )
-    sublocation = StringField(
-        "Sublocation",
-        validators=[Optional(), Length(max=120)],
     )
     assigned_user_id = SelectField(
         "Custodian",
@@ -2322,19 +2351,18 @@ class EquipmentIntakeReceiveForm(FlaskForm):
                     f"Row {line_number} must start with an asset tag."
                 )
                 return []
-            if len(parts) > 4:
+            if len(parts) > 3:
                 self.asset_rows.errors.append(
-                    f"Row {line_number} supports at most 4 comma-separated values."
+                    f"Row {line_number} supports at most 3 comma-separated values."
                 )
                 return []
-            while len(parts) < 4:
+            while len(parts) < 3:
                 parts.append("")
             parsed_rows.append(
                 {
                     "asset_tag": parts[0] or None,
                     "serial_number": parts[1] or None,
                     "name": parts[2] or None,
-                    "sublocation": parts[3] or None,
                 }
             )
         return parsed_rows
@@ -2346,7 +2374,6 @@ class EquipmentIntakeReceiveForm(FlaskForm):
 
         self.asset_tag_prefix.data = (self.asset_tag_prefix.data or "").strip() or None
         self.name_prefix.data = (self.name_prefix.data or "").strip() or None
-        self.sublocation.data = (self.sublocation.data or "").strip() or None
         self._parsed_asset_rows = self._parse_asset_rows()
         if self.asset_rows.errors:
             return False
@@ -2442,6 +2469,10 @@ class EquipmentIntakeReceiveForm(FlaskForm):
             return False
 
         return True
+
+
+class EquipmentCustodyActionForm(FlaskForm):
+    submit = SubmitField("Submit")
 
 
 class EquipmentSnipeItImportForm(FlaskForm):

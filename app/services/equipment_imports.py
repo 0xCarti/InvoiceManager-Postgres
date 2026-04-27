@@ -438,6 +438,7 @@ def run_snipe_it_import(
                 cost=parsed_asset.purchase_cost,
                 purchase_vendor_id=purchase_vendor.id if purchase_vendor else None,
                 location_id=location.id if location else None,
+                home_location_id=location.id if location else None,
                 sublocation=parsed_asset.sublocation,
                 assigned_user_id=assigned_user.id if assigned_user else None,
             )
@@ -468,6 +469,8 @@ def run_snipe_it_import(
             existing_asset.intake_batch = batch
             if location is not None:
                 existing_asset.location_id = location.id
+                if existing_asset.home_location_id is None:
+                    existing_asset.home_location_id = location.id
             existing_asset.sublocation = parsed_asset.sublocation or existing_asset.sublocation
             if assigned_user is not None:
                 existing_asset.assigned_user_id = assigned_user.id

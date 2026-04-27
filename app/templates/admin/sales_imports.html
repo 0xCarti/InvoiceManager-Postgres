@@ -20,6 +20,10 @@
 {% endif %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
+    .mobile-list-page {
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+    }
     .mobile-list-page .mobile-toolbar,
     .mobile-list-page .mobile-pagination-controls {
         display: flex;
@@ -34,6 +38,9 @@
     .mobile-list-page .mobile-pagination-controls form,
     .mobile-list-page .mobile-pagination-controls .pagination {
         width: 100%;
+    }
+    .mobile-list-page .mobile-table-wrap {
+        overflow: visible;
     }
     .mobile-list-page .mobile-table-wrap .table {
         width: 100% !important;
@@ -53,9 +60,21 @@
     .mobile-list-page .mobile-actions form {
         margin: 0 !important;
     }
+    .mobile-list-page .sales-import-card-actions {
+        display: grid;
+        gap: 0.5rem;
+    }
+    .mobile-list-page .sales-import-card-actions .btn,
+    .mobile-list-page .sales-import-card-actions form,
+    .mobile-list-page .sales-import-card-actions form .btn {
+        width: 100%;
+    }
+    .mobile-list-page .sales-import-active-filters {
+        align-items: stretch !important;
+    }
 }
 </style>
-<div class="container mt-5 mobile-list-page">
+<div class="container mt-5 mobile-list-page app-page-shell">
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
         <div>
             <h2 class="mb-1">Sales Imports</h2>
@@ -72,7 +91,7 @@
                 <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</button></li>
             </ul>
         </div>
-        <div>
+        <div class="d-none d-md-block">
             {{ column_visibility_dropdown(
                 table_id='sales-imports-table',
                 storage_key='salesImportsTableColumnVisibility',
@@ -85,7 +104,7 @@
     </div>
 
     {% if search_query or status_filter %}
-    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3 sales-import-active-filters">
         <span class="text-muted small">Active filters:</span>
         {% if search_query %}
         <span class="badge rounded-pill text-bg-light border">Search: {{ search_query }}</span>
@@ -98,7 +117,7 @@
 
     {% if imports.items %}
     <div class="table-responsive mobile-table-wrap">
-        <table class="table sortable align-middle" id="sales-imports-table">
+        <table class="table sortable align-middle table-mobile-card" id="sales-imports-table">
             <thead>
                 <tr>
                     <th scope="col" class="col-import-id">Import</th>
@@ -115,7 +134,7 @@
             <tbody>
                 {% for import in imports.items %}
                 <tr>
-                    <td class="col-import-id">
+                    <td class="col-import-id mobile-card-primary">
                         <div class="fw-semibold">
                             <a href="{{ url_for('admin.sales_import_detail', import_id=import.id) }}">#{{ import.id }}</a>
                         </div>
@@ -128,9 +147,14 @@
                         </div>
                     </td>
                     <td class="col-import-status">
-                        <span class="badge {% if import.status == 'approved' %}text-bg-success{% elif import.status == 'needs_mapping' %}text-bg-warning{% elif import.status == 'failed' %}text-bg-danger{% elif import.status == 'reversed' %}text-bg-secondary{% elif import.status == 'ignored' %}text-bg-light border text-dark{% else %}text-bg-primary{% endif %}">
+                        <span class="badge {% if import.status == 'approved' %}text-bg-success{% elif import.status == 'ignored' %}text-bg-light border text-dark{% else %}text-bg-primary{% endif %}">
                             {{ import.status|replace('_', ' ')|title }}
                         </span>
+                        {% if import.needs_mapping %}
+                        <div class="mt-2">
+                            <span class="badge text-bg-warning">Needs Mapping</span>
+                        </div>
+                        {% endif %}
                         <div class="small mt-2">
                             {% if import.issue_count %}
                             <span class="text-warning">{{ import.issue_count }} issue{% if import.issue_count != 1 %}s{% endif %} blocking approval</span>
@@ -200,8 +224,8 @@
                         </div>
                     </td>
                     {% if can_manage_sales_imports %}
-                    <td class="col-import-actions">
-                        <div class="mobile-actions">
+                    <td class="col-import-actions mobile-card-actions">
+                        <div class="mobile-actions sales-import-card-actions">
                             <a href="{{ url_for('admin.sales_import_detail', import_id=import.id) }}" class="btn btn-sm btn-outline-primary">Review</a>
                             {% if import.can_direct_approve %}
                             <form method="post" class="d-inline">
@@ -216,10 +240,6 @@
                             </form>
                             {% elif import.status == 'approved' %}
                             <span class="small text-success align-self-center">Already approved</span>
-                            {% elif import.status == 'reversed' %}
-                            <span class="small text-muted align-self-center">Reversed</span>
-                            {% elif import.status == 'failed' %}
-                            <span class="small text-danger align-self-center">Failed</span>
                             {% elif import.status == 'ignored' %}
                             <span class="small text-muted align-self-center">Ignored</span>
                             {% else %}

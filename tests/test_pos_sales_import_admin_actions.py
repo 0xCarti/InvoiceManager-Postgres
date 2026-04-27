@@ -28,7 +28,7 @@ def _seed_import_with_unresolved_rows(app, *, message_id: str = "msg-map-1"):
             message_id=message_id,
             attachment_filename="sales.xls",
             attachment_sha256=(message_id[-1] or "e") * 64,
-            status="needs_mapping",
+            status="pending",
         )
         db.session.add(sales_import)
         db.session.flush()

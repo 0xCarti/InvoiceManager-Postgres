@@ -10,6 +10,11 @@ def _template_text(relative_path: str) -> str:
 
 def test_new_feature_templates_keep_mobile_responsive_helpers():
     expectations = {
+        "app/templates/admin/sales_imports.html": [
+            "table-mobile-card",
+            "sales-import-card-actions",
+            "mobile-list-page app-page-shell",
+        ],
         "app/templates/admin/sales_import_detail.html": [
             "sales-import-detail-page",
             "sales-import-header-actions",

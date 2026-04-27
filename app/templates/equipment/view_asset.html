@@ -9,6 +9,7 @@
 {% set can_view_maintenance = can_access_endpoint('equipment.view_equipment_maintenance', 'GET') %}
 {% set can_manage_maintenance = can_access_endpoint('equipment.create_equipment_maintenance_issue', 'GET') %}
 {% set can_view_intake = can_access_endpoint('equipment.view_equipment_intake', 'GET') %}
+{% set can_manage_custody = can_access_endpoint('equipment.view_equipment_asset_scan', 'GET') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .asset-page-actions > *,
@@ -24,6 +25,7 @@
             <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
                 <h2 class="mb-0">{{ asset.asset_tag }}</h2>
                 <span class="badge {{ asset.status_badge_class }}">{{ asset.status_label }}</span>
+                <span class="badge {{ asset.custody_badge_class }}">{{ asset.custody_state_label }}</span>
                 {% if asset.needs_attention %}
                 <span class="badge text-bg-warning">Needs Attention</span>
                 {% endif %}
@@ -45,11 +47,27 @@
             {% if can_view_intake and asset.intake_batch %}
             <a class="btn btn-outline-secondary" href="{{ url_for('equipment.view_equipment_intake_batch', batch_id=asset.intake_batch.id) }}">View Intake Batch</a>
             {% endif %}
+            {% if can_manage_custody and not asset.archived %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('equipment.view_equipment_asset_scan', asset_id=asset.id) }}">Scan Page</a>
+            {% endif %}
             {% if can_manage_maintenance %}
             <a class="btn btn-outline-secondary" href="{{ url_for('equipment.create_equipment_maintenance_issue', asset_id=asset.id) }}">Report Issue</a>
             {% endif %}
             {% if can_print_labels %}
             <a class="btn btn-outline-secondary" href="{{ url_for('equipment.print_equipment_labels', equipment_id=asset.id) }}" target="_blank" rel="noopener">Print Label</a>
+            {% endif %}
+            {% if can_manage_custody and not asset.archived %}
+                {% if asset.is_checked_out %}
+                <form action="{{ url_for('equipment.check_in_equipment_asset', asset_id=asset.id) }}" method="post" class="d-inline">
+                    {{ custody_form.hidden_tag() }}
+                    <button type="submit" class="btn btn-outline-primary">Sign In</button>
+                </form>
+                {% else %}
+                <form action="{{ url_for('equipment.check_out_equipment_asset', asset_id=asset.id) }}" method="post" class="d-inline">
+                    {{ custody_form.hidden_tag() }}
+                    <button type="submit" class="btn btn-outline-primary">Sign Out</button>
+                </form>
+                {% endif %}
             {% endif %}
             {% if can_edit_equipment %}
             <a class="btn btn-primary" href="{{ url_for('equipment.edit_equipment_asset', asset_id=asset.id) }}">Edit</a>
@@ -110,12 +128,37 @@
         <div class="col-12 col-lg-6">
             <div class="card h-100">
                 <div class="card-body">
-                    <h3 class="h5 mb-3">Assignment and Service</h3>
+                    <h3 class="h5 mb-3">Location and Custody</h3>
                     <dl class="row mb-0">
-                        <dt class="col-sm-4">Location</dt>
+                        <dt class="col-sm-4">Current Location</dt>
                         <dd class="col-sm-8">{{ asset.location_label or '-' }}</dd>
+                        <dt class="col-sm-4">Home Storage</dt>
+                        <dd class="col-sm-8">{{ asset.home_location_label or '-' }}</dd>
                         <dt class="col-sm-4">Custodian</dt>
                         <dd class="col-sm-8">{{ asset.custodian_label or '-' }}</dd>
+                        <dt class="col-sm-4">Custody State</dt>
+                        <dd class="col-sm-8">
+                            <span class="badge {{ asset.custody_badge_class }}">{{ asset.custody_state_label }}</span>
+                        </dd>
+                        <dt class="col-sm-4">Checked Out At</dt>
+                        <dd class="col-sm-8">{{ asset.checked_out_at|format_datetime('%Y-%m-%d %H:%M') if asset.checked_out_at else '-' }}</dd>
+                        <dt class="col-sm-4">Label QR</dt>
+                        <dd class="col-sm-8">
+                            <div>{{ asset.label_qr_target_label }}</div>
+                            {% if asset.label_qr_custom_url %}
+                            <div class="small text-muted text-break">{{ asset.label_qr_custom_url }}</div>
+                            {% endif %}
+                        </dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-6">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h3 class="h5 mb-3">Purchase and Service</h3>
+                    <dl class="row mb-0">
                         <dt class="col-sm-4">Purchased From</dt>
                         <dd class="col-sm-8">{{ purchase_vendor_name or (asset.intake_batch.vendor_display_name if asset.intake_batch else '-') or '-' }}</dd>
                         <dt class="col-sm-4">PO Reference</dt>
@@ -210,6 +253,61 @@
                     </div>
                     {% else %}
                     <p class="text-muted mb-0">No maintenance issues have been logged for this asset yet.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                        <h3 class="h5 mb-0">Custody History</h3>
+                        <span class="badge text-bg-light border">{{ recent_custody_events|length }} Event{% if recent_custody_events|length != 1 %}s{% endif %}</span>
+                    </div>
+                    {% if recent_custody_events %}
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-0 table-mobile-card">
+                            <thead>
+                                <tr>
+                                    <th>Action</th>
+                                    <th>By</th>
+                                    <th>From</th>
+                                    <th>To</th>
+                                    <th>When</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for event in recent_custody_events %}
+                                <tr>
+                                    <td class="mobile-card-primary">{{ event.action_label }}</td>
+                                    <td>{{ event.performed_by.display_label if event.performed_by else 'System' }}</td>
+                                    <td>
+                                        {% if event.from_assigned_user %}
+                                        {{ event.from_assigned_user.display_label }}
+                                        {% elif event.from_location %}
+                                        {{ event.from_location.name }}
+                                        {% else %}
+                                        -
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if event.to_assigned_user %}
+                                        {{ event.to_assigned_user.display_label }}
+                                        {% elif event.to_location %}
+                                        {{ event.to_location.name }}
+                                        {% else %}
+                                        -
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ event.created_at|format_datetime('%Y-%m-%d %H:%M') }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-0">No custody events have been logged for this asset yet.</p>
                     {% endif %}
                 </div>
             </div>

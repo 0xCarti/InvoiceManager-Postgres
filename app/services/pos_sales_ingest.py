@@ -447,7 +447,7 @@ def ingest_pos_sales_attachment(
             attachment_storage_path=str(persisted_path),
             sales_date=_default_sales_import_date(received_at),
             received_at=received_at,
-            status=PosSalesImport.STATUS_FAILED,
+            status=PosSalesImport.STATUS_IGNORED,
             failure_reason="Unable to parse POS spreadsheet attachment.",
         )
         db.session.add(failure)

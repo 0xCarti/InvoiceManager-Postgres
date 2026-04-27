@@ -36,8 +36,16 @@
         <h3 class="h5 mb-3">Location and Custody</h3>
         <div class="row g-3">
             <div class="col-md-4">{{ forms.render_field(form.location_id) }}</div>
-            <div class="col-md-4">{{ forms.render_field(form.sublocation) }}</div>
+            <div class="col-md-4">{{ forms.render_field(form.home_location_id) }}</div>
             <div class="col-md-4">{{ forms.render_field(form.assigned_user_id) }}</div>
+        </div>
+    </div>
+
+    <div class="mb-4">
+        <h3 class="h5 mb-3">Labels and QR</h3>
+        <div class="row g-3">
+            <div class="col-md-6">{{ forms.render_field(form.label_qr_target) }}</div>
+            <div class="col-md-6">{{ forms.render_field(form.label_qr_custom_url) }}</div>
         </div>
     </div>
 
