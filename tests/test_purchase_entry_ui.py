@@ -83,6 +83,16 @@ def test_purchase_orders_list_template_includes_upload_script_and_accessible_fil
     assert 'accept=".csv,.xlsx,.xls"' in content
 
 
+def test_purchase_order_templates_hide_equipment_intake_actions():
+    for relative_path in (
+        "app/templates/purchase_orders/edit_purchase_order.html",
+        "app/templates/purchase_orders/view_purchase_orders.html",
+    ):
+        content = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert "Create Equipment Intake" not in content
+        assert "equipment.create_equipment_intake_batch" not in content
+
+
 def test_purchase_order_upload_script_supports_drop_fallback():
     content = (
         ROOT / "app/static/js/purchase_order_upload.js"

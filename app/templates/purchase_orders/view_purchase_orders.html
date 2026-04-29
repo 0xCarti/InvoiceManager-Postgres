@@ -9,7 +9,6 @@
 {% set can_mark_purchase_orders = can_access_endpoint('purchase.mark_purchase_order_ordered', 'POST') %}
 {% set can_receive_purchase_invoices = can_access_endpoint('purchase.receive_invoice') %}
 {% set can_delete_purchase_orders = can_access_endpoint('purchase.delete_purchase_order', 'POST') %}
-{% set can_manage_equipment_intake = can_access_endpoint('equipment.create_equipment_intake_batch', 'GET') %}
 {% set can_view_purchase_cost_forecast = can_access_endpoint('report.purchase_cost_forecast') %}
 {% set can_view_purchase_inventory_summary = can_access_endpoint('report.purchase_inventory_summary') %}
 {% set has_purchase_order_reports = can_view_purchase_cost_forecast or can_view_purchase_inventory_summary %}
@@ -358,9 +357,6 @@
                 <td class="col-po-actions">
                     <div class="mobile-actions mobile-card-actions">
                         <a href="{{ url_for('notes.entity_notes', entity_type='purchase_order', entity_id=order.id) }}" class="btn btn-sm btn-outline-secondary">Notes</a>
-                        {% if can_manage_equipment_intake %}
-                        <a href="{{ url_for('equipment.create_equipment_intake_batch', purchase_order_id=order.id) }}" class="btn btn-sm btn-outline-secondary">Create Equipment Intake</a>
-                        {% endif %}
                         {% if not order.received %}
                         {% if order.can_mark_ordered and can_mark_purchase_orders %}
                         <form action="{{ url_for('purchase.mark_purchase_order_ordered', po_id=order.id) }}" method="post" class="d-inline">

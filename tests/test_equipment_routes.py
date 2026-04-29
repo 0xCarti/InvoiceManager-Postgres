@@ -922,14 +922,14 @@ def test_equipment_procurement_report_and_invoice_prefill(client, app):
         purchase_orders_html = purchase_orders_page.get_data(as_text=True)
         assert (
             f"/equipment/intake/create?purchase_order_id={purchase_order_id}"
-            in purchase_orders_html
+            not in purchase_orders_html
         )
 
         purchase_order_edit_page = client.get(
             f"/purchase_orders/edit/{purchase_order_id}"
         )
         assert purchase_order_edit_page.status_code == 200
-        assert "Create Equipment Intake" in purchase_order_edit_page.get_data(
+        assert "Create Equipment Intake" not in purchase_order_edit_page.get_data(
             as_text=True
         )
 
