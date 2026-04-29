@@ -15,12 +15,21 @@ from app.services.purchase_imports import (
 )
 
 
+@pytest.fixture(autouse=True)
+def gl_codes():
+    yield
+
+
 def _make_pratts_file(csv_text: str) -> FileStorage:
     return FileStorage(stream=io.BytesIO(csv_text.encode()), filename="pratts.csv")
 
 
 def _make_pratts_vendor() -> Vendor:
     return Vendor(first_name="Pratt", last_name="Supplies")
+
+
+def _make_sysco_vendor() -> Vendor:
+    return Vendor(first_name="Sysco", last_name="Source")
 
 
 def _make_manitoba_vendor() -> Vendor:
@@ -152,6 +161,21 @@ def test_parse_pratts_csv_invalid_quantities():
         parse_purchase_order_csv(_make_pratts_file(csv_text), _make_pratts_vendor())
 
     assert "No purchasable lines found" in str(excinfo.value)
+
+
+def test_parse_sysco_csv_supports_host_order_header():
+    csv_text = """Host Order,Item,Pack,Size,Brand,Description,Qty Ship,Price,Portion Cost,Ext Price
+7811596,4697761,12,1 LT,FAIRLEE,JUICE ORANGE BLEND,3,32.64,,97.92
+"""
+
+    parsed = parse_purchase_order_csv(
+        _make_pratts_file(csv_text),
+        _make_sysco_vendor(),
+    )
+
+    assert len(parsed.items) == 1
+    assert parsed.order_number == "7811596"
+    assert parsed.expected_total == pytest.approx(97.92)
 
 
 def test_parse_manitoba_liquor_xlsx_success_with_malformed_dimension():

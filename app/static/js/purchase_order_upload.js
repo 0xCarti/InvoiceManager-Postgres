@@ -7,6 +7,7 @@
         const browseButton = document.getElementById('upload-po-browse-btn');
         const errorAlert = document.getElementById('upload-po-error');
         const vendorSelect = document.getElementById('upload-po-vendor');
+        let pendingDroppedFile = null;
 
         if (!uploadForm || !dropzone || !fileInput) {
             return;
@@ -19,14 +20,48 @@
             }
         };
 
-        const setFile = (file) => {
-            const dataTransfer = new DataTransfer();
-            dataTransfer.items.add(file);
-            fileInput.files = dataTransfer.files;
-            if (fileName) {
+        const setSelectedFileLabel = (file) => {
+            if (!fileName) {
+                return;
+            }
+            if (file && file.name) {
                 fileName.textContent = file.name;
                 fileName.classList.remove('text-muted');
+                return;
             }
+            fileName.textContent = 'No file chosen';
+            fileName.classList.add('text-muted');
+        };
+
+        const openFilePicker = () => {
+            clearError();
+            if (typeof fileInput.showPicker === 'function') {
+                fileInput.showPicker();
+                return;
+            }
+            fileInput.click();
+        };
+
+        const setFile = (file) => {
+            pendingDroppedFile = null;
+            let assignedToInput = false;
+
+            if (typeof DataTransfer !== 'undefined') {
+                try {
+                    const dataTransfer = new DataTransfer();
+                    dataTransfer.items.add(file);
+                    fileInput.files = dataTransfer.files;
+                    assignedToInput = Boolean(fileInput.files && fileInput.files.length);
+                } catch (error) {
+                    assignedToInput = false;
+                }
+            }
+
+            if (!assignedToInput) {
+                pendingDroppedFile = file;
+            }
+
+            setSelectedFileLabel(file);
             clearError();
         };
 
@@ -70,23 +105,26 @@
             handleFiles(event.dataTransfer?.files);
         });
 
-        dropzone.addEventListener('click', () => fileInput.click());
+        dropzone.addEventListener('click', () => openFilePicker());
         dropzone.addEventListener('keypress', (event) => {
             if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
-                fileInput.click();
+                openFilePicker();
             }
         });
 
         if (browseButton) {
             browseButton.addEventListener('click', (event) => {
                 event.preventDefault();
-                fileInput.click();
+                openFilePicker();
             });
         }
 
         fileInput.addEventListener('change', () => {
-            handleFiles(fileInput.files);
+            pendingDroppedFile = null;
+            const [file] = Array.from(fileInput.files || []);
+            setSelectedFileLabel(file || null);
+            clearError();
         });
 
         uploadForm.addEventListener('submit', (event) => {
@@ -100,13 +138,44 @@
                 return;
             }
 
-            if (!fileInput.files.length) {
+            const hasNativeFile = Boolean(fileInput.files && fileInput.files.length);
+            if (!hasNativeFile && !pendingDroppedFile) {
                 event.preventDefault();
                 if (errorAlert) {
                     errorAlert.textContent = 'Choose a file before uploading.';
                     errorAlert.classList.remove('d-none');
                 }
                 fileInput.focus();
+                return;
+            }
+
+            if (!hasNativeFile && pendingDroppedFile) {
+                event.preventDefault();
+                const formData = new FormData(uploadForm);
+                formData.set(
+                    'purchase_order_file',
+                    pendingDroppedFile,
+                    pendingDroppedFile.name
+                );
+
+                fetch(uploadForm.action, {
+                    method: uploadForm.method || 'POST',
+                    body: formData,
+                    credentials: 'same-origin',
+                })
+                    .then((response) => {
+                        if (!response.ok) {
+                            throw new Error('Upload failed');
+                        }
+                        window.location.assign(response.url);
+                    })
+                    .catch(() => {
+                        if (errorAlert) {
+                            errorAlert.textContent =
+                                'The file could not be uploaded. Try choosing the file directly.';
+                            errorAlert.classList.remove('d-none');
+                        }
+                    });
             }
         });
     });

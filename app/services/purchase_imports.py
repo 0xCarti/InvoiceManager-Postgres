@@ -51,7 +51,13 @@ _SYSCO_REQUIRED_HEADERS = {
 
 _SYSCO_OPTIONAL_HEADERS = {
     "ext_price": {"ext price", "extended price", "extd price"},
-    "order_number": {"order #", "po number", "order number", "po #"},
+    "order_number": {
+        "order #",
+        "po number",
+        "order number",
+        "po #",
+        "host order",
+    },
 }
 
 _PRATTS_REQUIRED_HEADERS = {
@@ -66,7 +72,13 @@ _PRATTS_REQUIRED_HEADERS = {
 }
 
 _PRATTS_OPTIONAL_HEADERS = {
-    "order_number": {"order #", "po number", "order number", "po #"},
+    "order_number": {
+        "order #",
+        "po number",
+        "order number",
+        "po #",
+        "host order",
+    },
 }
 
 _MANITOBA_LIQUOR_REQUIRED_HEADERS = {
@@ -423,6 +435,21 @@ def _parse_manitoba_liquor_xlsx(file_obj: IO) -> ParsedPurchaseOrder:
     )
 
 
+def _alias_rank(
+    alias: VendorItemAlias,
+    *,
+    item_unit_id: int | None = None,
+):
+    updated_at = alias.updated_at or alias.created_at or datetime.datetime.min
+    return (
+        1 if item_unit_id and alias.item_unit_id == item_unit_id else 0,
+        1 if alias.normalized_description else 0,
+        1 if alias.item_unit_id is None else 0,
+        updated_at,
+        alias.id or 0,
+    )
+
+
 def parse_purchase_order_csv(file: FileStorage, vendor: Vendor) -> ParsedPurchaseOrder:
     """Parse a vendor purchase-order upload into a purchase order structure."""
 
@@ -474,17 +501,45 @@ def find_preferred_vendor_alias(
     if not aliases:
         return None
 
-    def _alias_rank(alias: VendorItemAlias):
-        updated_at = alias.updated_at or alias.created_at or datetime.datetime.min
-        return (
-            1 if item_unit_id and alias.item_unit_id == item_unit_id else 0,
-            1 if alias.normalized_description else 0,
-            1 if alias.item_unit_id is None else 0,
-            updated_at,
-            alias.id or 0,
-        )
+    return max(aliases, key=lambda alias: _alias_rank(alias, item_unit_id=item_unit_id))
 
-    return max(aliases, key=_alias_rank)
+
+def preferred_vendor_aliases_for_items(
+    *,
+    item_ids: Iterable[int],
+    vendor: Vendor | None = None,
+    vendor_id: int | None = None,
+) -> dict[int, VendorItemAlias]:
+    resolved_vendor_id = vendor.id if vendor is not None else vendor_id
+    normalized_item_ids: list[int] = []
+    seen_item_ids: set[int] = set()
+    for item_id in item_ids:
+        if item_id is None or not str(item_id).strip():
+            continue
+        try:
+            normalized_item_id = int(item_id)
+        except (TypeError, ValueError):
+            continue
+        if normalized_item_id in seen_item_ids:
+            continue
+        seen_item_ids.add(normalized_item_id)
+        normalized_item_ids.append(normalized_item_id)
+    normalized_item_ids.sort()
+    if not resolved_vendor_id or not normalized_item_ids:
+        return {}
+
+    aliases = VendorItemAlias.query.filter(
+        VendorItemAlias.vendor_id == resolved_vendor_id,
+        VendorItemAlias.item_id.in_(normalized_item_ids),
+    ).all()
+
+    alias_map: dict[int, VendorItemAlias] = {}
+    for alias in aliases:
+        current = alias_map.get(alias.item_id)
+        if current is None or _alias_rank(alias) > _alias_rank(current):
+            alias_map[alias.item_id] = alias
+
+    return alias_map
 
 
 def update_or_create_vendor_alias(

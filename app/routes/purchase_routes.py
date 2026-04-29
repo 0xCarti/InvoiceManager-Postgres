@@ -62,6 +62,7 @@ from app.services.purchase_imports import (
     CSVImportError,
     find_preferred_vendor_alias,
     parse_purchase_order_csv,
+    preferred_vendor_aliases_for_items,
     resolve_vendor_purchase_lines,
     serialize_parsed_line,
     update_or_create_vendor_alias,
@@ -72,6 +73,7 @@ import json
 import re
 
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from wtforms.validators import ValidationError
 
@@ -544,6 +546,69 @@ def _sync_vendor_alias_for_purchase_entry(
         default_cost=default_cost,
     )
     db.session.add(alias)
+
+
+def _apply_preferred_vendor_alias_defaults(form, vendor_id: int | None) -> None:
+    if not vendor_id:
+        return
+
+    item_ids: list[int] = []
+    row_forms: list[tuple[int, object]] = []
+    for item_form in form.items:
+        if not item_form.item.data:
+            continue
+        try:
+            item_id = int(item_form.item.data)
+        except (TypeError, ValueError):
+            continue
+        item_ids.append(item_id)
+        row_forms.append((item_id, item_form))
+
+    alias_map = preferred_vendor_aliases_for_items(
+        vendor_id=vendor_id,
+        item_ids=item_ids,
+    )
+    if not alias_map:
+        return
+
+    for item_id, item_form in row_forms:
+        alias = alias_map.get(item_id)
+        if alias is None:
+            continue
+        if not item_form.vendor_sku.data:
+            item_form.vendor_sku.data = alias.vendor_sku
+        if not item_form.vendor_description.data:
+            item_form.vendor_description.data = alias.vendor_description
+        if not item_form.pack_size.data:
+            item_form.pack_size.data = alias.pack_size
+
+
+def _build_purchase_item_lookup(
+    selected_item_ids: list[int],
+    vendor_id: int | None = None,
+) -> dict[int, dict[str, str]]:
+    if not selected_item_ids:
+        return {}
+
+    normalized_item_ids = sorted(set(selected_item_ids))
+    alias_map = preferred_vendor_aliases_for_items(
+        vendor_id=vendor_id,
+        item_ids=normalized_item_ids,
+    )
+    return {
+        item.id: {
+            "name": item.name,
+            "gl_code": item.purchase_gl_code.code if item.purchase_gl_code else "",
+            "vendor_sku": (
+                alias_map[item.id].vendor_sku
+                if item.id in alias_map and alias_map[item.id].vendor_sku
+                else ""
+            ),
+        }
+        for item in Item.query.options(selectinload(Item.purchase_gl_code))
+        .filter(Item.id.in_(normalized_item_ids))
+        .all()
+    }
 
 
 def _validate_json_csrf(payload: dict | None) -> None:
@@ -1175,6 +1240,8 @@ def create_purchase_order():
         form.order_date.data = datetime.date.today()
     if request.method == "GET" and form.expected_date.data is None:
         form.expected_date.data = datetime.date.today() + datetime.timedelta(days=1)
+    if request.method == "GET":
+        _apply_preferred_vendor_alias_defaults(form, form.vendor.data or None)
     item_entries = []
     has_incomplete_rows = False
     form_submitted = request.method == "POST"
@@ -1253,19 +1320,10 @@ def create_purchase_order():
                 selected_item_ids.append(int(item_form.item.data))
             except (TypeError, ValueError):
                 continue
-    item_lookup = {}
-    if selected_item_ids:
-        item_lookup = {
-            item.id: {
-                "name": item.name,
-                "gl_code": item.purchase_gl_code.code
-                if item.purchase_gl_code
-                else "",
-            }
-            for item in Item.query.options(selectinload(Item.purchase_gl_code))
-            .filter(Item.id.in_(selected_item_ids))
-            .all()
-        }
+    item_lookup = _build_purchase_item_lookup(
+        selected_item_ids,
+        form.vendor.data or None,
+    )
 
     codes = _purchase_gl_code_choices()
     return render_template(
@@ -1553,6 +1611,7 @@ def edit_purchase_order(po_id):
             form.items[i].quantity.data = poi.quantity
             form.items[i].cost.data = poi.unit_cost
             form.items[i].position.data = poi.position
+        _apply_preferred_vendor_alias_defaults(form, po.vendor_id)
 
     selected_item_ids = []
     for item_form in form.items:
@@ -1561,19 +1620,10 @@ def edit_purchase_order(po_id):
                 selected_item_ids.append(int(item_form.item.data))
             except (TypeError, ValueError):
                 continue
-    item_lookup = {}
-    if selected_item_ids:
-        item_lookup = {
-            item.id: {
-                "name": item.name,
-                "gl_code": item.purchase_gl_code.code
-                if item.purchase_gl_code
-                else "",
-            }
-            for item in Item.query.options(selectinload(Item.purchase_gl_code))
-            .filter(Item.id.in_(selected_item_ids))
-            .all()
-        }
+    item_lookup = _build_purchase_item_lookup(
+        selected_item_ids,
+        form.vendor.data or po.vendor_id,
+    )
 
     codes = _purchase_gl_code_choices()
     return render_template(
@@ -1630,7 +1680,15 @@ def delete_purchase_order(po_id):
         )
         return redirect(url_for("purchase.view_purchase_orders"))
     db.session.delete(po)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash(
+            "Could not delete this purchase order because dependent records still exist.",
+            "error",
+        )
+        return redirect(url_for("purchase.view_purchase_orders"))
     log_activity(f"Deleted purchase order {po.id}")
     flash("Purchase order deleted successfully!", "success")
     return redirect(url_for("purchase.view_purchase_orders"))

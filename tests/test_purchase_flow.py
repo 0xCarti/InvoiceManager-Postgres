@@ -21,6 +21,7 @@ from app.models import (
     Setting,
     User,
     Vendor,
+    VendorItemAlias,
 )
 from tests.utils import login
 
@@ -276,6 +277,75 @@ def test_purchase_order_can_be_marked_ordered_and_filtered(client, app):
         assert po is not None
         assert po.status == PurchaseOrder.STATUS_ORDERED
         assert po.received is False
+
+
+def test_delete_purchase_order_removes_receive_draft(client, app):
+    email, vendor_id, _, _, _ = setup_purchase(app)
+    with app.app_context():
+        user = User.query.filter_by(email=email).first()
+        assert user is not None
+        po = PurchaseOrder(
+            vendor_id=vendor_id,
+            user_id=user.id,
+            vendor_name="Vend Or",
+            order_date=datetime.date(2024, 5, 1),
+            expected_date=datetime.date(2024, 5, 2),
+            delivery_charge=0,
+        )
+        db.session.add(po)
+        db.session.commit()
+        draft = PurchaseInvoiceDraft(
+            purchase_order_id=po.id,
+            payload='{"items":[]}',
+        )
+        db.session.add(draft)
+        db.session.commit()
+        po_id = po.id
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            f"/purchase_orders/{po_id}/delete",
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+        assert b"Purchase order deleted successfully!" in resp.data
+
+    with app.app_context():
+        assert db.session.get(PurchaseOrder, po_id) is None
+        assert (
+            PurchaseInvoiceDraft.query.filter_by(purchase_order_id=po_id).first()
+            is None
+        )
+
+
+def test_item_search_returns_preferred_vendor_alias_for_vendor_context(client, app):
+    email, vendor_id, item_id, _, unit_id = setup_purchase(app)
+    with app.app_context():
+        alias = VendorItemAlias(
+            vendor_id=vendor_id,
+            item_id=item_id,
+            item_unit_id=unit_id,
+            vendor_sku="SKU-123",
+            vendor_description="Preferred Part",
+            normalized_description="preferred part",
+            pack_size="12 x 1",
+        )
+        db.session.add(alias)
+        db.session.commit()
+
+    with client:
+        login(client, email, "pass")
+        resp = client.get(
+            "/items/search",
+            query_string={"term": "Part", "vendor_id": vendor_id},
+        )
+        assert resp.status_code == 200
+        payload = resp.get_json()
+        assert payload
+        assert payload[0]["preferred_vendor_sku"] == "SKU-123"
+        assert payload[0]["preferred_vendor_description"] == "Preferred Part"
+        assert payload[0]["preferred_pack_size"] == "12 x 1"
 
 
 def test_purchase_order_item_filter(client, app):

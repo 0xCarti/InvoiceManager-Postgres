@@ -148,6 +148,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initPurchaseOrderForm({
         container: document.getElementById('items'),
         addRowButtons: Array.from(document.querySelectorAll('[data-role="purchase-order-add-item"]')),
+        vendorSelect: document.getElementById('{{ form.vendor.id }}'),
         quickAddButton: document.getElementById('quick-add-item'),
         newItemModal: document.getElementById('newItemModal'),
         saveNewItemButton: document.getElementById('save-new-item'),

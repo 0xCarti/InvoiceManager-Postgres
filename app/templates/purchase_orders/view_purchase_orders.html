@@ -453,7 +453,7 @@
                             <span class="text-muted" id="upload-po-file-name">No file chosen</span>
                         </div>
                     </div>
-                    <input type="file" name="purchase_order_file" id="upload-po-file-input" class="form-control mt-3 d-none" aria-label="Purchase order file">
+                    <input type="file" name="purchase_order_file" id="upload-po-file-input" class="form-control mt-3 visually-hidden" accept=".csv,.xlsx,.xls" aria-label="Purchase order file">
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -508,9 +508,7 @@
 {% block scripts %}
 {{ super() }}
 <script src="{{ url_for('static', filename='js/date_pickers.js') }}"></script>
-{% if can_upload_purchase_orders %}
 <script src="{{ url_for('static', filename='js/purchase_order_upload.js') }}"></script>
-{% endif %}
 <script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function() {
     initDatePickers({

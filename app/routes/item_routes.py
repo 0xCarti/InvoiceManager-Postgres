@@ -45,6 +45,7 @@ from app.models import (
     Vendor,
     VendorItemAlias,
 )
+from app.services.purchase_imports import preferred_vendor_aliases_for_items
 from app.utils.activity import log_activity
 from app.utils.filter_state import (
     filters_to_query_args,
@@ -1147,6 +1148,7 @@ def bulk_delete_items():
 def search_items():
     """Search items by name for autocomplete fields."""
     search_term = normalize_request_text_filter(request.args.get("term"))
+    vendor_id = request.args.get("vendor_id", type=int)
     if not search_term:
         return jsonify([])
     items = (
@@ -1166,11 +1168,30 @@ def search_items():
         .limit(20)
         .all()
     )
+    alias_map = preferred_vendor_aliases_for_items(
+        vendor_id=vendor_id,
+        item_ids=[item.id for item in items],
+    )
     items_data = [
         {
             "id": item.id,
             "name": item.name,
             "gl_code": item.purchase_gl_code.code if item.purchase_gl_code else "",
+            "preferred_vendor_sku": (
+                alias_map[item.id].vendor_sku
+                if item.id in alias_map and alias_map[item.id].vendor_sku
+                else ""
+            ),
+            "preferred_vendor_description": (
+                alias_map[item.id].vendor_description
+                if item.id in alias_map and alias_map[item.id].vendor_description
+                else ""
+            ),
+            "preferred_pack_size": (
+                alias_map[item.id].pack_size
+                if item.id in alias_map and alias_map[item.id].pack_size
+                else ""
+            ),
             "matched_on": (
                 "upc"
                 if item.upc == search_term

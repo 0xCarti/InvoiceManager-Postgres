@@ -3290,6 +3290,12 @@ class PurchaseOrder(db.Model):
         cascade="all, delete-orphan",
         order_by="PurchaseOrderItem.position",
     )
+    draft = relationship(
+        "PurchaseInvoiceDraft",
+        back_populates="purchase_order",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
     vendor = relationship("Vendor", backref="purchase_orders")
 
     __table_args__ = (
@@ -3468,7 +3474,7 @@ class PurchaseInvoiceDraft(db.Model):
         server_default=func.now(),
     )
 
-    purchase_order = relationship("PurchaseOrder")
+    purchase_order = relationship("PurchaseOrder", back_populates="draft")
 
     @property
     def data(self):

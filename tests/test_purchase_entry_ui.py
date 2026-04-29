@@ -55,9 +55,42 @@ def test_purchase_order_form_script_keeps_a_ready_blank_row():
     assert 'event.key === "Enter"' in content
     assert "ensureTrailingBlankRow();" in content
     assert 'vendorSkuLabel.textContent = "Vendor SKU";' in content
+    assert 'params.set("vendor_id", vendorSelect.value);' in content
+    assert "preferredVendorSku" in content
+    assert "preferredVendorDescription" in content
+    assert "preferredPackSize" in content
     assert 'row.classList.add(\n                "row",\n                "g-3"' in content
     assert '"col-xl-4"' in content
     assert '"col-xl-2"' in content
+
+
+def test_purchase_order_templates_pass_vendor_context_to_form_script():
+    for relative_path in (
+        "app/templates/purchase_orders/create_purchase_order.html",
+        "app/templates/purchase_orders/edit_purchase_order.html",
+    ):
+        content = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert "vendorSelect: document.getElementById('{{ form.vendor.id }}')" in content
+
+
+def test_purchase_orders_list_template_includes_upload_script_and_accessible_file_input():
+    content = (
+        ROOT / "app/templates/purchase_orders/view_purchase_orders.html"
+    ).read_text(encoding="utf-8")
+    assert "purchase_order_upload.js" in content
+    assert 'id="upload-po-file-input"' in content
+    assert "visually-hidden" in content
+    assert 'accept=".csv,.xlsx,.xls"' in content
+
+
+def test_purchase_order_upload_script_supports_drop_fallback():
+    content = (
+        ROOT / "app/static/js/purchase_order_upload.js"
+    ).read_text(encoding="utf-8")
+    assert "pendingDroppedFile" in content
+    assert "fileInput.showPicker" in content
+    assert "new DataTransfer()" in content
+    assert "window.location.assign(response.url);" in content
 
 
 def test_receive_invoice_template_shows_inline_deposit_field():

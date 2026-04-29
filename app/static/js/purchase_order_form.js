@@ -18,6 +18,7 @@
         const quickAddButton = config.quickAddButton || null;
         const saveNewItemButton = config.saveNewItemButton || null;
         const newItemModalEl = config.newItemModal || null;
+        const vendorSelect = config.vendorSelect || null;
         const canManageUnits = config.canManageUnits !== false;
         const manageUnitsModalEl =
             (config && config.manageUnitsModal) ||
@@ -1023,12 +1024,14 @@
             const quantityInput = row.querySelector(".quantity");
             const unitSelect = row.querySelector(".unit-select");
             const costField = row.querySelector(".item-cost-field");
+            const vendorSkuField = row.querySelector(".vendor-sku-field");
             return Boolean(
                 (hiddenField && hiddenField.value) ||
                     (searchInput && searchInput.value.trim()) ||
                     (quantityInput && quantityInput.value.trim()) ||
                     (unitSelect && unitSelect.value) ||
-                    (costField && costField.value)
+                    (costField && costField.value) ||
+                    (vendorSkuField && vendorSkuField.value.trim())
             );
         }
 
@@ -1096,6 +1099,18 @@
                     optionLike && optionLike.dataset
                         ? optionLike.dataset.glCode || ""
                         : "",
+                vendorSku:
+                    optionLike && optionLike.dataset
+                        ? optionLike.dataset.preferredVendorSku || ""
+                        : "",
+                vendorDescription:
+                    optionLike && optionLike.dataset
+                        ? optionLike.dataset.preferredVendorDescription || ""
+                        : "",
+                packSize:
+                    optionLike && optionLike.dataset
+                        ? optionLike.dataset.preferredPackSize || ""
+                        : "",
             };
         }
 
@@ -1104,13 +1119,25 @@
                 itemId: item && item.id ? String(item.id) : "",
                 itemName: item && item.name ? item.name : "",
                 glCode: item && item.gl_code ? item.gl_code : "",
+                preferredVendorSku:
+                    item && item.preferred_vendor_sku ? item.preferred_vendor_sku : "",
+                preferredVendorDescription:
+                    item && item.preferred_vendor_description
+                        ? item.preferred_vendor_description
+                        : "",
+                preferredPackSize:
+                    item && item.preferred_pack_size ? item.preferred_pack_size : "",
                 matchedOn: item && item.matched_on ? item.matched_on : "name",
                 exactMatch: item && item.exact_match ? "1" : "0",
             };
         }
 
         function requestSearchResults(term) {
-            return fetch(`/items/search?term=${encodeURIComponent(term)}`).then(
+            const params = new URLSearchParams({ term });
+            if (vendorSelect && vendorSelect.value) {
+                params.set("vendor_id", vendorSelect.value);
+            }
+            return fetch(`/items/search?${params.toString()}`).then(
                 (response) => {
                     if (!response.ok) {
                         throw new Error("Search failed");
@@ -1133,12 +1160,29 @@
             const searchInput = row.querySelector(".item-search");
             const unitSelect = row.querySelector(".unit-select");
             const suggestionList = row.querySelector(".suggestion-list");
+            const vendorSkuField = row.querySelector(".vendor-sku-field");
+            const vendorDescriptionField = row.querySelector(
+                ".vendor-description-field"
+            );
+            const packSizeField = row.querySelector(".vendor-pack-size-field");
 
             if (hiddenField) {
                 hiddenField.value = itemId;
             }
             if (searchInput) {
                 searchInput.value = itemName;
+            }
+            if (vendorSkuField) {
+                vendorSkuField.value = itemData && itemData.vendorSku ? itemData.vendorSku : "";
+            }
+            if (vendorDescriptionField) {
+                vendorDescriptionField.value =
+                    itemData && itemData.vendorDescription
+                        ? itemData.vendorDescription
+                        : "";
+            }
+            if (packSizeField) {
+                packSizeField.value = itemData && itemData.packSize ? itemData.packSize : "";
             }
             row.dataset.entryMode = entryMode;
             updateRowGlCode(row, glCode);
@@ -1288,6 +1332,12 @@
                         option.dataset.itemId = item.id;
                         option.dataset.itemName = item.name;
                         option.dataset.glCode = item.gl_code || "";
+                        option.dataset.preferredVendorSku =
+                            item.preferred_vendor_sku || "";
+                        option.dataset.preferredVendorDescription =
+                            item.preferred_vendor_description || "";
+                        option.dataset.preferredPackSize =
+                            item.preferred_pack_size || "";
                         option.dataset.matchedOn = item.matched_on || "name";
                         option.dataset.exactMatch = item.exact_match ? "1" : "0";
                         suggestionList.appendChild(option);
@@ -1309,12 +1359,26 @@
             const costField = row.querySelector(".item-cost-field");
             const unitSelect = row.querySelector(".unit-select");
             const suggestionList = row.querySelector(".suggestion-list");
+            const vendorSkuField = row.querySelector(".vendor-sku-field");
+            const vendorDescriptionField = row.querySelector(
+                ".vendor-description-field"
+            );
+            const packSizeField = row.querySelector(".vendor-pack-size-field");
 
             if (hiddenField) {
                 hiddenField.value = "";
             }
             if (costField) {
                 costField.value = "";
+            }
+            if (vendorSkuField) {
+                vendorSkuField.value = "";
+            }
+            if (vendorDescriptionField) {
+                vendorDescriptionField.value = "";
+            }
+            if (packSizeField) {
+                packSizeField.value = "";
             }
             delete row.dataset.entryMode;
             setManageButtonState(row, false);
