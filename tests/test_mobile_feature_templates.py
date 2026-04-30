@@ -80,3 +80,26 @@ def test_new_feature_templates_keep_mobile_responsive_helpers():
         content = _template_text(relative_path)
         for snippet in snippets:
             assert snippet in content, f"Missing responsive helper '{snippet}' in {relative_path}"
+
+
+def test_mobile_table_wrap_keeps_horizontal_scroll_enabled():
+    content = _template_text("app/static/css/mobile-responsive.css")
+    block = content.split(".mobile-list-page .mobile-table-wrap {", 1)[1].split("}", 1)[0]
+
+    assert "overflow-x: auto;" in block
+    assert "-webkit-overflow-scrolling: touch;" in block
+    assert "overflow: hidden;" not in block
+
+
+def test_core_list_templates_use_mobile_table_wrap():
+    templates = (
+        "app/templates/invoices/view_invoices.html",
+        "app/templates/purchase_orders/view_purchase_orders.html",
+        "app/templates/items/view_items.html",
+        "app/templates/products/view_products.html",
+        "app/templates/purchase_invoices/view_purchase_invoices.html",
+    )
+
+    for relative_path in templates:
+        content = _template_text(relative_path)
+        assert 'class="table-responsive mobile-table-wrap"' in content
