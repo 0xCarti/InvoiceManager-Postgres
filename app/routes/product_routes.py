@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 from flask import (
     Blueprint,
@@ -674,12 +675,17 @@ def create_product():
     """Add a new product definition."""
     sales_import_context = _get_sales_import_product_create_context()
     form = ProductWithRecipeForm()
-    if (
-        request.method == "GET"
-        and sales_import_context is not None
-        and not form.name.data
-    ):
-        form.name.data = sales_import_context["row_record"].source_product_name
+    if request.method == "GET" and sales_import_context is not None:
+        row_record = sales_import_context["row_record"]
+        if not form.name.data:
+            form.name.data = row_record.source_product_name
+        if form.price.data is None:
+            imported_unit_price = coerce_float(row_record.computed_unit_price)
+            if imported_unit_price is not None:
+                try:
+                    form.price.data = Decimal(str(imported_unit_price))
+                except (InvalidOperation, ValueError):
+                    form.price.data = None
 
     if form.validate_on_submit():
         yield_quantity = _normalize_recipe_yield_quantity(

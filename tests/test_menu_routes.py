@@ -13,6 +13,19 @@ from app.models import (
 from tests.utils import login
 
 
+def test_menu_edit_page_renders_selected_only_toggle(client, app):
+    email, _, menu_id = setup_data(app)
+
+    with client:
+        login(client, email, "pass")
+        response = client.get(f"/menus/{menu_id}/edit", follow_redirects=True)
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert 'id="product-show-selected-toggle"' in body
+    assert "Show Selected Only" in body
+
+
 def test_menu_edit_syncs_location_stand_sheet(client, app):
     email, prod1_id, menu_id = setup_data(app)
     with app.app_context():

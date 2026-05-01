@@ -42,9 +42,17 @@
                 <span class="input-group-text" id="product-search-label">Search</span>
                 <input type="text" class="form-control" id="product-search" placeholder="Search products" aria-describedby="product-search-label">
                 <button class="btn btn-outline-secondary" type="button" id="product-search-clear">Clear</button>
+                <button
+                    class="btn btn-outline-secondary"
+                    type="button"
+                    id="product-show-selected-toggle"
+                    aria-pressed="false"
+                >
+                    Show Selected Only
+                </button>
             </div>
             {{ form.product_ids(class="form-select", multiple=True, size=12) }}
-            <div class="form-text">Use the search box to quickly find products, then hold Ctrl (Windows) or Command (Mac) to select multiple items.</div>
+            <div class="form-text">Use the search box or the selected-only toggle to quickly review products, then hold Ctrl (Windows) or Command (Mac) to select multiple items.</div>
             <div id="quick-product-feedback" class="form-text d-none"></div>
             {% for error in form.product_ids.errors %}
             <div class="text-danger small">{{ error }}</div>

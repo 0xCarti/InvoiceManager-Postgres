@@ -215,6 +215,17 @@
     overflow-y: auto;
 }
 
+.table-responsive {
+    overflow-x: auto;
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+}
+
+.table-responsive > .table {
+    width: max-content;
+    min-width: 100%;
+}
+
 .mobile-list-page .mobile-table-wrap {
     border: 1px solid rgba(17, 24, 39, 0.08);
     border-radius: 1rem;
@@ -272,20 +283,16 @@
     display: grid;
 }
 
-.table-mobile-wrap th,
-.table-mobile-wrap td {
-    white-space: normal;
-    overflow-wrap: anywhere;
-}
-
 .table-mobile-compact th,
 .table-mobile-compact td {
     vertical-align: top;
 }
 
-.table-mobile-card th,
-.table-mobile-card td {
-    white-space: normal;
+@media (min-width: 768px) {
+    .table-responsive td .mobile-actions,
+    .table-responsive th .mobile-actions {
+        flex-wrap: nowrap;
+    }
 }
 
 .table-mobile-card th[data-label=""]::before,

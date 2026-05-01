@@ -419,6 +419,13 @@
             <div class="card-header">Item Rows (Totals row excluded from stock operations)</div>
             <div class="card-body p-0">
                 {% if selected_location.rows %}
+                {% if can_manage_sales_imports and products %}
+                <datalist id="terminal-product-options">
+                    {% for product in products %}
+                    <option value="{{ product.name }} (ID: {{ product.id }})" data-id="{{ product.id }}" label="{{ product.name }}"></option>
+                    {% endfor %}
+                </datalist>
+                {% endif %}
                 <div class="d-lg-none p-3 vstack gap-3">
                     {% for row in selected_location.rows %}
                     {% set review = row_review_data.get(row.id, {}) %}
@@ -503,13 +510,31 @@
                                     <input type="hidden" name="action" value="map_product">
                                     <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
                                     <input type="hidden" name="row_id" value="{{ row.id }}">
-                                    <label class="form-label mb-0">Map to existing product</label>
-                                    <select class="form-select form-select-sm" name="target_product_id" required>
-                                        <option value="">Select product</option>
-                                        {% for product in products %}
-                                        <option value="{{ product.id }}">{{ product.name }}</option>
-                                        {% endfor %}
-                                    </select>
+                                    <div
+                                        data-terminal-product-mapping
+                                        data-product-name="{{ row.source_product_name }}"
+                                        data-product-price="{{ '%.2f'|format(review.file_price|default(0.0)) }}"
+                                    >
+                                        <label class="form-label mb-0" for="sales-import-product-{{ row.id }}-search">Map to existing product</label>
+                                        <div class="input-group input-group-sm">
+                                            <input
+                                                type="search"
+                                                class="form-control"
+                                                id="sales-import-product-{{ row.id }}-search"
+                                                name="target_product_search"
+                                                list="terminal-product-options"
+                                                data-role="product-search-input"
+                                                placeholder="Start typing to search by product name..."
+                                                autocomplete="off"
+                                            >
+                                            <button type="button" class="btn btn-outline-secondary" data-action="clear">Clear</button>
+                                        </div>
+                                        <input type="hidden" name="target_product_id" id="sales-import-product-{{ row.id }}" value="" data-role="product-value">
+                                        <div class="form-text" data-role="selection-status"></div>
+                                        <div class="form-text text-danger d-none" data-role="selection-error">
+                                            Select a product from the suggestions before saving.
+                                        </div>
+                                    </div>
                                     <button type="submit" class="btn btn-primary btn-sm w-100">Save Mapping</button>
                                 </form>
                                 <div class="vstack gap-2 mb-2">
@@ -636,14 +661,31 @@
                                         <input type="hidden" name="action" value="map_product">
                                         <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
                                         <input type="hidden" name="row_id" value="{{ row.id }}">
-                                        <div class="col-md-8">
-                                            <label class="form-label mb-1">Map to existing product</label>
-                                            <select class="form-select form-select-sm" name="target_product_id" required>
-                                                <option value="">Select product</option>
-                                                {% for product in products %}
-                                                <option value="{{ product.id }}">{{ product.name }}</option>
-                                                {% endfor %}
-                                            </select>
+                                        <div
+                                            class="col-md-8"
+                                            data-terminal-product-mapping
+                                            data-product-name="{{ row.source_product_name }}"
+                                            data-product-price="{{ '%.2f'|format(review.file_price|default(0.0)) }}"
+                                        >
+                                            <label class="form-label mb-1" for="sales-import-product-table-{{ row.id }}-search">Map to existing product</label>
+                                            <div class="input-group input-group-sm">
+                                                <input
+                                                    type="search"
+                                                    class="form-control"
+                                                    id="sales-import-product-table-{{ row.id }}-search"
+                                                    name="target_product_search"
+                                                    list="terminal-product-options"
+                                                    data-role="product-search-input"
+                                                    placeholder="Start typing to search by product name..."
+                                                    autocomplete="off"
+                                                >
+                                                <button type="button" class="btn btn-outline-secondary" data-action="clear">Clear</button>
+                                            </div>
+                                            <input type="hidden" name="target_product_id" id="sales-import-product-table-{{ row.id }}" value="" data-role="product-value">
+                                            <div class="form-text" data-role="selection-status"></div>
+                                            <div class="form-text text-danger d-none" data-role="selection-error">
+                                                Select a product from the suggestions before saving.
+                                            </div>
                                         </div>
                                         <div class="col-md-4">
                                             <button type="submit" class="btn btn-primary btn-sm w-100">Save Mapping</button>
@@ -764,5 +806,8 @@
         </div>
     </div>
 </div>
+{% endif %}
+{% if can_manage_sales_imports %}
+<script src="{{ url_for('static', filename='js/terminal_sales_mapping.js') }}" defer></script>
 {% endif %}
 {% endblock %}

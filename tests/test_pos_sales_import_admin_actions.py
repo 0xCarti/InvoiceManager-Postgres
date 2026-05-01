@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import date as date_cls
 
 import pytest
@@ -50,6 +51,7 @@ def _seed_import_with_unresolved_rows(app, *, message_id: str = "msg-map-1"):
             normalized_product_name="mega_pretzel",
             product_id=None,
             quantity=2.0,
+            computed_unit_price=7.5,
             parse_index=0,
         )
         db.session.add(row)
@@ -121,6 +123,17 @@ def test_mapping_resolution_create_or_map_flow_updates_rows_and_aliases(client, 
     with client:
         login(client, admin_email, admin_pass)
 
+        detail_response = client.get(
+            f"/controlpanel/sales-imports/{import_id}",
+            follow_redirects=True,
+        )
+        assert detail_response.status_code == 200
+        detail_html = detail_response.get_data(as_text=True)
+        assert 'data-role="product-search-input"' in detail_html
+        assert 'list="terminal-product-options"' in detail_html
+        assert "terminal_sales_mapping.js" in detail_html
+        assert f'Pretzel (ID: {mapped_product_id})' in detail_html
+
         map_location_response = client.post(
             f"/controlpanel/sales-imports/{import_id}",
             data={
@@ -168,6 +181,11 @@ def test_mapping_resolution_create_or_map_flow_updates_rows_and_aliases(client, 
         assert create_product_response.status_code == 200
         assert b"Create Product for Sales Import" in create_product_response.data
         assert b"Mega Pretzel" in create_product_response.data
+        create_product_html = create_product_response.get_data(as_text=True)
+        assert re.search(
+            r'name="price"[^>]*value="7\\.50"',
+            create_product_html,
+        )
 
         save_created_product_response = client.post(
             f"/products/create?sales_import_id={import_id}&import_row_id={row_id}&return_location_id={location_import_id}",

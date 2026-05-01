@@ -259,6 +259,7 @@
             var clearButton = container.querySelector("[data-action='clear']");
             var skipValue = container.getAttribute("data-skip-value") || "";
             var createValue = container.getAttribute("data-create-value") || "";
+            var hostForm = container.closest("form");
 
             function hideError() {
                 if (errorMessage) {
@@ -324,6 +325,30 @@
                 if (!searchInput || !searchInput.value.trim()) {
                     setStatusMessage(statusMessage, "", null);
                 }
+            }
+
+            function commitSearchSelection() {
+                if (!searchInput) {
+                    return true;
+                }
+                var raw = searchInput.value.trim();
+                if (!raw) {
+                    hiddenInput.value = "";
+                    resetSelectionState();
+                    return true;
+                }
+                var option = resolveOption(raw);
+                var optionId = option && (option.dataset ? option.dataset.id : option.getAttribute("data-id"));
+                if (option && optionId) {
+                    linkToOption(option, false);
+                    return true;
+                }
+                hiddenInput.value = "";
+                delete container.dataset.createdProductId;
+                syncCreatedIdState();
+                showError();
+                setStatusMessage(statusMessage, "", null);
+                return false;
             }
 
             function initializeState() {
@@ -438,21 +463,22 @@
                 });
 
                 searchInput.addEventListener("change", function () {
-                    var raw = searchInput.value.trim();
-                    if (!raw) {
-                        hiddenInput.value = "";
-                        resetSelectionState();
+                    commitSearchSelection();
+                });
+
+                searchInput.addEventListener("blur", function () {
+                    if (!searchInput.value.trim()) {
                         return;
                     }
-                    var option = resolveOption(raw);
-                    if (option && (option.dataset ? option.dataset.id : option.getAttribute("data-id"))) {
-                        linkToOption(option, false);
-                    } else {
-                        hiddenInput.value = "";
-                        delete container.dataset.createdProductId;
-                        syncCreatedIdState();
-                        showError();
-                        setStatusMessage(statusMessage, "", null);
+                    commitSearchSelection();
+                });
+            }
+
+            if (hostForm) {
+                hostForm.addEventListener("submit", function (event) {
+                    if (searchInput && searchInput.value.trim() && !commitSearchSelection()) {
+                        event.preventDefault();
+                        searchInput.focus();
                     }
                 });
             }

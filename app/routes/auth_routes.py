@@ -4745,6 +4745,9 @@ def sales_import_detail(import_id: int):
     if sales_import.status == "approved":
         reversal_warnings = _check_negative_sales_import_reverse(sales_import)
     undo_confirm_form = ConfirmForm()
+    available_products = []
+    if current_user.has_permission("sales_imports.manage"):
+        available_products = Product.query.order_by(Product.name).all()
 
     return render_template(
         "admin/sales_import_detail.html",
@@ -4757,7 +4760,7 @@ def sales_import_detail(import_id: int):
         location_errors=location_errors,
         row_errors=row_errors,
         locations=Location.query.order_by(Location.name).all(),
-        products=Product.query.order_by(Product.name).all(),
+        products=available_products,
         candidate_event_locations_by_import_location=candidate_event_locations_by_import_location,
         conflicting_event_location_ids=conflicting_event_location_ids,
         direct_inventory_only_location_ids=direct_inventory_only_location_ids,

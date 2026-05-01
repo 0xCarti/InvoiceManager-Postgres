@@ -38,24 +38,44 @@
 
         var searchInput = document.getElementById("product-search");
         var clearSearchButton = document.getElementById("product-search-clear");
+        var selectedOnlyToggleButton = document.getElementById(
+            "product-show-selected-toggle"
+        );
+        var showSelectedOnly = false;
 
-        function applyProductFilter() {
-            if (!productSelect || !searchInput) {
+        function updateSelectedOnlyToggleButton() {
+            if (!selectedOnlyToggleButton) {
                 return;
             }
-            var term = searchInput.value.trim().toLowerCase();
+            selectedOnlyToggleButton.classList.toggle("active", showSelectedOnly);
+            selectedOnlyToggleButton.setAttribute(
+                "aria-pressed",
+                showSelectedOnly ? "true" : "false"
+            );
+            selectedOnlyToggleButton.textContent = showSelectedOnly
+                ? "Show All Products"
+                : "Show Selected Only";
+        }
+
+        function applyProductFilter() {
+            if (!productSelect) {
+                return;
+            }
+            var term = searchInput ? searchInput.value.trim().toLowerCase() : "";
             Array.prototype.forEach.call(productSelect.options, function (option) {
-                if (!term) {
-                    option.hidden = false;
-                    return;
-                }
-                var matches = option.text.toLowerCase().indexOf(term) !== -1;
-                option.hidden = !matches;
+                var matchesSearch =
+                    !term || option.text.toLowerCase().indexOf(term) !== -1;
+                var matchesSelection = !showSelectedOnly || option.selected;
+                option.hidden = !(matchesSearch && matchesSelection);
             });
         }
 
         if (productSelect && searchInput) {
             searchInput.addEventListener("input", applyProductFilter);
+        }
+
+        if (productSelect) {
+            productSelect.addEventListener("change", applyProductFilter);
         }
 
         if (productSelect && clearSearchButton) {
@@ -67,6 +87,16 @@
                 applyProductFilter();
                 searchInput.focus();
             });
+        }
+
+        if (productSelect && selectedOnlyToggleButton) {
+            selectedOnlyToggleButton.addEventListener("click", function () {
+                showSelectedOnly = !showSelectedOnly;
+                updateSelectedOnlyToggleButton();
+                applyProductFilter();
+                productSelect.focus();
+            });
+            updateSelectedOnlyToggleButton();
         }
 
         var copySelect = document.getElementById("copy-menu-select");
