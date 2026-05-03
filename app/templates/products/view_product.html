@@ -1,0 +1,448 @@
+{% extends "base.html" %}
+
+{% block title %}View Product{% endblock %}
+
+{% block content %}
+<div class="container mt-5 app-page-shell">
+    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center mb-4 gap-3">
+        <div>
+            <h2 class="mb-1">{{ product.name }}</h2>
+            <p class="text-muted mb-0">Review pricing, recipe details, menu placement, related locations, and terminal sales mappings for this product.</p>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            {% if can_access_endpoint('product.edit_product', 'GET') %}
+            <a class="btn btn-primary" href="{{ url_for('product.edit_product', product_id=product.id) }}">Edit Product</a>
+            {% endif %}
+            {% if can_access_endpoint('product.copy_product', 'GET') %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('product.copy_product', product_id=product.id) }}">Copy</a>
+            {% endif %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('notes.entity_notes', entity_type='product', entity_id=product.id) }}">View Notes</a>
+            <a class="btn btn-outline-secondary" href="{{ url_for('product.view_products') }}">Back to Products</a>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-6 col-xl-2">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-muted">Terminal Price</div>
+                    <div class="h5 mb-0">{{ '%.2f'|format(product.price or 0) }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-xl-2">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-muted">Invoice Price</div>
+                    <div class="h5 mb-0">{{ '%.2f'|format(product.invoice_sale_price if product.invoice_sale_price is not none else product.price or 0) }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-xl-2">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-muted">Cost</div>
+                    <div class="h5 mb-0">{{ '%.2f'|format(product.cost or 0) }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-xl-2">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-muted">Food Cost %</div>
+                    <div class="h5 mb-0">{{ '{:.2f}%'.format(product.food_cost_percentage or 0) }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-xl-2">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-muted">Quantity</div>
+                    <div class="h5 mb-0">{{ '%.2f'|format(product.quantity or 0) }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-xl-2">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-muted">Last Sold</div>
+                    <div class="h5 mb-0">{{ last_sold_at.strftime('%Y-%m-%d') if last_sold_at else 'Never' }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-8">
+            <div class="card mb-4">
+                <div class="card-body">
+                    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+                        <div>
+                            <h3 class="h5 mb-1">Recipe</h3>
+                            <p class="text-muted mb-0">Inventory usage and yield configuration for this product.</p>
+                        </div>
+                        {% if can_access_endpoint('product.edit_product_recipe', 'GET') %}
+                        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('product.edit_product_recipe', product_id=product.id) }}">Edit Recipe</a>
+                        {% endif %}
+                    </div>
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <div class="border rounded p-3 h-100">
+                                <div class="small text-muted">Inventory GL Code</div>
+                                <div class="fw-semibold">
+                                    {% if product.gl_code_rel %}
+                                    {{ product.gl_code_rel.code }}{% if product.gl_code_rel.description %} - {{ product.gl_code_rel.description }}{% endif %}
+                                    {% elif product.gl_code %}
+                                    {{ product.gl_code }}
+                                    {% else %}
+                                    -
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="border rounded p-3 h-100">
+                                <div class="small text-muted">Sales GL Code</div>
+                                <div class="fw-semibold">
+                                    {% if product.sales_gl_code %}
+                                    {{ product.sales_gl_code.code }}{% if product.sales_gl_code.description %} - {{ product.sales_gl_code.description }}{% endif %}
+                                    {% else %}
+                                    -
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="small text-muted">Recipe Yield</div>
+                        <div class="fw-semibold">
+                            {{ '{:g}'.format(product.recipe_yield_quantity or 1) }}{% if product.recipe_yield_unit %} {{ product.recipe_yield_unit }}{% endif %}
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-striped align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Item</th>
+                                    <th class="text-end">Quantity</th>
+                                    <th>Unit</th>
+                                    <th>Countable</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for recipe_item in product.recipe_items %}
+                                <tr>
+                                    <td>
+                                        {% if recipe_item.item and can_access_endpoint('item.view_item', 'GET') %}
+                                        <a href="{{ url_for('item.view_item', item_id=recipe_item.item.id) }}">{{ recipe_item.item.name }}</a>
+                                        {% elif recipe_item.item %}
+                                        {{ recipe_item.item.name }}
+                                        {% else %}
+                                        Item #{{ recipe_item.item_id }}
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">{{ '%.4f'|format(recipe_item.quantity or 0) }}</td>
+                                    <td>{{ recipe_item.unit.name if recipe_item.unit else '-' }}</td>
+                                    <td>{{ 'Yes' if recipe_item.countable else 'No' }}</td>
+                                </tr>
+                                {% else %}
+                                <tr><td colspan="4" class="text-muted">No recipe items have been added yet.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            {% if can_view_vendor_aliases %}
+            <div class="card mb-4">
+                <div class="card-body">
+                    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+                        <div>
+                            <h3 class="h5 mb-1">Recipe Item Vendor SKUs</h3>
+                            <p class="text-muted mb-0">Vendor mappings for the items used in this product recipe.</p>
+                        </div>
+                    </div>
+                    {% if vendor_alias_groups %}
+                    <div class="vstack gap-4">
+                        {% for group in vendor_alias_groups %}
+                        <section>
+                            <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-2">
+                                <div>
+                                    <h4 class="h6 mb-1">
+                                        {% if can_access_endpoint('item.view_item', 'GET') %}
+                                        <a href="{{ url_for('item.view_item', item_id=group.item.id) }}">{{ group.item.name }}</a>
+                                        {% else %}
+                                        {{ group.item.name }}
+                                        {% endif %}
+                                    </h4>
+                                    <p class="text-muted small mb-0">{{ group.aliases|length }} vendor mapping{{ '' if group.aliases|length == 1 else 's' }}</p>
+                                </div>
+                                {% if can_access_endpoint('admin.vendor_item_aliases', 'POST') %}
+                                <a
+                                    class="btn btn-sm btn-outline-primary"
+                                    href="{{ url_for('admin.vendor_item_aliases', item_id=group.item.id, next=url_for('product.view_product', product_id=product.id)) }}"
+                                >Add Mapping</a>
+                                {% endif %}
+                            </div>
+                            {% set item_ref = group.item %}
+                            {% set vendor_aliases = group.aliases %}
+                            {% set return_url = url_for('product.view_product', product_id=product.id) %}
+                            {% set empty_message = 'No vendor SKU mappings have been saved for this recipe item yet.' %}
+                            {% include 'items/_vendor_alias_table.html' %}
+                        </section>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-0">This product does not have any recipe items yet.</p>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            <div class="card mb-4" id="terminal-sales-mappings">
+                <div class="card-body">
+                    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+                        <div>
+                            <h3 class="h5 mb-1">Terminal Sales Mappings</h3>
+                            <p class="text-muted mb-0">Saved POS alias matches that automatically map future imports back to this product.</p>
+                        </div>
+                    </div>
+                    {% if product.terminal_sale_aliases %}
+                    <div class="table-responsive">
+                        <table class="table table-striped align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Terminal Product Name</th>
+                                    <th>Normalized Name</th>
+                                    <th>Mapped On</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for alias in product.terminal_sale_aliases|sort(attribute='source_name') %}
+                                <tr>
+                                    <td class="text-wrap">{{ alias.source_name }}</td>
+                                    <td class="text-wrap">{{ alias.normalized_name }}</td>
+                                    <td>{{ alias.created_at.strftime('%Y-%m-%d %H:%M') if alias.created_at else 'Unknown' }}</td>
+                                    <td class="text-end">
+                                        {% if can_access_endpoint('product.remove_terminal_sale_alias', 'POST') %}
+                                        <form class="d-inline" method="post" action="{{ url_for('product.remove_terminal_sale_alias', product_id=product.id, alias_id=alias.id, next=url_for('product.view_product', product_id=product.id, _anchor='terminal-sales-mappings')) }}">
+                                            {{ alias_delete_form.hidden_tag() }}
+                                            <button type="submit" class="btn btn-outline-danger btn-sm" data-confirm-message="Remove this mapping?">Remove</button>
+                                        </form>
+                                        {% else %}
+                                        <span class="text-muted">View only</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-0">There are no terminal sales mappings for this product.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="card mb-4">
+                <div class="card-body">
+                    <h3 class="h5 mb-3">Menus</h3>
+                    {% if product.menus %}
+                    <div class="list-group list-group-flush">
+                        {% for menu in product.menus|sort(attribute='name') %}
+                        <div class="list-group-item px-0">
+                            <div class="fw-semibold">
+                                {% if can_access_endpoint('menu.edit_menu', 'GET') %}
+                                <a href="{{ url_for('menu.edit_menu', menu_id=menu.id) }}">{{ menu.name }}</a>
+                                {% else %}
+                                {{ menu.name }}
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-0">This product is not assigned to any menus.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-body">
+                    <h3 class="h5 mb-3">Associated Locations</h3>
+                    {% if product.locations %}
+                    <div class="list-group list-group-flush">
+                        {% for location in product.locations|sort(attribute='name') %}
+                        <div class="list-group-item px-0">
+                            <div class="fw-semibold">
+                                {% if can_access_endpoint('locations.view_location', 'GET') %}
+                                <a href="{{ url_for('locations.view_location', location_id=location.id) }}">{{ location.name }}</a>
+                                {% else %}
+                                {{ location.name }}
+                                {% endif %}
+                            </div>
+                            {% if location.current_menu %}
+                            <div class="small text-muted">Current menu: {{ location.current_menu.name }}</div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-0">This product is not associated with any direct inventory locations.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-xl-6">
+            <h3 class="h5 mb-3">Recent Terminal Sales</h3>
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Event</th>
+                            <th>Location</th>
+                            <th class="text-end">Quantity</th>
+                            <th>Import</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for sale in terminal_sales.items %}
+                        <tr>
+                            <td>{{ sale.sold_at.strftime('%Y-%m-%d %H:%M') if sale.sold_at else '-' }}</td>
+                            <td>
+                                {% if sale.event_location and sale.event_location.event and can_access_endpoint('event.view_event', 'GET') %}
+                                <a href="{{ url_for('event.view_event', event_id=sale.event_location.event.id) }}">{{ sale.event_location.event.name }}</a>
+                                {% elif sale.event_location and sale.event_location.event %}
+                                {{ sale.event_location.event.name }}
+                                {% else %}
+                                <span class="text-muted">Direct inventory</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if sale.event_location and sale.event_location.location %}
+                                {{ sale.event_location.location.name }}
+                                {% else %}
+                                <span class="text-muted">Unknown</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end">{{ '%.2f'|format(sale.quantity or 0) }}</td>
+                            <td>
+                                {% if sale.pos_sales_import_id and can_access_endpoint('admin.sales_import_detail', 'GET') %}
+                                <a href="{{ url_for('admin.sales_import_detail', import_id=sale.pos_sales_import_id) }}">Import #{{ sale.pos_sales_import_id }}</a>
+                                {% elif sale.pos_sales_import_id %}
+                                Import #{{ sale.pos_sales_import_id }}
+                                {% else %}
+                                <span class="text-muted">Manual</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="5" class="text-muted">No terminal sales found.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-2">
+                <nav aria-label="Terminal sales pagination">
+                    <ul class="pagination mb-0">
+                        <li class="page-item {% if not terminal_sales.has_prev %}disabled{% endif %}">
+                            <a class="page-link" href="{{ url_for('product.view_product', product_id=product.id, terminal_sales_page=terminal_sales.prev_num if terminal_sales.has_prev else 1, **terminal_sales_pagination_args) }}"{% if not terminal_sales.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>
+                        </li>
+                        <li class="page-item disabled"><span class="page-link">Page {{ terminal_sales.page }} of {{ terminal_sales.pages }}</span></li>
+                        <li class="page-item {% if not terminal_sales.has_next %}disabled{% endif %}">
+                            <a class="page-link" href="{{ url_for('product.view_product', product_id=product.id, terminal_sales_page=terminal_sales.next_num if terminal_sales.has_next else terminal_sales.pages or 1, **terminal_sales_pagination_args) }}"{% if not terminal_sales.has_next %} tabindex="-1" aria-disabled="true"{% endif %}>Next</a>
+                        </li>
+                    </ul>
+                </nav>
+                <form method="get" class="d-flex align-items-center gap-2">
+                    {% for key, values in request.args.lists() %}
+                        {% if key not in ['terminal_sales_page', 'terminal_sales_per_page'] %}
+                            {% for value in values %}
+                                <input type="hidden" name="{{ key }}" value="{{ value }}">
+                            {% endfor %}
+                        {% endif %}
+                    {% endfor %}
+                    <input type="hidden" name="terminal_sales_page" value="1">
+                    <label for="terminal-sales-per-page" class="form-label mb-0">Rows per page</label>
+                    <select id="terminal-sales-per-page" name="terminal_sales_per_page" class="form-select js-auto-submit">
+                        {% for option in PAGINATION_SIZES %}
+                            <option value="{{ option }}" {% if terminal_sales_per_page == option %}selected{% endif %}>{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                </form>
+            </div>
+        </div>
+
+        <div class="col-xl-6">
+            <h3 class="h5 mb-3">Recent Sales Invoices</h3>
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Invoice #</th>
+                            <th class="text-end">Quantity</th>
+                            <th class="text-end">Unit Price</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for sale in sales_items.items %}
+                        <tr>
+                            <td>{{ sale.invoice.date_created.date() if sale.invoice and sale.invoice.date_created else '-' }}</td>
+                            <td>
+                                {% if sale.invoice_id and can_access_endpoint('invoice.view_invoice', 'GET') %}
+                                <a href="{{ url_for('invoice.view_invoice', invoice_id=sale.invoice_id) }}">{{ sale.invoice_id }}</a>
+                                {% else %}
+                                {{ sale.invoice_id }}
+                                {% endif %}
+                            </td>
+                            <td class="text-end">{{ '%.2f'|format(sale.quantity or 0) }}</td>
+                            <td class="text-end">{{ '%.2f'|format(sale.unit_price or 0) }}</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="4" class="text-muted">No sales invoices found.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-2">
+                <nav aria-label="Sales invoice pagination">
+                    <ul class="pagination mb-0">
+                        <li class="page-item {% if not sales_items.has_prev %}disabled{% endif %}">
+                            <a class="page-link" href="{{ url_for('product.view_product', product_id=product.id, sales_page=sales_items.prev_num if sales_items.has_prev else 1, **sales_pagination_args) }}"{% if not sales_items.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>
+                        </li>
+                        <li class="page-item disabled"><span class="page-link">Page {{ sales_items.page }} of {{ sales_items.pages }}</span></li>
+                        <li class="page-item {% if not sales_items.has_next %}disabled{% endif %}">
+                            <a class="page-link" href="{{ url_for('product.view_product', product_id=product.id, sales_page=sales_items.next_num if sales_items.has_next else sales_items.pages or 1, **sales_pagination_args) }}"{% if not sales_items.has_next %} tabindex="-1" aria-disabled="true"{% endif %}>Next</a>
+                        </li>
+                    </ul>
+                </nav>
+                <form method="get" class="d-flex align-items-center gap-2">
+                    {% for key, values in request.args.lists() %}
+                        {% if key not in ['sales_page', 'sales_per_page'] %}
+                            {% for value in values %}
+                                <input type="hidden" name="{{ key }}" value="{{ value }}">
+                            {% endfor %}
+                        {% endif %}
+                    {% endfor %}
+                    <input type="hidden" name="sales_page" value="1">
+                    <label for="product-sales-per-page" class="form-label mb-0">Rows per page</label>
+                    <select id="product-sales-per-page" name="sales_per_page" class="form-select js-auto-submit">
+                        {% for option in PAGINATION_SIZES %}
+                            <option value="{{ option }}" {% if sales_per_page == option %}selected{% endif %}>{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

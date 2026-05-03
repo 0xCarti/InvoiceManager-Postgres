@@ -1,0 +1,387 @@
+{% extends "base.html" %}
+
+{% block title %}View Location{% endblock %}
+
+{% block content %}
+{% set can_manage_terminal_location_mappings = can_access_endpoint('locations.remove_terminal_sale_alias', 'POST') %}
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .mobile-list-page .location-detail-actions,
+    .mobile-list-page .location-detail-actions .btn,
+    .mobile-list-page .location-detail-actions form {
+        width: 100%;
+    }
+    .mobile-list-page .mobile-table-wrap .table {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+    .mobile-list-page .mobile-table-wrap .table th,
+    .mobile-list-page .mobile-table-wrap .table td {
+        white-space: normal !important;
+        vertical-align: top;
+    }
+}
+</style>
+<div class="container mt-5 mobile-list-page app-page-shell">
+    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center mb-4 gap-3">
+        <div>
+            <h2 class="mb-1">{{ location.name }}</h2>
+            <p class="text-muted mb-0">Review location setup, saved terminal mappings, and recent location activity in one place.</p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 location-detail-actions">
+            {% if can_access_endpoint('locations.edit_location', 'GET') %}
+            <a class="btn btn-primary" href="{{ url_for('locations.edit_location', location_id=location.id, next=url_for('locations.view_location', location_id=location.id)) }}">Edit Location</a>
+            {% endif %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('locations.view_stand_sheet', location_id=location.id) }}">Stand Sheet</a>
+            {% if can_access_endpoint('locations.location_items', 'GET') %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('locations.location_items', location_id=location.id) }}">Manage Items</a>
+            {% endif %}
+            {% if can_access_endpoint('notes.entity_notes', 'GET') %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('notes.entity_notes', entity_type='location', entity_id=location.id) }}">View Notes</a>
+            {% endif %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('locations.view_locations') }}">Back to Locations</a>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-6 col-xl-2">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-muted">Current Menu</div>
+                    <div class="h6 mb-0">
+                        {% if location.current_menu %}
+                        {{ location.current_menu.name }}
+                        {% else %}
+                        No Menu
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-xl-2">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-muted">Default Playlist</div>
+                    <div class="h6 mb-0">{{ location.default_playlist.name if location.default_playlist else 'None' }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-xl-2">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-muted">Status</div>
+                    <div class="h6 mb-0">{{ 'Archived' if location.archived else 'Active' }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-xl-2">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-muted">Spoilage</div>
+                    <div class="h6 mb-0">{{ 'Yes' if location.is_spoilage else 'No' }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-xl-2">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-muted">Products</div>
+                    <div class="h6 mb-0">{{ associated_products|length }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-xl-2">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-muted">Last Import</div>
+                    <div class="h6 mb-0">{{ latest_import_at.strftime('%Y-%m-%d') if latest_import_at else 'Never' }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-7">
+            <div class="card mb-4" id="terminal-sales-mappings">
+                <div class="card-body">
+                    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+                        <div>
+                            <h3 class="h5 mb-1">Terminal Sales Mappings</h3>
+                            <p class="text-muted mb-0">Saved POS location aliases that map future imports back to this location.</p>
+                        </div>
+                    </div>
+                    {% if terminal_aliases %}
+                    <div class="table-responsive mobile-table-wrap">
+                        <table class="table table-striped align-middle mb-0 table-mobile-card">
+                            <thead>
+                                <tr>
+                                    <th>Terminal Location Name</th>
+                                    <th>Normalized Name</th>
+                                    <th>Mapped On</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for alias in terminal_aliases %}
+                                <tr>
+                                    <td class="mobile-card-primary text-wrap">{{ alias.source_name }}</td>
+                                    <td class="text-wrap">{{ alias.normalized_name }}</td>
+                                    <td>{{ alias.created_at.strftime('%Y-%m-%d %H:%M') if alias.created_at else 'Unknown' }}</td>
+                                    <td class="text-end">
+                                        {% if can_manage_terminal_location_mappings %}
+                                        <form class="d-inline" method="post" action="{{ url_for('locations.remove_terminal_sale_alias', location_id=location.id, alias_id=alias.id, next=url_for('locations.view_location', location_id=location.id, _anchor='terminal-sales-mappings')) }}">
+                                            {{ alias_delete_form.hidden_tag() }}
+                                            <button type="submit" class="btn btn-outline-danger btn-sm" data-confirm-message="Remove this mapping?">Remove</button>
+                                        </form>
+                                        {% else %}
+                                        <span class="text-muted">View only</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-0">There are no terminal sales mappings for this location.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-body">
+                    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+                        <div>
+                            <h3 class="h5 mb-1">Recent Transfers</h3>
+                            <p class="text-muted mb-0">The latest incoming and outgoing transfers that touched this location.</p>
+                        </div>
+                        {% if can_access_endpoint('transfer.view_transfers', 'GET') %}
+                        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('transfer.view_transfers') }}">All Transfers</a>
+                        {% endif %}
+                    </div>
+                    {% if recent_transfers %}
+                    <div class="table-responsive mobile-table-wrap">
+                        <table class="table table-striped align-middle mb-0 table-mobile-card">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Direction</th>
+                                    <th>Counterparty</th>
+                                    <th>Status</th>
+                                    <th class="text-end">Details</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for transfer in recent_transfers %}
+                                {% set is_outbound = transfer.from_location_id == location.id %}
+                                {% set other_location = transfer.to_location if is_outbound else transfer.from_location %}
+                                <tr>
+                                    <td>{{ transfer.date_created.strftime('%Y-%m-%d %H:%M') if transfer.date_created else '-' }}</td>
+                                    <td class="mobile-card-primary">{{ 'Outgoing' if is_outbound else 'Incoming' }}</td>
+                                    <td>{{ other_location.name if other_location else 'Unknown location' }}</td>
+                                    <td>{{ 'Completed' if transfer.completed else 'Pending' }}</td>
+                                    <td class="text-end">
+                                        {% if can_access_endpoint('transfer.view_transfer', 'GET') %}
+                                        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('transfer.view_transfer', transfer_id=transfer.id) }}">Transfer #{{ transfer.id }}</a>
+                                        {% else %}
+                                        <span class="text-muted">#{{ transfer.id }}</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-0">No transfers have been recorded for this location yet.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="card mb-4">
+                <div class="card-body">
+                    <h3 class="h5 mb-3">Location Setup</h3>
+                    <div class="list-group list-group-flush">
+                        <div class="list-group-item px-0">
+                            <div class="small text-muted">Current Menu</div>
+                            <div class="fw-semibold">
+                                {% if location.current_menu %}
+                                {% if can_access_endpoint('menu.edit_menu', 'GET') %}
+                                <a href="{{ url_for('menu.edit_menu', menu_id=location.current_menu.id) }}">{{ location.current_menu.name }}</a>
+                                {% else %}
+                                {{ location.current_menu.name }}
+                                {% endif %}
+                                {% else %}
+                                <span class="text-muted">No menu assigned</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="list-group-item px-0">
+                            <div class="small text-muted">Default Playlist</div>
+                            <div class="fw-semibold">{{ location.default_playlist.name if location.default_playlist else 'None' }}</div>
+                        </div>
+                        <div class="list-group-item px-0">
+                            <div class="small text-muted">Last Transfer</div>
+                            <div class="fw-semibold">{{ latest_transfer_at.strftime('%Y-%m-%d %H:%M') if latest_transfer_at else 'Never' }}</div>
+                        </div>
+                        <div class="list-group-item px-0">
+                            <div class="small text-muted">Last Event</div>
+                            <div class="fw-semibold">{{ latest_event_date.strftime('%Y-%m-%d') if latest_event_date else 'Never' }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-body">
+                    <h3 class="h5 mb-3">Products At This Location</h3>
+                    {% if associated_products %}
+                    <div class="list-group list-group-flush">
+                        {% for product in associated_products %}
+                        <div class="list-group-item px-0">
+                            <div class="fw-semibold">
+                                {% if can_access_endpoint('product.view_product', 'GET') %}
+                                <a href="{{ url_for('product.view_product', product_id=product.id) }}">{{ product.name }}</a>
+                                {% else %}
+                                {{ product.name }}
+                                {% endif %}
+                            </div>
+                            <div class="small text-muted">Terminal price: {{ '%.2f'|format(product.price or 0) }}</div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-0">No products are currently associated with this location.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-xl-6">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+                        <div>
+                            <h3 class="h5 mb-1">Recent Events</h3>
+                            <p class="text-muted mb-0">Recent event assignments involving this location.</p>
+                        </div>
+                        {% if can_access_endpoint('event.view_events', 'GET') %}
+                        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.view_events') }}">All Events</a>
+                        {% endif %}
+                    </div>
+                    {% if recent_event_locations %}
+                    <div class="table-responsive mobile-table-wrap">
+                        <table class="table table-striped align-middle mb-0 table-mobile-card">
+                            <thead>
+                                <tr>
+                                    <th>Event</th>
+                                    <th>Dates</th>
+                                    <th>Status</th>
+                                    <th class="text-end">Details</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for event_location in recent_event_locations %}
+                                {% set event_obj = event_location.event %}
+                                <tr>
+                                    <td class="mobile-card-primary">
+                                        {% if event_obj %}
+                                        {{ event_obj.name }}
+                                        {% else %}
+                                        Unknown event
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if event_obj %}
+                                        {{ event_obj.start_date.strftime('%Y-%m-%d') }} to {{ event_obj.end_date.strftime('%Y-%m-%d') }}
+                                        {% else %}
+                                        -
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if event_obj %}
+                                        {{ 'Closed' if event_obj.closed else 'Open' }} / {{ 'Confirmed' if event_location.confirmed else 'Pending' }}
+                                        {% else %}
+                                        -
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        {% if event_obj and can_access_endpoint('event.view_event', 'GET') %}
+                                        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('event.view_event', event_id=event_obj.id) }}">View Event</a>
+                                        {% else %}
+                                        <span class="text-muted">Unavailable</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-0">No event history has been recorded for this location yet.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-6">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+                        <div>
+                            <h3 class="h5 mb-1">Recent Imported Sales</h3>
+                            <p class="text-muted mb-0">Recent POS sales imports that were mapped to this location.</p>
+                        </div>
+                        {% if can_access_endpoint('admin.sales_imports', 'GET') %}
+                        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.sales_imports') }}">Sales Imports</a>
+                        {% endif %}
+                    </div>
+                    {% if recent_import_locations %}
+                    <div class="table-responsive mobile-table-wrap">
+                        <table class="table table-striped align-middle mb-0 table-mobile-card">
+                            <thead>
+                                <tr>
+                                    <th>Received</th>
+                                    <th>Source Name</th>
+                                    <th>Status</th>
+                                    <th class="text-end">Details</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for import_location in recent_import_locations %}
+                                {% set import_record = import_location.sales_import %}
+                                <tr>
+                                    <td>{{ import_record.received_at.strftime('%Y-%m-%d %H:%M') if import_record and import_record.received_at else '-' }}</td>
+                                    <td class="mobile-card-primary text-wrap">{{ import_location.source_location_name }}</td>
+                                    <td>
+                                        {% if import_record %}
+                                        {{ import_record.status.replace('_', ' ')|title }}
+                                        {% else %}
+                                        -
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        {% if import_record and can_access_endpoint('admin.sales_import_detail', 'GET') %}
+                                        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin.sales_import_detail', import_id=import_record.id) }}">Import #{{ import_record.id }}</a>
+                                        {% else %}
+                                        <span class="text-muted">Unavailable</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-0">No imported sales have been mapped to this location yet.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

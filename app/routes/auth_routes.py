@@ -48,7 +48,6 @@ from app.forms import (
     RestoreBackupForm,
     SetPasswordForm,
     SettingsForm,
-    TerminalSalesMappingDeleteForm,
     TimezoneForm,
     UserAccessForm,
     VendorItemAliasForm,
@@ -2431,120 +2430,20 @@ def settings():
     )
 
 
-@admin.route("/controlpanel/terminal-sales-mappings", methods=["GET", "POST"])
+@admin.route("/controlpanel/terminal-sales-mappings", methods=["GET"])
 @login_required
 def terminal_sales_mappings():
-    """Allow admins to remove stored terminal sales aliases."""
-    product_aliases = (
-        TerminalSaleProductAlias.query.options(
-            selectinload(TerminalSaleProductAlias.product)
-        )
-        .order_by(TerminalSaleProductAlias.source_name)
-        .all()
+    """Redirect legacy terminal mapping bookmarks to the locations area."""
+    flash(
+        "Terminal sales location mappings now live on each location page.",
+        "info",
     )
-    location_aliases = (
-        TerminalSaleLocationAlias.query.options(
-            selectinload(TerminalSaleLocationAlias.location)
-        )
-        .order_by(TerminalSaleLocationAlias.source_name)
-        .all()
+    target_endpoint = (
+        "locations.view_locations"
+        if current_user.can_access_endpoint("locations.view_locations", "GET")
+        else get_default_landing_endpoint(current_user)
     )
-
-    product_form = TerminalSalesMappingDeleteForm(prefix="product")
-    location_form = TerminalSalesMappingDeleteForm(prefix="location")
-
-    product_form.selected_ids.choices = [
-        (alias.id, alias.source_name) for alias in product_aliases
-    ]
-    location_form.selected_ids.choices = [
-        (alias.id, alias.source_name) for alias in location_aliases
-    ]
-
-    if product_form.delete_all.data or product_form.delete_selected.data:
-        if product_form.validate_on_submit():
-            deleted_count = 0
-            if product_form.delete_all.data:
-                deleted_count = TerminalSaleProductAlias.query.delete()
-            else:
-                selected_ids = product_form.selected_ids.data or []
-                if selected_ids:
-                    deleted_count = (
-                        TerminalSaleProductAlias.query.filter(
-                            TerminalSaleProductAlias.id.in_(selected_ids)
-                        ).delete(synchronize_session=False)
-                    )
-                else:
-                    flash("Select at least one product mapping to remove.", "warning")
-            if deleted_count:
-                db.session.commit()
-                action = (
-                    "all terminal sales product mappings"
-                    if product_form.delete_all.data
-                    else f"{deleted_count} terminal sales product mapping"
-                )
-                if deleted_count > 1 and not product_form.delete_all.data:
-                    action += "s"
-                log_activity(f"Deleted {action} via admin panel")
-                flash(
-                    f"Removed {deleted_count} product mapping"
-                    f"{'s' if deleted_count != 1 else ''}.",
-                    "success",
-                )
-            elif product_form.delete_all.data:
-                flash("There were no product mappings to remove.", "info")
-            return redirect(url_for("admin.terminal_sales_mappings"))
-        flash("Unable to process the request. Please try again.", "danger")
-        return redirect(url_for("admin.terminal_sales_mappings"))
-
-    if location_form.delete_all.data or location_form.delete_selected.data:
-        if location_form.validate_on_submit():
-            deleted_count = 0
-            if location_form.delete_all.data:
-                deleted_count = TerminalSaleLocationAlias.query.delete()
-            else:
-                selected_ids = location_form.selected_ids.data or []
-                if selected_ids:
-                    deleted_count = (
-                        TerminalSaleLocationAlias.query.filter(
-                            TerminalSaleLocationAlias.id.in_(selected_ids)
-                        ).delete(synchronize_session=False)
-                    )
-                else:
-                    flash(
-                        "Select at least one location mapping to remove.",
-                        "warning",
-                    )
-            if deleted_count:
-                db.session.commit()
-                action = (
-                    "all terminal sales location mappings"
-                    if location_form.delete_all.data
-                    else f"{deleted_count} terminal sales location mapping"
-                )
-                if deleted_count > 1 and not location_form.delete_all.data:
-                    action += "s"
-                log_activity(f"Deleted {action} via admin panel")
-                flash(
-                    f"Removed {deleted_count} location mapping"
-                    f"{'s' if deleted_count != 1 else ''}.",
-                    "success",
-                )
-            elif location_form.delete_all.data:
-                flash("There were no location mappings to remove.", "info")
-            return redirect(url_for("admin.terminal_sales_mappings"))
-        flash("Unable to process the request. Please try again.", "danger")
-        return redirect(url_for("admin.terminal_sales_mappings"))
-
-    return render_template(
-        "admin/terminal_sales_mappings.html",
-        product_form=product_form,
-        location_form=location_form,
-        product_aliases=product_aliases,
-        location_aliases=location_aliases,
-        can_manage_terminal_sales_mappings=current_user.has_permission(
-            "terminal_sales_mappings.manage"
-        ),
-    )
+    return redirect(url_for(target_endpoint))
 
 
 @admin.route("/controlpanel/sales-imports", methods=["GET", "POST"])
@@ -3896,6 +3795,8 @@ def download_sales_import_attachment(import_id: int):
 @login_required
 def sales_import_detail(import_id: int):
     """Render location and row-level detail for a staged POS sales import."""
+    is_ajax_request = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    ajax_review_response: dict[str, str] | None = None
     sales_import = (
         PosSalesImport.query.options(
             selectinload(PosSalesImport.locations)
@@ -3997,7 +3898,17 @@ def sales_import_detail(import_id: int):
         selected_location_id = request.form.get("selected_location_id", type=int)
 
         def _redirect_review_locked():
-            flash(_sales_import_review_locked_message(sales_import), "warning")
+            locked_message = _sales_import_review_locked_message(sales_import)
+            if is_ajax_request and action == "resolve_row_price":
+                return (
+                    jsonify(
+                        success=False,
+                        message=locked_message,
+                        category="warning",
+                    ),
+                    409,
+                )
+            flash(locked_message, "warning")
             return redirect(
                 url_for(
                     "admin.sales_import_detail",
@@ -4208,16 +4119,55 @@ def sales_import_detail(import_id: int):
                 None,
             )
             if not row_record:
+                if is_ajax_request:
+                    return (
+                        jsonify(
+                            success=False,
+                            message="Unable to find the selected import row.",
+                            category="danger",
+                        ),
+                        404,
+                    )
                 flash("Unable to find the selected import row.", "danger")
             elif resolution is None:
-                flash("Choose how this row should handle pricing before saving.", "warning")
+                if is_ajax_request:
+                    return (
+                        jsonify(
+                            success=False,
+                            message="Choose how this row should handle pricing before saving.",
+                            category="warning",
+                        ),
+                        400,
+                    )
+                flash(
+                    "Choose how this row should handle pricing before saving.",
+                    "warning",
+                )
             elif row_record.product_id is None and resolution != "skip":
+                if is_ajax_request:
+                    return (
+                        jsonify(
+                            success=False,
+                            message="Map the product before choosing a row price.",
+                            category="warning",
+                        ),
+                        400,
+                    )
                 flash("Map the product before choosing a row price.", "warning")
             else:
                 selected_price = None
                 if resolution == "custom":
                     selected_price = coerce_float(request.form.get("custom_price"))
                     if selected_price is None:
+                        if is_ajax_request:
+                            return (
+                                jsonify(
+                                    success=False,
+                                    message="Enter a valid custom price before saving.",
+                                    category="warning",
+                                ),
+                                400,
+                            )
                         flash("Enter a valid custom price before saving.", "warning")
                         return redirect(
                             url_for(
@@ -4241,16 +4191,23 @@ def sales_import_detail(import_id: int):
                 db.session.commit()
 
                 if resolution == "skip":
-                    flash(
-                        "Row skipped. It will be excluded from stock operations and price updates.",
-                        "success",
+                    message = (
+                        "Row skipped. It will be excluded from stock operations and price updates."
                     )
                 elif resolution == "file":
-                    flash("This row will use the file price on approval.", "success")
+                    message = "This row will use the file price on approval."
                 elif resolution == "app":
-                    flash("This row will keep the app price on approval.", "success")
+                    message = "This row will keep the app price on approval."
                 else:
-                    flash("Custom row price saved.", "success")
+                    message = "Custom row price saved."
+
+                if is_ajax_request:
+                    ajax_review_response = {
+                        "message": message,
+                        "category": "success",
+                    }
+                else:
+                    flash(message, "success")
 
                 log_activity(
                     f"Saved price review for POS sales import {sales_import.id} row {row_record.id}: "
@@ -4749,8 +4706,7 @@ def sales_import_detail(import_id: int):
     if current_user.has_permission("sales_imports.manage"):
         available_products = Product.query.order_by(Product.name).all()
 
-    return render_template(
-        "admin/sales_import_detail.html",
+    detail_context = dict(
         sales_import=sales_import,
         attachment_available=attachment_available,
         sorted_locations=sorted_locations,
@@ -4779,6 +4735,18 @@ def sales_import_detail(import_id: int):
         price_review_locked=not _sales_import_review_is_editable(sales_import),
         undo_confirm_form=undo_confirm_form,
     )
+
+    if ajax_review_response is not None:
+        return jsonify(
+            success=True,
+            message=ajax_review_response["message"],
+            category=ajax_review_response["category"],
+            review_html=render_template(
+                "admin/sales_import_detail.html", **detail_context
+            ),
+        )
+
+    return render_template("admin/sales_import_detail.html", **detail_context)
 
 
 @admin.route("/controlpanel/vendor-item-aliases", methods=["GET", "POST"])

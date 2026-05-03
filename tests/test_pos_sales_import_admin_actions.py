@@ -304,18 +304,25 @@ def test_sales_import_and_terminal_mapping_actions_require_csrf(client, app):
     with app.app_context():
         location = Location(name="CSRF Stand")
         product = Product(name="CSRF Product", price=1.0, cost=0.5)
+        location_alias = TerminalSaleLocationAlias(
+            source_name="Legacy CSRF Stand",
+            normalized_name="legacy_csrf_stand",
+            location=location,
+        )
         db.session.add_all([location, product])
+        db.session.flush()
+        db.session.add(location_alias)
         db.session.commit()
         location_id = location.id
+        location_alias_id = location_alias.id
         product_id = product.id
 
     with client:
         login(client, admin_email, admin_pass)
 
-        # Controlpanel mappings endpoint POST should be CSRF-protected.
+        # Location mapping removal should be CSRF-protected.
         mappings_without_csrf = client.post(
-            "/controlpanel/terminal-sales-mappings",
-            data={"product-delete_all": "y"},
+            f"/locations/{location_id}/terminal_sale_aliases/{location_alias_id}/delete",
             follow_redirects=False,
         )
         assert mappings_without_csrf.status_code == 400

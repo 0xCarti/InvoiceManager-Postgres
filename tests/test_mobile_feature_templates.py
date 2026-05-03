@@ -19,9 +19,10 @@ def test_new_feature_templates_keep_mobile_responsive_helpers():
             "sales-import-detail-page",
             "sales-import-header-actions",
         ],
-        "app/templates/admin/terminal_sales_mappings.html": [
+        "app/templates/locations/view_location.html": [
             "table-mobile-card",
-            "terminal-mapping-actions",
+            "location-detail-actions",
+            "mobile-list-page app-page-shell",
         ],
         "app/templates/communications/center.html": [
             "communications-hero-actions",

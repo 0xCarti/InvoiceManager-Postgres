@@ -9,7 +9,7 @@
 {% set can_view_count_sheets = can_access_endpoint('event.bulk_count_sheets') %}
 {% set can_upload_sales = can_access_endpoint('event.upload_terminal_sales') %}
 {% set can_close_event = can_access_endpoint('event.close_event', 'POST') %}
-{% set can_view_locations = can_access_endpoint('locations.edit_location') %}
+{% set can_view_locations = can_access_endpoint('locations.view_location', 'GET') %}
 {% set can_view_stand_sheet = can_access_endpoint('event.stand_sheet') %}
 {% set can_view_scan_counts = can_access_endpoint('event.scan_counts') %}
 {% set can_add_terminal_sale = can_access_endpoint('event.add_terminal_sale') %}
@@ -160,7 +160,7 @@
                         <td class="text-break">
                             {% if el.location %}
                                 {% if can_view_locations %}
-                                <a href="{{ url_for('locations.edit_location', location_id=el.location_id, next=request.full_path) }}">{{ el.location.name }}</a>
+                                <a href="{{ url_for('locations.view_location', location_id=el.location_id) }}">{{ el.location.name }}</a>
                                 {% else %}
                                 <span>{{ el.location.name }}</span>
                                 {% endif %}

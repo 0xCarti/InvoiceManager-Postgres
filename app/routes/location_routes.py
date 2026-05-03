@@ -24,7 +24,20 @@ from app.forms import (
     LocationForm,
     LocationItemAddForm,
 )
-from app.models import GLCode, Item, Location, LocationStandItem, Menu, Playlist
+from app.models import (
+    Event,
+    EventLocation,
+    GLCode,
+    Item,
+    Location,
+    LocationStandItem,
+    Menu,
+    Playlist,
+    PosSalesImport,
+    PosSalesImportLocation,
+    TerminalSaleLocationAlias,
+    Transfer,
+)
 from app.services.pdf import render_stand_sheet_pdf
 from app.utils.activity import log_activity
 from app.utils.filter_state import (
@@ -132,6 +145,8 @@ def _safe_next_url(raw_value: str | None) -> str | None:
     if not sanitized.startswith("/"):
         sanitized = f"/{sanitized}"
     return sanitized
+
+
 @location.route("/locations/add", methods=["GET", "POST"])
 @login_required
 def add_location():
@@ -259,10 +274,9 @@ def edit_location(location_id):
                 }
             )
         flash("Location updated successfully.", "success")
-        redirect_kwargs = {"location_id": location.id}
         if safe_next:
-            redirect_kwargs["next"] = safe_next
-        return redirect(url_for("locations.edit_location", **redirect_kwargs))
+            return redirect(safe_next)
+        return redirect(url_for("locations.edit_location", location_id=location.id))
 
     if form.menu_id.data is None:
         form.menu_id.data = location.current_menu_id or 0
@@ -527,6 +541,139 @@ def email_stand_sheets(location_id: int | None = None):
         if not is_multiple and ordered_locations
         else url_for("locations.view_locations")
     )
+    return redirect(redirect_target)
+
+
+@location.route("/locations/<int:location_id>")
+@login_required
+def view_location(location_id: int):
+    """Display details and recent activity for a single location."""
+    location_obj = (
+        Location.query.options(
+            selectinload(Location.current_menu).selectinload(Menu.products),
+            selectinload(Location.default_playlist),
+            selectinload(Location.products),
+            selectinload(Location.terminal_sale_location_aliases),
+        )
+        .filter(Location.id == location_id)
+        .first()
+    )
+    if location_obj is None:
+        abort(404)
+
+    associated_products = sorted(
+        get_authoritative_location_products(location_obj),
+        key=lambda product_obj: normalize_name_for_sorting(
+            product_obj.name
+        ).casefold(),
+    )
+    terminal_aliases = sorted(
+        location_obj.terminal_sale_location_aliases,
+        key=lambda alias: normalize_name_for_sorting(alias.source_name).casefold(),
+    )
+    recent_transfers = (
+        Transfer.query.options(
+            selectinload(Transfer.from_location),
+            selectinload(Transfer.to_location),
+            selectinload(Transfer.transfer_items),
+        )
+        .filter(
+            or_(
+                Transfer.from_location_id == location_id,
+                Transfer.to_location_id == location_id,
+            )
+        )
+        .order_by(Transfer.date_created.desc(), Transfer.id.desc())
+        .limit(10)
+        .all()
+    )
+    recent_event_locations = (
+        EventLocation.query.options(
+            selectinload(EventLocation.event),
+            selectinload(EventLocation.terminal_sales_summary),
+        )
+        .join(Event, EventLocation.event_id == Event.id)
+        .filter(EventLocation.location_id == location_id)
+        .order_by(Event.end_date.desc(), Event.start_date.desc(), Event.id.desc())
+        .limit(10)
+        .all()
+    )
+    recent_import_locations = (
+        PosSalesImportLocation.query.options(
+            selectinload(PosSalesImportLocation.sales_import),
+            selectinload(PosSalesImportLocation.event_location).selectinload(
+                EventLocation.event
+            ),
+        )
+        .join(PosSalesImport, PosSalesImportLocation.import_id == PosSalesImport.id)
+        .filter(PosSalesImportLocation.location_id == location_id)
+        .filter(PosSalesImport.status != PosSalesImport.STATUS_DELETED)
+        .order_by(PosSalesImport.received_at.desc(), PosSalesImport.id.desc())
+        .limit(10)
+        .all()
+    )
+    latest_transfer_at = recent_transfers[0].date_created if recent_transfers else None
+    latest_event_date = (
+        recent_event_locations[0].event.end_date
+        if recent_event_locations and recent_event_locations[0].event
+        else None
+    )
+    latest_import_at = (
+        recent_import_locations[0].sales_import.received_at
+        if recent_import_locations and recent_import_locations[0].sales_import
+        else None
+    )
+
+    return render_template(
+        "locations/view_location.html",
+        location=location_obj,
+        associated_products=associated_products,
+        terminal_aliases=terminal_aliases,
+        alias_delete_form=DeleteForm(),
+        recent_transfers=recent_transfers,
+        recent_event_locations=recent_event_locations,
+        recent_import_locations=recent_import_locations,
+        latest_transfer_at=latest_transfer_at,
+        latest_event_date=latest_event_date,
+        latest_import_at=latest_import_at,
+    )
+
+
+@location.route(
+    "/locations/<int:location_id>/terminal_sale_aliases/<int:alias_id>/delete",
+    methods=["POST"],
+)
+@login_required
+def remove_terminal_sale_alias(location_id: int, alias_id: int):
+    """Remove a saved POS location alias from a location."""
+    redirect_target = _safe_next_url(request.args.get("next")) or url_for(
+        "locations.view_location",
+        location_id=location_id,
+        _anchor="terminal-sales-mappings",
+    )
+
+    location_obj = db.session.get(Location, location_id)
+    if location_obj is None:
+        abort(404)
+
+    alias = TerminalSaleLocationAlias.query.filter_by(
+        id=alias_id,
+        location_id=location_id,
+    ).first()
+    if alias is None:
+        abort(404)
+
+    form = DeleteForm()
+    if form.validate_on_submit():
+        db.session.delete(alias)
+        db.session.commit()
+        log_activity(
+            f"Removed terminal sale alias {alias.id} from location {location_obj.id}"
+        )
+        flash("Terminal sales location mapping removed.", "success")
+    else:
+        flash("Unable to remove mapping. Please try again.", "danger")
+
     return redirect(redirect_target)
 
 

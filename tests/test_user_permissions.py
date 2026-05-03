@@ -443,53 +443,43 @@ def test_import_page_hides_upload_actions_for_view_only_users(client, app):
     assert b'type="file"' not in response.data
 
 
-def test_terminal_sales_mappings_page_hides_delete_actions_for_view_only_users(
+def test_view_location_page_hides_terminal_mapping_delete_actions_for_view_only_users(
     client, app
 ):
     with app.app_context():
-        product = Product(name="Alias Product", price=5.0, cost=1.0)
         location = Location(name="Alias Location")
         user = User(
             email="terminal-mapping-viewer@example.com",
             password=generate_password_hash("pass"),
             active=True,
         )
-        db.session.add_all([product, location, user])
+        db.session.add_all([location, user])
         db.session.flush()
-        db.session.add_all(
-            [
-                TerminalSaleProductAlias(
-                    source_name="Terminal Product",
-                    normalized_name="terminal_product_view_only",
-                    product_id=product.id,
-                ),
-                TerminalSaleLocationAlias(
-                    source_name="Terminal Location",
-                    normalized_name="terminal_location_view_only",
-                    location_id=location.id,
-                ),
-            ]
+        db.session.add(
+            TerminalSaleLocationAlias(
+                source_name="Terminal Location",
+                normalized_name="terminal_location_view_only",
+                location_id=location.id,
+            )
         )
         db.session.commit()
         grant_permissions(
             user,
-            "terminal_sales_mappings.view",
-            group_name="Terminal Mappings View Only",
-            description="Can review terminal sales mappings without deleting them.",
+            "locations.view",
+            group_name="Location View Only",
+            description="Can review location detail pages without deleting location mappings.",
         )
+        location_id = location.id
 
     with client:
         login(client, "terminal-mapping-viewer@example.com", "pass")
-        response = client.get(
-            "/controlpanel/terminal-sales-mappings", follow_redirects=True
-        )
+        response = client.get(f"/locations/{location_id}", follow_redirects=True)
 
     assert response.status_code == 200
-    assert b"You have view-only access to terminal sales mappings." in response.data
-    assert b"Terminal Product" in response.data
+    assert b"Terminal Sales Mappings" in response.data
     assert b"Terminal Location" in response.data
-    assert b"Delete Selected" not in response.data
-    assert b"Delete All" not in response.data
+    assert b"View only" in response.data
+    assert b"Remove" not in response.data
 
 
 def test_vendor_item_aliases_page_hides_manage_actions_for_view_only_users(

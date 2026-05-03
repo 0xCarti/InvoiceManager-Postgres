@@ -3,7 +3,13 @@
     {% if can_select_locations %}
     <td class="col-select"><input type="checkbox" name="location_ids" value="{{ location.id }}" style="transform: scale(1.5);"></td>
     {% endif %}
-    <td class="col-location-name">{{ location.name }}</td>
+    <td class="col-location-name">
+        {% if can_access_endpoint('locations.view_location', 'GET') %}
+        <a href="{{ url_for('locations.view_location', location_id=location.id) }}">{{ location.name }}</a>
+        {% else %}
+        {{ location.name }}
+        {% endif %}
+    </td>
     <td class="col-location-menu">
         {% if location.current_menu %}
         {{ location.current_menu.name }}
@@ -13,6 +19,9 @@
     </td>
     <td class="col-location-actions">
         <div class="mobile-actions app-action-stack">
+            {% if can_access_endpoint('locations.view_location', 'GET') %}
+            <a href="{{ url_for('locations.view_location', location_id=location.id) }}" class="btn btn-outline-primary btn-sm">View</a>
+            {% endif %}
             {% if can_access_endpoint('locations.edit_location', 'GET') %}
             <button type="button" class="btn btn-info btn-sm edit-location-btn" data-id="{{ location.id }}">Edit</button>
             {% endif %}

@@ -7,10 +7,12 @@ from app.models import (
     TerminalSaleLocationAlias,
     TerminalSaleProductAlias,
 )
-from tests.utils import login
+from tests.utils import extract_csrf_token, login
 
 
-def test_admin_can_remove_terminal_sales_mappings(client, app):
+def test_location_detail_can_remove_terminal_sales_mapping_and_legacy_admin_url_redirects(
+    client, app
+):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
 
@@ -32,33 +34,29 @@ def test_admin_can_remove_terminal_sales_mappings(client, app):
         db.session.add_all([product_alias, location_alias])
         db.session.commit()
 
-        product_alias_id = product_alias.id
+        location_id = location.id
         location_alias_id = location_alias.id
 
     with client:
         login(client, admin_email, admin_pass)
-        resp = client.get("/controlpanel/terminal-sales-mappings")
+        resp = client.get("/controlpanel/terminal-sales-mappings", follow_redirects=True)
         assert resp.status_code == 200
+        assert (
+            b"Terminal sales location mappings now live on each location page."
+            in resp.data
+        )
+
+        detail_page = client.get(f"/locations/{location_id}")
+        csrf_token = extract_csrf_token(detail_page)
 
         resp = client.post(
-            "/controlpanel/terminal-sales-mappings",
-            data={
-                "product-selected_ids": [str(product_alias_id)],
-                "product-delete_selected": "y",
-            },
+            f"/locations/{location_id}/terminal_sale_aliases/{location_alias_id}/delete?next=/locations/{location_id}",
+            data={"csrf_token": csrf_token},
             follow_redirects=True,
         )
         assert resp.status_code == 200
-
-        resp = client.post(
-            "/controlpanel/terminal-sales-mappings",
-            data={
-                "location-delete_all": "y",
-            },
-            follow_redirects=True,
-        )
-        assert resp.status_code == 200
+        assert b"Terminal sales location mapping removed." in resp.data
 
     with app.app_context():
-        assert TerminalSaleProductAlias.query.count() == 0
+        assert TerminalSaleProductAlias.query.count() == 1
         assert TerminalSaleLocationAlias.query.count() == 0

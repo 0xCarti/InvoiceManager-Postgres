@@ -441,10 +441,14 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "locations.add_location": requirement(any_of=("locations.create",)),
     "locations.edit_location": requirement(any_of=("locations.edit",)),
     "locations.copy_location_items": requirement(any_of=("locations.manage_items",)),
+    "locations.view_location": requirement(any_of=("locations.view",)),
     "locations.view_stand_sheet": requirement(any_of=("locations.view",)),
     "locations.email_stand_sheets": requirement(any_of=("locations.email_stand_sheets",)),
     "locations.add_location_item": requirement(any_of=("locations.manage_items",)),
     "locations.delete_location_item": requirement(any_of=("locations.manage_items",)),
+    "locations.remove_terminal_sale_alias": requirement(
+        any_of=("terminal_sales_mappings.manage",)
+    ),
     "locations.view_locations": requirement(any_of=("locations.view",)),
     "locations.delete_location": requirement(any_of=("locations.delete",)),
     "menu.view_menus": requirement(any_of=("menus.view",)),
@@ -499,6 +503,7 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "vendor.edit_vendor": requirement(any_of=("vendors.edit",)),
     "vendor.delete_vendor": requirement(any_of=("vendors.delete",)),
     "product.view_products": requirement(any_of=("products.view",)),
+    "product.view_product": requirement(any_of=("products.view",)),
     "product.create_product": requirement(any_of=("products.create",)),
     "product.ajax_create_product": requirement(any_of=("products.create",)),
     "product.quick_create_product": requirement(any_of=("products.create",)),
@@ -983,8 +988,13 @@ ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] =
     ("admin.backups", "GET"): requirement(any_of=("backups.view", "backups.create", "backups.restore", "backups.download")),
     ("admin.settings", "GET"): requirement(any_of=("settings.view", "settings.manage")),
     ("admin.settings", "POST"): requirement(any_of=("settings.manage",)),
-    ("admin.terminal_sales_mappings", "GET"): requirement(any_of=("terminal_sales_mappings.view", "terminal_sales_mappings.manage")),
-    ("admin.terminal_sales_mappings", "POST"): requirement(any_of=("terminal_sales_mappings.manage",)),
+    ("admin.terminal_sales_mappings", "GET"): requirement(
+        any_of=(
+            "locations.view",
+            "terminal_sales_mappings.view",
+            "terminal_sales_mappings.manage",
+        )
+    ),
     ("admin.sales_imports", "GET"): requirement(any_of=("sales_imports.view", "sales_imports.manage")),
     ("admin.sales_imports", "POST"): requirement(any_of=("sales_imports.manage",)),
     ("admin.download_sales_import_attachment", "GET"): requirement(

@@ -1,10 +1,17 @@
 <tr id="product-row-{{ product.id }}">
     {% set can_select_products = can_access_endpoint('product.bulk_update_products', 'GET') or can_access_endpoint('product.bulk_set_cost_from_recipe', 'POST') %}
+    {% set can_view_product = can_access_endpoint('product.view_product', 'GET') %}
     {% if can_select_products %}
     <td class="col-select"><input type="checkbox" name="product_ids" value="{{ product.id }}" style="transform: scale(1.5);"></td>
     {% endif %}
     <td class="col-product-id" data-sort-value="{{ product.id }}">{{ product.id }}</td>
-    <td class="col-product-name">{{ product.name }}</td>
+    <td class="col-product-name">
+        {% if can_view_product %}
+        <a href="{{ url_for('product.view_product', product_id=product.id) }}">{{ product.name }}</a>
+        {% else %}
+        {{ product.name }}
+        {% endif %}
+    </td>
     <td class="col-product-price" data-sort-value="{{ '%.6f'|format(product.price or 0) }}">{{ '%.2f'|format(product.price or 0) }}</td>
     <td class="col-product-invoice-price" data-sort-value="{{ '%.6f'|format(product.invoice_sale_price or 0) }}">{{ '%.2f'|format(product.invoice_sale_price if product.invoice_sale_price is not none else product.price or 0) }}</td>
     <td class="col-product-cost" data-sort-value="{{ '%.6f'|format(product.cost or 0) }}">{{ '%.2f'|format(product.cost or 0) }}</td>
@@ -21,8 +28,8 @@
         {% if product.locations %}
             {% for location in product.locations %}
                 <div>
-                    {% if can_access_endpoint('locations.edit_location', 'GET') %}
-                    <a href="{{ url_for('locations.edit_location', location_id=location.id) }}" class="link-primary text-decoration-none">
+                    {% if can_access_endpoint('locations.view_location', 'GET') %}
+                    <a href="{{ url_for('locations.view_location', location_id=location.id) }}" class="link-primary text-decoration-none">
                         {{ location.name }}
                     </a>
                     {% else %}
@@ -61,31 +68,10 @@
         {% endif %}
     </td>
     <td class="col-product-actions">
-        {% set menu_ns = namespace(entries=[]) %}
-        {% for menu in product.menus %}
-            {% set menu_ns.entries = menu_ns.entries + [{'name': menu.name, 'url': url_for('menu.edit_menu', menu_id=menu.id) if can_access_endpoint('menu.edit_menu', 'GET') else none}] %}
-        {% endfor %}
-        {% set location_ns = namespace(entries=[]) %}
-        {% for location in product.locations %}
-            {% set location_ns.entries = location_ns.entries + [{'name': location.name, 'url': url_for('locations.edit_location', location_id=location.id) if can_access_endpoint('locations.edit_location', 'GET') else none}] %}
-        {% endfor %}
         <div class="mobile-actions mobile-card-actions app-action-stack">
-            <button type="button"
-                    class="btn btn-outline-primary btn-sm view-product-menus"
-                    data-bs-toggle="modal"
-                    data-bs-target="#productMenusModal"
-                    data-product-name="{{ product.name }}"
-                    data-product-menus='{{ menu_ns.entries | tojson }}'>
-                View Menus
-            </button>
-            <button type="button"
-                    class="btn btn-outline-secondary btn-sm view-product-locations"
-                    data-bs-toggle="modal"
-                    data-bs-target="#productLocationsModal"
-                    data-product-name="{{ product.name }}"
-                    data-product-locations='{{ location_ns.entries | tojson }}'>
-                View Locations
-            </button>
+            {% if can_view_product %}
+            <a href="{{ url_for('product.view_product', product_id=product.id) }}" class="btn btn-outline-primary btn-sm">View</a>
+            {% endif %}
             {% if can_access_endpoint('product.edit_product', 'GET') %}
             <a href="{{ url_for('product.edit_product', product_id=product.id) }}"
                class="btn btn-primary btn-sm edit-product-link"

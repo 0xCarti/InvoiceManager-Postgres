@@ -21,7 +21,7 @@ from app.models import (
     UserFilterPreference,
 )
 from tests.permission_helpers import grant_permissions
-from tests.utils import login
+from tests.utils import extract_csrf_token, login
 from werkzeug.security import generate_password_hash
 
 
@@ -1192,6 +1192,47 @@ def test_sales_import_price_review_can_use_custom_price_on_approval(client, app)
         item = db.session.get(Item, review_import["item_id"])
         assert product.price == 4.75
         assert item.quantity == 8.0
+
+
+def test_sales_import_price_review_can_save_via_ajax_without_redirect(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    review_import = _create_price_review_import(app, message_id="msg-price-review-ajax")
+
+    with client:
+        login(client, admin_email, admin_pass)
+        detail_response = client.get(
+            f"/controlpanel/sales-imports/{review_import['import_id']}?location_id={review_import['location_import_id']}",
+            follow_redirects=True,
+        )
+        csrf_token = extract_csrf_token(detail_response)
+
+        ajax_response = client.post(
+            f"/controlpanel/sales-imports/{review_import['import_id']}?location_id={review_import['location_import_id']}",
+            data={
+                "csrf_token": csrf_token,
+                "action": "resolve_row_price",
+                "selected_location_id": review_import["location_import_id"],
+                "row_id": review_import["row_id"],
+                "price_resolution": "app",
+            },
+            headers={
+                "X-Requested-With": "XMLHttpRequest",
+                "Accept": "application/json",
+            },
+        )
+
+    assert ajax_response.status_code == 200
+    payload = ajax_response.get_json()
+    assert payload["success"] is True
+    assert "keep the app price" in payload["message"]
+    assert "data-sales-import-review-root" in payload["review_html"]
+    assert "App Price" in payload["review_html"]
+
+    with app.app_context():
+        row = db.session.get(PosSalesImportRow, review_import["row_id"])
+        metadata = json.loads(row.approval_metadata)
+        assert metadata["review"]["price_action"] == "app"
 
 
 def test_sales_import_row_can_be_skipped_without_product_mapping(client, app):

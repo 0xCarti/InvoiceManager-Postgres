@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from urllib.parse import urlparse
 
 from flask import (
     Blueprint,
@@ -29,6 +30,7 @@ from app.models import (
     GLCode,
     Item,
     ItemUnit,
+    EventLocation,
     PosSalesImport,
     PosSalesImportRow,
     Product,
@@ -36,6 +38,7 @@ from app.models import (
     Customer,
     Invoice,
     InvoiceProduct,
+    Location,
     TerminalSale,
     TerminalSaleProductAlias,
     Vendor,
@@ -267,6 +270,16 @@ def _parse_product_ids(raw_value: str) -> list[int]:
 
 def _render_product_bulk_form(form: BulkProductUpdateForm):
     return render_template("products/bulk_update_form.html", form=form)
+
+
+def _safe_local_return_url(value: str | None) -> str | None:
+    candidate = (value or "").strip().replace("\\", "")
+    if not candidate:
+        return None
+    parsed = urlparse(candidate)
+    if parsed.scheme or parsed.netloc or not candidate.startswith("/"):
+        return None
+    return candidate
 
 
 def _get_sales_import_product_create_context():
@@ -1074,6 +1087,106 @@ def edit_product(product_id):
     )
 
 
+@product.route("/products/<int:product_id>")
+@login_required
+def view_product(product_id: int):
+    """Display details for a single product."""
+    product_obj = (
+        Product.query.options(
+            selectinload(Product.sales_gl_code),
+            selectinload(Product.gl_code_rel),
+            selectinload(Product.locations).selectinload(Location.current_menu),
+            selectinload(Product.menus),
+            selectinload(Product.recipe_items).selectinload(ProductRecipeItem.item),
+            selectinload(Product.recipe_items).selectinload(ProductRecipeItem.unit),
+            selectinload(Product.terminal_sale_aliases),
+        )
+        .filter(Product.id == product_id)
+        .first()
+    )
+    if product_obj is None:
+        abort(404)
+
+    can_view_vendor_aliases = current_user.can_access_endpoint(
+        "admin.vendor_item_aliases", "GET"
+    )
+    vendor_alias_groups = (
+        _build_product_vendor_alias_groups(product_obj)
+        if can_view_vendor_aliases
+        else []
+    )
+    alias_delete_form = DeleteForm()
+
+    sales_page = request.args.get("sales_page", 1, type=int)
+    terminal_sales_page = request.args.get("terminal_sales_page", 1, type=int)
+    sales_per_page = get_per_page("sales_per_page")
+    terminal_sales_per_page = get_per_page("terminal_sales_per_page")
+
+    sales_items = (
+        InvoiceProduct.query.options(
+            selectinload(InvoiceProduct.invoice),
+            selectinload(InvoiceProduct.product),
+        )
+        .join(Invoice, InvoiceProduct.invoice_id == Invoice.id)
+        .filter(InvoiceProduct.product_id == product_id)
+        .order_by(Invoice.date_created.desc(), Invoice.id.desc())
+        .paginate(page=sales_page, per_page=sales_per_page)
+    )
+    terminal_sales = (
+        TerminalSale.query.options(
+            selectinload(TerminalSale.event_location).selectinload(
+                EventLocation.event
+            ),
+            selectinload(TerminalSale.event_location).selectinload(
+                EventLocation.location
+            ),
+            selectinload(TerminalSale.pos_sales_import),
+        )
+        .filter(TerminalSale.product_id == product_id)
+        .order_by(TerminalSale.sold_at.desc(), TerminalSale.id.desc())
+        .paginate(page=terminal_sales_page, per_page=terminal_sales_per_page)
+    )
+
+    latest_invoice_sale = (
+        db.session.query(func.max(Invoice.date_created))
+        .join(InvoiceProduct, InvoiceProduct.invoice_id == Invoice.id)
+        .filter(InvoiceProduct.product_id == product_id)
+        .scalar()
+    )
+    latest_terminal_sale = (
+        db.session.query(func.max(TerminalSale.sold_at))
+        .filter(TerminalSale.product_id == product_id)
+        .scalar()
+    )
+    last_sold_at = max(
+        [value for value in [latest_invoice_sale, latest_terminal_sale] if value],
+        default=None,
+    )
+
+    return render_template(
+        "products/view_product.html",
+        product=product_obj,
+        can_view_vendor_aliases=can_view_vendor_aliases,
+        vendor_alias_groups=vendor_alias_groups,
+        alias_delete_form=alias_delete_form,
+        sales_items=sales_items,
+        terminal_sales=terminal_sales,
+        sales_per_page=sales_per_page,
+        terminal_sales_per_page=terminal_sales_per_page,
+        sales_pagination_args=build_pagination_args(
+            sales_per_page,
+            page_param="sales_page",
+            per_page_param="sales_per_page",
+        ),
+        terminal_sales_pagination_args=build_pagination_args(
+            terminal_sales_per_page,
+            page_param="terminal_sales_page",
+            per_page_param="terminal_sales_per_page",
+        ),
+        last_sold_at=last_sold_at,
+    )
+
+
 @product.route(
     "/products/<int:product_id>/terminal_sale_aliases/<int:alias_id>/delete",
     methods=["POST"],
@@ -1081,6 +1194,9 @@ def edit_product(product_id):
 @login_required
 def remove_terminal_sale_alias(product_id: int, alias_id: int):
     """Remove a terminal sale alias mapping from a product."""
+    redirect_target = _safe_local_return_url(request.args.get("next")) or url_for(
+        "product.edit_product", product_id=product_id, _anchor="terminal-sales"
+    )
 
     product = db.session.get(Product, product_id)
     if product is None:
@@ -1103,11 +1219,7 @@ def remove_terminal_sale_alias(product_id: int, alias_id: int):
     else:
         flash("Unable to remove mapping. Please try again.", "danger")
 
-    return redirect(
-        url_for(
-            "product.edit_product", product_id=product.id, _anchor="terminal-sales"
-        )
-    )
+    return redirect(redirect_target)
 
 
 @product.route("/products/<int:product_id>/recipe", methods=["GET", "POST"])

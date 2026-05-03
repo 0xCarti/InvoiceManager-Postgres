@@ -1,3 +1,4 @@
+from datetime import date, datetime
 from contextlib import contextmanager
 
 from flask import template_rendered
@@ -5,14 +6,20 @@ from werkzeug.security import generate_password_hash
 
 from app import db
 from app.models import (
+    Event,
+    EventLocation,
     GLCode,
     Item,
     ItemUnit,
     Location,
     LocationStandItem,
     Menu,
+    PosSalesImport,
+    PosSalesImportLocation,
     Product,
     ProductRecipeItem,
+    TerminalSaleLocationAlias,
+    Transfer,
     User,
 )
 from tests.permission_helpers import grant_permissions
@@ -308,6 +315,92 @@ def test_email_stand_sheet_missing_configuration(monkeypatch, client, app):
 
     assert response.status_code == 200
     assert b"Email settings are not configured." in response.data
+
+
+def test_view_location_shows_recent_activity_and_terminal_mappings(client, app):
+    email, _, menu_id = setup_data(app)
+
+    with app.app_context():
+        user = User.query.filter_by(email=email).first()
+        assert user is not None
+        menu = db.session.get(Menu, menu_id)
+        location = Location(name="Detail Stand", current_menu=menu)
+        warehouse = Location(name="Warehouse")
+        event = Event(
+            name="Summer Festival",
+            start_date=date(2026, 7, 1),
+            end_date=date(2026, 7, 3),
+        )
+        db.session.add_all([location, warehouse, event])
+        db.session.flush()
+
+        db.session.add(
+            TerminalSaleLocationAlias(
+                source_name="Stand #1",
+                normalized_name="stand_1_detail",
+                location_id=location.id,
+            )
+        )
+        db.session.add(
+            Transfer(
+                from_location_id=warehouse.id,
+                to_location_id=location.id,
+                user_id=user.id,
+                date_created=datetime(2026, 7, 4, 12, 30),
+                completed=True,
+                from_location_name=warehouse.name,
+                to_location_name=location.name,
+            )
+        )
+        event_location = EventLocation(
+            event_id=event.id,
+            location_id=location.id,
+            confirmed=True,
+        )
+        db.session.add(event_location)
+        db.session.flush()
+
+        sales_import = PosSalesImport(
+            source_provider="mailgun",
+            message_id="msg-location-detail",
+            attachment_filename="detail-sales.csv",
+            attachment_sha256="d" * 64,
+            sales_date=date(2026, 7, 4),
+            received_at=datetime(2026, 7, 5, 9, 15),
+            status=PosSalesImport.STATUS_APPROVED,
+        )
+        db.session.add(sales_import)
+        db.session.flush()
+        db.session.add(
+            PosSalesImportLocation(
+                import_id=sales_import.id,
+                source_location_name="Stand #1",
+                normalized_location_name="stand_1_detail",
+                location_id=location.id,
+                event_location_id=event_location.id,
+                total_quantity=14,
+                computed_total=112,
+                parse_index=0,
+            )
+        )
+        db.session.commit()
+        location_id = location.id
+
+    with client:
+        login(client, email, "pass")
+        response = client.get(f"/locations/{location_id}")
+
+    assert response.status_code == 200
+    assert b"Detail Stand" in response.data
+    assert b"Terminal Sales Mappings" in response.data
+    assert b"Stand #1" in response.data
+    assert b"Recent Transfers" in response.data
+    assert b"Recent Events" in response.data
+    assert b"Recent Imported Sales" in response.data
+    assert b"Summer Festival" in response.data
+    assert b"Cake" in response.data
+    assert b"Transfer #" in response.data
+    assert b"Import #" in response.data
 
 
 def test_view_locations_filters_by_menu_and_spoilage(client, app):

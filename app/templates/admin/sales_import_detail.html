@@ -14,7 +14,7 @@
     }
 }
 </style>
-<div class="container mt-4 app-page-shell sales-import-detail-page">
+<div class="container mt-4 app-page-shell sales-import-detail-page" data-sales-import-review-root>
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
         <h1 class="mb-1">Sales Import #{{ sales_import.id }}</h1>
@@ -101,6 +101,8 @@
         <a href="{{ url_for('admin.sales_imports') }}" class="btn btn-outline-secondary">Back to Imports</a>
     </div>
 </div>
+
+<div class="mb-3" data-role="sales-import-feedback"></div>
 
 <div class="card mb-3">
     <div class="card-body">
@@ -484,7 +486,7 @@
                             {% elif can_manage_sales_imports and row.product_id is not none and review.price_mismatch %}
                             <div class="vstack gap-2">
                                 <div class="small fw-semibold">Price review</div>
-                                <form method="post" class="vstack gap-2">
+                                <form method="post" class="vstack gap-2" data-ajax-price-resolution-form>
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <input type="hidden" name="action" value="resolve_row_price">
                                     <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
@@ -549,7 +551,7 @@
                                     </a>
                                     {% endif %}
                                 </div>
-                                <form method="post" class="vstack gap-2">
+                                <form method="post" class="vstack gap-2" data-ajax-price-resolution-form>
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <input type="hidden" name="action" value="resolve_row_price">
                                     <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
@@ -615,7 +617,7 @@
                             <tr class="table-light">
                                 <td colspan="5">
                                     <div class="small fw-semibold mb-2">Price review for "{{ row.source_product_name }}"</div>
-                                    <form method="post" class="row g-2 align-items-end">
+                                    <form method="post" class="row g-2 align-items-end" data-ajax-price-resolution-form>
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="action" value="resolve_row_price">
                                         <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
@@ -709,7 +711,7 @@
                                             {% endif %}
                                         </div>
                                     </div>
-                                    <form method="post" class="row g-2 align-items-end">
+                                    <form method="post" class="row g-2 align-items-end" data-ajax-price-resolution-form>
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="action" value="resolve_row_price">
                                         <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
@@ -809,5 +811,108 @@
 {% endif %}
 {% if can_manage_sales_imports %}
 <script src="{{ url_for('static', filename='js/terminal_sales_mapping.js') }}" defer></script>
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('DOMContentLoaded', function () {
+    function alertClassFor(category) {
+        switch (category) {
+            case 'danger':
+                return 'alert-danger';
+            case 'warning':
+                return 'alert-warning';
+            case 'success':
+                return 'alert-success';
+            default:
+                return 'alert-info';
+        }
+    }
+
+    function showSalesImportFeedback(root, message, category) {
+        const container = root ? root.querySelector('[data-role="sales-import-feedback"]') : null;
+        if (!container) {
+            return;
+        }
+        container.innerHTML = '';
+        if (!message) {
+            return;
+        }
+        const alert = document.createElement('div');
+        alert.className = `alert ${alertClassFor(category)} py-2 mb-0`;
+        alert.textContent = message;
+        container.appendChild(alert);
+    }
+
+    function replaceSalesImportReview(html, message, category) {
+        const parser = new DOMParser();
+        const parsed = parser.parseFromString(html || '', 'text/html');
+        const nextRoot = parsed.querySelector('[data-sales-import-review-root]');
+        const currentRoot = document.querySelector('[data-sales-import-review-root]');
+        if (!nextRoot || !currentRoot) {
+            return false;
+        }
+        currentRoot.replaceWith(nextRoot);
+        showSalesImportFeedback(nextRoot, message, category);
+        if (typeof window.initTerminalProductMappings === 'function') {
+            window.initTerminalProductMappings(nextRoot);
+        }
+        return true;
+    }
+
+    document.addEventListener('submit', function (event) {
+        const form = event.target;
+        if (!(form instanceof HTMLFormElement) || !form.matches('[data-ajax-price-resolution-form]')) {
+            return;
+        }
+
+        event.preventDefault();
+        const submitter = event.submitter instanceof HTMLElement ? event.submitter : form.querySelector('[type="submit"]');
+        if (submitter) {
+            submitter.disabled = true;
+        }
+
+        const formData = new FormData(form);
+        if (event.submitter && event.submitter.name && !formData.has(event.submitter.name)) {
+            formData.append(event.submitter.name, event.submitter.value);
+        }
+
+        fetch(form.getAttribute('action') || window.location.href, {
+            method: 'POST',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'Accept': 'application/json'
+            },
+            credentials: 'same-origin',
+            body: formData
+        })
+            .then(async function (response) {
+                const payload = await response.json().catch(function () {
+                    return null;
+                });
+                if (!payload) {
+                    throw new Error('Unable to refresh the sales import review.');
+                }
+                if (!response.ok || !payload.success) {
+                    showSalesImportFeedback(
+                        document.querySelector('[data-sales-import-review-root]'),
+                        payload.message || 'Unable to save the price review.',
+                        payload.category || 'danger'
+                    );
+                    return null;
+                }
+                if (!replaceSalesImportReview(payload.review_html, payload.message, payload.category)) {
+                    throw new Error('Unable to refresh the sales import review.');
+                }
+                return payload;
+            })
+            .catch(function () {
+                window.location.reload();
+            })
+            .finally(function () {
+                if (submitter && document.body.contains(submitter)) {
+                    submitter.disabled = false;
+                }
+            });
+    });
+});
+</script>
 {% endif %}
 {% endblock %}

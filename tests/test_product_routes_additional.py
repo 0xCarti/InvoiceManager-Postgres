@@ -6,8 +6,11 @@ from app.models import (
     GLCode,
     Item,
     ItemUnit,
+    Location,
+    Menu,
     Product,
     ProductRecipeItem,
+    TerminalSaleProductAlias,
     User,
     Customer,
     Invoice,
@@ -239,6 +242,59 @@ def test_view_products_customer_filter(client, app):
         assert resp.status_code == 200
         assert b"ProdX" in resp.data
         assert b"ProdY" not in resp.data
+
+
+def test_view_product_replaces_modal_actions_and_handles_terminal_aliases(
+    client, app
+):
+    email, item_id, unit_id = setup_data(app)
+
+    with app.app_context():
+        product = Product(name="Detail Product", price=7.5, cost=2.5)
+        location = Location(name="Arena Stand")
+        menu = Menu(name="Arena Menu")
+        db.session.add_all([product, location, menu])
+        db.session.flush()
+        product.locations.append(location)
+        product.menus.append(menu)
+        db.session.add(
+            TerminalSaleProductAlias(
+                source_name="POS Detail Product",
+                normalized_name="pos_detail_product",
+                product_id=product.id,
+            )
+        )
+        db.session.commit()
+        product_id = product.id
+        alias_id = product.terminal_sale_aliases[0].id
+
+    with client:
+        login(client, email, "pass")
+
+        list_response = client.get("/products")
+        assert list_response.status_code == 200
+        assert b"View Menus" not in list_response.data
+        assert b"View Locations" not in list_response.data
+        assert b">View<" in list_response.data
+
+        detail_response = client.get(f"/products/{product_id}")
+        assert detail_response.status_code == 200
+        assert b"Arena Menu" in detail_response.data
+        assert b"Arena Stand" in detail_response.data
+        assert b"POS Detail Product" in detail_response.data
+        assert b"Terminal Sales Mappings" in detail_response.data
+        assert b"Recent Terminal Sales" in detail_response.data
+        assert b"Recent Sales Invoices" in detail_response.data
+
+        remove_response = client.post(
+            f"/products/{product_id}/terminal_sale_aliases/{alias_id}/delete?next=/products/{product_id}",
+            follow_redirects=True,
+        )
+        assert remove_response.status_code == 200
+        assert b"Terminal sales product mapping removed." in remove_response.data
+
+    with app.app_context():
+        assert db.session.get(TerminalSaleProductAlias, alias_id) is None
 
 
 def test_bulk_set_cost_from_recipe(client, app):
