@@ -34,6 +34,15 @@ def test_login_page_renders_password_toggle(client):
     assert b'js/password_toggle.js' in response.data
 
 
+def test_zero_threat_verification_page_is_get_only(client):
+    get_response = client.get("/zero-threat.html")
+    assert get_response.status_code == 200
+    assert b"zeroThreat=" in get_response.data
+
+    post_response = client.post("/zero-threat.html")
+    assert post_response.status_code == 405
+
+
 def test_logout_requires_post(client, app):
     with app.app_context():
         user = User(

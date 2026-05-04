@@ -23,6 +23,7 @@ from app.services.communication_service import (
     sync_dynamic_bulletin_recipients,
     visible_message_history,
 )
+from app.services.notification_service import notify_users_for_category
 from app.utils.activity import log_activity
 from app.utils.dashboard_bulletins import (
     load_saved_dashboard_bulletin_ids,
@@ -238,6 +239,40 @@ def _build_bulletin_read_summary(receipt: CommunicationRecipient) -> dict[str, o
     }
 
 
+def _sender_label() -> str:
+    return current_user.display_name or current_user.email
+
+
+def _notify_message_recipients(message: Communication, recipients) -> None:
+    sender_label = _sender_label()
+    notify_users_for_category(
+        category="messages",
+        recipients=recipients,
+        subject=f"New message from {sender_label}: {message.subject}",
+        body=(
+            f"{sender_label} sent you a new message.\n\n"
+            f"Subject: {message.subject}\n\n{message.body}"
+        ),
+        sms_body=f"New message from {sender_label}: {message.subject}",
+        exclude_user_ids={current_user.id},
+    )
+
+
+def _notify_bulletin_recipients(bulletin: Communication, recipients) -> None:
+    sender_label = _sender_label()
+    notify_users_for_category(
+        category="bulletins",
+        recipients=recipients,
+        subject=f"New bulletin: {bulletin.subject}",
+        body=(
+            f"{sender_label} posted a bulletin.\n\n"
+            f"Subject: {bulletin.subject}\n\n{bulletin.body}"
+        ),
+        sms_body=f"New bulletin: {bulletin.subject}",
+        exclude_user_ids={current_user.id},
+    )
+
+
 def _submit_message(message_form: CommunicationMessageForm) -> bool:
     if not current_user.has_any_permission(
         "communications.send_direct",
@@ -284,6 +319,7 @@ def _submit_message(message_form: CommunicationMessageForm) -> bool:
     log_activity(
         f"Sent communication message {message.id} to {len(recipients)} user(s)"
     )
+    _notify_message_recipients(message, recipients)
     flash(
         f"Message sent to {len(recipients)} user(s).",
         "success",
@@ -329,6 +365,7 @@ def _submit_bulletin(bulletin_form: BulletinPostForm) -> bool:
     log_activity(
         f"Posted bulletin {bulletin.id} for {len(recipients)} user(s)"
     )
+    _notify_bulletin_recipients(bulletin, recipients)
     flash(
         f"Bulletin posted for {len(recipients)} user(s).",
         "success",

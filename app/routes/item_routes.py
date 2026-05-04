@@ -3,6 +3,7 @@ import os
 from flask import (
     Blueprint,
     abort,
+    current_app,
     flash,
     jsonify,
     redirect,
@@ -1516,8 +1517,6 @@ def import_items():
     """Bulk import items from a text file."""
     form = ImportItemsForm()
     if form.validate_on_submit():
-        from run import app
-
         file = form.file.data
         filename = secure_filename(file.filename)
         ext = os.path.splitext(filename)[1].lower()
@@ -1530,7 +1529,7 @@ def import_items():
         if size > MAX_IMPORT_SIZE:
             flash("File is too large.", "error")
             return redirect(url_for("item.import_items"))
-        filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+        filepath = os.path.join(current_app.config["UPLOAD_FOLDER"], filename)
         file.save(filepath)
 
         # Read all unique item names from the uploaded file

@@ -279,6 +279,41 @@ def test_purchase_order_can_be_marked_ordered_and_filtered(client, app):
         assert po.received is False
 
 
+def test_mark_ordered_ignores_external_next_redirects(client, app):
+    email, vendor_id, item_id, _, unit_id = setup_purchase(app)
+
+    with client:
+        login(client, email, "pass")
+        client.post(
+            "/purchase_orders/create",
+            data={
+                "vendor": vendor_id,
+                "order_date": "2024-04-01",
+                "expected_date": "2024-04-02",
+                "items-0-item": item_id,
+                "items-0-unit": unit_id,
+                "items-0-quantity": 1,
+            },
+            follow_redirects=True,
+        )
+
+    with app.app_context():
+        po = PurchaseOrder.query.first()
+        assert po is not None
+        po_id = po.id
+
+    with client:
+        login(client, email, "pass")
+        response = client.post(
+            f"/purchase_orders/{po_id}/mark_ordered",
+            data={"next": "https://example.com/phish"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/purchase_orders")
+
+
 def test_delete_purchase_order_removes_receive_draft(client, app):
     email, vendor_id, _, _, _ = setup_purchase(app)
     with app.app_context():

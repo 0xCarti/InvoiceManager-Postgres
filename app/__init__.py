@@ -458,7 +458,9 @@ def create_app(args=None):
     else:
         args = list(args)
     app = Flask(__name__)
-    app.config["SECRET_KEY"] = os.getenv("SECRET_KEY")
+    configured_secret_key = (os.getenv("SECRET_KEY") or "").strip()
+    app.config["SECRET_KEY"] = configured_secret_key or secrets.token_urlsafe(64)
+    app.config["SECRET_KEY_IS_EPHEMERAL"] = not bool(configured_secret_key)
     default_secure_cookies = "--demo" not in args
     session_cookie_secure = _get_bool_env(
         "SESSION_COOKIE_SECURE", default=default_secure_cookies
@@ -628,6 +630,12 @@ def create_app(args=None):
     os.makedirs(app.config["BACKUP_FOLDER"], exist_ok=True)
     os.makedirs(app.config["IMPORT_FILES_FOLDER"], exist_ok=True)
     _configure_error_file_logging(app)
+    if app.config["SECRET_KEY_IS_EPHEMERAL"]:
+        app.logger.warning(
+            "SECRET_KEY is not configured; using an ephemeral in-memory key. "
+            "Set SECRET_KEY before production deployment to keep sessions and "
+            "signed tokens stable across restarts."
+        )
 
     if "--demo" in args:
         app.config["DEMO"] = True

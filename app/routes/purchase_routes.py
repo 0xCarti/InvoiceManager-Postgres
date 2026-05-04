@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from flask import (
     Blueprint,
     abort,
@@ -67,6 +69,7 @@ from app.services.purchase_imports import (
     serialize_parsed_line,
     update_or_create_vendor_alias,
 )
+from app.services.notification_service import notify_users_for_category
 
 import datetime
 import json
@@ -78,6 +81,29 @@ from sqlalchemy.orm import selectinload
 from wtforms.validators import ValidationError
 
 purchase = Blueprint("purchase", __name__)
+
+
+def _notify_purchase_order_activity(
+    po: PurchaseOrder,
+    *,
+    action: str,
+    detail: str | None = None,
+    sms_body: str | None = None,
+) -> None:
+    vendor_name = po.vendor_name or "Unknown vendor"
+    body = (
+        f"Purchase order #{po.id} for {vendor_name} "
+        f"was {action} by {current_user.email}."
+    )
+    if detail:
+        body = f"{body} {detail}"
+    notify_users_for_category(
+        category="purchase_orders",
+        subject=f"Purchase order {action}: #{po.id}",
+        body=body,
+        sms_body=sms_body or f"PO {action}: #{po.id} {vendor_name}",
+        exclude_user_ids={current_user.id},
+    )
 
 
 _PURCHASE_UPLOAD_SESSION_KEY = "purchase_order_upload"
@@ -96,8 +122,16 @@ def _normalize_purchase_order_filter_status(value: str | None) -> str:
 
 
 def _purchase_redirect_target(next_url: str | None, fallback_endpoint: str):
-    if next_url and next_url.startswith("/") and not next_url.startswith("//"):
-        return redirect(next_url)
+    candidate = (next_url or "").strip().replace("\\", "")
+    if candidate:
+        parsed = urlparse(candidate)
+        if (
+            not parsed.scheme
+            and not parsed.netloc
+            and candidate.startswith("/")
+            and not candidate.startswith("//")
+        ):
+            return redirect(candidate)
     return redirect(url_for(fallback_endpoint))
 
 
@@ -1310,6 +1344,7 @@ def create_purchase_order():
             db.session.commit()
             _clear_purchase_upload_state()
             log_activity(f"Created purchase order {po.id}")
+            _notify_purchase_order_activity(po, action="created")
             flash("Purchase order created successfully!", "success")
             return redirect(url_for("purchase.view_purchase_orders"))
 
@@ -1577,6 +1612,7 @@ def edit_purchase_order(po_id):
 
             db.session.commit()
             log_activity(f"Edited purchase order {po.id}")
+            _notify_purchase_order_activity(po, action="updated")
             flash("Purchase order updated successfully!", "success")
             return redirect(url_for("purchase.view_purchase_orders"))
 
@@ -1657,6 +1693,7 @@ def mark_purchase_order_ordered(po_id):
         db.session.add(po)
         db.session.commit()
         log_activity(f"Marked purchase order {po.id} as ordered")
+        _notify_purchase_order_activity(po, action="marked as ordered")
         flash("Purchase order marked as ordered.", "success")
     else:
         flash("This purchase order is already marked as ordered.", "info")
@@ -2018,6 +2055,15 @@ def receive_invoice(po_id):
         # atomically, ensuring the weighted cost persists in the database.
         db.session.commit()
         log_activity(f"Received invoice {invoice.id} for PO {po.id}")
+        _notify_purchase_order_activity(
+            po,
+            action="received",
+            detail=(
+                f"Invoice #{invoice.id} was received into "
+                f"{invoice.location_name or 'the selected location'}."
+            ),
+            sms_body=f"PO received: #{po.id} {po.vendor_name}",
+        )
         flash("Invoice received successfully!", "success")
         return redirect(url_for("purchase.view_purchase_invoices"))
 
@@ -2423,10 +2469,16 @@ def reverse_purchase_invoice(invoice_id):
         )
         return redirect(url_for("purchase.view_purchase_invoices"))
 
-    PurchaseInvoiceItem.query.filter_by(invoice_id=invoice.id).delete()
     db.session.delete(invoice)
     po.received = False
     po.status = PurchaseOrder.STATUS_ORDERED
     db.session.commit()
+    log_activity(f"Reversed invoice {invoice_id} for PO {po.id}")
+    _notify_purchase_order_activity(
+        po,
+        action="reversed",
+        detail=f"Invoice #{invoice_id} was reversed.",
+        sms_body=f"PO reversed: #{po.id} {po.vendor_name}",
+    )
     flash("Invoice reversed successfully", "success")
     return redirect(url_for("purchase.view_purchase_orders"))

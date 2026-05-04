@@ -161,6 +161,45 @@ class User(UserMixin, db.Model):
     timezone = db.Column(db.String(50))
     phone_number = db.Column(db.String(20))
     notify_transfers = db.Column(db.Boolean, default=False, nullable=False)
+    notify_transfers_email = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
+    notify_purchase_orders_email = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
+    notify_purchase_orders_text = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
+    notify_events_email = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
+    notify_events_text = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
+    notify_users_email = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
+    notify_users_text = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
+    notify_messages_email = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
+    notify_messages_text = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
+    notify_bulletins_email = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
+    notify_bulletins_text = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
+    notify_locations_email = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
+    notify_locations_text = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
     hourly_rate = db.Column(
         db.Float, nullable=True, default=0.0, server_default="0.0"
     )

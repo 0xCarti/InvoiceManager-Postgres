@@ -38,6 +38,7 @@ from app.models import (
     TerminalSaleLocationAlias,
     Transfer,
 )
+from app.services.notification_service import notify_users_for_category
 from app.services.pdf import render_stand_sheet_pdf
 from app.utils.activity import log_activity
 from app.utils.filter_state import (
@@ -64,6 +65,28 @@ from app.utils.text import (
 from app.utils.email import SMTPConfigurationError, send_email
 
 location = Blueprint("locations", __name__)
+
+
+def _notify_location_activity(
+    location_obj: Location,
+    *,
+    action: str,
+    detail: str | None = None,
+    sms_body: str | None = None,
+) -> None:
+    body = (
+        f"Location '{location_obj.name}' (#{location_obj.id}) "
+        f"was {action} by {current_user.email}."
+    )
+    if detail:
+        body = f"{body} {detail}"
+    notify_users_for_category(
+        category="locations",
+        subject=f"Location {action}: {location_obj.name}",
+        body=body,
+        sms_body=sms_body or f"Location {action}: {location_obj.name}",
+        exclude_user_ids={current_user.id},
+    )
 
 
 def _build_location_stand_sheet_items(location: Location):
@@ -182,6 +205,7 @@ def add_location():
             apply_menu_products(new_location, None)
         db.session.commit()
         log_activity(f"Added location {new_location.name}")
+        _notify_location_activity(new_location, action="created")
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
             return jsonify(
                 {
@@ -265,6 +289,7 @@ def edit_location(location_id):
             set_location_menu(location, None)
         db.session.commit()
         log_activity(f"Edited location {location.id}")
+        _notify_location_activity(location, action="updated")
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
             return jsonify(
                 {
@@ -1216,5 +1241,6 @@ def delete_location(location_id):
     location.archived = True
     db.session.commit()
     log_activity(f"Archived location {location.id}")
+    _notify_location_activity(location, action="archived")
     flash("Location archived successfully!")
     return redirect(url_for("locations.view_locations"))

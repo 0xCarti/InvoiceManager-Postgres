@@ -104,6 +104,10 @@ from app.services.purchase_imports import (
     normalize_vendor_alias_text,
     update_or_create_vendor_alias,
 )
+from app.services.notification_service import (
+    notify_users_for_category,
+    operational_notification_fields,
+)
 from app.permissions import (
     get_default_landing_endpoint,
     get_permission_categories,
@@ -523,9 +527,10 @@ def _persist_restore_preflight_diagnostic(
 
 
 def _serializer():
-    from flask import current_app
-
-    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"])
+    secret_key = current_app.secret_key or current_app.config.get("SECRET_KEY")
+    if not secret_key:  # pragma: no cover - configuration guard
+        raise RuntimeError("Application secret key is not configured.")
+    return URLSafeTimedSerializer(secret_key)
 
 
 def _reset_token_password_fingerprint(user: User) -> str:
@@ -677,6 +682,34 @@ def verify_reset_token(token: str, max_age: int = 3600):
     return user
 
 
+PROFILE_NOTIFICATION_BOOLEAN_FIELDS = operational_notification_fields() + (
+    "notify_schedule_post_email",
+    "notify_schedule_post_text",
+    "notify_schedule_changes_email",
+    "notify_schedule_changes_text",
+    "notify_tradeboard_email",
+    "notify_tradeboard_text",
+)
+PROFILE_NOTIFICATION_FIELDS = ("phone_number",) + PROFILE_NOTIFICATION_BOOLEAN_FIELDS
+
+
+def _build_notification_form(user: User) -> NotificationForm:
+    form_kwargs = {"phone_number": user.phone_number or ""}
+    for field_name in PROFILE_NOTIFICATION_BOOLEAN_FIELDS:
+        form_kwargs[field_name] = bool(getattr(user, field_name, False))
+    return NotificationForm(**form_kwargs)
+
+
+def _notifications_submitted(form_data) -> bool:
+    return any(field_name in form_data for field_name in PROFILE_NOTIFICATION_FIELDS)
+
+
+def _apply_notification_preferences(user: User, form: NotificationForm) -> None:
+    user.phone_number = form.phone_number.data or None
+    for field_name in PROFILE_NOTIFICATION_BOOLEAN_FIELDS:
+        setattr(user, field_name, bool(getattr(form, field_name).data))
+
+
 @auth.route("/login", methods=["GET", "POST"])
 @limiter.limit("5 per minute")
 def login():
@@ -704,10 +737,8 @@ def login():
         log_activity("Logged in", user.id)
         return _redirect_to_default_landing(user)
 
-    from run import app
-
     return render_template(
-        "auth/login.html", form=form, demo=app.config["DEMO"]
+        "auth/login.html", form=form, demo=current_app.config["DEMO"]
     )
 
 
@@ -724,8 +755,9 @@ def logout():
     return redirect(url_for("auth.login"))
 
 
-@admin.route("/zero-threat.html", methods=["GET", "POST"])
+@admin.route("/zero-threat.html", methods=["GET"])
 def zerothreat():
+    """Serve the static ZeroThreat domain-verification page."""
     return render_template("auth/zero-threat.html")
     
 
@@ -781,16 +813,7 @@ def profile():
 
     form = ChangePasswordForm()
     tz_form = TimezoneForm(timezone=current_user.timezone or "")
-    notif_form = NotificationForm(
-        phone_number=current_user.phone_number or "",
-        notify_transfers=current_user.notify_transfers,
-        notify_schedule_post_email=current_user.notify_schedule_post_email,
-        notify_schedule_post_text=current_user.notify_schedule_post_text,
-        notify_schedule_changes_email=current_user.notify_schedule_changes_email,
-        notify_schedule_changes_text=current_user.notify_schedule_changes_text,
-        notify_tradeboard_email=current_user.notify_tradeboard_email,
-        notify_tradeboard_text=current_user.notify_tradeboard_text,
-    )
+    notif_form = _build_notification_form(current_user)
     status_messages = {}
     if request.args.get("password_status") == "updated":
         status_messages["password"] = ("success", "Password updated.")
@@ -804,16 +827,7 @@ def profile():
 
     password_submitted = "new_password" in request.form
     timezone_submitted = "timezone" in request.form
-    notifications_submitted = (
-        "phone_number" in request.form
-        or "notify_transfers" in request.form
-        or "notify_schedule_post_email" in request.form
-        or "notify_schedule_post_text" in request.form
-        or "notify_schedule_changes_email" in request.form
-        or "notify_schedule_changes_text" in request.form
-        or "notify_tradeboard_email" in request.form
-        or "notify_tradeboard_text" in request.form
-    )
+    notifications_submitted = _notifications_submitted(request.form)
 
     if password_submitted and form.validate_on_submit():
         if not check_password_hash(
@@ -831,28 +845,7 @@ def profile():
         db.session.commit()
         return redirect(url_for("auth.profile", timezone_status="updated"))
     elif notifications_submitted and notif_form.validate_on_submit():
-        current_user.phone_number = notif_form.phone_number.data or None
-        current_user.notify_transfers = (
-            notif_form.notify_transfers.data or False
-        )
-        current_user.notify_schedule_post_email = (
-            notif_form.notify_schedule_post_email.data or False
-        )
-        current_user.notify_schedule_post_text = (
-            notif_form.notify_schedule_post_text.data or False
-        )
-        current_user.notify_schedule_changes_email = (
-            notif_form.notify_schedule_changes_email.data or False
-        )
-        current_user.notify_schedule_changes_text = (
-            notif_form.notify_schedule_changes_text.data or False
-        )
-        current_user.notify_tradeboard_email = (
-            notif_form.notify_tradeboard_email.data or False
-        )
-        current_user.notify_tradeboard_text = (
-            notif_form.notify_tradeboard_text.data or False
-        )
+        _apply_notification_preferences(current_user, notif_form)
         db.session.commit()
         return redirect(
             url_for("auth.profile", notifications_status="updated")
@@ -911,16 +904,7 @@ def user_profile(user_id):
 
     form = SetPasswordForm()
     tz_form = TimezoneForm(timezone=user.timezone or "")
-    notif_form = NotificationForm(
-        phone_number=user.phone_number or "",
-        notify_transfers=user.notify_transfers,
-        notify_schedule_post_email=user.notify_schedule_post_email,
-        notify_schedule_post_text=user.notify_schedule_post_text,
-        notify_schedule_changes_email=user.notify_schedule_changes_email,
-        notify_schedule_changes_text=user.notify_schedule_changes_text,
-        notify_tradeboard_email=user.notify_tradeboard_email,
-        notify_tradeboard_text=user.notify_tradeboard_text,
-    )
+    notif_form = _build_notification_form(user)
     status_messages = {}
     if request.args.get("password_status") == "updated":
         status_messages["password"] = ("success", "Password updated.")
@@ -934,16 +918,7 @@ def user_profile(user_id):
 
     password_submitted = "new_password" in request.form
     timezone_submitted = "timezone" in request.form
-    notifications_submitted = (
-        "phone_number" in request.form
-        or "notify_transfers" in request.form
-        or "notify_schedule_post_email" in request.form
-        or "notify_schedule_post_text" in request.form
-        or "notify_schedule_changes_email" in request.form
-        or "notify_schedule_changes_text" in request.form
-        or "notify_tradeboard_email" in request.form
-        or "notify_tradeboard_text" in request.form
-    )
+    notifications_submitted = _notifications_submitted(request.form)
 
     if password_submitted and form.validate_on_submit():
         user.password = generate_password_hash(form.new_password.data)
@@ -962,26 +937,7 @@ def user_profile(user_id):
             )
         )
     elif notifications_submitted and notif_form.validate_on_submit():
-        user.phone_number = notif_form.phone_number.data or None
-        user.notify_transfers = notif_form.notify_transfers.data or False
-        user.notify_schedule_post_email = (
-            notif_form.notify_schedule_post_email.data or False
-        )
-        user.notify_schedule_post_text = (
-            notif_form.notify_schedule_post_text.data or False
-        )
-        user.notify_schedule_changes_email = (
-            notif_form.notify_schedule_changes_email.data or False
-        )
-        user.notify_schedule_changes_text = (
-            notif_form.notify_schedule_changes_text.data or False
-        )
-        user.notify_tradeboard_email = (
-            notif_form.notify_tradeboard_email.data or False
-        )
-        user.notify_tradeboard_text = (
-            notif_form.notify_tradeboard_text.data or False
-        )
+        _apply_notification_preferences(user, notif_form)
         db.session.commit()
         return redirect(
             url_for(
@@ -1030,6 +986,13 @@ def activate_user(user_id):
     user.active = True
     db.session.commit()
     log_activity(f"Activated user {user_id}")
+    notify_users_for_category(
+        category="users",
+        subject=f"User activated: {user.email}",
+        body=f"{current_user.email} activated user {user.email}.",
+        sms_body=f"User activated: {user.email}",
+        exclude_user_ids={current_user.id},
+    )
     flash("User account activated.", "success")
     return redirect(
         url_for("admin.users")
@@ -1080,11 +1043,19 @@ def users():
                 )
                 _reset_user_invitation(new_user, group_ids=invite_form.group_ids.data)
                 db.session.add(new_user)
-                _deliver_user_invitation(
+                invitation_sent = _deliver_user_invitation(
                     new_user,
                     success_message="Invitation sent.",
                     activity_message=f"Invited user {email}",
                 )
+                if invitation_sent:
+                    notify_users_for_category(
+                        category="users",
+                        subject=f"User invited: {email}",
+                        body=f"{current_user.email} invited {email} to InvoiceManager.",
+                        sms_body=f"User invited: {email}",
+                        exclude_user_ids={current_user.id},
+                    )
             return redirect(url_for("admin.users"))
         return render_template(
             "admin/view_users.html",
@@ -1103,6 +1074,7 @@ def users():
 
         user = db.session.get(User, user_id)
         if user:
+            notification_payload = None
             if action == "toggle_active":
                 if _is_pending_invited_user(user):
                     flash(
@@ -1114,6 +1086,19 @@ def users():
                 if not user.active:
                     user.last_active_at = None
                 log_activity(f"Toggled active for user {user_id}")
+                notification_payload = {
+                    "subject": (
+                        f"User {'activated' if user.active else 'deactivated'}: {user.email}"
+                    ),
+                    "body": (
+                        f"{current_user.email} "
+                        f"{'activated' if user.active else 'deactivated'} "
+                        f"user {user.email}."
+                    ),
+                    "sms_body": (
+                        f"User {'activated' if user.active else 'deactivated'}: {user.email}"
+                    ),
+                }
             elif action == "resend_invite":
                 if not _is_pending_invited_user(user):
                     flash("Only pending invites can be re-sent.", "warning")
@@ -1136,10 +1121,24 @@ def users():
                 log_activity(
                     f"Toggled super admin for user {user_id} to {user.is_admin}"
                 )
+                notification_payload = {
+                    "subject": f"User access updated: {user.email}",
+                    "body": (
+                        f"{current_user.email} updated super-admin access for "
+                        f"user {user.email}."
+                    ),
+                    "sms_body": f"User access updated: {user.email}",
+                }
             else:
                 flash("Unsupported action.", "danger")
                 return redirect(url_for("admin.users"))
             db.session.commit()
+            if notification_payload:
+                notify_users_for_category(
+                    category="users",
+                    exclude_user_ids={current_user.id},
+                    **notification_payload,
+                )
             flash("User updated successfully", "success")
         else:
             flash("User not found", "danger")
@@ -1212,11 +1211,25 @@ def delete_user(user_id):
         db.session.delete(user_to_delete)
         db.session.commit()
         log_activity(f"Deleted pending invite {invite_email}")
+        notify_users_for_category(
+            category="users",
+            subject=f"Pending invite deleted: {invite_email}",
+            body=f"{current_user.email} deleted the pending invite for {invite_email}.",
+            sms_body=f"Pending invite deleted: {invite_email}",
+            exclude_user_ids={current_user.id},
+        )
         flash("Pending invite deleted.", "success")
         return redirect(url_for("admin.users"))
     user_to_delete.active = False
     db.session.commit()
     log_activity(f"Archived user {user_id}")
+    notify_users_for_category(
+        category="users",
+        subject=f"User archived: {user_to_delete.email}",
+        body=f"{current_user.email} archived user {user_to_delete.email}.",
+        sms_body=f"User archived: {user_to_delete.email}",
+        exclude_user_ids={current_user.id},
+    )
     flash("User archived successfully.", "success")
     return redirect(url_for("admin.users"))
 
@@ -1637,7 +1650,7 @@ def restore_backup_route():
                 actor_user_id,
             )
             flash(
-                "⚠️ Incompatible backup: this backup is missing critical database "
+                "Warning: Incompatible backup: this backup is missing critical database "
                 "structures and cannot be restored safely.",
                 "danger",
             )
@@ -1842,7 +1855,7 @@ def restore_backup_file(filename):
             actor_user_id,
         )
         flash(
-            "⚠️ Incompatible backup: this backup is missing critical database "
+            "Warning: Incompatible backup: this backup is missing critical database "
             "structures and cannot be restored safely.",
             "danger",
         )
@@ -1972,8 +1985,15 @@ def download_backup(filename):
     from flask import current_app, send_from_directory
 
     backups_dir = current_app.config["BACKUP_FOLDER"]
-    log_activity(f"Downloaded backup {filename}")
-    return send_from_directory(backups_dir, filename, as_attachment=True)
+    try:
+        filepath = safe_join(backups_dir, filename)
+    except NotFound:
+        abort(404)
+    if filepath is None or not os.path.isfile(filepath):
+        abort(404)
+    safe_filename = os.path.basename(filepath)
+    log_activity(f"Downloaded backup {safe_filename}")
+    return send_from_directory(backups_dir, safe_filename, as_attachment=True)
 
 
 @admin.route("/controlpanel/activity", methods=["GET"])

@@ -32,14 +32,30 @@ from app.models import (
     TransferItem,
     User,
 )
+from app.services.notification_service import notify_users_for_category
 from app.utils.activity import log_activity
 from app.utils.numeric import coerce_float
 from app.utils.pagination import build_pagination_args, get_per_page
-from app.utils.sms import send_sms
 from app.utils.text import build_text_match_predicate, normalize_request_text_filter
 from app.utils.text import normalize_request_text_filter
 
 transfer = Blueprint("transfer", __name__)
+
+
+def _notify_transfer_activity(transfer_obj: Transfer, *, action: str) -> None:
+    route_summary = (
+        f"{transfer_obj.from_location_name} -> {transfer_obj.to_location_name}"
+    )
+    notify_users_for_category(
+        category="transfers",
+        subject=f"Transfer {action}: #{transfer_obj.id}",
+        body=(
+            f"Transfer #{transfer_obj.id} ({route_summary}) "
+            f"was {action} by {current_user.email}."
+        ),
+        sms_body=f"Transfer {action}: #{transfer_obj.id} {route_summary}",
+        exclude_user_ids={current_user.id},
+    )
 
 
 def _extract_transfer_items(prefix: str):
@@ -451,18 +467,8 @@ def add_transfer():
 
             db.session.commit()
             log_activity(f"Added transfer {transfer.id}")
-
             socketio.emit("new_transfer", {"message": "New transfer added"})
-
-            try:
-                notify_users = User.query.filter_by(notify_transfers=True).all()
-                for user in notify_users:
-                    if user.phone_number:
-                        send_sms(
-                            user.phone_number, f"Transfer {transfer.id} created"
-                        )
-            except Exception:
-                pass
+            _notify_transfer_activity(transfer, action="created")
 
             flash("Transfer added successfully!", "success")
             return redirect(url_for("transfer.view_transfers"))
@@ -513,16 +519,7 @@ def ajax_add_transfer():
             db.session.commit()
             log_activity(f"Added transfer {transfer.id}")
             socketio.emit("new_transfer", {"message": "New transfer added"})
-            try:
-                notify_users = User.query.filter_by(notify_transfers=True).all()
-                for user in notify_users:
-                    if user.phone_number:
-                        send_sms(
-                            user.phone_number,
-                            f"Transfer {transfer.id} created",
-                        )
-            except Exception:
-                pass
+            _notify_transfer_activity(transfer, action="created")
             row_html = render_template(
                 "transfers/_transfer_row.html",
                 transfer=transfer,
@@ -556,6 +553,10 @@ def edit_transfer(transfer_id):
             db.session.commit()
             log_activity(f"Edited transfer {transfer.id}")
             if transfer_was_reopened:
+                _notify_transfer_activity(
+                    transfer,
+                    action="updated and reopened",
+                )
                 flash(
                     "Transfer updated and reopened for reconciliation.",
                     "info",
@@ -735,6 +736,7 @@ def complete_transfer(transfer_id):
     )
     db.session.commit()
     log_activity(f"Completed transfer {transfer.id}")
+    _notify_transfer_activity(transfer, action="completed")
     flash("Transfer marked as complete!", "success")
     return redirect(url_for("transfer.view_transfers"))
 
@@ -802,11 +804,14 @@ def complete_transfer_item(transfer_item_id):
         transfer_items=transfer_items,
         quantities=quantities,
     )
+    was_completed = transfer.completed
     _sync_transfer_completed(transfer)
     db.session.commit()
     log_activity(
         f"Completed transfer item {transfer_item.id} on transfer {transfer.id}"
     )
+    if not was_completed and transfer.completed:
+        _notify_transfer_activity(transfer, action="completed")
     flash("Transfer item marked as complete!", "success")
     return redirect(url_for("transfer.view_transfer", transfer_id=transfer.id))
 
@@ -863,6 +868,7 @@ def uncomplete_transfer(transfer_id):
     )
     db.session.commit()
     log_activity(f"Uncompleted transfer {transfer.id}")
+    _notify_transfer_activity(transfer, action="reopened")
     flash("Transfer marked as not completed.", "success")
     return redirect(url_for("transfer.view_transfers"))
 
@@ -929,11 +935,14 @@ def uncomplete_transfer_item(transfer_item_id):
         transfer_items=transfer_items,
         quantities=quantities,
     )
+    was_completed = transfer.completed
     _sync_transfer_completed(transfer)
     db.session.commit()
     log_activity(
         f"Uncompleted transfer item {transfer_item.id} on transfer {transfer.id}"
     )
+    if was_completed and not transfer.completed:
+        _notify_transfer_activity(transfer, action="reopened")
     flash("Transfer item marked as not completed.", "success")
     return redirect(url_for("transfer.view_transfer", transfer_id=transfer.id))
 

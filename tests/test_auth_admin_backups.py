@@ -305,6 +305,21 @@ def test_backup_page_lists_only_database_files(client, app):
     assert b"restore_preflight_diag_deadbeef.json" not in response.data
 
 
+def test_download_backup_rejects_path_traversal(client, app):
+    with client:
+        login(
+            client,
+            os.getenv("ADMIN_EMAIL", "admin@example.com"),
+            os.getenv("ADMIN_PASS", "adminpass"),
+        )
+        response = client.get(
+            "/controlpanel/backups/download/../outside.db",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 404
+
+
 def test_restore_backup_file_permissive_mode_shows_partial_restore_message(
     client, app, monkeypatch
 ):
