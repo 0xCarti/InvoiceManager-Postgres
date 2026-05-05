@@ -7,6 +7,8 @@
         const browseButton = document.getElementById('upload-po-browse-btn');
         const errorAlert = document.getElementById('upload-po-error');
         const vendorSelect = document.getElementById('upload-po-vendor');
+        const importProfileSelect = document.getElementById('upload-po-import-profile');
+        const importProfileHelp = document.getElementById('upload-po-import-profile-help');
         let pendingDroppedFile = null;
 
         if (!uploadForm || !dropzone || !fileInput) {
@@ -40,6 +42,60 @@
                 return;
             }
             fileInput.click();
+        };
+
+        const populateImportProfiles = () => {
+            if (!importProfileSelect) {
+                return;
+            }
+
+            const selectedVendorOption =
+                vendorSelect && vendorSelect.selectedOptions && vendorSelect.selectedOptions.length
+                    ? vendorSelect.selectedOptions[0]
+                    : null;
+            const rawProfiles = selectedVendorOption?.dataset?.importProfiles || '[]';
+            let profiles = [];
+
+            try {
+                profiles = JSON.parse(rawProfiles);
+            } catch (error) {
+                profiles = [];
+            }
+
+            importProfileSelect.innerHTML = '';
+
+            if (!profiles.length) {
+                importProfileSelect.disabled = true;
+                const placeholder = document.createElement('option');
+                placeholder.value = '';
+                placeholder.textContent = vendorSelect && vendorSelect.value
+                    ? 'No import formats available'
+                    : 'Select a vendor first';
+                importProfileSelect.appendChild(placeholder);
+                if (importProfileHelp) {
+                    importProfileHelp.textContent = vendorSelect && vendorSelect.value
+                        ? 'This vendor does not currently support purchase-order imports.'
+                        : 'Sysco vendors support both Source and Shop exports. Other vendors load the matching format automatically.';
+                }
+                return;
+            }
+
+            profiles.forEach((profile, index) => {
+                const option = document.createElement('option');
+                option.value = profile.value;
+                option.textContent = profile.label;
+                if (index === 0) {
+                    option.selected = true;
+                }
+                importProfileSelect.appendChild(option);
+            });
+
+            importProfileSelect.disabled = false;
+            if (importProfileHelp) {
+                importProfileHelp.textContent = profiles.length > 1
+                    ? 'Select the export type that matches the uploaded file.'
+                    : `This vendor uses the ${profiles[0].label} import format.`;
+            }
         };
 
         const setFile = (file) => {
@@ -120,6 +176,10 @@
             });
         }
 
+        if (vendorSelect) {
+            vendorSelect.addEventListener('change', populateImportProfiles);
+        }
+
         fileInput.addEventListener('change', () => {
             pendingDroppedFile = null;
             const [file] = Array.from(fileInput.files || []);
@@ -135,6 +195,20 @@
                     errorAlert.classList.remove('d-none');
                 }
                 vendorSelect.focus();
+                return;
+            }
+
+            if (
+                importProfileSelect &&
+                !importProfileSelect.disabled &&
+                !importProfileSelect.value
+            ) {
+                event.preventDefault();
+                if (errorAlert) {
+                    errorAlert.textContent = 'Select an import format before uploading.';
+                    errorAlert.classList.remove('d-none');
+                }
+                importProfileSelect.focus();
                 return;
             }
 
@@ -178,5 +252,7 @@
                     });
             }
         });
+
+        populateImportProfiles();
     });
 })();

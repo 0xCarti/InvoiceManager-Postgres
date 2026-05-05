@@ -78,6 +78,8 @@ def test_purchase_orders_list_template_includes_upload_script_and_accessible_fil
         ROOT / "app/templates/purchase_orders/view_purchase_orders.html"
     ).read_text(encoding="utf-8")
     assert "purchase_order_upload.js" in content
+    assert 'id="upload-po-import-profile"' in content
+    assert 'data-import-profiles=' in content
     assert 'id="upload-po-file-input"' in content
     assert "visually-hidden" in content
     assert 'accept=".csv,.xlsx,.xls"' in content
@@ -98,6 +100,8 @@ def test_purchase_order_upload_script_supports_drop_fallback():
         ROOT / "app/static/js/purchase_order_upload.js"
     ).read_text(encoding="utf-8")
     assert "pendingDroppedFile" in content
+    assert "populateImportProfiles" in content
+    assert "JSON.parse(rawProfiles)" in content
     assert "fileInput.showPicker" in content
     assert "new DataTransfer()" in content
     assert "window.location.assign(response.url);" in content

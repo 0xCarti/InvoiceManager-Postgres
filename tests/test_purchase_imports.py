@@ -11,6 +11,7 @@ from app.models import Vendor
 from app.services.purchase_imports import (
     CSVImportError,
     ParsedPurchaseLine,
+    PURCHASE_IMPORT_PROFILE_SYSCO_SHOP,
     parse_purchase_order_csv,
 )
 
@@ -24,6 +25,17 @@ def _make_pratts_file(csv_text: str) -> FileStorage:
     return FileStorage(stream=io.BytesIO(csv_text.encode()), filename="pratts.csv")
 
 
+def _make_mbll_csv_file(csv_text: str, *, filename: str = "mbll.csv") -> FileStorage:
+    return FileStorage(
+        stream=io.BytesIO(csv_text.encode("utf-8")),
+        filename=filename,
+    )
+
+
+def _make_sysco_shop_file(csv_text: str) -> FileStorage:
+    return FileStorage(stream=io.BytesIO(csv_text.encode()), filename="sysco-shop.csv")
+
+
 def _make_pratts_vendor() -> Vendor:
     return Vendor(first_name="Pratt", last_name="Supplies")
 
@@ -34,6 +46,10 @@ def _make_sysco_vendor() -> Vendor:
 
 def _make_manitoba_vendor() -> Vendor:
     return Vendor(first_name="Manitoba", last_name="Liquor & Lotteries")
+
+
+def _make_mbll_vendor() -> Vendor:
+    return Vendor(first_name="MBLL", last_name="")
 
 
 def _make_manitoba_file(*, malformed_dimension: bool = False) -> FileStorage:
@@ -178,6 +194,40 @@ def test_parse_sysco_csv_supports_host_order_header():
     assert parsed.expected_total == pytest.approx(97.92)
 
 
+def test_parse_sysco_shop_csv_with_explicit_import_profile():
+    csv_text = """H,O0601,259,125702,"May 05 2026 12:22 PM ",05/06/2026,Y,,,7846048,7846048,275.56,8,SUBMITTED
+F,SUPC,"Case Qty","Split Qty","Cust #",Pack/Size,Brand,Description,"Mfr #","Per Lb","Case $","Each $"
+P,2821106,4,0,,8/1.77LT,OCNSPRY,"Juice Cranberry Cocktail",,N,33.32,
+P,2394161,0,2,,8/1.89LT,CLAMATO,"Juice Clamato Original",,N,,4.50
+"""
+
+    parsed = parse_purchase_order_csv(
+        _make_sysco_shop_file(csv_text),
+        _make_sysco_vendor(),
+        import_profile=PURCHASE_IMPORT_PROFILE_SYSCO_SHOP,
+    )
+
+    assert len(parsed.items) == 2
+    assert parsed.order_number == "7846048"
+    assert parsed.order_date == datetime.date(2026, 5, 5)
+    assert parsed.expected_date == datetime.date(2026, 5, 6)
+    assert parsed.expected_total == pytest.approx(275.56)
+
+    first: ParsedPurchaseLine = parsed.items[0]
+    assert first.vendor_sku == "2821106"
+    assert first.vendor_description == "OCNSPRY Juice Cranberry Cocktail"
+    assert first.pack_size == "8/1.77LT"
+    assert first.quantity == 4
+    assert first.unit_cost == pytest.approx(33.32)
+
+    second: ParsedPurchaseLine = parsed.items[1]
+    assert second.vendor_sku == "2394161"
+    assert second.vendor_description == "CLAMATO Juice Clamato Original"
+    assert second.pack_size == "8/1.89LT"
+    assert second.quantity == 2
+    assert second.unit_cost == pytest.approx(4.50)
+
+
 def test_parse_manitoba_liquor_xlsx_success_with_malformed_dimension():
     parsed = parse_purchase_order_csv(
         _make_manitoba_file(malformed_dimension=True),
@@ -245,6 +295,11 @@ def test_parse_manitoba_liquor_xlsx_supports_actual_export_headers():
             1,
         ]
     )
+    sheet.append([None, None, "Container Deposit", None, None, 48.00])
+    sheet.append([None, None, "Subtotal", None, None, 4959.10])
+    sheet.append([None, None, "Taxable Amount", None, None, 4911.10])
+    sheet.append([None, None, "@ Tax Rate 5.000 %", None, None, 245.56])
+    sheet.append([None, None, "Invoice Total", None, None, 5204.66])
 
     stream = io.BytesIO()
     workbook.save(stream)
@@ -258,7 +313,7 @@ def test_parse_manitoba_liquor_xlsx_supports_actual_export_headers():
     assert len(parsed.items) == 2
     assert parsed.order_number is None
     assert parsed.order_date is None
-    assert parsed.expected_total == pytest.approx(4911.10)
+    assert parsed.expected_total == pytest.approx(4959.10)
 
     first: ParsedPurchaseLine = parsed.items[0]
     assert first.vendor_sku == "15485"
@@ -267,6 +322,44 @@ def test_parse_manitoba_liquor_xlsx_supports_actual_export_headers():
     second: ParsedPurchaseLine = parsed.items[1]
     assert second.vendor_sku == "18669"
     assert second.pack_size == "8520 ml x 1"
+
+
+def test_parse_manitoba_liquor_csv_supports_actual_export_and_summary_rows():
+    csv_text = """Item Number,Order Quantity,Product Description,Vol/Case Size,Unit Price,Extended Price,Invoice No.,Order No.,Original Order No,Invoice Date
+15485,480,COORS ORIGINAL 473C,473 ml x 24,3.44,"1,651.20",7780065,2682595,,04/20/2026
+,,Container Deposit,,,48,,,,
+18669,70,COORS ORIGINAL 24/355C,8520 ml x 1,46.57,"3,259.90",7780065,2682595,,04/20/2026
+,,Container Deposit,,,168,,,,
+,,BDL -MINIMUM ORDER QTY.,.,0,,7780065,2682595,,04/20/2026
+,,Subtotal,,,"5,127.10",,,,
+,,Taxable Amount,,,"4,911.10",,,,
+,,     @ Tax Rate5.000 %,,,245.56,,,,
+,,INVOICE TOTAL,,,"5,372.66",,,,
+"""
+
+    parsed = parse_purchase_order_csv(
+        _make_mbll_csv_file(csv_text),
+        _make_mbll_vendor(),
+    )
+
+    assert len(parsed.items) == 2
+    assert parsed.order_number == "2682595"
+    assert parsed.order_date == datetime.date(2026, 4, 20)
+    assert parsed.expected_total == pytest.approx(5127.10)
+
+    first: ParsedPurchaseLine = parsed.items[0]
+    assert first.vendor_sku == "15485"
+    assert first.vendor_description == "COORS ORIGINAL 473C"
+    assert first.pack_size == "473 ml x 24"
+    assert first.quantity == 480
+    assert first.unit_cost == pytest.approx(3.44)
+
+    second: ParsedPurchaseLine = parsed.items[1]
+    assert second.vendor_sku == "18669"
+    assert second.vendor_description == "COORS ORIGINAL 24/355C"
+    assert second.pack_size == "8520 ml x 1"
+    assert second.quantity == 70
+    assert second.unit_cost == pytest.approx(46.57)
 
 
 def test_parse_manitoba_liquor_xlsx_missing_headers():

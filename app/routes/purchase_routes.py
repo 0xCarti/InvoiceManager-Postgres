@@ -65,9 +65,11 @@ from app.services.purchase_imports import (
     CSVImportError,
     find_preferred_vendor_alias,
     parse_purchase_order_csv,
+    purchase_import_profile_label,
     preferred_vendor_aliases_for_items,
     resolve_vendor_purchase_lines,
     serialize_parsed_line,
+    supported_purchase_import_profiles,
     update_or_create_vendor_alias,
 )
 from app.services.notification_service import notify_users_for_event
@@ -815,6 +817,16 @@ def view_purchase_orders():
 
     vendors = Vendor.query.filter_by(archived=False).all()
     upload_vendors = _get_enabled_import_vendors()
+    upload_vendor_import_profiles = {
+        vendor.id: [
+            {
+                "value": profile,
+                "label": purchase_import_profile_label(profile),
+            }
+            for profile in supported_purchase_import_profiles(vendor)
+        ]
+        for vendor in upload_vendors
+    }
     filter_items = (
         Item.query.filter_by(archived=False)
         .order_by(Item.name)
@@ -833,6 +845,7 @@ def view_purchase_orders():
         mark_ordered_form=mark_ordered_form,
         vendors=vendors,
         upload_vendors=upload_vendors,
+        upload_vendor_import_profiles=upload_vendor_import_profiles,
         vendor_id=vendor_id,
         start_date=start_date_str,
         end_date=end_date_str,
@@ -937,6 +950,7 @@ def merge_purchase_orders_route():
 def upload_purchase_order():
     file = request.files.get("purchase_order_file")
     vendor_id = request.form.get("vendor_id", type=int)
+    import_profile = (request.form.get("import_profile") or "").strip() or None
     vendor = db.session.get(Vendor, vendor_id) if vendor_id else None
     enabled_vendor_ids = {vendor.id for vendor in _get_enabled_import_vendors()}
 
@@ -944,8 +958,20 @@ def upload_purchase_order():
         flash("Select an enabled vendor before uploading a purchase order file.", "danger")
         return redirect(url_for("purchase.view_purchase_orders"))
 
+    supported_profiles = supported_purchase_import_profiles(vendor)
+    if not supported_profiles:
+        flash("Purchase-order imports are not supported for this vendor.", "danger")
+        return redirect(url_for("purchase.view_purchase_orders"))
+    if import_profile and import_profile not in supported_profiles:
+        flash("Select a valid import format for the chosen vendor.", "danger")
+        return redirect(url_for("purchase.view_purchase_orders"))
+
     try:
-        parsed_order = parse_purchase_order_csv(file, vendor)
+        parsed_order = parse_purchase_order_csv(
+            file,
+            vendor,
+            import_profile=import_profile,
+        )
         resolved_lines = resolve_vendor_purchase_lines(vendor, parsed_order.items)
     except CSVImportError as exc:
         flash(str(exc), "danger")

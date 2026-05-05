@@ -69,6 +69,30 @@ def test_purchase_order_upload_modal_lists_manitoba_vendor_when_enabled(client, 
     assert "Manitoba Liquor &amp; Lotteries" in response.get_data(as_text=True)
 
 
+def test_purchase_order_upload_modal_lists_sysco_source_and_shop_formats(client, app):
+    with app.app_context():
+        user = User(
+            email="sysco-upload@example.com",
+            password=generate_password_hash("pass"),
+            is_admin=True,
+            active=True,
+        )
+        vendor = Vendor(first_name="Sysco", last_name="Source")
+        db.session.add_all([user, vendor])
+        Setting.set_enabled_purchase_import_vendors(["SYSCO"])
+        db.session.commit()
+
+    with client:
+        login(client, "sysco-upload@example.com", "pass")
+        response = client.get("/purchase_orders")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Sysco Source" in html
+    assert "Sysco Shop" in html
+    assert 'id="upload-po-import-profile"' in html
+
+
 def test_legacy_central_supply_setting_is_not_exposed_for_upload(client, app):
     with app.app_context():
         user = User(

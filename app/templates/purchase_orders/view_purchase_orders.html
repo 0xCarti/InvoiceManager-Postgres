@@ -436,14 +436,21 @@
                         <select name="vendor_id" id="upload-po-vendor" class="form-select" required>
                             <option value="">Select a vendor</option>
                             {% for vendor in upload_vendors %}
-                                <option value="{{ vendor.id }}">{{ vendor.first_name }} {{ vendor.last_name }}</option>
+                                <option value="{{ vendor.id }}" data-import-profiles='{{ upload_vendor_import_profiles.get(vendor.id, [])|tojson|forceescape }}'>{{ vendor.first_name }} {{ vendor.last_name }}</option>
                             {% endfor %}
                         </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="upload-po-import-profile" class="form-label">Import Format</label>
+                        <select name="import_profile" id="upload-po-import-profile" class="form-select" required disabled>
+                            <option value="">Select a vendor first</option>
+                        </select>
+                        <div class="form-text" id="upload-po-import-profile-help">Sysco vendors support both Source and Shop exports. Other vendors load the matching format automatically.</div>
                     </div>
                     <label for="upload-po-file-input" class="form-label">Select a file</label>
                     <div id="upload-po-dropzone" class="border border-2 border-secondary rounded p-4 text-center bg-light" role="button" tabindex="0" aria-describedby="upload-po-help">
                         <p class="mb-2">Drag and drop a purchase order file here, or browse to select one.</p>
-                        <p class="text-muted mb-3" id="upload-po-help">Supported formats depend on the upload endpoint.</p>
+                        <p class="text-muted mb-3" id="upload-po-help">Sysco Source, Sysco Shop, and Pratts imports use CSV. Manitoba Liquor &amp; Lotteries imports support CSV and Excel.</p>
                         <button class="btn btn-outline-secondary" type="button" id="upload-po-browse-btn">Choose File</button>
                         <div class="mt-2">
                             <span class="text-muted" id="upload-po-file-name">No file chosen</span>
