@@ -912,6 +912,58 @@ def test_dashboard_settings_can_reorder_sections_and_metabase_cards(client, app)
     assert follow_up_body.index("Bulletins") < follow_up_body.index("Event Schedule")
 
 
+def test_dashboard_settings_modal_uses_drag_and_drop_reordering_ui(client, app):
+    app.config["METABASE_SITE_URL"] = "http://metabase.localhost:3000"
+
+    with app.app_context():
+        user = _create_dashboard_user("dashboard-drag-drop@example.com")
+        grant_permissions(
+            user,
+            "dashboard.view",
+            "dashboard.view_cards",
+            "dashboard.manage_cards",
+            "transfers.view",
+            "events.view",
+            group_name="Dashboard Drag Drop",
+            description="Can manage dashboard ordering with drag and drop.",
+        )
+        save_dashboard_metabase_cards(
+            user,
+            [
+                {
+                    "id": "drag-drop-card",
+                    "title": "Drag Drop Card",
+                    "embed_url": "http://metabase.localhost:3000/public/dashboard/drag-drop",
+                    "height": 420,
+                    "visible": True,
+                }
+            ],
+        )
+
+    login(client, "dashboard-drag-drop@example.com", "pass")
+
+    response = client.get("/", follow_redirects=True)
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert 'data-dashboard-sort-list="sections"' in body
+    assert 'data-dashboard-sort-list="metabase-cards"' in body
+    assert "dashboard-drag-handle" in body
+    assert "data-dashboard-order-input" in body
+    assert "data-dashboard-order-display" in body
+    assert 'name="display_order_section_bulletins"' in body
+    assert 'name="display_order_card_drag-drop-card"' in body
+    assert re.search(
+        r'name="display_order_section_bulletins"\s+type="hidden"',
+        body,
+    )
+    assert re.search(
+        r'name="display_order_card_drag-drop-card"\s+type="hidden"',
+        body,
+    )
+    assert "function initDashboardSortList(list)" in body
+
+
 @pytest.mark.parametrize(
     ("activity_interval", "expected_bucket_start"),
     [

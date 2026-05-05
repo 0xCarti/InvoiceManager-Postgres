@@ -61,13 +61,59 @@
 .dashboard-metabase-settings-list .list-group-item {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
+    align-items: center;
     gap: 0.75rem;
+}
+
+.dashboard-settings-row {
+    user-select: none;
+}
+
+.dashboard-settings-row.dragging {
+    opacity: 0.7;
+    border-color: rgba(13, 110, 253, 0.4);
+    background: #f8f9fa;
+}
+
+.dashboard-settings-copy {
+    flex: 1 1 220px;
+    min-width: 0;
+    cursor: pointer;
+}
+
+.dashboard-drag-handle {
+    flex-shrink: 0;
+    cursor: grab;
+}
+
+.dashboard-drag-handle:active {
+    cursor: grabbing;
 }
 
 .dashboard-order-field {
     width: 5.5rem;
     flex-shrink: 0;
+    text-align: right;
+}
+
+.dashboard-order-pill {
+    min-width: 2.75rem;
+    font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 767.98px) {
+    .dashboard-settings-row {
+        flex-wrap: wrap;
+    }
+
+    .dashboard-settings-copy {
+        flex: 1 1 180px;
+    }
+
+    .dashboard-order-field {
+        width: auto;
+        margin-left: auto;
+    }
 }
 </style>
 <div class="container mt-4 dashboard-mobile-page" data-dashboard-container data-user-id="{{ current_user.id if current_user.is_authenticated else 'guest' }}">
@@ -860,10 +906,18 @@
                         <input type="hidden" name="activity_interval" value="{{ selected_activity_interval }}">
                         <div class="mb-4">
                             <h6 class="mb-2">Dashboard sections</h6>
-                            <p class="text-muted small mb-3">Choose which built-in dashboard cards appear for you and set the order they use.</p>
-                            <div class="list-group dashboard-metabase-settings-list mb-3">
+                            <p class="text-muted small mb-3">Choose which built-in dashboard cards appear for you and drag rows into the order you want.</p>
+                            <div class="list-group dashboard-metabase-settings-list mb-3" data-dashboard-sort-list="sections">
                                 {% for section in context.layout.sections %}
-                                <label class="list-group-item list-group-item-action" for="visible-section-{{ section.id }}">
+                                <div class="list-group-item list-group-item-action dashboard-settings-row" data-dashboard-sort-item>
+                                    <button
+                                        type="button"
+                                        class="btn btn-outline-secondary btn-sm dashboard-drag-handle"
+                                        aria-label="Drag to reorder {{ section.label }}"
+                                        title="Drag to reorder"
+                                    >
+                                        Move
+                                    </button>
                                     <div class="form-check mb-0">
                                         <input
                                             id="visible-section-{{ section.id }}"
@@ -874,22 +928,21 @@
                                             {% if section.visible %}checked{% endif %}
                                         >
                                     </div>
-                                    <div class="flex-grow-1">
+                                    <label class="flex-grow-1 mb-0 dashboard-settings-copy" for="visible-section-{{ section.id }}">
                                         <div class="fw-semibold">{{ section.label }}</div>
                                         <div class="small text-muted">{{ section.description }}</div>
-                                    </div>
+                                    </label>
                                     <div class="dashboard-order-field">
-                                        <label class="form-label form-label-sm small text-muted mb-1" for="display-order-section-{{ section.id }}">Order</label>
                                         <input
-                                            id="display-order-section-{{ section.id }}"
                                             name="display_order_section_{{ section.id }}"
-                                            type="number"
-                                            min="1"
-                                            class="form-control form-control-sm"
+                                            type="hidden"
                                             value="{{ section.display_order }}"
+                                            data-dashboard-order-input
                                         >
+                                        <div class="small text-muted mb-1">Order</div>
+                                        <span class="badge bg-light text-dark border dashboard-order-pill" data-dashboard-order-display>{{ section.display_order }}</span>
                                     </div>
-                                </label>
+                                </div>
                                 {% endfor %}
                             </div>
                         </div>
@@ -897,10 +950,18 @@
                         {% if context.metabase.saved_cards %}
                         <div class="border-top pt-4 mb-4">
                             <h6 class="mb-2">Metabase cards</h6>
-                            <p class="text-muted small mb-3">Choose which saved Metabase cards appear on your dashboard and set the order they use.</p>
-                            <div class="list-group dashboard-metabase-settings-list mb-3">
+                            <p class="text-muted small mb-3">Choose which saved Metabase cards appear on your dashboard and drag rows into the order you want.</p>
+                            <div class="list-group dashboard-metabase-settings-list mb-3" data-dashboard-sort-list="metabase-cards">
                                 {% for card in context.metabase.saved_cards %}
-                                <label class="list-group-item list-group-item-action" for="visible-card-{{ card.id }}">
+                                <div class="list-group-item list-group-item-action dashboard-settings-row" data-dashboard-sort-item>
+                                    <button
+                                        type="button"
+                                        class="btn btn-outline-secondary btn-sm dashboard-drag-handle"
+                                        aria-label="Drag to reorder {{ card.title }}"
+                                        title="Drag to reorder"
+                                    >
+                                        Move
+                                    </button>
                                     <div class="form-check mb-0">
                                         <input
                                             id="visible-card-{{ card.id }}"
@@ -911,23 +972,22 @@
                                             {% if card.visible %}checked{% endif %}
                                         >
                                     </div>
-                                    <div class="flex-grow-1">
+                                    <label class="flex-grow-1 mb-0 dashboard-settings-copy" for="visible-card-{{ card.id }}">
                                         <div class="fw-semibold">{{ card.title }}</div>
                                         <div class="small text-muted text-break">{{ card.embed_url }}</div>
-                                    </div>
+                                    </label>
                                     <div class="dashboard-order-field">
-                                        <label class="form-label form-label-sm small text-muted mb-1" for="display-order-card-{{ card.id }}">Order</label>
                                         <input
-                                            id="display-order-card-{{ card.id }}"
                                             name="display_order_card_{{ card.id }}"
-                                            type="number"
-                                            min="1"
-                                            class="form-control form-control-sm mb-2"
+                                            type="hidden"
                                             value="{{ card.display_order }}"
+                                            data-dashboard-order-input
                                         >
+                                        <div class="small text-muted mb-1">Order</div>
+                                        <span class="badge bg-light text-dark border dashboard-order-pill mb-2" data-dashboard-order-display>{{ card.display_order }}</span>
                                         <span class="badge bg-light text-dark border w-100">{{ card.height }}px</span>
                                     </div>
-                                </label>
+                                </div>
                                 {% endfor %}
                             </div>
                         </div>
@@ -1101,6 +1161,161 @@
             collapsibleSections.forEach((section) => {
                 section.addEventListener('shown.bs.collapse', () => persistCollapseState(section.id, true));
                 section.addEventListener('hidden.bs.collapse', () => persistCollapseState(section.id, false));
+            });
+
+            function initDashboardSortList(list) {
+                if (!list) {
+                    return;
+                }
+
+                const supportsPointerEvents = 'PointerEvent' in window;
+                let preparedDragRow = null;
+                let activeDragRow = null;
+                let skipNextPointerCancel = false;
+                let pointerCancelFallbackTimer = null;
+
+                const updateSortOrder = () => {
+                    const rows = Array.from(list.querySelectorAll('[data-dashboard-sort-item]'));
+                    rows.forEach((row, index) => {
+                        const displayOrder = index + 1;
+                        const input = row.querySelector('[data-dashboard-order-input]');
+                        if (input) {
+                            input.value = displayOrder;
+                        }
+                        const badge = row.querySelector('[data-dashboard-order-display]');
+                        if (badge) {
+                            badge.textContent = String(displayOrder);
+                        }
+                    });
+                };
+
+                const clearPreparedDragRow = () => {
+                    if (!preparedDragRow) {
+                        return;
+                    }
+                    preparedDragRow.removeAttribute('draggable');
+                    delete preparedDragRow.dataset.dragPrepared;
+                    preparedDragRow = null;
+                };
+
+                const prepareRowForDrag = (row) => {
+                    if (!row || preparedDragRow === row) {
+                        return;
+                    }
+                    clearPreparedDragRow();
+                    preparedDragRow = row;
+                    row.dataset.dragPrepared = 'true';
+                    row.setAttribute('draggable', 'true');
+                };
+
+                const handleDragPrepare = (event) => {
+                    const handle = event.target.closest('.dashboard-drag-handle');
+                    if (!handle) {
+                        return;
+                    }
+                    const row = handle.closest('[data-dashboard-sort-item]');
+                    if (!row) {
+                        return;
+                    }
+                    prepareRowForDrag(row);
+
+                    if (supportsPointerEvents && event.type === 'pointerdown') {
+                        skipNextPointerCancel = true;
+                        if (pointerCancelFallbackTimer) {
+                            clearTimeout(pointerCancelFallbackTimer);
+                        }
+                        pointerCancelFallbackTimer = window.setTimeout(() => {
+                            skipNextPointerCancel = false;
+                            pointerCancelFallbackTimer = null;
+                        }, 0);
+                    }
+                };
+
+                const handlePointerLikeCleanup = () => {
+                    if (skipNextPointerCancel) {
+                        skipNextPointerCancel = false;
+                        return;
+                    }
+                    if (activeDragRow) {
+                        return;
+                    }
+                    clearPreparedDragRow();
+                };
+
+                if (supportsPointerEvents) {
+                    list.addEventListener('pointerdown', handleDragPrepare);
+                    list.addEventListener('pointerup', handlePointerLikeCleanup);
+                    list.addEventListener('pointercancel', handlePointerLikeCleanup);
+                    document.addEventListener('pointerup', handlePointerLikeCleanup);
+                } else {
+                    list.addEventListener('mousedown', handleDragPrepare);
+                    list.addEventListener('mouseup', handlePointerLikeCleanup);
+                    document.addEventListener('mouseup', handlePointerLikeCleanup);
+                }
+
+                list.addEventListener('dragstart', (event) => {
+                    const row = event.target.closest('[data-dashboard-sort-item]');
+                    if (!row || row.dataset.dragPrepared !== 'true') {
+                        event.preventDefault();
+                        return;
+                    }
+
+                    if (pointerCancelFallbackTimer) {
+                        clearTimeout(pointerCancelFallbackTimer);
+                        pointerCancelFallbackTimer = null;
+                    }
+                    activeDragRow = row;
+                    row.classList.add('dragging');
+                    if (event.dataTransfer) {
+                        event.dataTransfer.effectAllowed = 'move';
+                        event.dataTransfer.setData('text/plain', row.dataset.dragPrepared || '');
+                    }
+                });
+
+                list.addEventListener('dragover', (event) => {
+                    if (!activeDragRow) {
+                        return;
+                    }
+                    event.preventDefault();
+                    if (event.dataTransfer) {
+                        event.dataTransfer.dropEffect = 'move';
+                    }
+                    const targetRow = event.target.closest('[data-dashboard-sort-item]');
+                    if (!targetRow || targetRow === activeDragRow) {
+                        return;
+                    }
+                    const rect = targetRow.getBoundingClientRect();
+                    const offset = event.clientY - rect.top;
+                    if (offset < rect.height / 2) {
+                        list.insertBefore(activeDragRow, targetRow);
+                    } else {
+                        list.insertBefore(activeDragRow, targetRow.nextElementSibling);
+                    }
+                });
+
+                list.addEventListener('drop', (event) => {
+                    if (!activeDragRow) {
+                        return;
+                    }
+                    event.preventDefault();
+                    updateSortOrder();
+                });
+
+                list.addEventListener('dragend', () => {
+                    if (!activeDragRow) {
+                        return;
+                    }
+                    activeDragRow.classList.remove('dragging');
+                    activeDragRow = null;
+                    clearPreparedDragRow();
+                    updateSortOrder();
+                });
+
+                updateSortOrder();
+            }
+
+            document.querySelectorAll('[data-dashboard-sort-list]').forEach((list) => {
+                initDashboardSortList(list);
             });
 
             const weeklyActivity = {{ context.charts.weekly_activity | tojson }};
