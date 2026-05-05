@@ -50,7 +50,7 @@ def merge_purchase_orders(
     unique_source_ids = list(dict.fromkeys(source_po_ids))
     all_ids = set(unique_source_ids) | {target_po_id}
 
-    with db.session.begin():
+    try:
         orders: List[PurchaseOrder] = (
             PurchaseOrder.query.options(selectinload(PurchaseOrder.items))
             .filter(PurchaseOrder.id.in_(all_ids))
@@ -89,6 +89,10 @@ def merge_purchase_orders(
             db.session.delete(source)
 
         _record_activity(target_order.id, unique_source_ids)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
 
     return target_order
 

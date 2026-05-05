@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from flask import (
     Blueprint,
     abort,
+    current_app,
     flash,
     jsonify,
     redirect,
@@ -903,6 +904,11 @@ def merge_purchase_orders_route():
     except PurchaseMergeError as exc:
         return _merge_error_response(f"Merge failed: {exc}", wants_json)
     except Exception:
+        current_app.logger.exception(
+            "Unexpected purchase order merge failure for target=%s sources=%s",
+            target_id,
+            source_ids,
+        )
         return _merge_error_response(
             "An unexpected error occurred while merging purchase orders.", wants_json
         )
