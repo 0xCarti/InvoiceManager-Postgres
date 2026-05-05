@@ -14,9 +14,26 @@
         var optionByLowerValue = Object.create(null);
         var optionById = Object.create(null);
 
+        function optionDisplayValue(option) {
+            if (!option) {
+                return "";
+            }
+            return option.value || option.label || option.textContent || "";
+        }
+
+        function optionLabelValue(option) {
+            if (!option) {
+                return "";
+            }
+            return option.label || option.value || option.textContent || "";
+        }
+
         function registerOption(option) {
             if (!option) {
                 return;
+            }
+            if (datalistOptions.indexOf(option) === -1) {
+                datalistOptions.push(option);
             }
             var value = option.value || "";
             var label = option.label || "";
@@ -257,6 +274,7 @@
             if (!hiddenInput) {
                 return;
             }
+            var resultsContainer = container.querySelector("[data-role='product-search-results']");
             var statusMessage = container.querySelector("[data-role='selection-status']");
             var errorMessage = container.querySelector("[data-role='selection-error']");
             var skipButton = container.querySelector("[data-action='skip']");
@@ -276,6 +294,58 @@
                 if (errorMessage) {
                     errorMessage.classList.remove("d-none");
                 }
+            }
+
+            function clearResults() {
+                if (!resultsContainer) {
+                    return;
+                }
+                resultsContainer.innerHTML = "";
+                resultsContainer.classList.add("d-none");
+            }
+
+            function renderResults(query) {
+                if (!resultsContainer) {
+                    return;
+                }
+
+                var normalizedQuery = (query || "").trim().toLowerCase();
+                var matches = datalistOptions.filter(function (option) {
+                    if (!normalizedQuery) {
+                        return true;
+                    }
+                    return (
+                        optionDisplayValue(option).toLowerCase().indexOf(normalizedQuery) !== -1 ||
+                        optionLabelValue(option).toLowerCase().indexOf(normalizedQuery) !== -1
+                    );
+                }).slice(0, 12);
+
+                resultsContainer.innerHTML = "";
+                if (!matches.length) {
+                    if (!normalizedQuery) {
+                        resultsContainer.classList.add("d-none");
+                        return;
+                    }
+                    var emptyState = document.createElement("div");
+                    emptyState.className = "list-group-item small text-muted";
+                    emptyState.textContent = "No matching products found.";
+                    resultsContainer.appendChild(emptyState);
+                    resultsContainer.classList.remove("d-none");
+                    return;
+                }
+
+                matches.forEach(function (option) {
+                    var button = document.createElement("button");
+                    button.type = "button";
+                    button.className = "list-group-item list-group-item-action";
+                    button.textContent = optionDisplayValue(option);
+                    button.addEventListener("click", function (event) {
+                        event.preventDefault();
+                        linkToOption(option, false);
+                    });
+                    resultsContainer.appendChild(button);
+                });
+                resultsContainer.classList.remove("d-none");
             }
 
             function setActiveButton(activeButton) {
@@ -320,6 +390,7 @@
                     display ? "Linked to " + display : "",
                     forceCreated ? "success" : "muted"
                 );
+                clearResults();
             }
 
             function resetSelectionState() {
@@ -327,6 +398,7 @@
                 hideError();
                 delete container.dataset.createdProductId;
                 syncCreatedIdState();
+                clearResults();
                 if (!searchInput || !searchInput.value.trim()) {
                     setStatusMessage(statusMessage, "", null);
                 }
@@ -352,6 +424,7 @@
                 delete container.dataset.createdProductId;
                 syncCreatedIdState();
                 showError();
+                renderResults(raw);
                 setStatusMessage(statusMessage, "", null);
                 return false;
             }
@@ -413,6 +486,7 @@
                     syncCreatedIdState();
                     setActiveButton(null);
                     hideError();
+                    clearResults();
                     setStatusMessage(statusMessage, "", null);
                 });
             }
@@ -427,6 +501,7 @@
                     syncCreatedIdState();
                     setActiveButton(skipButton);
                     hideError();
+                    clearResults();
                     setStatusMessage(statusMessage, "This terminal sale product will be skipped.", "muted");
                 });
             }
@@ -445,6 +520,7 @@
                     syncCreatedIdState();
                     setActiveButton(createButton);
                     hideError();
+                    clearResults();
                     setStatusMessage(
                         statusMessage,
                         "A new product will be created from this sale item.",
@@ -462,9 +538,15 @@
                     hideError();
                     if (searchInput.value.trim()) {
                         setStatusMessage(statusMessage, "Select a product from the list to confirm the match.", "muted");
+                        renderResults(searchInput.value);
                     } else {
                         setStatusMessage(statusMessage, "", null);
+                        renderResults("");
                     }
+                });
+
+                searchInput.addEventListener("focus", function () {
+                    renderResults(searchInput.value);
                 });
 
                 searchInput.addEventListener("change", function () {
@@ -472,10 +554,17 @@
                 });
 
                 searchInput.addEventListener("blur", function () {
-                    if (!searchInput.value.trim()) {
-                        return;
-                    }
-                    commitSearchSelection();
+                    window.setTimeout(function () {
+                        if (searchInput.value.trim()) {
+                            commitSearchSelection();
+                        }
+                        if (
+                            document.activeElement !== searchInput &&
+                            !container.contains(document.activeElement)
+                        ) {
+                            clearResults();
+                        }
+                    }, 150);
                 });
             }
 

@@ -1086,6 +1086,132 @@ def test_sales_import_detail_sidebar_shows_issue_counts_and_sorts_locations(
         assert "bg-success" in sidebar_badges["Bravo Clean"]
 
 
+def test_sales_import_detail_can_filter_locations_to_issues_only(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        clean_location = Location(name="Alpha Clean Filter")
+        issue_location = Location(name="Echo Issue Filter")
+        clean_product = Product(name="Clean Filter Product", price=4.0, cost=1.0)
+        issue_product = Product(name="Issue Filter Product", price=6.0, cost=1.0)
+        mapped_product = Product(name="Mapped For Filter", price=3.0, cost=1.0)
+        db.session.add_all(
+            [
+                clean_location,
+                issue_location,
+                clean_product,
+                issue_product,
+                mapped_product,
+            ]
+        )
+        db.session.flush()
+
+        sales_import = PosSalesImport(
+            source_provider="mailgun",
+            message_id="msg-sidebar-filter-issues",
+            attachment_filename="sales.xls",
+            attachment_sha256="2" * 64,
+            status="pending",
+            sales_date=date_cls(2026, 4, 15),
+        )
+        db.session.add(sales_import)
+        db.session.flush()
+
+        clean_import_location = PosSalesImportLocation(
+            import_id=sales_import.id,
+            source_location_name="Alpha Clean Filter",
+            normalized_location_name="alpha_clean_filter",
+            location_id=clean_location.id,
+            parse_index=0,
+        )
+        unmapped_import_location = PosSalesImportLocation(
+            import_id=sales_import.id,
+            source_location_name="Zulu Filter Unmapped",
+            normalized_location_name="zulu_filter_unmapped",
+            location_id=None,
+            parse_index=1,
+        )
+        issue_import_location = PosSalesImportLocation(
+            import_id=sales_import.id,
+            source_location_name="Echo Issue Filter",
+            normalized_location_name="echo_issue_filter",
+            location_id=issue_location.id,
+            parse_index=2,
+        )
+        db.session.add_all(
+            [
+                clean_import_location,
+                unmapped_import_location,
+                issue_import_location,
+            ]
+        )
+        db.session.flush()
+
+        db.session.add_all(
+            [
+                PosSalesImportRow(
+                    import_id=sales_import.id,
+                    location_import_id=clean_import_location.id,
+                    source_product_name=clean_product.name,
+                    normalized_product_name="clean_filter_product",
+                    product_id=clean_product.id,
+                    quantity=1.0,
+                    computed_unit_price=clean_product.price,
+                    parse_index=0,
+                ),
+                PosSalesImportRow(
+                    import_id=sales_import.id,
+                    location_import_id=unmapped_import_location.id,
+                    source_product_name=mapped_product.name,
+                    normalized_product_name="mapped_for_filter",
+                    product_id=mapped_product.id,
+                    quantity=1.0,
+                    computed_unit_price=mapped_product.price,
+                    parse_index=0,
+                ),
+                PosSalesImportRow(
+                    import_id=sales_import.id,
+                    location_import_id=issue_import_location.id,
+                    source_product_name=issue_product.name,
+                    normalized_product_name="issue_filter_product",
+                    product_id=None,
+                    quantity=1.0,
+                    computed_unit_price=issue_product.price,
+                    parse_index=0,
+                ),
+            ]
+        )
+        db.session.commit()
+        sales_import_id = sales_import.id
+
+    with client:
+        login(client, admin_email, admin_pass)
+        detail_response = client.get(
+            f"/controlpanel/sales-imports/{sales_import_id}?location_filter=issues",
+            follow_redirects=True,
+        )
+        assert detail_response.status_code == 200
+
+        html = detail_response.data.decode("utf-8")
+        assert "Showing 2 of 3 locations" in html
+        assert "All locations" in html
+        assert "Issues only" in html
+
+        sidebar_cards = re.findall(
+            r'<a\s+href="[^"]*location_id=\d+[^"]*"[^>]*>.*?<div class="fw-semibold">([^<]+)</div>',
+            html,
+            re.S,
+        )
+        sidebar_names = [name.strip() for name in sidebar_cards[:2]]
+
+        assert sidebar_names == [
+            "Zulu Filter Unmapped",
+            "Echo Issue Filter",
+        ]
+        assert "Alpha Clean Filter" not in sidebar_names
+
+
 def test_sales_import_price_review_can_keep_app_price_on_approval(client, app):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
@@ -1310,6 +1436,153 @@ def test_sales_import_row_can_be_skipped_without_product_mapping(client, app):
         metadata = json.loads(row.approval_metadata)
         assert sales_import.status == "approved"
         assert metadata["review"]["price_action"] == "skip"
+
+
+def test_skipped_sales_import_location_does_not_block_approval_or_apply_inventory(
+    client, app
+):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        kept_location = Location(name="Keep Approval Stand")
+        item = Item(name="Keep Approval Item", base_unit="each", quantity=10.0)
+        product = Product(name="Keep Approval Product", price=8.0, cost=2.0)
+        db.session.add_all([kept_location, item, product])
+        db.session.flush()
+
+        db.session.add(
+            ProductRecipeItem(
+                product_id=product.id,
+                item_id=item.id,
+                quantity=1.0,
+                countable=True,
+            )
+        )
+        db.session.add(
+            LocationStandItem(
+                location_id=kept_location.id,
+                item_id=item.id,
+                expected_count=10.0,
+            )
+        )
+
+        sales_import = PosSalesImport(
+            source_provider="mailgun",
+            message_id="msg-skip-location-approval",
+            attachment_filename="sales.xls",
+            attachment_sha256="3" * 64,
+            status="pending",
+            sales_date=date_cls(2026, 4, 15),
+        )
+        db.session.add(sales_import)
+        db.session.flush()
+
+        kept_import_location = PosSalesImportLocation(
+            import_id=sales_import.id,
+            source_location_name="Keep Approval Stand",
+            normalized_location_name="keep_approval_stand",
+            location_id=kept_location.id,
+            parse_index=0,
+        )
+        skipped_import_location = PosSalesImportLocation(
+            import_id=sales_import.id,
+            source_location_name="Skip Approval Stand",
+            normalized_location_name="skip_approval_stand",
+            location_id=None,
+            parse_index=1,
+        )
+        db.session.add_all([kept_import_location, skipped_import_location])
+        db.session.flush()
+
+        kept_row = PosSalesImportRow(
+            import_id=sales_import.id,
+            location_import_id=kept_import_location.id,
+            source_product_name=product.name,
+            normalized_product_name="keep_approval_product",
+            product_id=product.id,
+            quantity=3.0,
+            computed_unit_price=product.price,
+            parse_index=0,
+        )
+        skipped_row = PosSalesImportRow(
+            import_id=sales_import.id,
+            location_import_id=skipped_import_location.id,
+            source_product_name="Unknown Approval Product",
+            normalized_product_name="unknown_approval_product",
+            product_id=None,
+            quantity=2.0,
+            computed_unit_price=5.0,
+            parse_index=0,
+        )
+        db.session.add_all([kept_row, skipped_row])
+        db.session.commit()
+
+        sales_import_id = sales_import.id
+        kept_location_id = kept_location.id
+        kept_location_import_id = kept_import_location.id
+        skipped_location_import_id = skipped_import_location.id
+        kept_row_id = kept_row.id
+        skipped_row_id = skipped_row.id
+        item_id = item.id
+
+    with client:
+        login(client, admin_email, admin_pass)
+
+        skip_response = client.post(
+            f"/controlpanel/sales-imports/{sales_import_id}",
+            data={
+                "action": "toggle_location_skip",
+                "selected_location_id": skipped_location_import_id,
+                "location_import_id": skipped_location_import_id,
+                "skip_location": "1",
+            },
+            follow_redirects=True,
+        )
+        assert skip_response.status_code == 200
+        assert b"Location skipped" in skip_response.data
+        assert b"Skipped" in skip_response.data
+
+        filtered_response = client.get(
+            f"/controlpanel/sales-imports/{sales_import_id}?location_filter=issues",
+            follow_redirects=True,
+        )
+        assert filtered_response.status_code == 200
+        assert b"No locations with issues are left in this import." in filtered_response.data
+
+        approve_response = client.post(
+            f"/controlpanel/sales-imports/{sales_import_id}",
+            data={
+                "action": "approve_import",
+                "selected_location_id": kept_location_import_id,
+            },
+            follow_redirects=True,
+        )
+        assert approve_response.status_code == 200
+        assert b"Import approved" in approve_response.data
+
+    with app.app_context():
+        sales_import = db.session.get(PosSalesImport, sales_import_id)
+        kept_row = db.session.get(PosSalesImportRow, kept_row_id)
+        skipped_row = db.session.get(PosSalesImportRow, skipped_row_id)
+        skipped_location = db.session.get(
+            PosSalesImportLocation, skipped_location_import_id
+        )
+        stand_item = LocationStandItem.query.filter_by(
+            location_id=kept_location_id,
+            item_id=item_id,
+        ).one()
+        refreshed_item = db.session.get(Item, item_id)
+
+        assert sales_import.status == "approved"
+        assert stand_item.expected_count == 7.0
+        assert refreshed_item.quantity == 7.0
+        assert kept_row.approval_batch_id == sales_import.approval_batch_id
+        assert skipped_location.approval_batch_id is None
+        assert skipped_row.approval_batch_id is None
+
+        metadata = json.loads(skipped_location.approval_metadata)
+        assert metadata["review"]["skip"] is True
 
 
 def test_sales_imports_list_shows_issue_counts_and_direct_approve_button(client, app):

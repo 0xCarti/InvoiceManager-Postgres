@@ -1646,38 +1646,102 @@ def add_terminal_sale(event_id, el_id):
         products.sort(key=lambda prod: prod.name.lower())
         return products
 
+    def _sales_by_product(event_location: EventLocation):
+        grouped_sales: dict[int, list[TerminalSale]] = {}
+        for sale in event_location.terminal_sales:
+            if sale.product_id is None:
+                continue
+            grouped_sales.setdefault(sale.product_id, []).append(sale)
+
+        for product_sales in grouped_sales.values():
+            product_sales.sort(
+                key=lambda sale: (
+                    sale.sold_at or datetime.min,
+                    sale.id or 0,
+                )
+            )
+        return grouped_sales
+
+    def _is_imported_sale(sale: TerminalSale) -> bool:
+        return sale.pos_sales_import_id is not None or bool(sale.approval_batch_id)
+
     available_products = _collect_event_location_products(el)
+    sales_by_product = _sales_by_product(el)
 
     if request.method == "POST":
-        updated = False
+        requested_quantities: dict[int, float] = {}
+        validation_errors: list[str] = []
+
         for product in available_products:
             qty = request.form.get(f"qty_{product.id}")
             try:
-                amount = float(qty) if qty else 0
+                amount = float(qty) if qty else 0.0
             except ValueError:
-                amount = 0
+                amount = 0.0
 
-            sale = TerminalSale.query.filter_by(
-                event_location_id=el_id, product_id=product.id
-            ).first()
+            target_total = amount if amount > 0 else 0.0
+            requested_quantities[product.id] = target_total
 
-            if amount:
-                if sale:
-                    if sale.quantity != amount:
-                        sale.quantity = amount
+            imported_total = sum(
+                float(sale.quantity or 0.0)
+                for sale in sales_by_product.get(product.id, [])
+                if _is_imported_sale(sale)
+            )
+            if target_total + 1e-9 < imported_total:
+                validation_errors.append(
+                    f"{product.name} already has {imported_total:.2f} imported sales recorded. "
+                    "Lower this from the sales import review instead of the manual entry screen."
+                )
+
+        if validation_errors:
+            for message in validation_errors:
+                flash(message, "danger")
+            return render_template(
+                "events/add_terminal_sales.html",
+                event_location=el,
+                existing_sales=requested_quantities,
+                products=available_products,
+            )
+
+        updated = False
+        for product in available_products:
+            product_sales = sales_by_product.get(product.id, [])
+            imported_sales = [
+                sale for sale in product_sales if _is_imported_sale(sale)
+            ]
+            manual_sales = [
+                sale for sale in product_sales if not _is_imported_sale(sale)
+            ]
+            imported_total = sum(
+                float(sale.quantity or 0.0) for sale in imported_sales
+            )
+            manual_target = requested_quantities[product.id] - imported_total
+            if manual_target <= 1e-9:
+                manual_target = 0.0
+
+            primary_manual_sale = manual_sales[0] if manual_sales else None
+
+            if manual_target:
+                if primary_manual_sale:
+                    if abs(float(primary_manual_sale.quantity or 0.0) - manual_target) > 1e-9:
+                        primary_manual_sale.quantity = manual_target
                         updated = True
                 else:
                     sale = TerminalSale(
                         event_location_id=el_id,
                         product_id=product.id,
-                        quantity=amount,
+                        quantity=manual_target,
                         sold_at=datetime.utcnow(),
                     )
                     db.session.add(sale)
                     updated = True
-            elif sale:
-                db.session.delete(sale)
+            for extra_manual_sale in manual_sales[1:]:
+                db.session.delete(extra_manual_sale)
                 updated = True
+            if not manual_target:
+                for manual_sale in manual_sales[:1]:
+                    db.session.delete(manual_sale)
+                    updated = True
 
         db.session.commit()
         if updated:
@@ -1685,7 +1749,10 @@ def add_terminal_sale(event_id, el_id):
         flash("Sales recorded")
         return redirect(url_for("event.view_event", event_id=event_id))
 
-    existing_sales = {s.product_id: s.quantity for s in el.terminal_sales}
+    existing_sales = {
+        product_id: sum(float(sale.quantity or 0.0) for sale in product_sales)
+        for product_id, product_sales in sales_by_product.items()
+    }
     return render_template(
         "events/add_terminal_sales.html",
         event_location=el,

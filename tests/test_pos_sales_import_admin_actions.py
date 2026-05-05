@@ -130,7 +130,8 @@ def test_mapping_resolution_create_or_map_flow_updates_rows_and_aliases(client, 
         assert detail_response.status_code == 200
         detail_html = detail_response.get_data(as_text=True)
         assert 'data-role="product-search-input"' in detail_html
-        assert 'list="terminal-product-options"' in detail_html
+        assert 'data-role="product-search-results"' in detail_html
+        assert 'list="terminal-product-options"' not in detail_html
         assert "terminal_sales_mapping.js" in detail_html
         assert f'Pretzel (ID: {mapped_product_id})' in detail_html
 

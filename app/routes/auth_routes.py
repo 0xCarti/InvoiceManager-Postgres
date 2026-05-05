@@ -2592,6 +2592,7 @@ def _parse_sales_import_approval_changes(row: PosSalesImportRow) -> list[dict]:
 
 
 _SALES_IMPORT_PRICE_ACTIONS = {"file", "app", "custom", "skip"}
+_SALES_IMPORT_LOCATION_FILTERS = {"all", "issues"}
 _SALES_IMPORT_REVIEW_EDITABLE_STATUSES = {
     PosSalesImport.STATUS_PENDING,
 }
@@ -2652,6 +2653,29 @@ def _write_sales_import_location_metadata(
     location_import: PosSalesImportLocation, payload: dict[str, Any]
 ) -> None:
     location_import.approval_metadata = json.dumps(payload) if payload else None
+
+
+def _get_sales_import_location_review(
+    location_import: PosSalesImportLocation,
+) -> dict[str, Any]:
+    payload = _parse_sales_import_location_metadata(location_import)
+    review = payload.get("review")
+    if not isinstance(review, dict):
+        return {}
+    return review
+
+
+def _sales_import_location_is_skipped(
+    location_import: PosSalesImportLocation,
+) -> bool:
+    return bool(_get_sales_import_location_review(location_import).get("skip"))
+
+
+def _normalize_sales_import_location_filter(raw_value: Any) -> str:
+    location_filter = (raw_value or "").strip().lower()
+    if location_filter in _SALES_IMPORT_LOCATION_FILTERS:
+        return location_filter
+    return "all"
 
 
 def _format_sales_import_event_label(event_location: EventLocation) -> str:
@@ -2725,7 +2749,11 @@ def _sync_sales_import_event_assignments(
     changed = False
 
     for import_location in sales_import.locations:
-        if import_location.location_id is None or sales_import.sales_date is None:
+        if (
+            _sales_import_location_is_skipped(import_location)
+            or import_location.location_id is None
+            or sales_import.sales_date is None
+        ):
             if import_location.event_location_id is not None:
                 import_location.event_location_id = None
                 import_location.event_location = None
@@ -2770,6 +2798,14 @@ def _build_sales_import_event_assignment_state(
 
     for import_location in sales_import.locations:
         messages: list[str] = []
+        if _sales_import_location_is_skipped(import_location):
+            candidate_event_locations_by_import_location[import_location.id] = []
+            messages.append(
+                "This import location is skipped. Approval will ignore its event routing and inventory rows."
+            )
+            event_assignment_messages[import_location.id] = messages
+            continue
+
         candidates = (
             candidate_lookup.get(import_location.location_id, [])
             if import_location.location_id is not None
@@ -3226,6 +3262,7 @@ def _sales_import_discount_value(
 def _build_sales_import_review_context(
     sales_import: PosSalesImport,
 ) -> dict[str, Any]:
+    location_review_data: dict[int, dict[str, Any]] = {}
     row_review_data: dict[int, dict[str, Any]] = {}
     location_discount_totals: dict[int, float] = {}
     unresolved_location_ids: set[int] = set()
@@ -3236,6 +3273,11 @@ def _build_sales_import_review_context(
     import_discount_total = 0.0
 
     for location in sales_import.locations:
+        location_review = _get_sales_import_location_review(location)
+        location_is_skipped = bool(location_review.get("skip"))
+        location_review_data[location.id] = {
+            "is_skipped": location_is_skipped,
+        }
         location_discount_total = 0.0
         location_has_active_rows = False
 
@@ -3253,7 +3295,9 @@ def _build_sales_import_review_context(
                 row.discount_raw, row.discount_abs
             )
             is_skipped = action == "skip"
-            is_active = not row.is_zero_quantity and not is_skipped
+            is_active = (
+                not location_is_skipped and not row.is_zero_quantity and not is_skipped
+            )
             location_discount_total += row_discount
 
             price_mismatch = bool(
@@ -3307,6 +3351,7 @@ def _build_sales_import_review_context(
                 "discount": row_discount,
                 "is_skipped": is_skipped,
                 "is_active": is_active,
+                "location_is_skipped": location_is_skipped,
                 "price_mismatch": price_mismatch,
                 "resolved_price": resolved_price,
                 "resolved_source": resolved_source,
@@ -3336,6 +3381,7 @@ def _build_sales_import_review_context(
         unresolved_price_row_ids.add(row_id)
 
     return {
+        "location_review_data": location_review_data,
         "row_review_data": row_review_data,
         "location_discount_totals": location_discount_totals,
         "import_discount_total": import_discount_total,
@@ -3817,6 +3863,9 @@ def sales_import_detail(import_id: int):
     """Render location and row-level detail for a staged POS sales import."""
     is_ajax_request = request.headers.get("X-Requested-With") == "XMLHttpRequest"
     ajax_review_response: dict[str, str] | None = None
+    active_location_filter = _normalize_sales_import_location_filter(
+        request.values.get("location_filter")
+    )
     sales_import = (
         PosSalesImport.query.options(
             selectinload(PosSalesImport.locations)
@@ -3934,6 +3983,7 @@ def sales_import_detail(import_id: int):
                     "admin.sales_import_detail",
                     import_id=sales_import.id,
                     location_id=selected_location_id,
+                    location_filter=active_location_filter,
                 )
             )
 
@@ -4047,6 +4097,45 @@ def sales_import_detail(import_id: int):
                     f"'{location_record.source_location_name}' -> location {created_location.id}"
                 )
 
+        elif action == "toggle_location_skip":
+            if not _sales_import_review_is_editable(sales_import):
+                return _redirect_review_locked()
+            location_import_id = request.form.get("location_import_id", type=int)
+            should_skip = request.form.get("skip_location") == "1"
+            location_record = next(
+                (loc for loc in sales_import.locations if loc.id == location_import_id),
+                None,
+            )
+            if not location_record:
+                flash("Unable to find the selected import location.", "danger")
+            else:
+                payload = _parse_sales_import_location_metadata(location_record)
+                if should_skip:
+                    payload["review"] = {
+                        "skip": True,
+                        "updated_at": datetime.utcnow().isoformat(),
+                        "updated_by": current_user.id,
+                    }
+                    flash(
+                        "Location skipped. Approval will ignore this location and its rows.",
+                        "success",
+                    )
+                    log_activity(
+                        f"Skipped import location {location_record.id} on POS sales import {sales_import.id}"
+                    )
+                else:
+                    payload.pop("review", None)
+                    flash(
+                        "Location included again. Resolve any remaining issues before approval.",
+                        "success",
+                    )
+                    log_activity(
+                        f"Included import location {location_record.id} again on POS sales import {sales_import.id}"
+                    )
+                _write_sales_import_location_metadata(location_record, payload)
+                _sync_detail_review_state()
+                db.session.commit()
+
         elif action == "map_product":
             if not _sales_import_review_is_editable(sales_import):
                 return _redirect_review_locked()
@@ -4119,6 +4208,7 @@ def sales_import_detail(import_id: int):
                         sales_import_id=sales_import.id,
                         import_row_id=row_record.id,
                         return_location_id=target_location_id,
+                        location_filter=active_location_filter,
                     )
                 )
 
@@ -4194,6 +4284,7 @@ def sales_import_detail(import_id: int):
                                 "admin.sales_import_detail",
                                 import_id=sales_import.id,
                                 location_id=selected_location_id,
+                                location_filter=active_location_filter,
                             )
                         )
 
@@ -4258,7 +4349,12 @@ def sales_import_detail(import_id: int):
             if not reversal_reason:
                 flash("Enter a reversal reason before undoing an approved import.", "warning")
                 return redirect(
-                    url_for("admin.sales_import_detail", import_id=sales_import.id)
+                    url_for(
+                        "admin.sales_import_detail",
+                        import_id=sales_import.id,
+                        location_id=selected_location_id,
+                        location_filter=active_location_filter,
+                    )
                 )
 
             try:
@@ -4300,7 +4396,12 @@ def sales_import_detail(import_id: int):
                         "warning",
                     )
                     return redirect(
-                        url_for("admin.sales_import_detail", import_id=sales_import.id)
+                        url_for(
+                            "admin.sales_import_detail",
+                            import_id=sales_import.id,
+                            location_id=selected_location_id,
+                            location_filter=active_location_filter,
+                        )
                     )
 
                 warnings = _check_negative_sales_import_reverse(locked_import)
@@ -4312,7 +4413,12 @@ def sales_import_detail(import_id: int):
                     for warning in warnings:
                         flash(warning, "warning")
                     return redirect(
-                        url_for("admin.sales_import_detail", import_id=sales_import.id)
+                        url_for(
+                            "admin.sales_import_detail",
+                            import_id=sales_import.id,
+                            location_id=selected_location_id,
+                            location_filter=active_location_filter,
+                        )
                     )
 
                 reversal_time = datetime.utcnow()
@@ -4563,13 +4669,23 @@ def sales_import_detail(import_id: int):
                         "warning",
                     )
                     return redirect(
-                        url_for("admin.sales_import_detail", import_id=sales_import.id)
+                        url_for(
+                            "admin.sales_import_detail",
+                            import_id=sales_import.id,
+                            location_id=selected_location_id,
+                            location_filter=active_location_filter,
+                        )
                     )
 
                 if locked_import.status == "deleted":
                     flash("This import is already deleted.", "info")
                     return redirect(
-                        url_for("admin.sales_import_detail", import_id=sales_import.id)
+                        url_for(
+                            "admin.sales_import_detail",
+                            import_id=sales_import.id,
+                            location_id=selected_location_id,
+                            location_filter=active_location_filter,
+                        )
                     )
 
                 locked_import.status = "deleted"
@@ -4597,6 +4713,7 @@ def sales_import_detail(import_id: int):
                 "admin.sales_import_detail",
                 import_id=sales_import.id,
                 location_id=selected_location_id,
+                location_filter=active_location_filter,
             )
         )
 
@@ -4609,6 +4726,7 @@ def sales_import_detail(import_id: int):
     needs_mapping = issue_state["needs_mapping"]
 
     review_context = issue_state["review_context"]
+    location_review_data = review_context["location_review_data"]
     row_review_data = review_context["row_review_data"]
     location_discount_totals = review_context["location_discount_totals"]
     unresolved_price_count = issue_state["unresolved_price_count"]
@@ -4651,7 +4769,9 @@ def sales_import_detail(import_id: int):
     sorted_locations = sorted(
         sales_import.locations,
         key=lambda location: (
-            0
+            3
+            if location_review_data.get(location.id, {}).get("is_skipped")
+            else 0
             if location.location_id is None
             else 1
             if location_issue_counts.get(location.id, 0) > 0
@@ -4661,20 +4781,29 @@ def sales_import_detail(import_id: int):
             location.id,
         ),
     )
+    all_location_count = len(sorted_locations)
+    filtered_locations = [
+        location
+        for location in sorted_locations
+        if active_location_filter != "issues"
+        or location_issue_counts.get(location.id, 0) > 0
+    ]
 
-    selected_location_id = request.args.get("location_id", type=int)
+    selected_location_id = request.values.get("selected_location_id", type=int)
+    if selected_location_id is None:
+        selected_location_id = request.values.get("location_id", type=int)
     selected_location = None
     if selected_location_id is not None:
         selected_location = next(
             (
                 location
-                for location in sorted_locations
+                for location in filtered_locations
                 if location.id == selected_location_id
             ),
             None,
         )
-    if selected_location is None and sorted_locations:
-        selected_location = sorted_locations[0]
+    if selected_location is None and filtered_locations:
+        selected_location = filtered_locations[0]
 
     import_totals = {
         "quantity": sum(float(loc.total_quantity or 0.0) for loc in sales_import.locations),
@@ -4689,7 +4818,12 @@ def sales_import_detail(import_id: int):
     row_errors: dict[int, list[str]] = {}
     for location in sales_import.locations:
         errors: list[str] = []
-        if location.id in review_context["unresolved_location_ids"]:
+        location_review = location_review_data.get(location.id, {})
+        if location_review.get("is_skipped"):
+            errors.append(
+                "Location is skipped. Approval will ignore its rows, mapping requirements, and event routing."
+            )
+        elif location.id in review_context["unresolved_location_ids"]:
             errors.append("Location is not mapped.")
         if location.id in unresolved_event_location_ids:
             errors.extend(event_assignment_messages.get(location.id, []))
@@ -4698,13 +4832,17 @@ def sales_import_detail(import_id: int):
         for row in location.rows:
             row_validation_errors: list[str] = []
             row_review = row_review_data.get(row.id, {})
-            if row_review.get("is_skipped"):
+            if row_review.get("location_is_skipped"):
+                row_validation_errors.append(
+                    "Location is skipped; this row will not affect inventory, event sales, or product pricing."
+                )
+            elif row_review.get("is_skipped"):
                 row_validation_errors.append(
                     "Row is skipped; it will not affect inventory or update product pricing."
                 )
             elif row_review.get("requires_mapping"):
                 row_validation_errors.append("Product is not mapped.")
-            if row.is_zero_quantity:
+            if not row_review.get("location_is_skipped") and row.is_zero_quantity:
                 row_validation_errors.append(
                     "Quantity is zero; treat as informational and exclude from stock operations."
                 )
@@ -4729,8 +4867,12 @@ def sales_import_detail(import_id: int):
     detail_context = dict(
         sales_import=sales_import,
         attachment_available=attachment_available,
-        sorted_locations=sorted_locations,
+        sorted_locations=filtered_locations,
+        all_location_count=all_location_count,
+        visible_location_count=len(filtered_locations),
+        active_location_filter=active_location_filter,
         location_issue_counts=location_issue_counts,
+        location_review_data=location_review_data,
         selected_location=selected_location,
         import_totals=import_totals,
         location_errors=location_errors,

@@ -438,7 +438,6 @@
                                            class="form-control"
                                            id="{{ product.field }}-search"
                                            name="{{ product.field }}-search"
-                                           list="terminal-product-options"
                                            data-role="product-search-input"
                                            placeholder="Start typing to search by product name..."
                                            value="{{ selected_display }}">
@@ -463,6 +462,7 @@
                                 <div class="form-text text-danger d-none" data-role="selection-error">
                                     Select a product from the suggestions or choose Skip.
                                 </div>
+                                <div class="list-group mt-2 d-none" data-role="product-search-results" style="max-height: 16rem; overflow-y: auto;"></div>
                                 {% if product.price is not none %}
                                     <div class="form-text">
                                         {% if can_create_products %}

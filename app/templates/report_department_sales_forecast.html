@@ -73,7 +73,6 @@
                                        class="form-control"
                                        id="{{ entry.field }}-search"
                                        name="{{ entry.field }}-search"
-                                       list="terminal-product-options"
                                        data-role="product-search-input"
                                        placeholder="Search for a product..."
                                        value="{{ entry.selected_display }}">
@@ -93,6 +92,7 @@
                             <div class="form-text text-danger {% if not entry.has_error %}d-none{% endif %}" data-role="selection-error">
                                 Select a product from the suggestions, choose Skip, or Create a new product.
                             </div>
+                            <div class="list-group mt-2 d-none" data-role="product-search-results" style="max-height: 16rem; overflow-y: auto;"></div>
                             <div class="btn-group mt-2" role="group" aria-label="Mapping actions">
                                 <button type="button" class="btn btn-outline-secondary btn-sm" data-action="skip">Skip</button>
                                 <button type="button" class="btn btn-outline-primary btn-sm" data-action="create">Create new product</button>

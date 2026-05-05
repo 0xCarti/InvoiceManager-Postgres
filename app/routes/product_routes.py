@@ -286,6 +286,9 @@ def _get_sales_import_product_create_context():
     sales_import_id = request.args.get("sales_import_id", type=int)
     import_row_id = request.args.get("import_row_id", type=int)
     return_location_id = request.args.get("return_location_id", type=int)
+    location_filter = (request.args.get("location_filter") or "").strip().lower()
+    if location_filter not in {"all", "issues"}:
+        location_filter = "all"
 
     if sales_import_id is None and import_row_id is None and return_location_id is None:
         return None
@@ -322,12 +325,14 @@ def _get_sales_import_product_create_context():
             "admin.sales_import_detail",
             import_id=import_record.id,
             location_id=return_location_id,
+            location_filter=location_filter,
         ),
         "form_action": url_for(
             "product.create_product",
             sales_import_id=import_record.id,
             import_row_id=row_record.id,
             return_location_id=return_location_id,
+            location_filter=location_filter,
         ),
     }
 

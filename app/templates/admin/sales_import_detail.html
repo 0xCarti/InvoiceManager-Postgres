@@ -13,6 +13,11 @@
         width: 100%;
     }
 }
+
+.sales-import-detail-page [data-role="product-search-results"] {
+    max-height: 16rem;
+    overflow-y: auto;
+}
 </style>
 <div class="container mt-4 app-page-shell sales-import-detail-page" data-sales-import-review-root>
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
@@ -67,6 +72,7 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="action" value="approve_import">
             <input type="hidden" name="selected_location_id" value="{{ selected_location.id if selected_location else '' }}">
+            <input type="hidden" name="location_filter" value="{{ active_location_filter }}">
             <button type="submit" class="btn btn-success btn-sm" {% if unresolved_location_count or unresolved_event_location_count or unresolved_row_count or unresolved_price_count or not can_approve_import %}disabled{% endif %}>
                 Approve Import
             </button>
@@ -84,6 +90,7 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="action" value="refresh_auto_mapping">
             <input type="hidden" name="selected_location_id" value="{{ selected_location.id if selected_location else '' }}">
+            <input type="hidden" name="location_filter" value="{{ active_location_filter }}">
             <button type="submit" class="btn btn-outline-primary btn-sm" {% if review_edit_locked %}disabled{% endif %}>Refresh Auto-Mapping</button>
         </form>
         <button
@@ -154,6 +161,7 @@
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="action" value="save_sales_date">
                     <input type="hidden" name="selected_location_id" value="{{ selected_location.id if selected_location else '' }}">
+                    <input type="hidden" name="location_filter" value="{{ active_location_filter }}">
                     <div class="col-sm-8">
                         <label class="form-label mb-1" for="sales_date">Sales date</label>
                         <input
@@ -245,11 +253,27 @@
 <div class="row g-3">
     <div class="col-lg-4">
         <div class="card">
-            <div class="card-header">Locations</div>
+            <div class="card-header">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                    <span>Locations</span>
+                    <form method="get" class="d-flex align-items-center gap-2">
+                        <input type="hidden" name="location_id" value="{{ selected_location.id if selected_location else '' }}">
+                        <label class="small text-muted" for="location-filter">Show</label>
+                        <select id="location-filter" name="location_filter" class="form-select form-select-sm" onchange="this.form.submit()">
+                            <option value="all" {% if active_location_filter == 'all' %}selected{% endif %}>All locations</option>
+                            <option value="issues" {% if active_location_filter == 'issues' %}selected{% endif %}>Issues only</option>
+                        </select>
+                    </form>
+                </div>
+                <div class="small text-muted mt-2">
+                    Showing {{ visible_location_count }} of {{ all_location_count }} locations
+                </div>
+            </div>
             <div class="list-group list-group-flush">
+                {% if sorted_locations %}
                 {% for location in sorted_locations %}
                 <a
-                    href="{{ url_for('admin.sales_import_detail', import_id=sales_import.id, location_id=location.id) }}"
+                    href="{{ url_for('admin.sales_import_detail', import_id=sales_import.id, location_id=location.id, location_filter=active_location_filter) }}"
                     class="list-group-item list-group-item-action {% if selected_location and selected_location.id == location.id %}active{% endif %}"
                 >
                     <div class="d-flex justify-content-between align-items-start gap-2">
@@ -259,7 +283,9 @@
                                 Mapped: {{ location.location.name if location.location else 'Unmapped' }}
                             </div>
                             <div class="small {% if selected_location and selected_location.id == location.id %}text-white-50{% else %}text-muted{% endif %}">
-                                {% if event_assignment_labels.get(location.id) %}
+                                {% if location_review_data.get(location.id, {}).get('is_skipped') %}
+                                Event: Skipped
+                                {% elif event_assignment_labels.get(location.id) %}
                                 Event: {{ event_assignment_labels.get(location.id) }}
                                 {% elif location.id in direct_inventory_only_location_ids %}
                                 Event: Direct inventory only
@@ -272,8 +298,12 @@
                                 {% endif %}
                             </div>
                         </div>
-                        <span class="badge {% if location_issue_counts.get(location.id, 0) > 0 %}bg-danger text-white{% else %}bg-success text-white{% endif %}">
+                        <span class="badge {% if location_review_data.get(location.id, {}).get('is_skipped') %}bg-secondary text-white{% elif location_issue_counts.get(location.id, 0) > 0 %}bg-danger text-white{% else %}bg-success text-white{% endif %}">
+                            {% if location_review_data.get(location.id, {}).get('is_skipped') %}
+                            Skipped
+                            {% else %}
                             {{ location_issue_counts.get(location.id, 0) }}
+                            {% endif %}
                         </span>
                     </div>
                     <div class="small mt-1 {% if selected_location and selected_location.id == location.id %}text-white-50{% else %}text-muted{% endif %}">
@@ -281,12 +311,22 @@
                     </div>
                 </a>
                 {% endfor %}
+                {% else %}
+                <div class="p-3 small text-muted">
+                    {% if active_location_filter == 'issues' and all_location_count %}
+                    No locations with issues are left in this import.
+                    {% else %}
+                    No locations are available for this import.
+                    {% endif %}
+                </div>
+                {% endif %}
             </div>
         </div>
     </div>
 
     <div class="col-lg-8">
         {% if selected_location %}
+        {% set selected_location_review = location_review_data.get(selected_location.id, {}) %}
         {% if not can_manage_sales_imports %}
         <div class="alert alert-info py-2">
             You have view-only access to this sales import. Review details are visible, but mapping and approval actions are hidden.
@@ -298,12 +338,17 @@
                     <span class="fw-semibold">{{ selected_location.source_location_name }}</span>
                     <span class="text-muted">&rarr; {{ selected_location.location.name if selected_location.location else 'Unmapped location' }}</span>
                 </div>
-                <span class="badge bg-light text-dark border">{{ selected_location.rows|length }} item rows</span>
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    {% if selected_location_review.is_skipped %}
+                    <span class="badge bg-secondary">Skipped</span>
+                    {% endif %}
+                    <span class="badge bg-light text-dark border">{{ selected_location.rows|length }} item rows</span>
+                </div>
             </div>
             <div class="card-body">
                 {% set loc_errors = location_errors.get(selected_location.id, []) %}
                 {% if loc_errors %}
-                <div class="alert alert-warning py-2">
+                <div class="alert {% if selected_location_review.is_skipped %}alert-info{% else %}alert-warning{% endif %} py-2">
                     <ul class="mb-0">
                         {% for error in loc_errors %}
                         <li>{{ error }}</li>
@@ -312,6 +357,37 @@
                 </div>
                 {% endif %}
                 {% if can_manage_sales_imports and not review_edit_locked %}
+                <div class="border rounded p-3 mb-3 {% if selected_location_review.is_skipped %}bg-secondary-subtle border-secondary-subtle{% else %}bg-light{% endif %}">
+                    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                        <div>
+                            <div class="fw-semibold mb-2">Import Location Status</div>
+                            <div class="small text-muted">
+                                {% if selected_location_review.is_skipped %}
+                                This location is skipped. Approval will ignore its item rows, mapping requirements, and event routing until you include it again.
+                                {% else %}
+                                This location will be included when the import is approved.
+                                {% endif %}
+                            </div>
+                        </div>
+                        <form method="post">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="toggle_location_skip">
+                            <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
+                            <input type="hidden" name="location_filter" value="{{ active_location_filter }}">
+                            <input type="hidden" name="location_import_id" value="{{ selected_location.id }}">
+                            <input type="hidden" name="skip_location" value="{{ '0' if selected_location_review.is_skipped else '1' }}">
+                            <button type="submit" class="btn btn-sm {% if selected_location_review.is_skipped %}btn-outline-secondary{% else %}btn-outline-danger{% endif %}">
+                                {% if selected_location_review.is_skipped %}
+                                Include Location Again
+                                {% else %}
+                                Skip This Location
+                                {% endif %}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                {% endif %}
+                {% if can_manage_sales_imports and not review_edit_locked and not selected_location_review.is_skipped %}
                 <div class="border rounded p-3 mb-3 bg-light">
                     <div class="fw-semibold mb-2">{{ 'Resolve location mapping' if selected_location.location_id is none else 'Override location mapping' }}</div>
                     <div class="small text-muted mb-2">
@@ -325,6 +401,7 @@
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="action" value="map_location">
                         <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
+                        <input type="hidden" name="location_filter" value="{{ active_location_filter }}">
                         <input type="hidden" name="location_import_id" value="{{ selected_location.id }}">
                         <div class="col-md-8">
                             <label class="form-label mb-1">Map to existing location</label>
@@ -344,6 +421,7 @@
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="action" value="create_location">
                         <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
+                        <input type="hidden" name="location_filter" value="{{ active_location_filter }}">
                         <input type="hidden" name="location_import_id" value="{{ selected_location.id }}">
                         <div class="col-md-8">
                             <label class="form-label mb-1">Or create new location</label>
@@ -358,7 +436,12 @@
                 {% endif %}
                 <div class="border rounded p-3 mb-3">
                     <div class="fw-semibold mb-2">Event Routing</div>
-                    {% if selected_location.location_id is none %}
+                    {% if selected_location_review.is_skipped %}
+                    <div class="alert alert-info py-2 mb-0">
+                        <div class="small fw-semibold">This location is skipped.</div>
+                        <div class="small">Approval will not post its sales to an event location or to direct inventory while it stays skipped.</div>
+                    </div>
+                    {% elif selected_location.location_id is none %}
                     <div class="text-muted small">
                         Map this import location to an app location first. Event routing is calculated from the mapped location and sales date.
                     </div>
@@ -432,7 +515,7 @@
                     {% for row in selected_location.rows %}
                     {% set review = row_review_data.get(row.id, {}) %}
                     {% set errors = row_errors.get(row.id, []) %}
-                    <div class="card {% if review.is_skipped %}border-secondary{% elif review.has_price_conflict %}border-warning{% elif review.requires_price_resolution %}border-danger{% endif %}">
+                    <div class="card {% if review.location_is_skipped or review.is_skipped %}border-secondary{% elif review.has_price_conflict %}border-warning{% elif review.requires_price_resolution %}border-danger{% endif %}">
                         <div class="card-body">
                             <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
                                 <div class="min-w-0">
@@ -441,7 +524,9 @@
                                         {{ row.product.name if row.product else 'Unmapped product' }}
                                     </div>
                                 </div>
-                                {% if review.is_skipped %}
+                                {% if review.location_is_skipped %}
+                                <span class="badge bg-secondary">Location Skipped</span>
+                                {% elif review.is_skipped %}
                                 <span class="badge bg-secondary">Skipped</span>
                                 {% elif review.has_price_conflict %}
                                 <span class="badge bg-warning text-dark">Conflict</span>
@@ -490,6 +575,7 @@
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <input type="hidden" name="action" value="resolve_row_price">
                                     <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
+                                    <input type="hidden" name="location_filter" value="{{ active_location_filter }}">
                                     <input type="hidden" name="row_id" value="{{ row.id }}">
                                     <label class="form-label mb-0">Price action</label>
                                     <select class="form-select form-select-sm" name="price_resolution" {% if price_review_locked %}disabled{% endif %}>
@@ -504,13 +590,14 @@
                                     <button type="submit" class="btn btn-outline-primary btn-sm w-100" {% if price_review_locked %}disabled{% endif %}>Save Price Choice</button>
                                 </form>
                             </div>
-                            {% elif can_manage_sales_imports and row.product_id is none %}
+                            {% elif can_manage_sales_imports and row.product_id is none and not review.location_is_skipped %}
                             <div class="vstack gap-2">
                                 <div class="small fw-semibold">Resolve product mapping</div>
                                 <form method="post" class="vstack gap-2 mb-2">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <input type="hidden" name="action" value="map_product">
                                     <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
+                                    <input type="hidden" name="location_filter" value="{{ active_location_filter }}">
                                     <input type="hidden" name="row_id" value="{{ row.id }}">
                                     <div
                                         data-terminal-product-mapping
@@ -524,7 +611,6 @@
                                                 class="form-control"
                                                 id="sales-import-product-{{ row.id }}-search"
                                                 name="target_product_search"
-                                                list="terminal-product-options"
                                                 data-role="product-search-input"
                                                 placeholder="Start typing to search by product name..."
                                                 autocomplete="off"
@@ -536,6 +622,7 @@
                                         <div class="form-text text-danger d-none" data-role="selection-error">
                                             Select a product from the suggestions before saving.
                                         </div>
+                                        <div class="list-group mt-2 d-none" data-role="product-search-results"></div>
                                     </div>
                                     <button type="submit" class="btn btn-primary btn-sm w-100">Save Mapping</button>
                                 </form>
@@ -544,7 +631,7 @@
                                     <div class="small text-muted">Opens the full product form so you can set pricing and recipe items before mapping it back to this import row.</div>
                                     {% if can_create_and_map %}
                                     <a
-                                        href="{{ url_for('product.create_product', sales_import_id=sales_import.id, import_row_id=row.id, return_location_id=selected_location.id) }}"
+                                        href="{{ url_for('product.create_product', sales_import_id=sales_import.id, import_row_id=row.id, return_location_id=selected_location.id, location_filter=active_location_filter) }}"
                                         class="btn btn-outline-primary btn-sm w-100"
                                     >
                                         Create + Map
@@ -555,6 +642,7 @@
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <input type="hidden" name="action" value="resolve_row_price">
                                     <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
+                                    <input type="hidden" name="location_filter" value="{{ active_location_filter }}">
                                     <input type="hidden" name="row_id" value="{{ row.id }}">
                                     <input type="hidden" name="price_resolution" value="skip">
                                     <div class="small text-muted">Skip this row without mapping a product.</div>
@@ -581,11 +669,13 @@
                             {% for row in selected_location.rows %}
                             {% set review = row_review_data.get(row.id, {}) %}
                             {% set row_has_error = review.requires_mapping or review.requires_price_resolution or review.has_price_conflict %}
-                            <tr class="{% if review.is_skipped %}table-secondary{% elif review.has_price_conflict %}table-warning-subtle{% elif review.requires_price_resolution %}table-danger-subtle{% endif %}">
+                            <tr class="{% if review.location_is_skipped or review.is_skipped %}table-secondary{% elif review.has_price_conflict %}table-warning-subtle{% elif review.requires_price_resolution %}table-danger-subtle{% endif %}">
                                 <td class="text-break">
                                     <div class="fw-semibold">{{ row.source_product_name }}</div>
                                     <div class="mt-1">
-                                        {% if review.is_skipped %}
+                                        {% if review.location_is_skipped %}
+                                        <span class="badge bg-secondary">Location Skipped</span>
+                                        {% elif review.is_skipped %}
                                         <span class="badge bg-secondary">Skipped</span>
                                         {% elif row_has_error %}
                                         <span class="badge bg-danger">Error</span>
@@ -621,6 +711,7 @@
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="action" value="resolve_row_price">
                                         <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
+                                        <input type="hidden" name="location_filter" value="{{ active_location_filter }}">
                                         <input type="hidden" name="row_id" value="{{ row.id }}">
                                         <div class="col-md-4">
                                             <label class="form-label mb-1">Price action</label>
@@ -654,7 +745,7 @@
                                 </td>
                             </tr>
                             {% endif %}
-                            {% if can_manage_sales_imports and row.product_id is none %}
+                            {% if can_manage_sales_imports and row.product_id is none and not review.location_is_skipped %}
                             <tr class="table-warning-subtle">
                                 <td colspan="5">
                                     <div class="small fw-semibold mb-2">Resolve product mapping for "{{ row.source_product_name }}"</div>
@@ -662,6 +753,7 @@
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="action" value="map_product">
                                         <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
+                                        <input type="hidden" name="location_filter" value="{{ active_location_filter }}">
                                         <input type="hidden" name="row_id" value="{{ row.id }}">
                                         <div
                                             class="col-md-8"
@@ -676,7 +768,6 @@
                                                     class="form-control"
                                                     id="sales-import-product-table-{{ row.id }}-search"
                                                     name="target_product_search"
-                                                    list="terminal-product-options"
                                                     data-role="product-search-input"
                                                     placeholder="Start typing to search by product name..."
                                                     autocomplete="off"
@@ -688,6 +779,7 @@
                                             <div class="form-text text-danger d-none" data-role="selection-error">
                                                 Select a product from the suggestions before saving.
                                             </div>
+                                            <div class="list-group mt-2 d-none" data-role="product-search-results"></div>
                                         </div>
                                         <div class="col-md-4">
                                             <button type="submit" class="btn btn-primary btn-sm w-100">Save Mapping</button>
@@ -703,7 +795,7 @@
                                         <div class="col-md-4">
                                             {% if can_create_and_map %}
                                             <a
-                                                href="{{ url_for('product.create_product', sales_import_id=sales_import.id, import_row_id=row.id, return_location_id=selected_location.id) }}"
+                                                href="{{ url_for('product.create_product', sales_import_id=sales_import.id, import_row_id=row.id, return_location_id=selected_location.id, location_filter=active_location_filter) }}"
                                                 class="btn btn-outline-primary btn-sm w-100"
                                             >
                                                 Create + Map
@@ -715,6 +807,7 @@
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="action" value="resolve_row_price">
                                         <input type="hidden" name="selected_location_id" value="{{ selected_location.id }}">
+                                        <input type="hidden" name="location_filter" value="{{ active_location_filter }}">
                                         <input type="hidden" name="row_id" value="{{ row.id }}">
                                         <input type="hidden" name="price_resolution" value="skip">
                                         <div class="col-md-8">
@@ -739,7 +832,11 @@
             </div>
         </div>
         {% else %}
+        {% if active_location_filter == 'issues' and all_location_count %}
+        <div class="alert alert-success mb-0">No locations with issues match the current filter. Switch back to all locations to review the rest of the file.</div>
+        {% else %}
         <div class="alert alert-info mb-0">No locations are available for this import.</div>
+        {% endif %}
         {% endif %}
     </div>
 </div>
@@ -753,6 +850,7 @@
                 {{ undo_confirm_form.hidden_tag() }}
                 <input type="hidden" name="action" value="undo_approved_import">
                 <input type="hidden" name="selected_location_id" value="{{ selected_location.id if selected_location else '' }}">
+                <input type="hidden" name="location_filter" value="{{ active_location_filter }}">
                 {% if reversal_warnings %}
                 <input type="hidden" name="confirm_reversal" value="1">
                 {% endif %}
@@ -791,6 +889,7 @@
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="action" value="delete_import">
                 <input type="hidden" name="selected_location_id" value="{{ selected_location.id if selected_location else '' }}">
+                <input type="hidden" name="location_filter" value="{{ active_location_filter }}">
                 <div class="modal-header">
                     <h5 class="modal-title" id="deleteImportModalLabel">Delete Import</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
