@@ -54,7 +54,7 @@ from app.models import (
     TerminalSaleLocationAlias,
     TerminalSalesResolutionState,
 )
-from app.services.notification_service import notify_users_for_category
+from app.services.notification_service import notify_users_for_event
 from app.services.pdf import render_stand_sheet_pdf
 from app.utils.activity import log_activity
 from app.utils.filter_state import (
@@ -1001,6 +1001,7 @@ event = Blueprint("event", __name__)
 def _notify_event_activity(
     event_obj: Event,
     *,
+    event_key: str,
     action: str,
     detail: str | None = None,
     sms_body: str | None = None,
@@ -1012,8 +1013,8 @@ def _notify_event_activity(
     )
     if detail:
         body = f"{body} {detail}"
-    notify_users_for_category(
-        category="events",
+    notify_users_for_event(
+        event_key=event_key,
         subject=f"Event {action}: {event_obj.name}",
         body=body,
         sms_body=sms_body or f"Event {action}: {event_obj.name}",
@@ -1151,7 +1152,9 @@ def create_event():
         db.session.add(ev)
         db.session.commit()
         log_activity(f"Created event {ev.id}")
-        _notify_event_activity(ev, action="created")
+        _notify_event_activity(
+            ev, event_key="event_created", action="created"
+        )
         flash("Event created")
         return redirect(url_for("event.view_events"))
     return render_template(
@@ -1188,7 +1191,9 @@ def create_event_ajax():
         db.session.add(ev)
         db.session.commit()
         log_activity(f"Created event {ev.id}")
-        _notify_event_activity(ev, action="created")
+        _notify_event_activity(
+            ev, event_key="event_created", action="created"
+        )
         return render_template(
             "events/_event_row.html", e=ev, type_labels=dict(EVENT_TYPES)
         )
@@ -1227,7 +1232,9 @@ def edit_event(event_id):
         ev.estimated_sales = form.estimated_sales.data
         db.session.commit()
         log_activity(f"Edited event {ev.id}")
-        _notify_event_activity(ev, action="updated")
+        _notify_event_activity(
+            ev, event_key="event_updated", action="updated"
+        )
         flash("Event updated")
         return redirect(url_for("event.view_events"))
     return render_template(
@@ -1253,8 +1260,8 @@ def delete_event(event_id):
     db.session.delete(ev)
     db.session.commit()
     log_activity(f"Deleted event {event_id}")
-    notify_users_for_category(
-        category="events",
+    notify_users_for_event(
+        event_key="event_deleted",
         subject=f"Event deleted: {event_name}",
         body=f"Event '{event_name}' (#{event_id}) was deleted by {current_user.email}.",
         sms_body=f"Event deleted: {event_name}",
@@ -1588,6 +1595,7 @@ def add_location(event_id):
         )
         _notify_event_activity(
             ev,
+            event_key="event_locations_assigned",
             action="updated",
             detail=f"Assigned locations: {location_list}.",
             sms_body=f"Event locations updated: {ev.name}",
@@ -5659,7 +5667,7 @@ def close_event(event_id):
     ev.closed = True
     db.session.commit()
     log_activity(f"Closed event {event_id}")
-    _notify_event_activity(ev, action="closed")
+    _notify_event_activity(ev, event_key="event_closed", action="closed")
     flash("Event closed")
     return redirect(url_for("event.view_events"))
 

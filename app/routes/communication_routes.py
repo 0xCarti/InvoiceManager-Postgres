@@ -23,7 +23,7 @@ from app.services.communication_service import (
     sync_dynamic_bulletin_recipients,
     visible_message_history,
 )
-from app.services.notification_service import notify_users_for_category
+from app.services.notification_service import notify_users_for_event
 from app.utils.activity import log_activity
 from app.utils.dashboard_bulletins import (
     load_saved_dashboard_bulletin_ids,
@@ -245,8 +245,8 @@ def _sender_label() -> str:
 
 def _notify_message_recipients(message: Communication, recipients) -> None:
     sender_label = _sender_label()
-    notify_users_for_category(
-        category="messages",
+    notify_users_for_event(
+        event_key="message_received",
         recipients=recipients,
         subject=f"New message from {sender_label}: {message.subject}",
         body=(
@@ -260,8 +260,8 @@ def _notify_message_recipients(message: Communication, recipients) -> None:
 
 def _notify_bulletin_recipients(bulletin: Communication, recipients) -> None:
     sender_label = _sender_label()
-    notify_users_for_category(
-        category="bulletins",
+    notify_users_for_event(
+        event_key="bulletin_posted",
         recipients=recipients,
         subject=f"New bulletin: {bulletin.subject}",
         body=(

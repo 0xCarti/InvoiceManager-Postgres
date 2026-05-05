@@ -137,21 +137,41 @@ def test_profile_saves_operational_notification_preferences(client, app):
     with app.app_context():
         user_id = _create_user("profile-operational@example.com", password="pass")
 
+    transfer_created_email = notification_service.notification_preference_input_name(
+        "transfer_created", "email"
+    )
+    transfer_completed_text = notification_service.notification_preference_input_name(
+        "transfer_completed", "text"
+    )
+    purchase_received_email = notification_service.notification_preference_input_name(
+        "purchase_order_received", "email"
+    )
+    event_locations_text = notification_service.notification_preference_input_name(
+        "event_locations_assigned", "text"
+    )
+    message_email = notification_service.notification_preference_input_name(
+        "message_received", "email"
+    )
+    bulletin_text = notification_service.notification_preference_input_name(
+        "bulletin_posted", "text"
+    )
+    location_archived_email = notification_service.notification_preference_input_name(
+        "location_archived", "email"
+    )
+
     with client:
         login(client, "profile-operational@example.com", "pass")
         response = client.post(
             "/auth/profile",
             data={
                 "phone_number": "2045551111",
-                "notify_transfers_email": "y",
-                "notify_transfers": "y",
-                "notify_purchase_orders_email": "y",
-                "notify_purchase_orders_text": "y",
-                "notify_events_email": "y",
-                "notify_users_text": "y",
-                "notify_messages_email": "y",
-                "notify_bulletins_text": "y",
-                "notify_locations_email": "y",
+                transfer_created_email: "y",
+                transfer_completed_text: "y",
+                purchase_received_email: "y",
+                event_locations_text: "y",
+                message_email: "y",
+                bulletin_text: "y",
+                location_archived_email: "y",
             },
             follow_redirects=True,
         )
@@ -162,15 +182,16 @@ def test_profile_saves_operational_notification_preferences(client, app):
         user = db.session.get(User, user_id)
         assert user is not None
         assert user.phone_number == "2045551111"
-        assert user.notify_transfers_email is True
-        assert user.notify_transfers is True
-        assert user.notify_purchase_orders_email is True
-        assert user.notify_purchase_orders_text is True
-        assert user.notify_events_email is True
-        assert user.notify_users_text is True
-        assert user.notify_messages_email is True
-        assert user.notify_bulletins_text is True
-        assert user.notify_locations_email is True
+        assert user.notification_preferences["transfer_created"]["email"] is True
+        assert user.notification_preferences["transfer_completed"]["text"] is True
+        assert user.notification_preferences["purchase_order_received"]["email"] is True
+        assert user.notification_preferences["event_locations_assigned"]["text"] is True
+        assert user.notification_preferences["message_received"]["email"] is True
+        assert user.notification_preferences["bulletin_posted"]["text"] is True
+        assert user.notification_preferences["location_archived"]["email"] is True
+        assert user.notification_preferences["transfer_created"]["text"] is False
+        assert user.notify_transfers_email is False
+        assert user.notify_transfers is False
 
 
 def test_transfer_notifications_cover_create_and_complete(client, app, monkeypatch):
@@ -213,6 +234,61 @@ def test_transfer_notifications_cover_create_and_complete(client, app, monkeypat
     assert response.status_code == 200
     assert any("Transfer completed" in email["subject"] for email in sent["emails"])
     assert any("Transfer completed" in text["body"] for text in sent["texts"])
+
+
+def test_transfer_notifications_can_be_scoped_to_created_only(
+    client, app, monkeypatch
+):
+    sent = _capture_notifications(monkeypatch)
+    with app.app_context():
+        setup = _create_transfer_setup()
+        watcher = db.session.get(User, setup["watcher_id"])
+        actor = db.session.get(User, setup["actor_id"])
+        assert watcher is not None
+        assert actor is not None
+        watcher.notify_transfers = False
+        watcher.notify_transfers_email = False
+        watcher.notification_preferences = {
+            "transfer_created": {"email": True, "text": True},
+            "transfer_completed": {"email": False, "text": False},
+            "transfer_reopened": {"email": False, "text": False},
+            "transfer_updated": {"email": False, "text": False},
+        }
+        db.session.commit()
+        actor_email = actor.email
+
+    with client:
+        login(client, actor_email, "pass")
+        response = client.post(
+            "/transfers/add",
+            data={
+                "from_location_id": setup["from_location_id"],
+                "to_location_id": setup["to_location_id"],
+                "items-0-item": setup["item_id"],
+                "items-0-quantity": 2,
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+
+    with app.app_context():
+        transfer = Transfer.query.order_by(Transfer.id.desc()).first()
+        assert transfer is not None
+        transfer_id = transfer.id
+
+    with client:
+        login(client, actor_email, "pass")
+        response = client.post(
+            f"/transfers/complete/{transfer_id}",
+            data={"submit": "y"},
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert any("Transfer created" in email["subject"] for email in sent["emails"])
+    assert any("Transfer created" in text["body"] for text in sent["texts"])
+    assert not any("Transfer completed" in email["subject"] for email in sent["emails"])
+    assert not any("Transfer completed" in text["body"] for text in sent["texts"])
 
 
 def test_purchase_order_notifications_cover_lifecycle(

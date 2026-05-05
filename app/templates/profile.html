@@ -310,110 +310,59 @@
                             </div>
                             <hr class="my-2">
                             <div class="small text-muted mb-2">Operational notifications</div>
-                            <div class="table-responsive">
-                                <table class="table table-sm profile-notification-table">
-                                    <thead>
-                                        <tr>
-                                            <th scope="col">Category</th>
-                                            <th scope="col" class="text-center">Email</th>
-                                            <th scope="col" class="text-center">Text</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr>
-                                            <td>Transfer activity</td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_transfers_email(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_transfers(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                        <tr>
-                                            <td>Purchase orders</td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_purchase_orders_email(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_purchase_orders_text(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                        <tr>
-                                            <td>Event changes</td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_events_email(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_events_text(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                        <tr>
-                                            <td>User changes</td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_users_email(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_users_text(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                        <tr>
-                                            <td>Direct messages</td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_messages_email(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_messages_text(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                        <tr>
-                                            <td>Bulletins</td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_bulletins_email(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_bulletins_text(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                        <tr>
-                                            <td>Location changes</td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_locations_email(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_locations_text(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
+                            {% for group in operational_notification_groups %}
+                            <div class="border rounded p-3 mb-3">
+                                <div class="d-flex justify-content-between align-items-center mb-2 gap-2">
+                                    <div class="fw-semibold">{{ group.label }}</div>
+                                    <div class="small text-muted">{{ group.selected_count }} of {{ group.event_count }} enabled</div>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="table table-sm profile-notification-table mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th scope="col">Notification</th>
+                                                <th scope="col" class="text-center">Email</th>
+                                                <th scope="col" class="text-center">Text</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for event_pref in group.events %}
+                                            <tr>
+                                                <td>
+                                                    <div class="fw-semibold">{{ event_pref.label }}</div>
+                                                    <div class="text-muted small">{{ event_pref.description }}</div>
+                                                </td>
+                                                <td class="text-center">
+                                                    <div class="form-check profile-notification-check">
+                                                        <input
+                                                            class="form-check-input"
+                                                            type="checkbox"
+                                                            name="{{ event_pref.email_input_name }}"
+                                                            id="{{ event_pref.email_input_id }}"
+                                                            aria-label="{{ event_pref.label }} email notification"
+                                                            {% if event_pref.email_enabled %}checked{% endif %}
+                                                        >
+                                                    </div>
+                                                </td>
+                                                <td class="text-center">
+                                                    <div class="form-check profile-notification-check">
+                                                        <input
+                                                            class="form-check-input"
+                                                            type="checkbox"
+                                                            name="{{ event_pref.text_input_name }}"
+                                                            id="{{ event_pref.text_input_id }}"
+                                                            aria-label="{{ event_pref.label }} text notification"
+                                                            {% if event_pref.text_enabled %}checked{% endif %}
+                                                        >
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
+                            {% endfor %}
                             <hr class="my-2">
                             <div class="small text-muted mb-2">Schedule notifications</div>
                             <div class="table-responsive">

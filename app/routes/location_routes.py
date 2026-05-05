@@ -38,7 +38,7 @@ from app.models import (
     TerminalSaleLocationAlias,
     Transfer,
 )
-from app.services.notification_service import notify_users_for_category
+from app.services.notification_service import notify_users_for_event
 from app.services.pdf import render_stand_sheet_pdf
 from app.utils.activity import log_activity
 from app.utils.filter_state import (
@@ -70,6 +70,7 @@ location = Blueprint("locations", __name__)
 def _notify_location_activity(
     location_obj: Location,
     *,
+    event_key: str,
     action: str,
     detail: str | None = None,
     sms_body: str | None = None,
@@ -80,8 +81,8 @@ def _notify_location_activity(
     )
     if detail:
         body = f"{body} {detail}"
-    notify_users_for_category(
-        category="locations",
+    notify_users_for_event(
+        event_key=event_key,
         subject=f"Location {action}: {location_obj.name}",
         body=body,
         sms_body=sms_body or f"Location {action}: {location_obj.name}",
@@ -205,7 +206,9 @@ def add_location():
             apply_menu_products(new_location, None)
         db.session.commit()
         log_activity(f"Added location {new_location.name}")
-        _notify_location_activity(new_location, action="created")
+        _notify_location_activity(
+            new_location, event_key="location_created", action="created"
+        )
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
             return jsonify(
                 {
@@ -289,7 +292,9 @@ def edit_location(location_id):
             set_location_menu(location, None)
         db.session.commit()
         log_activity(f"Edited location {location.id}")
-        _notify_location_activity(location, action="updated")
+        _notify_location_activity(
+            location, event_key="location_updated", action="updated"
+        )
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
             return jsonify(
                 {
@@ -1241,6 +1246,8 @@ def delete_location(location_id):
     location.archived = True
     db.session.commit()
     log_activity(f"Archived location {location.id}")
-    _notify_location_activity(location, action="archived")
+    _notify_location_activity(
+        location, event_key="location_archived", action="archived"
+    )
     flash("Location archived successfully!")
     return redirect(url_for("locations.view_locations"))

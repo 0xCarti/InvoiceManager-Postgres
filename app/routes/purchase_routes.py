@@ -69,7 +69,7 @@ from app.services.purchase_imports import (
     serialize_parsed_line,
     update_or_create_vendor_alias,
 )
-from app.services.notification_service import notify_users_for_category
+from app.services.notification_service import notify_users_for_event
 
 import datetime
 import json
@@ -86,6 +86,7 @@ purchase = Blueprint("purchase", __name__)
 def _notify_purchase_order_activity(
     po: PurchaseOrder,
     *,
+    event_key: str,
     action: str,
     detail: str | None = None,
     sms_body: str | None = None,
@@ -97,8 +98,8 @@ def _notify_purchase_order_activity(
     )
     if detail:
         body = f"{body} {detail}"
-    notify_users_for_category(
-        category="purchase_orders",
+    notify_users_for_event(
+        event_key=event_key,
         subject=f"Purchase order {action}: #{po.id}",
         body=body,
         sms_body=sms_body or f"PO {action}: #{po.id} {vendor_name}",
@@ -1344,7 +1345,9 @@ def create_purchase_order():
             db.session.commit()
             _clear_purchase_upload_state()
             log_activity(f"Created purchase order {po.id}")
-            _notify_purchase_order_activity(po, action="created")
+            _notify_purchase_order_activity(
+                po, event_key="purchase_order_created", action="created"
+            )
             flash("Purchase order created successfully!", "success")
             return redirect(url_for("purchase.view_purchase_orders"))
 
@@ -1612,7 +1615,9 @@ def edit_purchase_order(po_id):
 
             db.session.commit()
             log_activity(f"Edited purchase order {po.id}")
-            _notify_purchase_order_activity(po, action="updated")
+            _notify_purchase_order_activity(
+                po, event_key="purchase_order_updated", action="updated"
+            )
             flash("Purchase order updated successfully!", "success")
             return redirect(url_for("purchase.view_purchase_orders"))
 
@@ -1693,7 +1698,11 @@ def mark_purchase_order_ordered(po_id):
         db.session.add(po)
         db.session.commit()
         log_activity(f"Marked purchase order {po.id} as ordered")
-        _notify_purchase_order_activity(po, action="marked as ordered")
+        _notify_purchase_order_activity(
+            po,
+            event_key="purchase_order_marked_ordered",
+            action="marked as ordered",
+        )
         flash("Purchase order marked as ordered.", "success")
     else:
         flash("This purchase order is already marked as ordered.", "info")
@@ -2057,6 +2066,7 @@ def receive_invoice(po_id):
         log_activity(f"Received invoice {invoice.id} for PO {po.id}")
         _notify_purchase_order_activity(
             po,
+            event_key="purchase_order_received",
             action="received",
             detail=(
                 f"Invoice #{invoice.id} was received into "
@@ -2476,6 +2486,7 @@ def reverse_purchase_invoice(invoice_id):
     log_activity(f"Reversed invoice {invoice_id} for PO {po.id}")
     _notify_purchase_order_activity(
         po,
+        event_key="purchase_order_reversed",
         action="reversed",
         detail=f"Invoice #{invoice_id} was reversed.",
         sms_body=f"PO reversed: #{po.id} {po.vendor_name}",

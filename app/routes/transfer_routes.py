@@ -32,7 +32,7 @@ from app.models import (
     TransferItem,
     User,
 )
-from app.services.notification_service import notify_users_for_category
+from app.services.notification_service import notify_users_for_event
 from app.utils.activity import log_activity
 from app.utils.numeric import coerce_float
 from app.utils.pagination import build_pagination_args, get_per_page
@@ -42,12 +42,14 @@ from app.utils.text import normalize_request_text_filter
 transfer = Blueprint("transfer", __name__)
 
 
-def _notify_transfer_activity(transfer_obj: Transfer, *, action: str) -> None:
+def _notify_transfer_activity(
+    transfer_obj: Transfer, *, event_key: str, action: str
+) -> None:
     route_summary = (
         f"{transfer_obj.from_location_name} -> {transfer_obj.to_location_name}"
     )
-    notify_users_for_category(
-        category="transfers",
+    notify_users_for_event(
+        event_key=event_key,
         subject=f"Transfer {action}: #{transfer_obj.id}",
         body=(
             f"Transfer #{transfer_obj.id} ({route_summary}) "
@@ -468,7 +470,9 @@ def add_transfer():
             db.session.commit()
             log_activity(f"Added transfer {transfer.id}")
             socketio.emit("new_transfer", {"message": "New transfer added"})
-            _notify_transfer_activity(transfer, action="created")
+            _notify_transfer_activity(
+                transfer, event_key="transfer_created", action="created"
+            )
 
             flash("Transfer added successfully!", "success")
             return redirect(url_for("transfer.view_transfers"))
@@ -519,7 +523,9 @@ def ajax_add_transfer():
             db.session.commit()
             log_activity(f"Added transfer {transfer.id}")
             socketio.emit("new_transfer", {"message": "New transfer added"})
-            _notify_transfer_activity(transfer, action="created")
+            _notify_transfer_activity(
+                transfer, event_key="transfer_created", action="created"
+            )
             row_html = render_template(
                 "transfers/_transfer_row.html",
                 transfer=transfer,
@@ -555,6 +561,7 @@ def edit_transfer(transfer_id):
             if transfer_was_reopened:
                 _notify_transfer_activity(
                     transfer,
+                    event_key="transfer_updated",
                     action="updated and reopened",
                 )
                 flash(
@@ -736,7 +743,9 @@ def complete_transfer(transfer_id):
     )
     db.session.commit()
     log_activity(f"Completed transfer {transfer.id}")
-    _notify_transfer_activity(transfer, action="completed")
+    _notify_transfer_activity(
+        transfer, event_key="transfer_completed", action="completed"
+    )
     flash("Transfer marked as complete!", "success")
     return redirect(url_for("transfer.view_transfers"))
 
@@ -811,7 +820,9 @@ def complete_transfer_item(transfer_item_id):
         f"Completed transfer item {transfer_item.id} on transfer {transfer.id}"
     )
     if not was_completed and transfer.completed:
-        _notify_transfer_activity(transfer, action="completed")
+        _notify_transfer_activity(
+            transfer, event_key="transfer_completed", action="completed"
+        )
     flash("Transfer item marked as complete!", "success")
     return redirect(url_for("transfer.view_transfer", transfer_id=transfer.id))
 
@@ -868,7 +879,9 @@ def uncomplete_transfer(transfer_id):
     )
     db.session.commit()
     log_activity(f"Uncompleted transfer {transfer.id}")
-    _notify_transfer_activity(transfer, action="reopened")
+    _notify_transfer_activity(
+        transfer, event_key="transfer_reopened", action="reopened"
+    )
     flash("Transfer marked as not completed.", "success")
     return redirect(url_for("transfer.view_transfers"))
 
@@ -942,7 +955,9 @@ def uncomplete_transfer_item(transfer_item_id):
         f"Uncompleted transfer item {transfer_item.id} on transfer {transfer.id}"
     )
     if was_completed and not transfer.completed:
-        _notify_transfer_activity(transfer, action="reopened")
+        _notify_transfer_activity(
+            transfer, event_key="transfer_reopened", action="reopened"
+        )
     flash("Transfer item marked as not completed.", "success")
     return redirect(url_for("transfer.view_transfer", transfer_id=transfer.id))
 

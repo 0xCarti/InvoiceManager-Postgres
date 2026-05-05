@@ -3785,24 +3785,6 @@ class NotificationForm(FlaskForm):
     phone_number = StringField(
         "Phone Number", validators=[Optional(), Length(max=20)]
     )
-    notify_transfers_email = BooleanField("Email for transfer activity")
-    notify_transfers = BooleanField("Text for transfer activity")
-    notify_purchase_orders_email = BooleanField(
-        "Email for purchase order activity"
-    )
-    notify_purchase_orders_text = BooleanField(
-        "Text for purchase order activity"
-    )
-    notify_events_email = BooleanField("Email for event activity")
-    notify_events_text = BooleanField("Text for event activity")
-    notify_users_email = BooleanField("Email for user changes")
-    notify_users_text = BooleanField("Text for user changes")
-    notify_messages_email = BooleanField("Email for direct messages")
-    notify_messages_text = BooleanField("Text for direct messages")
-    notify_bulletins_email = BooleanField("Email for bulletins")
-    notify_bulletins_text = BooleanField("Text for bulletins")
-    notify_locations_email = BooleanField("Email for location changes")
-    notify_locations_text = BooleanField("Text for location changes")
     notify_schedule_post_email = BooleanField("Email when my schedule is posted")
     notify_schedule_post_text = BooleanField("Text when my schedule is posted")
     notify_schedule_changes_email = BooleanField(

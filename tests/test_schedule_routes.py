@@ -49,7 +49,6 @@ def test_profile_saves_schedule_notification_preferences(client, app):
             "/auth/profile",
             data={
                 "phone_number": "2045551111",
-                "notify_transfers": "y",
                 "notify_schedule_post_email": "y",
                 "notify_schedule_post_text": "y",
                 "notify_schedule_changes_email": "y",

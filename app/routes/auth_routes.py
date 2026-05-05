@@ -105,8 +105,11 @@ from app.services.purchase_imports import (
     update_or_create_vendor_alias,
 )
 from app.services.notification_service import (
-    notify_users_for_category,
-    operational_notification_fields,
+    notification_preference_input_id,
+    notification_preference_input_name,
+    notify_users_for_event,
+    operational_notification_groups,
+    resolved_notification_preferences,
 )
 from app.permissions import (
     get_default_landing_endpoint,
@@ -682,7 +685,7 @@ def verify_reset_token(token: str, max_age: int = 3600):
     return user
 
 
-PROFILE_NOTIFICATION_BOOLEAN_FIELDS = operational_notification_fields() + (
+PROFILE_NOTIFICATION_BOOLEAN_FIELDS = (
     "notify_schedule_post_email",
     "notify_schedule_post_text",
     "notify_schedule_changes_email",
@@ -700,6 +703,54 @@ def _build_notification_form(user: User) -> NotificationForm:
     return NotificationForm(**form_kwargs)
 
 
+def _build_operational_notification_groups(user: User):
+    resolved_preferences = resolved_notification_preferences(user)
+    groups = []
+    for group in operational_notification_groups():
+        event_rows = []
+        for definition in group["events"]:
+            preferences = resolved_preferences.get(
+                definition.key, {"email": False, "text": False}
+            )
+            email_input_name = notification_preference_input_name(
+                definition.key, "email"
+            )
+            text_input_name = notification_preference_input_name(
+                definition.key, "text"
+            )
+            event_rows.append(
+                {
+                    "key": definition.key,
+                    "label": definition.label,
+                    "description": definition.description,
+                    "email_enabled": bool(preferences.get("email", False)),
+                    "text_enabled": bool(preferences.get("text", False)),
+                    "email_input_name": email_input_name,
+                    "text_input_name": text_input_name,
+                    "email_input_id": notification_preference_input_id(
+                        definition.key, "email"
+                    ),
+                    "text_input_id": notification_preference_input_id(
+                        definition.key, "text"
+                    ),
+                }
+            )
+        groups.append(
+            {
+                "key": group["key"],
+                "label": group["label"],
+                "events": event_rows,
+                "selected_count": sum(
+                    1
+                    for row in event_rows
+                    if row["email_enabled"] or row["text_enabled"]
+                ),
+                "event_count": len(event_rows),
+            }
+        )
+    return groups
+
+
 def _notifications_submitted(form_data) -> bool:
     return any(field_name in form_data for field_name in PROFILE_NOTIFICATION_FIELDS)
 
@@ -708,6 +759,18 @@ def _apply_notification_preferences(user: User, form: NotificationForm) -> None:
     user.phone_number = form.phone_number.data or None
     for field_name in PROFILE_NOTIFICATION_BOOLEAN_FIELDS:
         setattr(user, field_name, bool(getattr(form, field_name).data))
+    granular_preferences = {}
+    for group in operational_notification_groups():
+        for definition in group["events"]:
+            granular_preferences[definition.key] = {
+                "email": notification_preference_input_name(
+                    definition.key, "email"
+                )
+                in request.form,
+                "text": notification_preference_input_name(definition.key, "text")
+                in request.form,
+            }
+    user.notification_preferences = granular_preferences
 
 
 @auth.route("/login", methods=["GET", "POST"])
@@ -847,6 +910,7 @@ def profile():
     elif notifications_submitted and notif_form.validate_on_submit():
         _apply_notification_preferences(current_user, notif_form)
         db.session.commit()
+        log_activity(f"Updated notification preferences for user {current_user.id}")
         return redirect(
             url_for("auth.profile", notifications_status="updated")
         )
@@ -867,6 +931,9 @@ def profile():
         form=form,
         tz_form=tz_form,
         notif_form=notif_form,
+        operational_notification_groups=_build_operational_notification_groups(
+            current_user
+        ),
         status_messages=status_messages,
         password_submitted=password_submitted,
         timezone_submitted=timezone_submitted,
@@ -939,6 +1006,7 @@ def user_profile(user_id):
     elif notifications_submitted and notif_form.validate_on_submit():
         _apply_notification_preferences(user, notif_form)
         db.session.commit()
+        log_activity(f"Updated notification preferences for user {user.id}")
         return redirect(
             url_for(
                 "admin.user_profile",
@@ -963,6 +1031,7 @@ def user_profile(user_id):
         form=form,
         tz_form=tz_form,
         notif_form=notif_form,
+        operational_notification_groups=_build_operational_notification_groups(user),
         status_messages=status_messages,
         password_submitted=password_submitted,
         timezone_submitted=timezone_submitted,
@@ -986,8 +1055,8 @@ def activate_user(user_id):
     user.active = True
     db.session.commit()
     log_activity(f"Activated user {user_id}")
-    notify_users_for_category(
-        category="users",
+    notify_users_for_event(
+        event_key="user_activated",
         subject=f"User activated: {user.email}",
         body=f"{current_user.email} activated user {user.email}.",
         sms_body=f"User activated: {user.email}",
@@ -1049,8 +1118,8 @@ def users():
                     activity_message=f"Invited user {email}",
                 )
                 if invitation_sent:
-                    notify_users_for_category(
-                        category="users",
+                    notify_users_for_event(
+                        event_key="user_invited",
                         subject=f"User invited: {email}",
                         body=f"{current_user.email} invited {email} to InvoiceManager.",
                         sms_body=f"User invited: {email}",
@@ -1075,6 +1144,7 @@ def users():
         user = db.session.get(User, user_id)
         if user:
             notification_payload = None
+            notification_event_key = None
             if action == "toggle_active":
                 if _is_pending_invited_user(user):
                     flash(
@@ -1099,6 +1169,9 @@ def users():
                         f"User {'activated' if user.active else 'deactivated'}: {user.email}"
                     ),
                 }
+                notification_event_key = (
+                    "user_activated" if user.active else "user_deactivated"
+                )
             elif action == "resend_invite":
                 if not _is_pending_invited_user(user):
                     flash("Only pending invites can be re-sent.", "warning")
@@ -1129,13 +1202,14 @@ def users():
                     ),
                     "sms_body": f"User access updated: {user.email}",
                 }
+                notification_event_key = "user_access_updated"
             else:
                 flash("Unsupported action.", "danger")
                 return redirect(url_for("admin.users"))
             db.session.commit()
-            if notification_payload:
-                notify_users_for_category(
-                    category="users",
+            if notification_payload and notification_event_key:
+                notify_users_for_event(
+                    event_key=notification_event_key,
                     exclude_user_ids={current_user.id},
                     **notification_payload,
                 )
@@ -1211,8 +1285,8 @@ def delete_user(user_id):
         db.session.delete(user_to_delete)
         db.session.commit()
         log_activity(f"Deleted pending invite {invite_email}")
-        notify_users_for_category(
-            category="users",
+        notify_users_for_event(
+            event_key="user_pending_invite_deleted",
             subject=f"Pending invite deleted: {invite_email}",
             body=f"{current_user.email} deleted the pending invite for {invite_email}.",
             sms_body=f"Pending invite deleted: {invite_email}",
@@ -1223,8 +1297,8 @@ def delete_user(user_id):
     user_to_delete.active = False
     db.session.commit()
     log_activity(f"Archived user {user_id}")
-    notify_users_for_category(
-        category="users",
+    notify_users_for_event(
+        event_key="user_archived",
         subject=f"User archived: {user_to_delete.email}",
         body=f"{current_user.email} archived user {user_to_delete.email}.",
         sms_body=f"User archived: {user_to_delete.email}",

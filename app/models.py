@@ -5,7 +5,7 @@ from typing import Optional
 
 from flask import current_app, has_app_context
 from flask_login import UserMixin
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
 
@@ -199,6 +199,12 @@ class User(UserMixin, db.Model):
     )
     notify_locations_text = db.Column(
         db.Boolean, default=False, nullable=False, server_default="0"
+    )
+    notification_preferences = db.Column(
+        db.JSON,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
     )
     hourly_rate = db.Column(
         db.Float, nullable=True, default=0.0, server_default="0.0"
