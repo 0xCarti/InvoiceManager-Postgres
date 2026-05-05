@@ -107,6 +107,27 @@ def test_purchase_order_upload_script_supports_drop_fallback():
     assert "window.location.assign(response.url);" in content
 
 
+def test_vendor_alias_resolution_template_and_script_wire_dynamic_unit_options():
+    template_content = (
+        ROOT / "app/templates/purchase_orders/resolve_vendor_items.html"
+    ).read_text(encoding="utf-8")
+    script_content = (
+        ROOT / "app/static/js/vendor_alias_resolution.js"
+    ).read_text(encoding="utf-8")
+
+    assert "data-units-map=" in template_content
+    assert "alias-item-select" in template_content
+    assert "alias-unit-select" in template_content
+    assert "initVendorAliasResolution({" in template_content
+
+    assert "function populateUnits(select, itemId, preferredUnitId)" in script_content
+    assert "const rawUnits = unitsMap[itemId] || [];" in script_content
+    assert "if (Array.isArray(unit)) {" in script_content
+    assert "receiving_default: Boolean(unit[2])," in script_content
+    assert "itemSelect.addEventListener('change'" in script_content
+    assert "populateUnits(unitSelect, event.target.value);" in script_content
+
+
 def test_receive_invoice_template_shows_inline_deposit_field():
     content = (
         ROOT / "app/templates/purchase_orders/receive_invoice.html"

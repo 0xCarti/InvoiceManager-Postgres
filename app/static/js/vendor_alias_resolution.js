@@ -438,7 +438,17 @@ function initVendorAliasResolution(config) {
         if (!select) {
             return;
         }
-        const units = unitsMap[itemId] || [];
+        const rawUnits = unitsMap[itemId] || [];
+        const units = rawUnits.map((unit) => {
+            if (Array.isArray(unit)) {
+                return {
+                    id: unit[0],
+                    name: unit[1],
+                    receiving_default: Boolean(unit[2]),
+                };
+            }
+            return unit;
+        });
         const selected = preferredUnitId || select.getAttribute('data-selected');
         const currentValue = select.value;
         select.innerHTML = '';

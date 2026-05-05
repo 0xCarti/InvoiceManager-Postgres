@@ -1116,7 +1116,17 @@ def resolve_vendor_items():
         .all()
     )
     item_choices = [(item.id, item.name) for item in items]
-    units_map = {item.id: [(unit.id, unit.name) for unit in item.units] for item in items}
+    units_map = {
+        item.id: [
+            {
+                "id": unit.id,
+                "name": unit.name,
+                "receiving_default": bool(unit.receiving_default),
+            }
+            for unit in item.units
+        ]
+        for item in items
+    }
 
     for idx, row_form in enumerate(form.rows):
         parsed = unresolved_lines[idx]
