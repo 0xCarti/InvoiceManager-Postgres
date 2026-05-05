@@ -431,3 +431,229 @@ def test_confirm_location_uses_reporting_unit_prices_for_liquor_items(app, clien
     assert stand_entry["price"] == pytest.approx(8.25)
     assert stand_entry["variance"] == pytest.approx(1.0)
     assert stand_entry["variance_amount"] == pytest.approx(8.25)
+
+
+def test_confirm_location_uses_recipe_yield_for_item_prices_and_sales(app, client):
+    with app.app_context():
+        app.config["BASE_UNIT_CONVERSIONS"] = {
+            **DEFAULT_BASE_UNIT_CONVERSIONS,
+            "millilitre": "ounce",
+        }
+
+        user = User(
+            email="yield-confirm@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        location = Location(name="Wine Tent")
+        product = Product(
+            name="House Wine Glass",
+            price=10.0,
+            cost=3.0,
+            recipe_yield_quantity=5.0,
+            recipe_yield_unit="glass",
+        )
+        item = Item(name="Wine Bottle", base_unit="millilitre")
+        event = Event(
+            name="Yield Event",
+            start_date=date(2024, 4, 2),
+            end_date=date(2024, 4, 2),
+        )
+
+        db.session.add_all([user, location, product, item, event])
+        db.session.commit()
+        grant_event_permissions(user)
+
+        ounce_unit = ItemUnit(
+            item_id=item.id,
+            name="ounce",
+            factor=29.5735295625,
+            receiving_default=True,
+            transfer_default=True,
+        )
+        db.session.add(ounce_unit)
+        db.session.commit()
+
+        recipe = ProductRecipeItem(
+            product_id=product.id,
+            item_id=item.id,
+            unit=ounce_unit,
+            quantity=25.0,
+            countable=True,
+        )
+        location.products.append(product)
+        db.session.add_all(
+            [
+                recipe,
+                LocationStandItem(
+                    location_id=location.id,
+                    item_id=item.id,
+                    expected_count=0,
+                ),
+            ]
+        )
+        db.session.commit()
+
+        event_location = EventLocation(event=event, location=location)
+        db.session.add(event_location)
+        db.session.commit()
+
+        db.session.add_all(
+            [
+                TerminalSale(
+                    event_location_id=event_location.id,
+                    product_id=product.id,
+                    quantity=2.0,
+                ),
+                EventStandSheetItem(
+                    event_location_id=event_location.id,
+                    item_id=item.id,
+                    opening_count=15 * 29.5735295625,
+                    transferred_in=0,
+                    transferred_out=0,
+                    adjustments=0,
+                    eaten=0,
+                    spoiled=0,
+                    closing_count=0,
+                ),
+            ]
+        )
+        db.session.commit()
+
+        event_id = event.id
+        event_location_id = event_location.id
+        item_id = item.id
+        user_email = user.email
+
+    with captured_templates(app) as templates:
+        login_response = login(client, user_email, "pass")
+        assert login_response.status_code == 200
+        response = client.get(f"/events/{event_id}/locations/{event_location_id}/confirm")
+        assert response.status_code == 200
+
+    template_matches = [
+        (template, context)
+        for template, context in templates
+        if template.name == "events/confirm_location.html"
+    ]
+    assert template_matches, "Expected the confirm location template to render"
+    _, context = template_matches[0]
+
+    stand_entry = next(
+        entry for entry in context["stand_variances"] if entry["item"].id == item_id
+    )
+    assert stand_entry["price"] == pytest.approx(2.0)
+    assert stand_entry["variance"] == pytest.approx(5.0)
+    assert stand_entry["variance_amount"] == pytest.approx(10.0)
+
+
+def test_closed_event_report_uses_recipe_yield_for_physical_amounts(app, client):
+    with app.app_context():
+        app.config["BASE_UNIT_CONVERSIONS"] = {
+            **DEFAULT_BASE_UNIT_CONVERSIONS,
+            "millilitre": "ounce",
+        }
+
+        user = User(
+            email="yield-close-report@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        location = Location(name="Close Report Wine Stand")
+        product = Product(
+            name="Close Report Wine",
+            price=10.0,
+            cost=3.0,
+            recipe_yield_quantity=5.0,
+            recipe_yield_unit="glass",
+        )
+        item = Item(name="Close Report Bottle", base_unit="millilitre")
+        event = Event(
+            name="Yield Close Report Event",
+            start_date=date(2024, 4, 3),
+            end_date=date(2024, 4, 3),
+            closed=True,
+        )
+
+        db.session.add_all([user, location, product, item, event])
+        db.session.commit()
+        grant_event_permissions(user)
+
+        ounce_unit = ItemUnit(
+            item_id=item.id,
+            name="ounce",
+            factor=29.5735295625,
+            receiving_default=True,
+            transfer_default=True,
+        )
+        db.session.add(ounce_unit)
+        db.session.commit()
+
+        db.session.add(
+            ProductRecipeItem(
+                product_id=product.id,
+                item_id=item.id,
+                unit_id=ounce_unit.id,
+                quantity=25.0,
+                countable=True,
+            )
+        )
+        location.products.append(product)
+        db.session.add(
+            LocationStandItem(
+                location_id=location.id,
+                item_id=item.id,
+                expected_count=0,
+            )
+        )
+        db.session.commit()
+
+        event_location = EventLocation(
+            event_id=event.id,
+            location_id=location.id,
+            confirmed=True,
+        )
+        db.session.add(event_location)
+        db.session.commit()
+
+        db.session.add(
+            EventStandSheetItem(
+                event_location_id=event_location.id,
+                item_id=item.id,
+                opening_count=15 * 29.5735295625,
+                transferred_in=0,
+                transferred_out=0,
+                adjustments=0,
+                eaten=0,
+                spoiled=0,
+                closing_count=0,
+            )
+        )
+        db.session.commit()
+
+        event_id = event.id
+        item_id = item.id
+        user_email = user.email
+
+    with captured_templates(app) as templates:
+        login_response = login(client, user_email, "pass")
+        assert login_response.status_code == 200
+        response = client.get(f"/events/{event_id}/close-report")
+        assert response.status_code == 200
+
+    template_matches = [
+        (template, context)
+        for template, context in templates
+        if template.name == "events/close_report.html"
+    ]
+    assert template_matches, "Expected the close report template to render"
+    _, context = template_matches[0]
+
+    location_report = context["locations"][0]
+    stand_entry = next(
+        entry
+        for entry in location_report.stand_items
+        if entry["item"] and entry["item"].id == item_id
+    )
+    assert stand_entry["physical_units_display"] == pytest.approx(15.0)
+    assert stand_entry["physical_amount"] == Decimal("30.00")

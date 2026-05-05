@@ -471,6 +471,112 @@ def test_admin_can_approve_sales_import_and_apply_inventory(client, app):
         assert change["consumed_quantity"] == 6.0
 
 
+def test_admin_sales_import_approval_respects_recipe_yield_quantity(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        location = Location(name="Yield Approval Stand")
+        item = Item(name="Yield Approval Wine", base_unit="ounce", quantity=20.0)
+        product = Product(
+            name="Yield Approval Glass",
+            price=10.0,
+            cost=3.0,
+            recipe_yield_quantity=5.0,
+            recipe_yield_unit="glass",
+        )
+        db.session.add_all([location, item, product])
+        db.session.flush()
+
+        db.session.add(
+            ProductRecipeItem(
+                product_id=product.id,
+                item_id=item.id,
+                quantity=25.0,
+                countable=True,
+            )
+        )
+        db.session.add(
+            LocationStandItem(
+                location_id=location.id,
+                item_id=item.id,
+                expected_count=20.0,
+            )
+        )
+
+        sales_import = PosSalesImport(
+            source_provider="mailgun",
+            message_id="msg-approve-yield",
+            attachment_filename="sales.xls",
+            attachment_sha256="y" * 64,
+            status="pending",
+        )
+        db.session.add(sales_import)
+        db.session.flush()
+
+        import_location = PosSalesImportLocation(
+            import_id=sales_import.id,
+            source_location_name="Yield Approval Stand",
+            normalized_location_name="yield_approval_stand",
+            location_id=location.id,
+            parse_index=0,
+        )
+        db.session.add(import_location)
+        db.session.flush()
+
+        row = PosSalesImportRow(
+            import_id=sales_import.id,
+            location_import_id=import_location.id,
+            source_product_name="Yield Approval Glass",
+            normalized_product_name="yield_approval_glass",
+            product_id=product.id,
+            quantity=2.0,
+            computed_unit_price=product.price,
+            parse_index=0,
+        )
+        db.session.add(row)
+        db.session.commit()
+
+        sales_import_id = sales_import.id
+        row_id = row.id
+        location_id = location.id
+        item_id = item.id
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            f"/controlpanel/sales-imports/{sales_import_id}",
+            data={"action": "approve_import"},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Import approved" in response.data
+
+    with app.app_context():
+        sales_import = db.session.get(PosSalesImport, sales_import_id)
+        row = db.session.get(PosSalesImportRow, row_id)
+        record = LocationStandItem.query.filter_by(
+            location_id=location_id,
+            item_id=item_id,
+        ).first()
+        item = db.session.get(Item, item_id)
+
+        assert sales_import is not None
+        assert row is not None
+        assert record is not None
+        assert item is not None
+        assert record.expected_count == 10.0
+        assert item.quantity == 10.0
+
+        metadata = json.loads(row.approval_metadata)
+        change = metadata["changes"][0]
+        assert change["expected_count_before"] == 20.0
+        assert change["expected_count_after"] == 10.0
+        assert change["item_quantity_before"] == 20.0
+        assert change["item_quantity_after"] == 10.0
+        assert change["consumed_quantity"] == 10.0
+
+
 def test_admin_can_approve_sales_import_and_post_to_event_location(client, app):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")

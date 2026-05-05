@@ -30,7 +30,7 @@
 <div class="app-page-header">
     <div class="app-page-header-copy">
         <h2 class="mb-1">{{ location.name }} Items</h2>
-        <p class="text-muted mb-0">Review stand sheet quantities and location-level purchase GL overrides without the editor rows crowding together.</p>
+        <p class="text-muted mb-0">Review every recipe-backed or manually tracked item for this location, then override whether each one should be countable on stand sheets.</p>
     </div>
     <div class="app-page-header-actions">
         {% if can_view_location %}
@@ -86,6 +86,7 @@
                 <tr>
                     <th>Item</th>
                     <th>Expected Count</th>
+                    <th>Countable</th>
                     <th>Purchase GL Code</th>
                     <th class="text-end">Actions</th>
                 </tr>
@@ -101,6 +102,28 @@
                 <tr>
                     <td><a href="{{ url_for('item.view_item', item_id=entry.item_id) }}">{{ entry.item.name }}</a></td>
                     <td>{{ entry.expected_count }}</td>
+                    <td>
+                        <div class="form-check">
+                            <input
+                                id="location-countable-{{ entry.item_id }}"
+                                name="location_countable_{{ entry.item_id }}"
+                                type="checkbox"
+                                value="1"
+                                class="form-check-input"
+                                {% if entry.countable %}checked{% endif %}
+                            >
+                            <label class="form-check-label" for="location-countable-{{ entry.item_id }}">
+                                Count on stand sheets
+                            </label>
+                        </div>
+                        <div class="small text-muted mt-1">
+                            {% if entry.is_recipe_backed %}
+                                Recipe-backed item
+                            {% else %}
+                                Manual location item
+                            {% endif %}
+                        </div>
+                    </td>
                     <td>
                         <select name="{{ field_name }}" class="form-select">
                             {% set default_gl = entry.item.purchase_gl_code %}
@@ -119,7 +142,7 @@
                     </td>
                     <td class="text-end">
                         {% if entry.is_protected %}
-                            <span class="text-muted" title="This item comes from a product recipe and cannot be removed.">Locked</span>
+                            <span class="text-muted" title="This item comes from a product recipe. Use the Countable checkbox to override whether it appears on stand sheets.">Recipe item</span>
                         {% elif can_remove_location_items %}
                             <input type="hidden" name="page" value="{{ entries.page }}">
                             <input type="hidden" name="per_page" value="{{ per_page }}">
@@ -140,7 +163,7 @@
                 <tr>
                     <td><strong>Total</strong></td>
                     <td><strong>{{ '{:,.2f}'.format(total or 0) }}</strong></td>
-                    <td colspan="2"></td>
+                    <td colspan="3"></td>
                 </tr>
             </tbody>
         </table>
@@ -154,6 +177,7 @@
             <tr>
                 <th>Item</th>
                 <th>Expected Count</th>
+                <th>Countable</th>
                 <th>Purchase GL Code</th>
                 <th class="text-end">Actions</th>
             </tr>
@@ -163,6 +187,16 @@
             <tr>
                 <td><a href="{{ url_for('item.view_item', item_id=entry.item_id) }}">{{ entry.item.name }}</a></td>
                 <td>{{ entry.expected_count }}</td>
+                <td>
+                    {{ "Yes" if entry.countable else "No" }}
+                    <div class="small text-muted mt-1">
+                        {% if entry.is_protected %}
+                            Recipe-backed item
+                        {% else %}
+                            Manual location item
+                        {% endif %}
+                    </div>
+                </td>
                 <td>
                     {% if entry.purchase_gl_code %}
                         {{ entry.purchase_gl_code.code }}{% if entry.purchase_gl_code.description %} - {{ entry.purchase_gl_code.description }}{% endif %}
@@ -176,7 +210,7 @@
                 </td>
                 <td class="text-end">
                     {% if entry.is_protected %}
-                        <span class="text-muted" title="This item comes from a product recipe and cannot be removed.">Locked</span>
+                        <span class="text-muted" title="This item comes from a product recipe.">Recipe item</span>
                     {% else %}
                         <span class="text-muted">View only</span>
                     {% endif %}
@@ -186,7 +220,7 @@
             <tr>
                 <td><strong>Total</strong></td>
                 <td><strong>{{ '{:,.2f}'.format(total or 0) }}</strong></td>
-                <td colspan="2"></td>
+                <td colspan="3"></td>
             </tr>
         </tbody>
     </table>

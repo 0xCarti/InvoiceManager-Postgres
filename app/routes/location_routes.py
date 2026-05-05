@@ -49,7 +49,10 @@ from app.utils.filter_state import (
 from app.utils.menu_assignments import (
     apply_menu_products,
     get_authoritative_location_products,
+    get_location_drift_recipe_item_ids,
+    get_recipe_item_ids,
     set_location_menu,
+    sync_location_stand_items,
 )
 from app.utils.pagination import build_pagination_args, get_per_page
 from app.utils.units import (
@@ -99,29 +102,58 @@ def _build_location_stand_sheet_items(location: Location):
         location_id=location.id
     ).all()
     stand_by_item_id = {record.item_id: record for record in stand_records}
+    drift_item_ids = get_location_drift_recipe_item_ids(location)
 
     stand_items = []
     seen = set()
     for product_obj in get_authoritative_location_products(location):
         for recipe_item in product_obj.recipe_items:
-            if recipe_item.countable and recipe_item.item_id not in seen:
-                seen.add(recipe_item.item_id)
-                record = stand_by_item_id.get(recipe_item.item_id)
-                expected = record.expected_count if record else 0
-                item_obj = recipe_item.item
-                if item_obj.base_unit:
-                    display_expected, report_unit = convert_quantity_for_reporting(
-                        float(expected), item_obj.base_unit, conversions
-                    )
-                else:
-                    display_expected, report_unit = expected, item_obj.base_unit
-                stand_items.append(
-                    {
-                        "item": item_obj,
-                        "expected": display_expected,
-                        "report_unit_label": get_unit_label(report_unit),
-                    }
+            if recipe_item.item_id in seen or recipe_item.item is None:
+                continue
+            record = stand_by_item_id.get(recipe_item.item_id)
+            is_countable = record.countable if record is not None else recipe_item.countable
+            if not is_countable:
+                continue
+            seen.add(recipe_item.item_id)
+            expected = record.expected_count if record else 0
+            item_obj = recipe_item.item
+            if item_obj.base_unit:
+                display_expected, report_unit = convert_quantity_for_reporting(
+                    float(expected), item_obj.base_unit, conversions
                 )
+            else:
+                display_expected, report_unit = expected, item_obj.base_unit
+            stand_items.append(
+                {
+                    "item": item_obj,
+                    "expected": display_expected,
+                    "report_unit_label": get_unit_label(report_unit),
+                }
+            )
+
+    for record in stand_records:
+        if record.item_id in seen or not record.countable:
+            continue
+        if record.item_id in drift_item_ids:
+            continue
+        item_obj = record.item
+        if item_obj is None:
+            continue
+        expected = record.expected_count or 0
+        if item_obj.base_unit:
+            display_expected, report_unit = convert_quantity_for_reporting(
+                float(expected), item_obj.base_unit, conversions
+            )
+        else:
+            display_expected, report_unit = expected, item_obj.base_unit
+        stand_items.append(
+            {
+                "item": item_obj,
+                "expected": display_expected,
+                "report_unit_label": get_unit_label(report_unit),
+            }
+        )
+        seen.add(record.item_id)
 
     stand_items.sort(
         key=lambda entry: normalize_name_for_sorting(
@@ -134,12 +166,7 @@ def _build_location_stand_sheet_items(location: Location):
 def _protected_location_item_ids(location_obj: Location) -> set[int]:
     """Return item ids that cannot be removed from the location."""
 
-    protected = set()
-    for product_obj in get_authoritative_location_products(location_obj):
-        for recipe_item in product_obj.recipe_items:
-            if recipe_item.countable:
-                protected.add(recipe_item.item_id)
-    return protected
+    return get_recipe_item_ids(get_authoritative_location_products(location_obj))
 
 
 def _location_items_redirect(location_id: int, page: str | None, per_page: str | None):
@@ -363,38 +390,31 @@ def copy_location_items(source_id: int):
                 if source_record is not None:
                     record.expected_count = source_record.expected_count
                     record.purchase_gl_code_id = source_record.purchase_gl_code_id
+                    record.countable = source_record.countable
         else:
             set_location_menu(target, None)
             db.session.flush()
             target.products = list(source_products)
-            existing_items: set[int] = set()
-            for product in source_products:
-                for recipe_item in product.recipe_items:
-                    if not recipe_item.countable:
-                        continue
-                    item_id = recipe_item.item_id
-                    if item_id in existing_items:
-                        continue
-                    source_record = source_stand_items.get(item_id)
-                    expected = (
-                        source_record.expected_count
-                        if source_record is not None
-                        else 0
+            existing_items = sync_location_stand_items(
+                target,
+                products=source_products,
+                remove_missing=True,
+            )
+            for item_id, source_record in source_stand_items.items():
+                target_record = existing_items.get(item_id)
+                if target_record is None:
+                    target_record = LocationStandItem(
+                        location=target,
+                        item_id=item_id,
+                        countable=source_record.countable,
+                        expected_count=0,
+                        purchase_gl_code_id=source_record.purchase_gl_code_id,
                     )
-                    purchase_gl_code_id = (
-                        source_record.purchase_gl_code_id
-                        if source_record is not None
-                        else recipe_item.item.purchase_gl_code_id
-                    )
-                    db.session.add(
-                        LocationStandItem(
-                            location=target,
-                            item_id=item_id,
-                            expected_count=expected,
-                            purchase_gl_code_id=purchase_gl_code_id,
-                        )
-                    )
-                    existing_items.add(item_id)
+                    db.session.add(target_record)
+                    existing_items[item_id] = target_record
+                target_record.expected_count = source_record.expected_count
+                target_record.purchase_gl_code_id = source_record.purchase_gl_code_id
+                target_record.countable = source_record.countable
 
         processed_targets.append(str(tid))
 
@@ -710,7 +730,7 @@ def remove_terminal_sale_alias(location_id: int, alias_id: int):
 @location.route("/locations/<int:location_id>/items", methods=["GET", "POST"])
 @login_required
 def location_items(location_id):
-    """Manage stand sheet items and GL overrides for a location."""
+    """Manage stand sheet items, countable overrides, and GL overrides for a location."""
     location_obj = (
         Location.query.options(
             selectinload(Location.stand_items)
@@ -724,32 +744,8 @@ def location_items(location_id):
     if location_obj is None:
         abort(404)
 
-    # Ensure that every countable item from assigned products has a corresponding
-    # ``LocationStandItem`` record so it can be displayed and managed on this
-    # page. Older data may predate the automatic creation that now happens when
-    # editing locations, which meant the management view could appear empty even
-    # though the stand sheets contained items. Matching the stand sheet behavior
-    # keeps the two views consistent.
-    existing_items = {
-        record.item_id: record for record in location_obj.stand_items
-    }
-    created = False
-    for product_obj in get_authoritative_location_products(location_obj):
-        for recipe_item in product_obj.recipe_items:
-            if not recipe_item.countable:
-                continue
-            if recipe_item.item_id in existing_items:
-                continue
-            new_record = LocationStandItem(
-                location_id=location_id,
-                item_id=recipe_item.item_id,
-                expected_count=0,
-                purchase_gl_code_id=recipe_item.item.purchase_gl_code_id,
-            )
-            db.session.add(new_record)
-            existing_items[recipe_item.item_id] = new_record
-            created = True
-    if created:
+    existing_items = sync_location_stand_items(location_obj, remove_missing=False)
+    if any(record.id is None for record in existing_items.values()):
         db.session.commit()
 
     protected_item_ids = _protected_location_item_ids(location_obj)
@@ -795,11 +791,16 @@ def location_items(location_id):
             if new_value != current_value:
                 record.purchase_gl_code_id = new_value
                 updated += 1
+            countable_field = f"location_countable_{record.item_id}"
+            new_countable = request.form.get(countable_field) == "1"
+            if new_countable != bool(record.countable):
+                record.countable = new_countable
+                updated += 1
         if updated:
             db.session.commit()
-            flash("Item GL codes updated successfully.", "success")
+            flash("Location item settings updated successfully.", "success")
         else:
-            flash("No changes were made to item GL codes.", "info")
+            flash("No changes were made to location item settings.", "info")
         return redirect(
             url_for(
                 "locations.location_items",
@@ -812,6 +813,7 @@ def location_items(location_id):
     entries = query.paginate(page=page, per_page=per_page)
     for record in entries.items:
         record.is_protected = record.item_id in protected_item_ids
+        record.is_recipe_backed = record.item_id in protected_item_ids
     total_expected = (
         db.session.query(db.func.sum(LocationStandItem.expected_count))
         .filter_by(location_id=location_id)
@@ -885,6 +887,7 @@ def add_location_item(location_id: int):
     new_record = LocationStandItem(
         location_id=location_id,
         item_id=item_id,
+        countable=True,
         expected_count=float(expected),
         purchase_gl_code_id=item.purchase_gl_code_id,
     )
@@ -930,7 +933,7 @@ def delete_location_item(location_id: int, item_id: int):
     protected_item_ids = _protected_location_item_ids(location_obj)
     if item_id in protected_item_ids:
         flash(
-            "This item is required by a product recipe and cannot be removed.",
+            "This item is required by a product recipe and cannot be removed. Uncheck Countable instead.",
             "error",
         )
         return _location_items_redirect(location_id, page, per_page)

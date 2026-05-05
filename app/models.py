@@ -129,6 +129,9 @@ class LocationStandItem(db.Model):
         db.Integer, db.ForeignKey("location.id"), nullable=False
     )
     item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    countable = db.Column(
+        db.Boolean, nullable=False, default=True, server_default="1"
+    )
     expected_count = db.Column(
         db.Float, nullable=False, default=0.0, server_default="0.0"
     )

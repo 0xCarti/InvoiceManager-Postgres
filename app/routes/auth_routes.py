@@ -121,8 +121,10 @@ from app.utils.filter_state import (
     get_filter_defaults,
     normalize_filters,
 )
+from app.utils.menu_assignments import sync_location_stand_items
 from app.utils.numeric import coerce_float
 from app.utils.pagination import build_pagination_args, get_per_page
+from app.utils.recipe_usage import recipe_item_base_units_per_sale
 from app.utils.units import (
     DEFAULT_BASE_UNIT_CONVERSIONS,
     get_allowed_target_units,
@@ -3265,26 +3267,11 @@ def _apply_event_linked_sales_payload(
             and product not in location_obj.products
         ):
             location_obj.products.append(product)
-            for recipe_item in product.recipe_items:
-                if not recipe_item.countable or recipe_item.item_id is None:
-                    continue
-                record = LocationStandItem.query.filter_by(
-                    location_id=location_obj.id,
-                    item_id=recipe_item.item_id,
-                ).first()
-                if record is None:
-                    db.session.add(
-                        LocationStandItem(
-                            location_id=location_obj.id,
-                            item_id=recipe_item.item_id,
-                            expected_count=0.0,
-                            purchase_gl_code_id=(
-                                recipe_item.item.purchase_gl_code_id
-                                if recipe_item.item is not None
-                                else None
-                            ),
-                        )
-                    )
+            sync_location_stand_items(
+                location_obj,
+                products=[product],
+                remove_missing=False,
+            )
         db.session.add(
             TerminalSale(
                 event_location_id=event_location.id,
@@ -3756,12 +3743,18 @@ def _approve_sales_import(import_id: int) -> bool:
 
                 row_changes: list[dict] = []
                 for recipe_item in product.recipe_items:
-                    if not recipe_item.countable or recipe_item.item_id is None:
+                    if recipe_item.item_id is None:
                         continue
-                    factor = recipe_item.unit.factor if recipe_item.unit else 1.0
-                    units_per_product = float(recipe_item.quantity or 0.0) * float(
-                        factor or 1.0
+                    record = LocationStandItem.query.filter_by(
+                        location_id=import_location.location_id,
+                        item_id=recipe_item.item_id,
+                    ).first()
+                    is_countable = (
+                        record.countable if record is not None else recipe_item.countable
                     )
+                    if not is_countable:
+                        continue
+                    units_per_product = recipe_item_base_units_per_sale(recipe_item)
                     if units_per_product <= 0:
                         continue
 
@@ -3770,14 +3763,11 @@ def _approve_sales_import(import_id: int) -> bool:
                     if abs(delta) < 1e-9:
                         continue
 
-                    record = LocationStandItem.query.filter_by(
-                        location_id=import_location.location_id,
-                        item_id=recipe_item.item_id,
-                    ).first()
                     if record is None:
                         record = LocationStandItem(
                             location_id=import_location.location_id,
                             item_id=recipe_item.item_id,
+                            countable=True,
                             expected_count=0,
                             purchase_gl_code_id=(
                                 recipe_item.item.purchase_gl_code_id
@@ -3793,6 +3783,7 @@ def _approve_sales_import(import_id: int) -> bool:
                         and recipe_item.item.purchase_gl_code_id is not None
                     ):
                         record.purchase_gl_code_id = recipe_item.item.purchase_gl_code_id
+                    record.countable = True
 
                     expected_before = float(record.expected_count or 0.0)
                     expected_after = expected_before - delta
@@ -4650,6 +4641,7 @@ def sales_import_detail(import_id: int):
                                 stand_record = LocationStandItem(
                                     location_id=location_id,
                                     item_id=item_id,
+                                    countable=True,
                                     expected_count=0,
                                 )
                                 db.session.add(stand_record)
@@ -4662,6 +4654,7 @@ def sales_import_detail(import_id: int):
                             )
                             expected_after = expected_before + consumed_quantity
                             if stand_record is not None:
+                                stand_record.countable = True
                                 stand_record.expected_count = expected_after
 
                             item = db.session.get(Item, item_id)

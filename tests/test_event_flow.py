@@ -620,6 +620,8 @@ def test_bulk_stand_sheet(client, app):
         assert b"EventLoc" in resp.data and b"EventLoc2" in resp.data
         assert b"EItem (Gram)" in resp.data
         assert b"283.50" in resp.data
+        assert b'data-sticky-standsheet-header="1"' in resp.data
+        assert b"sticky_standsheet_headers.js" in resp.data
     with app.app_context():
         app.config["BASE_UNIT_CONVERSIONS"] = dict(DEFAULT_BASE_UNIT_CONVERSIONS)
 
@@ -985,6 +987,10 @@ def test_save_stand_sheet(client, app):
 
     with client:
         login(client, email, "pass")
+        response = client.get(f"/events/{eid}/stand_sheet/{loc_id}")
+        assert response.status_code == 200
+        assert b'data-sticky-standsheet-header="1"' in response.data
+        assert b"sticky_standsheet_headers.js" in response.data
         open_report = convert_quantity(5, "ounce", "gram")
         in_report = convert_quantity(2, "ounce", "gram")
         out_report = convert_quantity(1, "ounce", "gram")

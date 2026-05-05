@@ -9,23 +9,39 @@ from app import db
 from app.models import Location, LocationStandItem, Menu, MenuAssignment
 
 
-def _collect_menu_items(menu: Optional[Menu]) -> dict[int, int]:
-    """Return a mapping of item id to purchase GL code id for a menu."""
+def _collect_menu_items(menu: Optional[Menu]) -> dict[int, dict[str, object]]:
+    """Return authoritative recipe item metadata for a menu."""
 
     if menu is None:
         return {}
     return _collect_product_items(menu.products)
 
 
-def _collect_product_items(products: Iterable["Product"]) -> dict[int, int]:
-    """Return a mapping of item id to purchase GL code id for products."""
+def _collect_product_items(
+    products: Iterable["Product"],
+) -> dict[int, dict[str, object]]:
+    """Return authoritative recipe item metadata for products."""
 
-    items: dict[int, int] = {}
+    items: dict[int, dict[str, object]] = {}
     for product in products:
         for recipe_item in product.recipe_items:
-            if not recipe_item.countable:
+            item_id = recipe_item.item_id
+            item_obj = recipe_item.item
+            if item_id is None or item_obj is None:
                 continue
-            items[recipe_item.item_id] = recipe_item.item.purchase_gl_code_id
+            entry = items.setdefault(
+                item_id,
+                {
+                    "purchase_gl_code_id": item_obj.purchase_gl_code_id,
+                    "countable": False,
+                },
+            )
+            if (
+                entry["purchase_gl_code_id"] is None
+                and item_obj.purchase_gl_code_id is not None
+            ):
+                entry["purchase_gl_code_id"] = item_obj.purchase_gl_code_id
+            entry["countable"] = bool(entry["countable"] or recipe_item.countable)
     return items
 
 
@@ -42,6 +58,16 @@ def get_authoritative_location_products(location: Location | None) -> list["Prod
 def get_countable_recipe_item_ids(products: Iterable["Product"]) -> set[int]:
     """Return the countable recipe item ids referenced by the products."""
 
+    return {
+        item_id
+        for item_id, metadata in _collect_product_items(products).items()
+        if metadata.get("countable")
+    }
+
+
+def get_recipe_item_ids(products: Iterable["Product"]) -> set[int]:
+    """Return every recipe-backed item id referenced by the products."""
+
     return set(_collect_product_items(products).keys())
 
 
@@ -55,7 +81,66 @@ def get_location_drift_recipe_item_ids(location: Location | None) -> set[int]:
     drift_products = [
         product for product in location.products if product.id not in menu_product_ids
     ]
-    return get_countable_recipe_item_ids(drift_products)
+    return get_recipe_item_ids(drift_products)
+
+
+def sync_location_stand_items(
+    location: Location | None,
+    *,
+    products: Optional[Iterable["Product"]] = None,
+    remove_missing: bool = False,
+) -> dict[int, LocationStandItem]:
+    """Ensure stand-item rows exist for the given location products.
+
+    Existing per-location overrides are preserved. New rows inherit the recipe
+    default countable flag and the item's purchase GL code.
+    """
+
+    if location is None:
+        return {}
+
+    desired_products = (
+        list(products)
+        if products is not None
+        else get_authoritative_location_products(location)
+    )
+    desired_items = _collect_product_items(desired_products)
+
+    existing_records: dict[int, LocationStandItem] = {}
+    for record in list(location.stand_items):
+        if record in db.session.deleted:
+            continue
+        existing_records[record.item_id] = record
+
+    if remove_missing:
+        for record in list(location.stand_items):
+            if record.item_id in desired_items:
+                continue
+            db.session.delete(record)
+            existing_records.pop(record.item_id, None)
+
+    for item_id, metadata in desired_items.items():
+        record = existing_records.get(item_id)
+        if record in db.session.deleted:
+            record = None
+        if record is None:
+            record = LocationStandItem(
+                location=location,
+                item_id=item_id,
+                countable=bool(metadata.get("countable")),
+                expected_count=0,
+                purchase_gl_code_id=metadata.get("purchase_gl_code_id"),
+            )
+            db.session.add(record)
+            existing_records[item_id] = record
+            continue
+        if (
+            record.purchase_gl_code_id is None
+            and metadata.get("purchase_gl_code_id") is not None
+        ):
+            record.purchase_gl_code_id = metadata.get("purchase_gl_code_id")
+
+    return existing_records
 
 
 def apply_menu_products(
@@ -68,45 +153,17 @@ def apply_menu_products(
 
     if menu is not None:
         desired_products = list(menu.products)
-        desired_items = _collect_menu_items(menu)
     elif products is not None:
         desired_products = list(products)
-        desired_items = _collect_product_items(desired_products)
     else:
         desired_products = []
-        desired_items = {}
-    # Debug logging removed; ensure desired products/items are applied consistently.
+
     location.products = desired_products
-
-    existing_records: dict[int, LocationStandItem] = {}
-    for record in list(location.stand_items):
-        if record in db.session.deleted:
-            continue
-        existing_records[record.item_id] = record
-
-    # Remove stand sheet items that are no longer required
-    for record in list(location.stand_items):
-        if record.item_id not in desired_items:
-            db.session.delete(record)
-            existing_records.pop(record.item_id, None)
-
-    # Ensure all required items exist
-    for item_id, purchase_gl_code_id in desired_items.items():
-        record = existing_records.get(item_id)
-        if record in db.session.deleted:
-            record = None
-        if record is not None:
-            if record.purchase_gl_code_id != purchase_gl_code_id:
-                record.purchase_gl_code_id = purchase_gl_code_id
-            continue
-        db.session.add(
-            LocationStandItem(
-                location=location,
-                item_id=item_id,
-                expected_count=0,
-                purchase_gl_code_id=purchase_gl_code_id,
-            )
-        )
+    sync_location_stand_items(
+        location,
+        products=desired_products,
+        remove_missing=True,
+    )
 
     location.current_menu = menu
 

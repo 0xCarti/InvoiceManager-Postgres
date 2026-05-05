@@ -9,7 +9,16 @@ from sqlalchemy.exc import IntegrityError
 from werkzeug.security import generate_password_hash
 
 from app import db
-from app.models import Customer, Invoice, InvoiceProduct, Product, User
+from app.models import (
+    Customer,
+    Invoice,
+    InvoiceProduct,
+    Item,
+    ItemUnit,
+    Product,
+    ProductRecipeItem,
+    User,
+)
 from app.routes.report_routes import _invoice_product_matches_catalog_product
 from tests.utils import login
 
@@ -57,6 +66,50 @@ def setup_sales_without_product(app):
         db.session.add_all([user, customer])
         db.session.commit()
         return user.email, customer.id
+
+
+def setup_sales_with_recipe_yield(app):
+    with app.app_context():
+        product_name = f"Yield Widget-{uuid4().hex}"
+        user = User(
+            email=f"salesyield-{uuid4().hex}@example.com",
+            password=generate_password_hash("pass"),
+            is_admin=True,
+            active=True,
+        )
+        customer = Customer(first_name="Yield", last_name="Customer")
+        item = Item(name=f"Yield Item-{uuid4().hex}", base_unit="ounce", quantity=20.0)
+        product = Product(
+            name=product_name,
+            price=10.0,
+            cost=5.0,
+            quantity=5,
+            recipe_yield_quantity=5.0,
+        )
+        db.session.add_all([user, customer, item, product])
+        db.session.flush()
+
+        unit = ItemUnit(
+            item_id=item.id,
+            name="ounce",
+            factor=1.0,
+            receiving_default=True,
+            transfer_default=True,
+        )
+        db.session.add(unit)
+        db.session.flush()
+
+        db.session.add(
+            ProductRecipeItem(
+                product_id=product.id,
+                item_id=item.id,
+                unit_id=unit.id,
+                quantity=25.0,
+                countable=True,
+            )
+        )
+        db.session.commit()
+        return user.email, customer.id, product.name, product.id, item.id
 
 
 def create_sales_invoices(client, email, customer_id, product_name, count):
@@ -222,6 +275,27 @@ def test_sales_invoice_returns(client, app):
         assert invoice.total == pytest.approx(-22.4)
         product = Product.query.get(prod_id)
         assert product.quantity == 7
+
+
+def test_sales_invoice_respects_recipe_yield_quantity(client, app):
+    email, cust_id, prod_name, prod_id, item_id = setup_sales_with_recipe_yield(app)
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            "/create_invoice",
+            data={"customer": float(cust_id), "products": f"{prod_name}?2??"},
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+        assert b"Invoice created successfully" in resp.data
+
+    with app.app_context():
+        product = Product.query.get(prod_id)
+        item = Item.query.get(item_id)
+
+        assert product.quantity == 3
+        assert item.quantity == pytest.approx(10.0)
 
 
 def test_sales_invoice_rejects_empty_invoice_submission(client, app):

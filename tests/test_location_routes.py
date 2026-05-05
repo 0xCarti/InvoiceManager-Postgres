@@ -142,6 +142,8 @@ def test_location_flow(client, app):
         assert resp.status_code == 200
         assert b"Location: Kitchen" in resp.data
         assert b"Date Used" in resp.data
+        assert b'data-sticky-standsheet-header="1"' in resp.data
+        assert b"sticky_standsheet_headers.js" in resp.data
         resp = client.post(
             f"/locations/edit/{lid}",
             data={"name": "Kitchen2", "menu_id": str(expanded_menu_id)},
@@ -577,13 +579,15 @@ def test_location_items_manage_gl_overrides(client, app):
         resp = client.post(
             f"/locations/{location_id}/items?page=1",
             data={
+                f"location_countable_{first_item_id}": "1",
                 f"location_gl_code_{first_item_id}": "",
+                f"location_countable_{second_item_id}": "1",
                 f"location_gl_code_{second_item_id}": str(override_id),
             },
             follow_redirects=True,
         )
         assert resp.status_code == 200
-        assert b"Item GL codes updated successfully" in resp.data
+        assert b"Location item settings updated successfully" in resp.data
     with app.app_context():
         first = LocationStandItem.query.filter_by(
             location_id=location_id, item_id=first_item_id
@@ -593,6 +597,94 @@ def test_location_items_manage_gl_overrides(client, app):
         ).first()
         assert first.purchase_gl_code_id is None
         assert second.purchase_gl_code_id == override_id
+
+
+def test_location_items_include_non_countable_recipe_items_and_save_countable_override(
+    client, app
+):
+    email, product_id, menu_id = setup_data(app)
+    with app.app_context():
+        product = db.session.get(Product, product_id)
+        flour = Item.query.filter_by(name="Flour").first()
+        assert product is not None
+        assert flour is not None
+        syrup = Item(name="Syrup", base_unit="ml")
+        syrup_unit = ItemUnit(
+            item=syrup,
+            name="ml",
+            factor=1,
+            receiving_default=True,
+            transfer_default=True,
+        )
+        db.session.add_all([syrup, syrup_unit])
+        db.session.flush()
+        db.session.add(
+            ProductRecipeItem(
+                product_id=product.id,
+                item_id=syrup.id,
+                unit_id=syrup_unit.id,
+                quantity=1,
+                countable=False,
+            )
+        )
+        db.session.commit()
+
+    with client:
+        login(client, email, "pass")
+        response = client.post(
+            "/locations/add",
+            data={"name": "Cafe", "menu_id": str(menu_id)},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+
+    with app.app_context():
+        location = Location.query.filter_by(name="Cafe").first()
+        syrup = Item.query.filter_by(name="Syrup").first()
+        assert location is not None
+        assert syrup is not None
+        location_id = location.id
+        syrup_id = syrup.id
+        flour_id = flour.id
+        syrup_record = LocationStandItem.query.filter_by(
+            location_id=location_id,
+            item_id=syrup_id,
+        ).first()
+        assert syrup_record is not None
+        assert syrup_record.countable is False
+
+    with client:
+        login(client, email, "pass")
+        with captured_templates(app) as templates:
+            response = client.get(f"/locations/{location_id}/items")
+            assert response.status_code == 200
+            _, context = templates[0]
+            assert context["entries"].total == 2
+            syrup_entry = next(
+                entry for entry in context["entries"].items if entry.item_id == syrup_id
+            )
+            assert syrup_entry.countable is False
+            assert syrup_entry.is_recipe_backed is True
+        response = client.post(
+            f"/locations/{location_id}/items?page=1",
+            data={
+                f"location_countable_{flour_id}": "1",
+                f"location_gl_code_{flour_id}": "",
+                f"location_gl_code_{syrup_id}": "",
+                f"location_countable_{syrup_id}": "1",
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Location item settings updated successfully" in response.data
+
+    with app.app_context():
+        syrup_record = LocationStandItem.query.filter_by(
+            location_id=location_id,
+            item_id=syrup_id,
+        ).first()
+        assert syrup_record is not None
+        assert syrup_record.countable is True
 
 
 def test_location_items_add_and_remove_item(client, app):
@@ -620,6 +712,7 @@ def test_location_items_add_and_remove_item(client, app):
             location_id=location_id, item_id=extra_item_id
         ).first()
         assert record is not None
+        assert record.countable is True
         assert record.expected_count == 4
 
     with client:
@@ -755,9 +848,80 @@ def test_location_items_hide_add_remove_and_gl_override_controls_for_view_only_u
     assert response.status_code == 200
     assert b"Save Changes" not in response.data
     assert b"/items/add" not in response.data
+    assert b'name="location_countable_' not in response.data
     assert b'name="location_gl_code_' not in response.data
     assert b"Remove" not in response.data
     assert b"View only" in response.data
+
+
+def test_location_stand_sheet_uses_location_countable_override(client, app):
+    email, *_ = setup_data(app)
+    with app.app_context():
+        viewer = User.query.filter_by(email=email).first()
+        assert viewer is not None
+        include_item = Item(name="Include Item", base_unit="each")
+        include_unit = ItemUnit(
+            item=include_item,
+            name="each",
+            factor=1,
+            receiving_default=True,
+            transfer_default=True,
+        )
+        exclude_item = Item(name="Exclude Item", base_unit="each")
+        exclude_unit = ItemUnit(
+            item=exclude_item,
+            name="each",
+            factor=1,
+            receiving_default=True,
+            transfer_default=True,
+        )
+        product = Product(name="Stand Sheet Product", price=5.0, cost=1.0)
+        location = Location(name="Stand Sheet Override")
+        location.products.append(product)
+        db.session.add_all([include_item, include_unit, exclude_item, exclude_unit, product, location])
+        db.session.flush()
+        db.session.add_all(
+            [
+                ProductRecipeItem(
+                    product_id=product.id,
+                    item_id=include_item.id,
+                    unit_id=include_unit.id,
+                    quantity=1,
+                    countable=False,
+                ),
+                ProductRecipeItem(
+                    product_id=product.id,
+                    item_id=exclude_item.id,
+                    unit_id=exclude_unit.id,
+                    quantity=1,
+                    countable=True,
+                ),
+                LocationStandItem(
+                    location_id=location.id,
+                    item_id=include_item.id,
+                    countable=True,
+                    expected_count=4,
+                ),
+                LocationStandItem(
+                    location_id=location.id,
+                    item_id=exclude_item.id,
+                    countable=False,
+                    expected_count=6,
+                ),
+            ]
+        )
+        db.session.commit()
+        location_id = location.id
+        include_name = include_item.name
+        exclude_name = exclude_item.name
+
+    with client:
+        login(client, email, "pass")
+        response = client.get(f"/locations/{location_id}/stand_sheet")
+
+    assert response.status_code == 200
+    assert include_name.encode() in response.data
+    assert exclude_name.encode() not in response.data
 
 
 def test_copy_stand_sheet_overwrites_and_supports_multiple_targets(client, app):

@@ -32,6 +32,7 @@ from app.utils.filter_state import (
 )
 from app.utils.numeric import coerce_float
 from app.utils.pagination import build_pagination_args, get_per_page
+from app.utils.recipe_usage import recipe_item_base_units_per_sale
 from app.utils.text import normalize_request_text_filter
 
 invoice = Blueprint("invoice", __name__)
@@ -379,10 +380,10 @@ def _create_invoice_from_form(form):
 
             for recipe_item in product.recipe_items:
                 item = recipe_item.item
-                factor = recipe_item.unit.factor if recipe_item.unit else 1
-                item.quantity = (item.quantity or 0) - (
-                    recipe_item.quantity * factor * quantity
-                )
+                units_per_sale = recipe_item_base_units_per_sale(recipe_item)
+                if units_per_sale <= 0:
+                    continue
+                item.quantity = (item.quantity or 0) - (units_per_sale * quantity)
 
     if created_line_count == 0:
         db.session.rollback()

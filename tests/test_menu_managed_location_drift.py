@@ -79,6 +79,68 @@ def test_menu_managed_locations_hide_drifted_recipe_items_from_stand_sheets(app)
         assert [entry["item"].id for entry in stand_items] == [menu_item.id]
 
 
+def test_get_stand_items_respects_location_countable_override(app):
+    with app.app_context():
+        product = Product(name="Override Soda", price=5.0, cost=1.0)
+        include_item = Item(name="Override Include", base_unit="each")
+        include_unit = ItemUnit(
+            item=include_item,
+            name="each",
+            factor=1,
+            receiving_default=True,
+            transfer_default=True,
+        )
+        exclude_item = Item(name="Override Exclude", base_unit="each")
+        exclude_unit = ItemUnit(
+            item=exclude_item,
+            name="each",
+            factor=1,
+            receiving_default=True,
+            transfer_default=True,
+        )
+        location = Location(name="Override Stand")
+        location.products.append(product)
+        db.session.add_all(
+            [product, include_item, include_unit, exclude_item, exclude_unit, location]
+        )
+        db.session.flush()
+        db.session.add_all(
+            [
+                ProductRecipeItem(
+                    product_id=product.id,
+                    item_id=include_item.id,
+                    unit_id=include_unit.id,
+                    quantity=1.0,
+                    countable=False,
+                ),
+                ProductRecipeItem(
+                    product_id=product.id,
+                    item_id=exclude_item.id,
+                    unit_id=exclude_unit.id,
+                    quantity=1.0,
+                    countable=True,
+                ),
+                LocationStandItem(
+                    location_id=location.id,
+                    item_id=include_item.id,
+                    countable=True,
+                    expected_count=4.0,
+                ),
+                LocationStandItem(
+                    location_id=location.id,
+                    item_id=exclude_item.id,
+                    countable=False,
+                    expected_count=6.0,
+                ),
+            ]
+        )
+        db.session.commit()
+
+        _, stand_items = _get_stand_items(location.id)
+
+        assert [entry["item"].id for entry in stand_items] == [include_item.id]
+
+
 def test_apply_pending_sales_does_not_link_products_to_menu_managed_locations(app):
     with app.app_context():
         allowed_product, _ = _create_countable_product("Allowed Water", "Allowed Case")

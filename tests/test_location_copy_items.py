@@ -157,6 +157,51 @@ def test_copy_location_items(client, app):
             )
 
 
+def test_copy_location_items_preserves_countable_override(client, app):
+    email, _, menu_id = setup_data(app)
+    with client:
+        login(client, email, "pass")
+        response = client.post(
+            "/locations/add",
+            data={"name": "Countable Source", "menu_id": str(menu_id)},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        response = client.post(
+            "/locations/add",
+            data={"name": "Countable Target", "menu_id": "0"},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        with app.app_context():
+            source = Location.query.filter_by(name="Countable Source").first()
+            target = Location.query.filter_by(name="Countable Target").first()
+            assert source is not None
+            assert target is not None
+            source_record = LocationStandItem.query.filter_by(
+                location_id=source.id
+            ).first()
+            assert source_record is not None
+            source_record.countable = False
+            db.session.commit()
+            source_id = source.id
+            target_id = target.id
+            item_id = source_record.item_id
+        response = client.post(
+            f"/locations/{source_id}/copy_items",
+            json={"target_id": target_id},
+        )
+        assert response.status_code == 200
+
+    with app.app_context():
+        target_record = LocationStandItem.query.filter_by(
+            location_id=target_id,
+            item_id=item_id,
+        ).first()
+        assert target_record is not None
+        assert target_record.countable is False
+
+
 def test_copy_button_visible(client, app):
     email, prod_id, menu_id = setup_data(app)
     with client:

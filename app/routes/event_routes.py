@@ -65,6 +65,7 @@ from app.utils.filter_state import (
 from app.utils.menu_assignments import (
     get_authoritative_location_products,
     get_location_drift_recipe_item_ids,
+    sync_location_stand_items,
 )
 from app.utils.numeric import coerce_float
 from app.utils.pos_import import (
@@ -76,6 +77,7 @@ from app.utils.pos_import import (
     parse_terminal_sales_number,
     terminal_sales_cell_is_blank,
 )
+from app.utils.recipe_usage import recipe_item_base_units_per_sale
 from app.utils.units import (
     DEFAULT_BASE_UNIT_CONVERSIONS,
     convert_cost_for_reporting,
@@ -434,8 +436,7 @@ def _fallback_item_price(item, allowed_product_ids: set[int] | None = None) -> f
             continue
         if allowed_product_ids is not None and product.id not in allowed_product_ids:
             continue
-        factor = recipe.unit.factor if recipe.unit else 1.0
-        units_per_product = float(recipe.quantity or 0.0) * factor
+        units_per_product = recipe_item_base_units_per_sale(recipe)
         if units_per_product <= 0:
             continue
         price = float(getattr(product, "price", 0.0) or 0.0)
@@ -454,6 +455,14 @@ def _build_item_price_lookup(
 
     usage_totals: dict[int, float] = defaultdict(float)
     revenue_totals: dict[int, float] = defaultdict(float)
+    stand_record_map: dict[int, LocationStandItem] = {}
+    if event_location.location_id:
+        stand_record_map = {
+            record.item_id: record
+            for record in LocationStandItem.query.filter_by(
+                location_id=event_location.location_id
+            ).all()
+        }
 
     for sale in event_location.terminal_sales:
         product = sale.product
@@ -465,10 +474,13 @@ def _build_item_price_lookup(
             continue
         sale_revenue = quantity * price
         for recipe in product.recipe_items:
-            if not recipe.countable or recipe.item_id is None:
+            if recipe.item_id is None:
                 continue
-            factor = recipe.unit.factor if recipe.unit else 1.0
-            units_per_product = float(recipe.quantity or 0.0) * factor
+            record = stand_record_map.get(recipe.item_id)
+            is_countable = record.countable if record is not None else recipe.countable
+            if not is_countable:
+                continue
+            units_per_product = recipe_item_base_units_per_sale(recipe)
             if units_per_product <= 0:
                 continue
             item_units = quantity * units_per_product
@@ -548,9 +560,17 @@ def _calculate_physical_vs_terminal_variance(event: Event) -> float | None:
 def _sync_event_location_opening_counts(event_location: EventLocation) -> int:
     """Ensure stand sheet opening counts mirror the location inventory."""
 
+    location_obj = event_location.location or db.session.get(
+        Location, event_location.location_id
+    )
+    if location_obj is None:
+        return 0
+    sync_location_stand_items(location_obj, remove_missing=False)
+    db.session.flush()
+
     inventory_records = LocationStandItem.query.filter_by(
         location_id=event_location.location_id
-    ).all()
+    ).filter(LocationStandItem.countable.is_(True)).all()
     if not inventory_records:
         return 0
 
@@ -590,26 +610,16 @@ def _convert_report_value_to_base(value, base_unit, report_unit):
 
 
 def _ensure_location_items(location_obj: Location, product_obj: Product) -> None:
-    """Ensure a location has inventory records for the product's countable items."""
+    """Ensure a location has inventory records for the product's recipe items."""
 
     if location_obj is None or product_obj is None:
         return
 
-    for recipe_item in product_obj.recipe_items:
-        if not recipe_item.countable:
-            continue
-        record = LocationStandItem.query.filter_by(
-            location_id=location_obj.id, item_id=recipe_item.item_id
-        ).first()
-        if record is None:
-            db.session.add(
-                LocationStandItem(
-                    location_id=location_obj.id,
-                    item_id=recipe_item.item_id,
-                    expected_count=0,
-                    purchase_gl_code_id=recipe_item.item.purchase_gl_code_id,
-                )
-            )
+    sync_location_stand_items(
+        location_obj,
+        products=[product_obj],
+        remove_missing=False,
+    )
 
 
 def _normalize_variance_details(value):
@@ -4597,6 +4607,12 @@ def confirm_location(event_id, el_id):
     untracked_sales: list[dict[str, object]] = []
     if el.terminal_sales:
         aggregated: dict[int, dict[str, object]] = {}
+        location_records = {
+            record.item_id: record
+            for record in LocationStandItem.query.filter_by(
+                location_id=el.location_id
+            ).all()
+        }
         for sale in el.terminal_sales:
             quantity = float(sale.quantity or 0.0)
             if not quantity:
@@ -4606,11 +4622,14 @@ def confirm_location(event_id, el_id):
             if product is None:
                 continue
 
-            countable_items = [
-                ri.item_id
-                for ri in (product.recipe_items or [])
-                if ri.countable and ri.item_id is not None
-            ]
+            countable_items = []
+            for ri in (product.recipe_items or []):
+                if ri.item_id is None:
+                    continue
+                record = location_records.get(ri.item_id)
+                is_countable = record.countable if record is not None else ri.countable
+                if is_countable:
+                    countable_items.append(ri.item_id)
             if not countable_items:
                 continue
 
@@ -4970,6 +4989,10 @@ def _get_stand_items(location_id, event_id=None):
     conversions = _conversion_mapping()
     stand_items = []
     seen = set()
+    stand_records = {
+        record.item_id: record
+        for record in LocationStandItem.query.filter_by(location_id=location_id).all()
+    }
 
     sales_by_item = {}
     sheet_map = {}
@@ -4981,12 +5004,19 @@ def _get_stand_items(location_id, event_id=None):
         if el:
             for sale in el.terminal_sales:
                 for ri in sale.product.recipe_items:
-                    if ri.countable:
-                        factor = ri.unit.factor if ri.unit else 1
-                        sales_by_item[ri.item_id] = (
-                            sales_by_item.get(ri.item_id, 0)
-                            + sale.quantity * ri.quantity * factor
-                        )
+                    if ri.item_id is None:
+                        continue
+                    record = stand_records.get(ri.item_id)
+                    is_countable = record.countable if record is not None else ri.countable
+                    if not is_countable:
+                        continue
+                    units_per_product = recipe_item_base_units_per_sale(ri)
+                    if units_per_product <= 0:
+                        continue
+                    sales_by_item[ri.item_id] = (
+                        sales_by_item.get(ri.item_id, 0)
+                        + sale.quantity * units_per_product
+                    )
             for sheet in el.stand_sheet_items:
                 sheet_map[sheet.item_id] = sheet
 
@@ -4995,39 +5025,36 @@ def _get_stand_items(location_id, event_id=None):
 
     for product_obj in authoritative_products:
         for recipe_item in product_obj.recipe_items:
-            if recipe_item.countable and recipe_item.item_id not in seen:
-                seen.add(recipe_item.item_id)
-                record = LocationStandItem.query.filter_by(
-                    location_id=location_id,
-                    item_id=recipe_item.item_id,
-                ).first()
-                expected = record.expected_count if record else 0
-                sales = sales_by_item.get(recipe_item.item_id, 0)
-                item = recipe_item.item
-                recv_unit = next(
-                    (u for u in item.units if u.receiving_default), None
+            if recipe_item.item_id in seen or recipe_item.item is None:
+                continue
+            record = stand_records.get(recipe_item.item_id)
+            is_countable = record.countable if record is not None else recipe_item.countable
+            if not is_countable:
+                continue
+            seen.add(recipe_item.item_id)
+            expected = record.expected_count if record else 0
+            sales = sales_by_item.get(recipe_item.item_id, 0)
+            item = recipe_item.item
+            recv_unit = next((u for u in item.units if u.receiving_default), None)
+            trans_unit = next((u for u in item.units if u.transfer_default), None)
+            stand_items.append(
+                _build_stand_item_entry(
+                    item=item,
+                    expected=expected,
+                    sales=sales,
+                    sheet=sheet_map.get(recipe_item.item_id),
+                    recv_unit=recv_unit,
+                    trans_unit=trans_unit,
+                    conversions=conversions,
                 )
-                trans_unit = next(
-                    (u for u in item.units if u.transfer_default), None
-                )
-                stand_items.append(
-                    _build_stand_item_entry(
-                        item=item,
-                        expected=expected,
-                        sales=sales,
-                        sheet=sheet_map.get(recipe_item.item_id),
-                        recv_unit=recv_unit,
-                        trans_unit=trans_unit,
-                        conversions=conversions,
-                    )
-                )
+            )
 
     # Include any items directly assigned to the location that may not be
     # part of a product recipe (e.g. items received via purchase invoices).
-    for record in LocationStandItem.query.filter_by(
-        location_id=location_id
-    ).all():
+    for record in stand_records.values():
         if record.item_id in seen:
+            continue
+        if not record.countable:
             continue
         if record.item_id in drift_item_ids:
             continue
@@ -5635,13 +5662,14 @@ def close_event(event_id):
                 location_id=el.location_id, item_id=sheet.item_id
             ).first()
             if not sheet.closing_count:
-                if lsi:
+                if lsi and lsi.countable:
                     db.session.delete(lsi)
                 continue
             if not lsi:
                 lsi = LocationStandItem(
                     location_id=el.location_id,
                     item_id=sheet.item_id,
+                    countable=True,
                     purchase_gl_code_id=sheet.item.purchase_gl_code_id,
                 )
                 db.session.add(lsi)
@@ -5650,16 +5678,19 @@ def close_event(event_id):
                 and sheet.item.purchase_gl_code_id is not None
             ):
                 lsi.purchase_gl_code_id = sheet.item.purchase_gl_code_id
+            lsi.countable = True
             lsi.expected_count = sheet.closing_count
 
         if counted_item_ids:
             LocationStandItem.query.filter(
                 LocationStandItem.location_id == el.location_id,
+                LocationStandItem.countable.is_(True),
                 ~LocationStandItem.item_id.in_(counted_item_ids),
             ).delete(synchronize_session=False)
         else:
             LocationStandItem.query.filter_by(
-                location_id=el.location_id
+                location_id=el.location_id,
+                countable=True,
             ).delete()
 
         TerminalSale.query.filter_by(event_location_id=el.id).delete()
