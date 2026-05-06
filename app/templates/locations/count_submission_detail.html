@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+
+{% block title %}Count Submission{% endblock %}
+
+{% block content %}
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .count-submission-detail-actions,
+    .count-submission-detail-actions .btn,
+    .count-submission-detail-actions form {
+        width: 100%;
+    }
+}
+</style>
+
+<div class="container mt-5 app-page-shell">
+    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-start gap-3 mb-4">
+        <div>
+            <h2 class="mb-1">Count Submission #{{ submission.id }}</h2>
+            <p class="text-muted mb-0">
+                {{ submission.submission_type|title }} count from {{ submission.submitted_name }}
+                on {{ submission.submission_date.strftime('%Y-%m-%d') }}
+            </p>
+            <div class="mt-2 d-flex flex-wrap gap-2">
+                <span class="badge {% if submission.status == 'approved' %}text-bg-success{% elif submission.status == 'rejected' %}text-bg-danger{% else %}text-bg-warning{% endif %}">
+                    {{ submission.status|title }}
+                </span>
+                {% if submission.reviewed_at %}
+                <span class="badge text-bg-light border text-dark">
+                    Reviewed {{ submission.reviewed_at.strftime('%Y-%m-%d %H:%M') }}
+                </span>
+                {% endif %}
+            </div>
+        </div>
+        <div class="d-flex flex-wrap gap-2 count-submission-detail-actions">
+            <a class="btn btn-outline-secondary" href="{{ url_for('locations.count_submissions') }}">Back to Queue</a>
+            {% if submission.location %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('locations.view_location', location_id=submission.location.id) }}">Mapped Location</a>
+            {% elif submission.source_location %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('locations.view_location', location_id=submission.source_location.id) }}">Source Location</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-6 col-xl-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-muted">Source Location</div>
+                    <div class="h6 mb-0">{{ submission.source_location.name if submission.source_location else 'Unknown' }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-xl-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-muted">Mapped Location</div>
+                    <div class="h6 mb-0">{{ submission.location.name if submission.location else 'Unmapped' }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-xl-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-muted">Mapped Event</div>
+                    <div class="h6 mb-0">
+                        {% if submission.event_location and submission.event_location.event %}
+                        {{ submission.event_location.event.name }}
+                        {% else %}
+                        Unmapped
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-xl-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-muted">Submitted At</div>
+                    <div class="h6 mb-0">{{ submission.submitted_at.strftime('%Y-%m-%d %H:%M') if submission.submitted_at else 'Unknown' }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <form method="post" class="card">
+        <div class="card-body">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="row g-3 mb-4">
+                <div class="col-lg-4">
+                    <label class="form-label" for="submitted_name">Submitted Name</label>
+                    <input type="text" class="form-control" id="submitted_name" name="submitted_name" value="{{ submission.submitted_name }}" {% if not editable %}disabled{% endif %}>
+                </div>
+                <div class="col-lg-2">
+                    <label class="form-label" for="submission_type">Type</label>
+                    <select class="form-select" id="submission_type" name="submission_type" {% if not editable %}disabled{% endif %}>
+                        <option value="opening" {% if submission.submission_type == 'opening' %}selected{% endif %}>Opening</option>
+                        <option value="closing" {% if submission.submission_type == 'closing' %}selected{% endif %}>Closing</option>
+                    </select>
+                </div>
+                <div class="col-lg-3">
+                    <label class="form-label" for="submission_date">Submission Date</label>
+                    <input type="date" class="form-control" id="submission_date" name="submission_date" value="{{ submission.submission_date.isoformat() }}" {% if not editable %}disabled{% endif %}>
+                </div>
+                <div class="col-lg-3">
+                    <label class="form-label" for="location_id">Mapped Location</label>
+                    <select class="form-select" id="location_id" name="location_id" {% if not editable %}disabled{% endif %}>
+                        <option value="">Choose location</option>
+                        {% for location in available_locations %}
+                        <option value="{{ location.id }}" {% if submission.location_id == location.id %}selected{% endif %}>{{ location.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-12">
+                    <label class="form-label" for="event_location_id">Mapped Event</label>
+                    <select class="form-select" id="event_location_id" name="event_location_id" {% if not editable %}disabled{% endif %}>
+                        <option value="">Leave unmapped</option>
+                        {% for event_location in available_event_locations %}
+                        <option value="{{ event_location.id }}" {% if submission.event_location_id == event_location.id %}selected{% endif %}>
+                            {{ format_event_location_label(event_location) }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    {% if auto_matched_event_location %}
+                    <div class="form-text">
+                        Auto-match suggestion: {{ format_event_location_label(auto_matched_event_location) }}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h3 class="h5 mb-0">Counts</h3>
+                    <span class="text-muted small">{{ row_entries|length }} items</span>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-striped align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Item</th>
+                                <th>Report Unit</th>
+                                <th>Count</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for entry in row_entries %}
+                            <tr>
+                                <td>{{ entry.item.name }}</td>
+                                <td>{{ entry.report_unit_label or '-' }}</td>
+                                <td>
+                                    <input
+                                        type="text"
+                                        inputmode="text"
+                                        data-numeric-input="1"
+                                        class="form-control"
+                                        name="count_{{ entry.row.id }}"
+                                        value="{{ '%.4f'|format(entry.display_value or 0) }}"
+                                        {% if not editable %}disabled{% endif %}
+                                    >
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <label class="form-label" for="review_note">Review Note</label>
+                <textarea class="form-control" id="review_note" name="review_note" rows="4" {% if not editable %}disabled{% endif %}>{{ submission.review_note or '' }}</textarea>
+                <div class="form-text">
+                    Add context about remapping, corrections, or why the submission was rejected.
+                </div>
+            </div>
+
+            <div class="d-flex flex-wrap gap-2">
+                {% if editable %}
+                <button type="submit" class="btn btn-outline-primary" name="action" value="save_review">Save Review</button>
+                <button type="submit" class="btn btn-success" name="action" value="approve">Approve And Apply</button>
+                <button type="submit" class="btn btn-outline-danger" name="action" value="reject">Reject</button>
+                {% else %}
+                <div class="text-muted">This submission is locked because it has already been reviewed.</div>
+                {% endif %}
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}

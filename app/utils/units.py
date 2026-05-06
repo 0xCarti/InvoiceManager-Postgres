@@ -157,6 +157,21 @@ def convert_cost_for_reporting(
     return unit_cost / factor
 
 
+def convert_report_value_to_base(
+    value: float | None, base_unit: str | None, report_unit: str | None
+) -> float:
+    """Convert a reporting-unit quantity back into the stored base unit."""
+
+    if value is None:
+        return 0.0
+    if not base_unit or not report_unit or base_unit == report_unit:
+        return value
+    try:
+        return convert_quantity(value, report_unit, base_unit)
+    except (TypeError, ValueError):
+        return value
+
+
 def iter_base_unit_fields(form) -> Iterator[Tuple[str, str, object]]:
     """Yield form fields related to base unit conversions."""
 

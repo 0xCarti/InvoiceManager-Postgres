@@ -1320,6 +1320,12 @@ class Location(db.Model):
     default_playlist_id = db.Column(
         db.Integer, db.ForeignKey("playlist.id"), nullable=True
     )
+    count_qr_token = db.Column(
+        db.String(96),
+        nullable=False,
+        unique=True,
+        default=lambda: secrets.token_urlsafe(24),
+    )
     products = db.relationship(
         "Product", secondary=location_products, backref="locations"
     )
@@ -1358,8 +1364,29 @@ class Location(db.Model):
         back_populates="location",
         cascade="all, delete-orphan",
     )
+    count_submissions = relationship(
+        "LocationCountSubmission",
+        foreign_keys="LocationCountSubmission.source_location_id",
+        back_populates="source_location",
+        cascade="all, delete-orphan",
+        order_by="LocationCountSubmission.submitted_at.desc()",
+    )
+    mapped_count_submissions = relationship(
+        "LocationCountSubmission",
+        foreign_keys="LocationCountSubmission.location_id",
+        back_populates="location",
+        order_by="LocationCountSubmission.submitted_at.desc()",
+    )
 
     __table_args__ = (db.Index("ix_location_archived", "archived"),)
+
+    def ensure_count_qr_token(self) -> str:
+        token = (self.count_qr_token or "").strip()
+        if token:
+            return token
+        token = secrets.token_urlsafe(24)
+        self.count_qr_token = token
+        return token
 
 
 class Item(db.Model):
@@ -3776,6 +3803,11 @@ class EventLocation(db.Model):
         back_populates="event_location",
         cascade="all, delete-orphan",
     )
+    count_submissions = relationship(
+        "LocationCountSubmission",
+        back_populates="event_location",
+        order_by="LocationCountSubmission.submitted_at.desc()",
+    )
 
     __table_args__ = (
         db.UniqueConstraint("event_id", "location_id", name="_event_loc_uc"),
@@ -4165,6 +4197,144 @@ class EventStandSheetItem(db.Model):
     __table_args__ = (
         db.UniqueConstraint(
             "event_location_id", "item_id", name="_event_loc_item_uc"
+        ),
+    )
+
+
+class LocationCountSubmission(db.Model):
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    TYPE_OPENING = "opening"
+    TYPE_CLOSING = "closing"
+
+    id = db.Column(db.Integer, primary_key=True)
+    source_location_id = db.Column(
+        db.Integer, db.ForeignKey("location.id"), nullable=False
+    )
+    location_id = db.Column(
+        db.Integer, db.ForeignKey("location.id"), nullable=True
+    )
+    event_location_id = db.Column(
+        db.Integer, db.ForeignKey("event_location.id"), nullable=True
+    )
+    submission_type = db.Column(
+        db.String(16),
+        nullable=False,
+        default=TYPE_OPENING,
+        server_default=TYPE_OPENING,
+    )
+    submitted_name = db.Column(db.String(120), nullable=False)
+    submission_date = db.Column(db.Date, nullable=False)
+    status = db.Column(
+        db.String(16),
+        nullable=False,
+        default=STATUS_PENDING,
+        server_default=STATUS_PENDING,
+    )
+    review_note = db.Column(db.Text, nullable=True)
+    reviewed_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    submitted_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    source_location = relationship(
+        "Location",
+        foreign_keys=[source_location_id],
+        back_populates="count_submissions",
+    )
+    location = relationship(
+        "Location",
+        foreign_keys=[location_id],
+        back_populates="mapped_count_submissions",
+    )
+    event_location = relationship(
+        "EventLocation", back_populates="count_submissions"
+    )
+    reviewer = relationship("User", foreign_keys=[reviewed_by])
+    rows = relationship(
+        "LocationCountSubmissionRow",
+        back_populates="submission",
+        cascade="all, delete-orphan",
+        order_by="LocationCountSubmissionRow.parse_index.asc()",
+    )
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "submission_type IN ('opening', 'closing')",
+            name="ck_location_count_submission_type",
+        ),
+        db.CheckConstraint(
+            "status IN ('pending', 'approved', 'rejected')",
+            name="ck_location_count_submission_status",
+        ),
+        db.Index(
+            "ix_location_count_submission_status_submitted_at",
+            "status",
+            "submitted_at",
+        ),
+        db.Index(
+            "ix_location_count_submission_source_location_date",
+            "source_location_id",
+            "submission_date",
+        ),
+        db.Index(
+            "ix_location_count_submission_mapped_location_date",
+            "location_id",
+            "submission_date",
+        ),
+        db.Index(
+            "ix_location_count_submission_event_location",
+            "event_location_id",
+        ),
+    )
+
+
+class LocationCountSubmissionRow(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    submission_id = db.Column(
+        db.Integer,
+        db.ForeignKey("location_count_submission.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    count_value = db.Column(
+        db.Float,
+        nullable=False,
+        default=0.0,
+        server_default="0.0",
+    )
+    parse_index = db.Column(db.Integer, nullable=False)
+
+    submission = relationship(
+        "LocationCountSubmission", back_populates="rows"
+    )
+    item = relationship("Item")
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "submission_id",
+            "parse_index",
+            name="uq_location_count_submission_row_order",
+        ),
+        db.Index(
+            "ix_location_count_submission_row_submission",
+            "submission_id",
+        ),
+        db.Index(
+            "ix_location_count_submission_row_item",
+            "item_id",
         ),
     )
 

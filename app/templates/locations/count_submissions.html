@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block title %}Count Submissions{% endblock %}
+
+{% block content %}
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .count-submission-toolbar {
+        display: grid;
+        gap: 0.75rem;
+    }
+    .count-submission-toolbar > * {
+        width: 100%;
+    }
+}
+</style>
+
+<div class="container mt-5 app-page-shell">
+    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-4">
+        <div>
+            <h2 class="mb-1">Count Submissions</h2>
+            <p class="text-muted mb-0">Review opening and closing counts submitted from location QR signs.</p>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-outline-secondary" href="{{ url_for('locations.view_locations') }}">Back to Locations</a>
+        </div>
+    </div>
+
+    <form method="get" class="card card-body mb-3 count-submission-toolbar">
+        <div class="row g-2 align-items-end">
+            <div class="col-lg-5">
+                <label class="form-label mb-1" for="search">Search</label>
+                <input id="search" type="text" name="search" class="form-control" value="{{ search_query }}" placeholder="Submission ID, staff name, or location">
+            </div>
+            <div class="col-lg-3">
+                <label class="form-label mb-1" for="status">Status</label>
+                <select id="status" name="status" class="form-select">
+                    <option value="">All statuses</option>
+                    <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>Pending</option>
+                    <option value="approved" {% if status_filter == 'approved' %}selected{% endif %}>Approved</option>
+                    <option value="rejected" {% if status_filter == 'rejected' %}selected{% endif %}>Rejected</option>
+                </select>
+            </div>
+            <div class="col-lg-2">
+                <label class="form-label mb-1" for="location_id">Location ID</label>
+                <input id="location_id" type="text" name="location_id" class="form-control" value="{{ location_filter or '' }}" placeholder="Any">
+            </div>
+            <div class="col-lg-2 d-grid">
+                <button type="submit" class="btn btn-primary">Apply Filters</button>
+            </div>
+        </div>
+    </form>
+
+    {% if search_query or status_filter or location_filter %}
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="text-muted small">Active filters:</span>
+        {% if search_query %}
+        <span class="badge rounded-pill text-bg-light border">Search: {{ search_query }}</span>
+        {% endif %}
+        {% if status_filter %}
+        <span class="badge rounded-pill text-bg-light border">Status: {{ status_filter|title }}</span>
+        {% endif %}
+        {% if location_filter %}
+        <span class="badge rounded-pill text-bg-light border">Location: #{{ location_filter }}</span>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if submissions.items %}
+    <div class="table-responsive">
+        <table class="table table-striped align-middle table-mobile-card">
+            <thead>
+                <tr>
+                    <th>Submission</th>
+                    <th>Status</th>
+                    <th>Type</th>
+                    <th>Submitted</th>
+                    <th>Source</th>
+                    <th>Mapped Event</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for submission in submissions.items %}
+                <tr>
+                    <td class="mobile-card-primary">
+                        <div class="fw-semibold">#{{ submission.id }}</div>
+                        <div class="small text-muted">{{ submission.rows|length }} items</div>
+                    </td>
+                    <td>
+                        <span class="badge {% if submission.status == 'approved' %}text-bg-success{% elif submission.status == 'rejected' %}text-bg-danger{% else %}text-bg-warning{% endif %}">
+                            {{ submission.status|title }}
+                        </span>
+                    </td>
+                    <td>{{ submission.submission_type|title }}</td>
+                    <td>
+                        <div>{{ submission.submitted_name }}</div>
+                        <div class="small text-muted">
+                            {{ submission.submission_date.strftime('%Y-%m-%d') }}
+                            {% if submission.submitted_at %}
+                            · {{ submission.submitted_at.strftime('%H:%M') }}
+                            {% endif %}
+                        </div>
+                    </td>
+                    <td>
+                        <div>{{ submission.source_location.name if submission.source_location else 'Unknown' }}</div>
+                        {% if submission.location and submission.location_id != submission.source_location_id %}
+                        <div class="small text-muted">Mapped to {{ submission.location.name }}</div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if submission.event_location and submission.event_location.event %}
+                        <div>{{ submission.event_location.event.name }}</div>
+                        <div class="small text-muted">{{ submission.event_location.event.start_date.strftime('%Y-%m-%d') }} to {{ submission.event_location.event.end_date.strftime('%Y-%m-%d') }}</div>
+                        {% else %}
+                        <span class="text-muted">Not mapped</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-end">
+                        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('locations.count_submission_detail', submission_id=submission.id) }}">Review</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="card">
+        <div class="card-body text-muted">
+            No count submissions matched the current filters.
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
+        <nav aria-label="Count submission pagination">
+            <ul class="pagination mb-0">
+                <li class="page-item {% if not submissions.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('locations.count_submissions', page=submissions.prev_num if submissions.has_prev else 1, **pagination_args) }}"{% if not submissions.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link">Page {{ submissions.page }} of {{ submissions.pages }}</span>
+                </li>
+                <li class="page-item {% if not submissions.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('locations.count_submissions', page=submissions.next_num if submissions.has_next else submissions.pages or 1, **pagination_args) }}"{% if not submissions.has_next %} tabindex="-1" aria-disabled="true"{% endif %}>Next</a>
+                </li>
+            </ul>
+        </nav>
+        <form method="get" class="d-flex align-items-center gap-2">
+            {% for key, values in request.args.lists() %}
+                {% if key not in ['page', 'per_page'] %}
+                    {% for value in values %}
+                        <input type="hidden" name="{{ key }}" value="{{ value }}">
+                    {% endfor %}
+                {% endif %}
+            {% endfor %}
+            <input type="hidden" name="page" value="1">
+            <label for="count-submissions-per-page" class="form-label mb-0">Rows per page</label>
+            <select id="count-submissions-per-page" name="per_page" class="form-select js-auto-submit">
+                {% for option in PAGINATION_SIZES %}
+                    <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+</div>
+{% endblock %}

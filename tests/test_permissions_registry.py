@@ -232,6 +232,22 @@ def test_user_can_access_endpoint_requires_matching_permission():
         "signage.add_board_template",
         "POST",
     )
+    assert not user_can_access_endpoint(
+        DummyUser("locations.view"),
+        "locations.count_submissions",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("events.manage_locations"),
+        "locations.count_submissions",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("locations.view"),
+        "locations.print_count_sign",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("locations.edit"),
+        "locations.print_count_sign",
+    )
 
 
 def test_super_admin_bypasses_endpoint_permission_checks():
