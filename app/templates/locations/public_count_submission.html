@@ -29,6 +29,10 @@
     margin: 0;
 }
 
+.public-count-draft-status {
+    min-height: 1.25rem;
+}
+
 @media (max-width: 767.98px) {
     .public-count-shell {
         padding-left: 0.85rem;
@@ -60,7 +64,30 @@
             </div>
             {% endif %}
 
-            <form method="post">
+            <div class="alert alert-info d-none" data-count-draft-prompt>
+                <div class="fw-semibold mb-1">Continue where you left off?</div>
+                <div class="small mb-3">
+                    Unsaved counts were found on this device for this location.
+                </div>
+                <div class="d-flex flex-wrap gap-2">
+                    <button type="button" class="btn btn-primary btn-sm" data-count-draft-resume="1">
+                        Resume
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-count-draft-discard="1">
+                        Start Fresh
+                    </button>
+                </div>
+            </div>
+
+            <div class="small text-muted mb-3 public-count-draft-status d-none" data-count-draft-status aria-live="polite"></div>
+
+            <form
+                method="post"
+                data-count-form="1"
+                data-count-token="{{ location.count_qr_token }}"
+                data-count-date="{{ submission_date.isoformat() }}"
+                data-clear-draft-type="{{ clear_saved_draft_type }}"
+            >
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
                 <div class="mb-3">
@@ -143,12 +170,39 @@
 {{ super() }}
 <script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function () {
+    const form = document.querySelector('[data-count-form="1"]');
+    if (!form) {
+        return;
+    }
+
     const inputs = Array.from(document.querySelectorAll('[data-count-entry="1"]'));
     if (!inputs.length) {
         return;
     }
 
+    const submittedNameInput = document.getElementById('submitted_name');
+    const submissionTypeSelect = document.getElementById('submission_type');
     const submitButton = document.querySelector('[data-count-submit="1"]');
+    const draftPrompt = document.querySelector('[data-count-draft-prompt]');
+    const resumeDraftButton = document.querySelector('[data-count-draft-resume="1"]');
+    const discardDraftButton = document.querySelector('[data-count-draft-discard="1"]');
+    const draftStatus = document.querySelector('[data-count-draft-status]');
+    const storagePrefix = 'invoice-manager-location-count-draft';
+    const storageToken = form.dataset.countToken || '';
+    const storageDate = form.dataset.countDate || '';
+    const clearDraftType = form.dataset.clearDraftType || '';
+    const supportedDraftTypes = ['opening', 'closing'];
+    const draftMaxAgeMs = 1000 * 60 * 60 * 48;
+    let pendingDraft = null;
+    let canUseLocalStorage = true;
+
+    try {
+        const probeKey = storagePrefix + ':probe';
+        window.localStorage.setItem(probeKey, '1');
+        window.localStorage.removeItem(probeKey);
+    } catch (error) {
+        canUseLocalStorage = false;
+    }
 
     function focusInput(target) {
         if (!target) {
@@ -162,11 +216,191 @@ document.addEventListener('DOMContentLoaded', function () {
         }, 0);
     }
 
+    function setDraftStatus(message) {
+        if (!draftStatus) {
+            return;
+        }
+        if (!message) {
+            draftStatus.classList.add('d-none');
+            draftStatus.textContent = '';
+            return;
+        }
+        draftStatus.textContent = message;
+        draftStatus.classList.remove('d-none');
+    }
+
+    function draftStorageKey(submissionType) {
+        return [storagePrefix, storageToken, storageDate, submissionType].join(':');
+    }
+
+    function clearDraft(submissionType) {
+        if (!canUseLocalStorage || supportedDraftTypes.indexOf(submissionType) === -1) {
+            return;
+        }
+        window.localStorage.removeItem(draftStorageKey(submissionType));
+    }
+
+    function clearAllDrafts() {
+        supportedDraftTypes.forEach(clearDraft);
+    }
+
+    function readDraft(submissionType) {
+        if (!canUseLocalStorage || supportedDraftTypes.indexOf(submissionType) === -1) {
+            return null;
+        }
+        let payload = null;
+        try {
+            payload = JSON.parse(window.localStorage.getItem(draftStorageKey(submissionType)) || 'null');
+        } catch (error) {
+            clearDraft(submissionType);
+            return null;
+        }
+        if (!payload || typeof payload !== 'object') {
+            return null;
+        }
+        if (payload.submissionType !== submissionType || payload.storageDate !== storageDate) {
+            clearDraft(submissionType);
+            return null;
+        }
+        const savedAt = Date.parse(payload.updatedAt || '');
+        if (!Number.isFinite(savedAt) || Date.now() - savedAt > draftMaxAgeMs) {
+            clearDraft(submissionType);
+            return null;
+        }
+        return payload;
+    }
+
+    function loadLatestDraft() {
+        let latestDraft = null;
+        supportedDraftTypes.forEach(function (submissionType) {
+            const draft = readDraft(submissionType);
+            if (!draft) {
+                return;
+            }
+            if (!latestDraft) {
+                latestDraft = draft;
+                return;
+            }
+            if (Date.parse(draft.updatedAt) > Date.parse(latestDraft.updatedAt)) {
+                latestDraft = draft;
+            }
+        });
+        return latestDraft;
+    }
+
+    function formatSavedTime(timestamp) {
+        const savedAt = Date.parse(timestamp || '');
+        if (!Number.isFinite(savedAt)) {
+            return '';
+        }
+        return new Date(savedAt).toLocaleTimeString([], {
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+    }
+
+    function collectCounts() {
+        const values = {};
+        inputs.forEach(function (input) {
+            const value = (input.value || '').trim();
+            if (!value) {
+                return;
+            }
+            values[input.name] = value;
+        });
+        return values;
+    }
+
+    function formHasValues() {
+        if (submittedNameInput && submittedNameInput.value.trim()) {
+            return true;
+        }
+        return inputs.some(function (input) {
+            return Boolean((input.value || '').trim());
+        });
+    }
+
+    function hideDraftPrompt() {
+        pendingDraft = null;
+        if (draftPrompt) {
+            draftPrompt.classList.add('d-none');
+        }
+    }
+
+    function saveDraft() {
+        if (!canUseLocalStorage || !submissionTypeSelect) {
+            return;
+        }
+        const submissionType = submissionTypeSelect.value;
+        if (supportedDraftTypes.indexOf(submissionType) === -1) {
+            return;
+        }
+        const submittedName = submittedNameInput ? submittedNameInput.value.trim() : '';
+        const counts = collectCounts();
+        if (!submittedName && Object.keys(counts).length === 0) {
+            clearDraft(submissionType);
+            setDraftStatus('');
+            return;
+        }
+        const payload = {
+            version: 1,
+            storageDate: storageDate,
+            submissionType: submissionType,
+            submittedName: submittedName,
+            counts: counts,
+            updatedAt: new Date().toISOString(),
+        };
+        try {
+            window.localStorage.setItem(
+                draftStorageKey(submissionType),
+                JSON.stringify(payload)
+            );
+            setDraftStatus('Saved on this device at ' + formatSavedTime(payload.updatedAt) + '.');
+        } catch (error) {
+            canUseLocalStorage = false;
+            setDraftStatus('');
+        }
+    }
+
+    function restoreDraft(draft) {
+        if (!draft) {
+            return;
+        }
+        if (
+            submissionTypeSelect &&
+            supportedDraftTypes.indexOf(draft.submissionType) !== -1
+        ) {
+            const matchingOption = Array.from(submissionTypeSelect.options).find(function (option) {
+                return option.value === draft.submissionType && !option.disabled;
+            });
+            if (matchingOption) {
+                submissionTypeSelect.value = draft.submissionType;
+            }
+        }
+        if (submittedNameInput) {
+            submittedNameInput.value = draft.submittedName || '';
+        }
+        inputs.forEach(function (input) {
+            input.value = draft.counts && draft.counts[input.name] ? draft.counts[input.name] : '';
+        });
+        hideDraftPrompt();
+        setDraftStatus('Draft restored from ' + formatSavedTime(draft.updatedAt) + '.');
+
+        const firstEmptyInput = inputs.find(function (input) {
+            return !(input.value || '').trim();
+        });
+        focusInput(firstEmptyInput || inputs[0]);
+    }
+
     inputs.forEach(function (input, index) {
         input.addEventListener('focus', function () {
             if (typeof input.select === 'function') {
                 input.select();
             }
+        });
+
+        input.addEventListener('focusout', function () {
+            saveDraft();
         });
 
         input.addEventListener('keydown', function (event) {
@@ -188,6 +422,49 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
     });
+
+    if (submittedNameInput) {
+        submittedNameInput.addEventListener('focusout', saveDraft);
+    }
+    if (submissionTypeSelect) {
+        submissionTypeSelect.addEventListener('change', saveDraft);
+    }
+    form.addEventListener('submit', function () {
+        hideDraftPrompt();
+    });
+    window.addEventListener('pagehide', saveDraft);
+
+    if (resumeDraftButton) {
+        resumeDraftButton.addEventListener('click', function () {
+            restoreDraft(pendingDraft);
+        });
+    }
+    if (discardDraftButton) {
+        discardDraftButton.addEventListener('click', function () {
+            clearAllDrafts();
+            hideDraftPrompt();
+            setDraftStatus('Saved draft removed from this device.');
+            if (submittedNameInput && !submittedNameInput.value.trim()) {
+                focusInput(submittedNameInput);
+                return;
+            }
+            focusInput(inputs[0]);
+        });
+    }
+
+    if (clearDraftType) {
+        clearDraft(clearDraftType);
+    }
+    if (formHasValues()) {
+        saveDraft();
+        return;
+    }
+    pendingDraft = loadLatestDraft();
+    if (pendingDraft && draftPrompt) {
+        draftPrompt.classList.remove('d-none');
+        return;
+    }
+    hideDraftPrompt();
 });
 </script>
 {% endblock %}

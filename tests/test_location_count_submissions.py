@@ -140,6 +140,11 @@ def test_public_count_submission_renders_mobile_numeric_entry_inputs(client, app
     response = client.get(f"/locations/scan/{context['token']}")
 
     assert response.status_code == 200
+    assert b'data-count-form="1"' in response.data
+    assert b'data-count-draft-prompt' in response.data
+    assert b'data-count-draft-resume="1"' in response.data
+    assert b'data-count-draft-discard="1"' in response.data
+    assert b'data-count-draft-status' in response.data
     assert b'type="number"' in response.data
     assert b'step="1"' in response.data
     assert b'min="0"' in response.data

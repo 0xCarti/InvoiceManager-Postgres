@@ -692,6 +692,12 @@ def scan_count_submission(token: str):
         LocationCountSubmission.TYPE_CLOSING,
     }:
         selected_type = default_type
+    clear_saved_draft_type = (request.args.get("clear_draft") or "").strip().lower()
+    if clear_saved_draft_type not in {
+        LocationCountSubmission.TYPE_OPENING,
+        LocationCountSubmission.TYPE_CLOSING,
+    }:
+        clear_saved_draft_type = ""
 
     if request.method == "POST":
         submitted_name = (request.form.get("submitted_name") or "").strip()
@@ -750,6 +756,7 @@ def scan_count_submission(token: str):
                 url_for(
                     "locations.scan_count_submission",
                     token=location_obj.count_qr_token,
+                    clear_draft=selected_type,
                 )
             )
 
@@ -762,6 +769,7 @@ def scan_count_submission(token: str):
         open_event_candidates=open_event_candidates,
         opening_exists=opening_exists,
         selected_type=selected_type,
+        clear_saved_draft_type=clear_saved_draft_type,
     )
 
 
