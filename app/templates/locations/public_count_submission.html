@@ -18,6 +18,17 @@
     margin-top: 0.85rem;
 }
 
+.public-count-item input[data-count-entry="1"] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+}
+
+.public-count-item input[data-count-entry="1"]::-webkit-outer-spin-button,
+.public-count-item input[data-count-entry="1"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
 @media (max-width: 767.98px) {
     .public-count-shell {
         padding-left: 0.85rem;
@@ -89,15 +100,17 @@
                             </div>
                         </div>
                         <input
-                            type="text"
+                            type="number"
+                            step="1"
+                            min="0"
                             inputmode="numeric"
-                            pattern="[0-9]*"
                             enterkeyhint="next"
                             autocomplete="off"
                             autocorrect="off"
                             autocapitalize="off"
                             spellcheck="false"
                             data-count-entry="1"
+                            data-native-numeric="1"
                             class="form-control form-control-lg"
                             name="count_{{ entry.item.id }}"
                             value="{{ request.form.get('count_' ~ entry.item.id, '') }}"

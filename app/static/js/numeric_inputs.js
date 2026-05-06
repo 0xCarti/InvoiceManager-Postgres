@@ -466,6 +466,9 @@
     if (!input || input.dataset.numericExpressionEnabled === '1') {
       return;
     }
+    if (input.dataset.nativeNumeric === '1') {
+      return;
+    }
     const currentType = input.getAttribute('type');
     if (currentType && currentType.toLowerCase() === 'number') {
       input.setAttribute('data-original-type', currentType);
