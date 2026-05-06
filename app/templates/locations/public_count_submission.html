@@ -90,8 +90,14 @@
                         </div>
                         <input
                             type="text"
-                            inputmode="text"
-                            data-numeric-input="1"
+                            inputmode="numeric"
+                            pattern="[0-9]*"
+                            enterkeyhint="next"
+                            autocomplete="off"
+                            autocorrect="off"
+                            autocapitalize="off"
+                            spellcheck="false"
+                            data-count-entry="1"
                             class="form-control form-control-lg"
                             name="count_{{ entry.item.id }}"
                             value="{{ request.form.get('count_' ~ entry.item.id, '') }}"
@@ -106,11 +112,69 @@
                 </div>
                 {% endif %}
 
-                <button type="submit" class="btn btn-primary btn-lg w-100" {% if not items %}disabled{% endif %}>
+                <button
+                    type="submit"
+                    class="btn btn-primary btn-lg w-100"
+                    data-count-submit="1"
+                    {% if not items %}disabled{% endif %}
+                >
                     Send For Review
                 </button>
             </form>
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('DOMContentLoaded', function () {
+    const inputs = Array.from(document.querySelectorAll('[data-count-entry="1"]'));
+    if (!inputs.length) {
+        return;
+    }
+
+    const submitButton = document.querySelector('[data-count-submit="1"]');
+
+    function focusInput(target) {
+        if (!target) {
+            return;
+        }
+        window.setTimeout(function () {
+            target.focus();
+            if (typeof target.select === 'function') {
+                target.select();
+            }
+        }, 0);
+    }
+
+    inputs.forEach(function (input, index) {
+        input.addEventListener('focus', function () {
+            if (typeof input.select === 'function') {
+                input.select();
+            }
+        });
+
+        input.addEventListener('keydown', function (event) {
+            if (event.key !== 'Enter') {
+                return;
+            }
+            event.preventDefault();
+
+            const nextInput = inputs[index + 1];
+            if (nextInput) {
+                focusInput(nextInput);
+                return;
+            }
+
+            if (submitButton) {
+                window.setTimeout(function () {
+                    submitButton.focus();
+                }, 0);
+            }
+        });
+    });
+});
+</script>
 {% endblock %}

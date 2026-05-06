@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date as date_cls
 
 from flask import current_app
@@ -12,6 +13,7 @@ from app.models import (
     Event,
     EventLocation,
     EventStandSheetItem,
+    Item,
     Location,
     LocationCountSubmission,
     LocationCountSubmissionRow,
@@ -278,6 +280,51 @@ def parse_submission_count_value(
     )
 
 
+def _aggregate_submission_rows_for_type(
+    event_location_id: int,
+    submission_type: str,
+    *,
+    use_latest_date: bool,
+) -> dict[int, float]:
+    """Return summed item counts for the chosen approved submission date."""
+
+    approved_submissions = (
+        LocationCountSubmission.query.options(
+            selectinload(LocationCountSubmission.rows).selectinload(
+                LocationCountSubmissionRow.item
+            )
+        )
+        .filter(
+            LocationCountSubmission.event_location_id == event_location_id,
+            LocationCountSubmission.status == LocationCountSubmission.STATUS_APPROVED,
+            LocationCountSubmission.submission_type == submission_type,
+        )
+        .order_by(
+            LocationCountSubmission.submission_date.asc(),
+            LocationCountSubmission.submitted_at.asc(),
+            LocationCountSubmission.id.asc(),
+        )
+        .all()
+    )
+    if not approved_submissions:
+        return {}
+
+    target_date = (
+        approved_submissions[-1].submission_date
+        if use_latest_date
+        else approved_submissions[0].submission_date
+    )
+    totals_by_item_id: dict[int, float] = defaultdict(float)
+    for submission in approved_submissions:
+        if submission.submission_date != target_date:
+            continue
+        for row in submission.rows:
+            if row.item_id is None:
+                continue
+            totals_by_item_id[row.item_id] += float(row.count_value or 0.0)
+    return dict(totals_by_item_id)
+
+
 def sync_event_location_counts_from_approved_submissions(
     event_location_id: int,
 ) -> None:
@@ -295,43 +342,15 @@ def sync_event_location_counts_from_approved_submissions(
     if event_location is None:
         return
 
-    approved_opening = (
-        LocationCountSubmission.query.options(
-            selectinload(LocationCountSubmission.rows).selectinload(
-                LocationCountSubmissionRow.item
-            )
-        )
-        .filter(
-            LocationCountSubmission.event_location_id == event_location_id,
-            LocationCountSubmission.status == LocationCountSubmission.STATUS_APPROVED,
-            LocationCountSubmission.submission_type
-            == LocationCountSubmission.TYPE_OPENING,
-        )
-        .order_by(
-            LocationCountSubmission.submission_date.asc(),
-            LocationCountSubmission.submitted_at.asc(),
-            LocationCountSubmission.id.asc(),
-        )
-        .first()
+    opening_totals = _aggregate_submission_rows_for_type(
+        event_location_id,
+        LocationCountSubmission.TYPE_OPENING,
+        use_latest_date=False,
     )
-    approved_closing = (
-        LocationCountSubmission.query.options(
-            selectinload(LocationCountSubmission.rows).selectinload(
-                LocationCountSubmissionRow.item
-            )
-        )
-        .filter(
-            LocationCountSubmission.event_location_id == event_location_id,
-            LocationCountSubmission.status == LocationCountSubmission.STATUS_APPROVED,
-            LocationCountSubmission.submission_type
-            == LocationCountSubmission.TYPE_CLOSING,
-        )
-        .order_by(
-            LocationCountSubmission.submission_date.desc(),
-            LocationCountSubmission.submitted_at.desc(),
-            LocationCountSubmission.id.desc(),
-        )
-        .first()
+    closing_totals = _aggregate_submission_rows_for_type(
+        event_location_id,
+        LocationCountSubmission.TYPE_CLOSING,
+        use_latest_date=True,
     )
 
     sheet_by_item_id = {
@@ -342,46 +361,47 @@ def sync_event_location_counts_from_approved_submissions(
         sheet.opening_count = 0.0
         sheet.closing_count = 0.0
 
-    for source, field_name in (
-        (approved_opening, "opening_count"),
-        (approved_closing, "closing_count"),
+    for source_totals, field_name in (
+        (opening_totals, "opening_count"),
+        (closing_totals, "closing_count"),
     ):
-        if source is None:
+        if not source_totals:
             continue
-        for row in source.rows:
-            if row.item_id is None:
+        for item_id, total_count in source_totals.items():
+            if item_id is None:
                 continue
-            sheet = sheet_by_item_id.get(row.item_id)
+            sheet = sheet_by_item_id.get(item_id)
             if sheet is None:
                 sheet = EventStandSheetItem(
                     event_location_id=event_location.id,
-                    item_id=row.item_id,
+                    item_id=item_id,
                 )
                 db.session.add(sheet)
-                sheet_by_item_id[row.item_id] = sheet
-            setattr(sheet, field_name, float(row.count_value or 0.0))
+                sheet_by_item_id[item_id] = sheet
+            setattr(sheet, field_name, total_count)
 
     if (
-        approved_closing is not None
+        closing_totals
         and event_location.location_id is not None
         and event_location.event is not None
         and event_location.event.closed
     ):
-        for row in approved_closing.rows:
+        for item_id, total_count in closing_totals.items():
             record = LocationStandItem.query.filter_by(
                 location_id=event_location.location_id,
-                item_id=row.item_id,
+                item_id=item_id,
             ).first()
+            item = db.session.get(Item, item_id)
             if record is None:
                 record = LocationStandItem(
                     location_id=event_location.location_id,
-                    item_id=row.item_id,
+                    item_id=item_id,
                     countable=True,
                     expected_count=0.0,
                     purchase_gl_code_id=(
-                        row.item.purchase_gl_code_id if row.item is not None else None
+                        item.purchase_gl_code_id if item is not None else None
                     ),
                 )
                 db.session.add(record)
             record.countable = True
-            record.expected_count = float(row.count_value or 0.0)
+            record.expected_count = total_count

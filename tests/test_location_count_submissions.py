@@ -135,7 +135,21 @@ def test_public_count_submission_blocks_closing_until_opening_exists(client, app
     assert b'value="closing" selected' in response.data
 
 
-def test_manager_approval_uses_first_opening_and_last_closing(client, app):
+def test_public_count_submission_renders_mobile_numeric_entry_inputs(client, app):
+    context = _setup_location_count_context(app)
+    response = client.get(f"/locations/scan/{context['token']}")
+
+    assert response.status_code == 200
+    assert b'inputmode="numeric"' in response.data
+    assert b'pattern="[0-9]*"' in response.data
+    assert b'enterkeyhint="next"' in response.data
+    assert b'data-count-entry="1"' in response.data
+    assert b'data-count-submit="1"' in response.data
+
+
+def test_manager_approval_uses_first_opening_day_last_closing_day_and_aggregates_same_day_submissions(
+    client, app
+):
     context = _setup_location_count_context(app)
 
     with app.app_context():
@@ -147,6 +161,15 @@ def test_manager_approval_uses_first_opening_and_last_closing(client, app):
             submission_date=context["today"] - timedelta(days=2),
             count_value=10.0,
             submitted_name="Alex",
+        )
+        opening_first_same_day_id = _create_pending_submission(
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+            submission_type=LocationCountSubmission.TYPE_OPENING,
+            submission_date=context["today"] - timedelta(days=2),
+            count_value=3.0,
+            submitted_name="Jordan",
         )
         opening_later_id = _create_pending_submission(
             location_id=context["location_id"],
@@ -166,13 +189,30 @@ def test_manager_approval_uses_first_opening_and_last_closing(client, app):
             count_value=4.0,
             submitted_name="Casey",
         )
+        closing_last_same_day_id = _create_pending_submission(
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+            submission_type=LocationCountSubmission.TYPE_CLOSING,
+            submission_date=context["today"],
+            count_value=1.0,
+            submitted_name="Morgan",
+        )
 
         opening_first = db.session.get(LocationCountSubmission, opening_first_id)
+        opening_first_same_day = db.session.get(
+            LocationCountSubmission, opening_first_same_day_id
+        )
         opening_later = db.session.get(LocationCountSubmission, opening_later_id)
         closing_last = db.session.get(LocationCountSubmission, closing_last_id)
+        closing_last_same_day = db.session.get(
+            LocationCountSubmission, closing_last_same_day_id
+        )
         opening_first_row_id = opening_first.rows[0].id
+        opening_first_same_day_row_id = opening_first_same_day.rows[0].id
         opening_later_row_id = opening_later.rows[0].id
         closing_last_row_id = closing_last.rows[0].id
+        closing_last_same_day_row_id = closing_last_same_day.rows[0].id
 
     with client:
         login(client, "admin@example.com", "adminpass")
@@ -184,6 +224,14 @@ def test_manager_approval_uses_first_opening_and_last_closing(client, app):
                 "Alex",
                 opening_first_row_id,
                 "10",
+            ),
+            (
+                opening_first_same_day_id,
+                (context["today"] - timedelta(days=2)).isoformat(),
+                "opening",
+                "Jordan",
+                opening_first_same_day_row_id,
+                "3",
             ),
             (
                 opening_later_id,
@@ -200,6 +248,14 @@ def test_manager_approval_uses_first_opening_and_last_closing(client, app):
                 "Casey",
                 closing_last_row_id,
                 "4",
+            ),
+            (
+                closing_last_same_day_id,
+                context["today"].isoformat(),
+                "closing",
+                "Morgan",
+                closing_last_same_day_row_id,
+                "1",
             ),
         ):
             response = client.post(
@@ -225,8 +281,8 @@ def test_manager_approval_uses_first_opening_and_last_closing(client, app):
             item_id=context["item_id"],
         ).first()
         assert sheet is not None
-        assert sheet.opening_count == 10.0
-        assert sheet.closing_count == 4.0
+        assert sheet.opening_count == 13.0
+        assert sheet.closing_count == 5.0
 
 
 def test_print_count_sign_returns_pdf(client, app):
