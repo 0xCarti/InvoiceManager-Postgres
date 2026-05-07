@@ -77,6 +77,30 @@ def test_user_can_access_endpoint_requires_matching_permission():
         "event.email_bulk_stand_sheets",
         "POST",
     )
+    assert user_can_access_endpoint(
+        DummyUser("events.view"),
+        "event.download_event_document",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("events.view"),
+        "event.upload_event_document",
+        "POST",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("events.edit"),
+        "event.upload_event_document",
+        "POST",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("events.view"),
+        "event.delete_event_document_file",
+        "POST",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("events.edit"),
+        "event.delete_event_document_file",
+        "POST",
+    )
     assert not user_can_access_endpoint(
         DummyUser("purchase_orders.view"),
         "purchase.mark_purchase_order_ordered",

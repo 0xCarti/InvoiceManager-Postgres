@@ -19,6 +19,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_from_directory,
     session,
     url_for,
 )
@@ -30,6 +31,7 @@ from app.forms import (
     CSRFOnlyForm,
     EVENT_TYPES,
     EventForm,
+    EventDocumentUploadForm,
     EventLocationConfirmForm,
     EventLocationForm,
     EventLocationUndoConfirmForm,
@@ -40,6 +42,7 @@ from app.forms import (
 )
 from app.models import (
     Event,
+    EventDocument,
     EventLocation,
     EventLocationTerminalSalesSummary,
     EventStandSheetItem,
@@ -53,6 +56,13 @@ from app.models import (
     TerminalSaleProductAlias,
     TerminalSaleLocationAlias,
     TerminalSalesResolutionState,
+)
+from app.services.event_documents import (
+    cleanup_orphaned_event_document_storage,
+    delete_event_document,
+    event_document_accept_attribute,
+    persist_event_document_upload,
+    resolve_event_document_path,
 )
 from app.services.notification_service import notify_users_for_event
 from app.services.pdf import render_stand_sheet_pdf
@@ -1267,8 +1277,17 @@ def delete_event(event_id):
         abort(404)
     event_id = ev.id
     event_name = ev.name
+    document_storage_paths = [
+        path
+        for (path,) in EventDocument.query.with_entities(EventDocument.storage_path)
+        .filter(EventDocument.event_id == event_id)
+        .all()
+        if path
+    ]
     db.session.delete(ev)
     db.session.commit()
+    for storage_path in document_storage_paths:
+        cleanup_orphaned_event_document_storage(storage_path)
     log_activity(f"Deleted event {event_id}")
     notify_users_for_event(
         event_key="event_deleted",
@@ -1284,7 +1303,13 @@ def delete_event(event_id):
 @event.route("/events/<int:event_id>")
 @login_required
 def view_event(event_id):
-    ev = db.session.get(Event, event_id)
+    ev = (
+        Event.query.options(
+            selectinload(Event.locations).selectinload(EventLocation.location)
+        )
+        .filter(Event.id == event_id)
+        .first()
+    )
     if ev is None:
         abort(404)
     type_labels = dict(EVENT_TYPES)
@@ -1297,11 +1322,21 @@ def view_event(event_id):
     confirmed_sales = _calculate_confirmed_sales_summary(ev)
     physical_terminal_variance = _calculate_physical_vs_terminal_variance(ev)
     terminal_sales_conflicts = _terminal_sales_conflicts_for_event(ev)
+    event_documents = (
+        EventDocument.query.options(selectinload(EventDocument.uploader))
+        .filter(EventDocument.event_id == ev.id)
+        .order_by(EventDocument.created_at.desc(), EventDocument.id.desc())
+        .all()
+    )
     return render_template(
         "events/view_event.html",
         event=ev,
         event_type_label=type_labels.get(ev.event_type, ev.event_type),
         opening_form=opening_form,
+        document_upload_form=EventDocumentUploadForm(),
+        document_action_form=CSRFOnlyForm(),
+        event_documents=event_documents,
+        event_document_accept=event_document_accept_attribute(),
         confirmed_sales=confirmed_sales,
         physical_terminal_variance=physical_terminal_variance,
         terminal_sales_conflict_guidance=_TERMINAL_SALES_CONFLICT_GUIDANCE,
@@ -1311,6 +1346,80 @@ def view_event(event_id):
         ),
         undo_confirm_form_factory=EventLocationUndoConfirmForm,
     )
+
+
+@event.route("/events/<int:event_id>/documents", methods=["POST"])
+@login_required
+def upload_event_document(event_id):
+    if db.session.get(Event, event_id) is None:
+        abort(404)
+
+    form = EventDocumentUploadForm()
+    if not form.validate_on_submit():
+        for error_list in form.errors.values():
+            for error in error_list:
+                flash(error, "danger")
+        return redirect(url_for("event.view_event", event_id=event_id, _anchor="event-documents"))
+
+    try:
+        document = persist_event_document_upload(
+            form.file.data,
+            event_id=event_id,
+            document_name=form.name.data,
+            use_current_filename=bool(form.use_current_filename.data),
+            uploaded_by_id=getattr(current_user, "id", None),
+        )
+    except ValueError as exc:
+        flash(str(exc), "danger")
+    else:
+        log_activity(f"Uploaded event document {document.id} for event {event_id}")
+        flash("Event document uploaded successfully.", "success")
+
+    return redirect(url_for("event.view_event", event_id=event_id, _anchor="event-documents"))
+
+
+@event.route("/events/<int:event_id>/documents/<int:document_id>/download")
+@login_required
+def download_event_document(event_id: int, document_id: int):
+    document = (
+        EventDocument.query.filter(
+            EventDocument.id == document_id,
+            EventDocument.event_id == event_id,
+        )
+        .first_or_404()
+    )
+    document_path = resolve_event_document_path(document)
+    if document_path is None:
+        abort(404)
+
+    log_activity(f"Downloaded event document {document.id} for event {event_id}")
+    return send_from_directory(
+        os.path.dirname(document_path),
+        os.path.basename(document_path),
+        as_attachment=True,
+        download_name=document.download_name,
+        mimetype=document.content_type or None,
+    )
+
+
+@event.route("/events/<int:event_id>/documents/<int:document_id>/delete", methods=["POST"])
+@login_required
+def delete_event_document_file(event_id: int, document_id: int):
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        abort(400)
+
+    document = (
+        EventDocument.query.filter(
+            EventDocument.id == document_id,
+            EventDocument.event_id == event_id,
+        )
+        .first_or_404()
+    )
+    delete_event_document(document)
+    log_activity(f"Deleted event document {document_id} for event {event_id}")
+    flash("Event document deleted.", "success")
+    return redirect(url_for("event.view_event", event_id=event_id, _anchor="event-documents"))
 
 
 @event.route("/events/<int:event_id>/close-report")

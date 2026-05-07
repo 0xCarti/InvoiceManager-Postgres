@@ -257,7 +257,6 @@
         {% set eaten_val = s.sheet_values.eaten if s.sheet_values else None %}
         {% set spoiled_val = s.sheet_values.spoiled if s.sheet_values else None %}
         {% set closing_count = s.sheet_values.closing_count if s.sheet_values else None %}
-        {% set variance = (closing_count or 0) - (expected_open or 0) %}
         <tr>
           <td data-label="Stock Item (Report Unit)">{{ s.item.name }}{% if s.report_unit_label %} ({{ s.report_unit_label }}){% endif %}</td>
           <td data-label="Expected Opening Count">{% if expected_open is not none %}{{ '%.2f'|format(expected_open) }}{% endif %}</td>
@@ -269,7 +268,7 @@
           <td data-label="Closing Count"></td>
           <td data-label="Units Sold"></td>
           <td data-label="Price">{% if price.value is not none %}${{ '%.2f'|format(price.value) }}{% endif %}</td>
-          <td data-label="Variance">{% if s.sheet %}{{ '%.2f'|format(variance) }}{% endif %}</td>
+          <td data-label="Variance"></td>
         </tr>
         {% endfor %}
       </tbody>

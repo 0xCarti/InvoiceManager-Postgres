@@ -5,7 +5,16 @@ from datetime import date, datetime
 from flask import request
 
 from app import db
-from app.models import Event, EventLocation, Item, Location, Product, ProductRecipeItem
+from app.models import (
+    Event,
+    EventLocation,
+    EventStandSheetItem,
+    Item,
+    Location,
+    LocationStandItem,
+    Product,
+    ProductRecipeItem,
+)
 from app.routes import event_routes, location_routes
 from app.services.pdf import render_stand_sheet_pdf
 
@@ -128,11 +137,28 @@ def test_event_stand_sheet_pdf_contains_items(app, monkeypatch):
         )
 
         location.products.append(product)
+        db.session.add(
+            LocationStandItem(
+                location=location,
+                item=item,
+                expected_count=12.34,
+            )
+        )
 
         event = Event(name="PDF Event", start_date=today, end_date=today)
         event_location = EventLocation(event=event, location=location)
 
-        db.session.add_all([event, event_location])
+        db.session.add_all(
+            [
+                event,
+                event_location,
+                EventStandSheetItem(
+                    event_location=event_location,
+                    item=item,
+                    closing_count=56.78,
+                ),
+            ]
+        )
         db.session.commit()
         event_id = event.id
 
@@ -164,6 +190,9 @@ def test_event_stand_sheet_pdf_contains_items(app, monkeypatch):
         )
         assert item_name.encode() in pdf_bytes
         assert b"Date Used" in pdf_bytes
+        assert b"12.34" in pdf_bytes
+        assert b"$7.00" in pdf_bytes
+        assert b"44.44" not in pdf_bytes
         assert captured_base_url["base_url"] == request.url_root
         assert captured_styles["string"] == "@page { size: letter landscape; }"
         assert isinstance(captured_styles["stylesheets"], list)

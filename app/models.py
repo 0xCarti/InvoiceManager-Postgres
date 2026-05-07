@@ -1,6 +1,7 @@
 import json
 import secrets
 from datetime import date as date_cls, datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
 from flask import current_app, has_app_context
@@ -3766,6 +3767,63 @@ class Event(db.Model):
     locations = relationship(
         "EventLocation", back_populates="event", cascade="all, delete-orphan"
     )
+    documents = relationship(
+        "EventDocument", back_populates="event", cascade="all, delete-orphan"
+    )
+
+
+class EventDocument(db.Model):
+    __tablename__ = "event_document"
+
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey("event.id"), nullable=False)
+    name = db.Column(db.String(255), nullable=True)
+    original_filename = db.Column(db.String(255), nullable=False)
+    content_type = db.Column(db.String(120), nullable=True)
+    file_size_bytes = db.Column(
+        db.Integer, nullable=False, default=0, server_default="0"
+    )
+    sha256 = db.Column(db.String(64), nullable=False)
+    storage_path = db.Column(db.String(1024), nullable=False)
+    uploaded_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    event = relationship("Event", back_populates="documents")
+    uploader = relationship("User", foreign_keys=[uploaded_by])
+
+    __table_args__ = (
+        db.Index("ix_event_document_event_id", "event_id"),
+        db.Index("ix_event_document_uploaded_by", "uploaded_by"),
+        db.Index("ix_event_document_sha256", "sha256"),
+    )
+
+    @property
+    def display_name(self) -> str:
+        return (self.name or "").strip() or self.original_filename
+
+    @property
+    def download_name(self) -> str:
+        custom_name = (self.name or "").strip()
+        if not custom_name:
+            return self.original_filename
+
+        original_extension = Path(self.original_filename or "").suffix
+        custom_extension = Path(custom_name).suffix
+        if original_extension and custom_extension.casefold() != original_extension.casefold():
+            return f"{custom_name}{original_extension}"
+        return custom_name
 
 
 class EventLocation(db.Model):

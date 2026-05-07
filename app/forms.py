@@ -71,6 +71,7 @@ from app.models import (
     UserDepartmentMembership,
     Vendor,
 )
+from app.services.event_documents import EVENT_DOCUMENT_ALLOWED_EXTENSIONS
 from app.utils.numeric import (
     ExpressionParsingError,
     evaluate_math_expression,
@@ -3531,6 +3532,41 @@ class EventForm(FlaskForm):
         "Estimated Sales", validators=[Optional(), NumberRange(min=0)], places=2
     )
     submit = SubmitField("Submit")
+
+
+class EventDocumentUploadForm(FlaskForm):
+    name = StringField(
+        "Document Name",
+        validators=[Optional(), Length(max=255)],
+        render_kw={"placeholder": "Optional custom filename"},
+    )
+    use_current_filename = BooleanField("Use current filename", default=True)
+    file = FileField(
+        "Document File",
+        validators=[
+            FileRequired(),
+            FileAllowed(
+                EVENT_DOCUMENT_ALLOWED_EXTENSIONS,
+                "Only PDF, Office, text, CSV, and image files are allowed.",
+            ),
+        ],
+    )
+    submit = SubmitField("Upload Document")
+
+    def validate(self, extra_validators=None):
+        is_valid = super().validate(extra_validators=extra_validators)
+        self.name.data = (self.name.data or "").strip()
+        if not is_valid:
+            return False
+        if not self.use_current_filename.data and not self.name.data:
+            self.name.errors.append(
+                "Enter a document name or use the current filename."
+            )
+            return False
+        if any(separator in self.name.data for separator in ("/", "\\")):
+            self.name.errors.append("Document name cannot contain path separators.")
+            return False
+        return True
 
 
 class EventLocationForm(FlaskForm):

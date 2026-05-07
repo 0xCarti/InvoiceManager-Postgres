@@ -615,11 +615,26 @@ def test_bulk_stand_sheet(client, app):
             },
             follow_redirects=True,
         )
+        with app.app_context():
+            event_location = EventLocation.query.filter_by(
+                event_id=eid,
+                location_id=loc_id,
+            ).first()
+            db.session.add(
+                EventStandSheetItem(
+                    event_location_id=event_location.id,
+                    item_id=item_id,
+                    closing_count=10.5,
+                )
+            )
+            db.session.commit()
         resp = client.get(f"/events/{eid}/stand_sheets")
         assert resp.status_code == 200
         assert b"EventLoc" in resp.data and b"EventLoc2" in resp.data
         assert b"EItem (Gram)" in resp.data
         assert b"283.50" in resp.data
+        assert b'data-label="Variance"></td>' in resp.data
+        assert b"14.18" not in resp.data
         assert b'data-sticky-standsheet-header="1"' in resp.data
         assert b"sticky_standsheet_headers.js" in resp.data
     with app.app_context():

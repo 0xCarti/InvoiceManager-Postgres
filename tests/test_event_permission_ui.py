@@ -108,6 +108,8 @@ def test_event_detail_hides_management_controls_without_permission(client, app):
     assert "/sales/upload" not in body
     assert "/close" not in body
     assert 'id="opening-counts-form"' not in body
+    assert 'data-event-document-form="1"' not in body
+    assert "Use current filename" not in body
     assert "Stand Sheet" not in body
     assert "Count Sheet" not in body
     assert "Scan Counts" not in body
