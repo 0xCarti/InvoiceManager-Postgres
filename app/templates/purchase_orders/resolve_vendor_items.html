@@ -249,7 +249,6 @@
     </form>
 </div>
 {% include 'purchase_orders/_create_item_modal.html' %}
-<link href="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/css/select2.min.css" rel="stylesheet">
 <style>
     .select2-container { width: 100% !important; }
     .select2-container--default .select2-selection--single {
@@ -272,7 +271,6 @@
         min-width: 7rem;
     }
 </style>
-<script src="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/js/select2.min.js"></script>
 <script src="{{ url_for('static', filename='js/vendor_alias_resolution.js') }}"></script>
 <script nonce="{{ csp_nonce }}">
     document.addEventListener('DOMContentLoaded', function() {

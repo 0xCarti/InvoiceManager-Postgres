@@ -258,7 +258,7 @@
         row.classList.add('row','g-3','item-row','receiving-item-row','align-items-center');
         row.innerHTML = `
             <div class="col item-col">
-                <select name="items-${index}-item" id="items-${index}-item" class="form-control item-select">${itemOptions}</select>
+                <select name="items-${index}-item" id="items-${index}-item" class="form-control item-select" data-item-search="1" data-item-search-placeholder="Search items...">${itemOptions}</select>
                 <input type="hidden" name="items-${index}-vendor_description" id="items-${index}-vendor_description" class="vendor-description-field" value="">
                 <input type="hidden" name="items-${index}-pack_size" id="items-${index}-pack_size" class="vendor-pack-size-field" value="">
                 <input type="hidden" name="items-${index}-position" class="item-position" value="">
@@ -456,6 +456,9 @@
         e.preventDefault();
         const row = createRow(itemIndex);
         document.getElementById('items').appendChild(row);
+        if (window.initItemSearchSelects) {
+            window.initItemSearchSelects(row);
+        }
         if (window.NumericInput) {
             window.NumericInput.enableWithin(row);
         }
@@ -470,7 +473,11 @@
         setOptionalPanelState(row, false);
         const itemSelect = row.querySelector('.item-select');
         if (itemSelect) {
-            itemSelect.focus();
+            if (window.jQuery && window.jQuery(itemSelect).data('select2')) {
+                window.jQuery(itemSelect).select2('open');
+            } else {
+                itemSelect.focus();
+            }
         }
         itemIndex++;
         updatePositions();

@@ -280,9 +280,21 @@ def load_item_choices():
     """Return a list of active item choices, cached per request."""
     if "item_choices" not in g:
         g.item_choices = [
-            (i.id, i.name) for i in Item.query.filter_by(archived=False).all()
+            (i.id, i.name)
+            for i in Item.query.filter_by(archived=False).order_by(Item.name).all()
         ]
     return g.item_choices
+
+
+def item_search_render_kw(*, multiple: bool = False, placeholder: str | None = None):
+    """Return common render kwargs for searchable item fields."""
+
+    attrs = {"data-item-search": "1"}
+    if multiple:
+        attrs["data-item-search-multiple"] = "1"
+    if placeholder:
+        attrs["data-item-search-placeholder"] = placeholder
+    return attrs
 
 
 def load_unit_choices():
@@ -763,7 +775,11 @@ class LocationItemAddForm(FlaskForm):
     """Form used to add standalone items to a location."""
 
     item_id = SelectField(
-        "Item", coerce=int, validators=[DataRequired()], validate_choice=False
+        "Item",
+        coerce=int,
+        validators=[DataRequired()],
+        validate_choice=False,
+        render_kw=item_search_render_kw(placeholder="Search items..."),
     )
     expected_count = DecimalField(
         "Expected Count", validators=[Optional()], places=None, default=0
@@ -1435,6 +1451,7 @@ class PurchaseCostForecastForm(FlaskForm):
         coerce=int,
         validators=[Optional()],
         default=0,
+        render_kw=item_search_render_kw(placeholder="Search items..."),
     )
     submit = SubmitField("Generate Forecast")
 
@@ -1476,7 +1493,11 @@ class TransferItemForm(FlaskForm):
     class Meta:
         csrf = False
 
-    item = SelectField("Item", coerce=int)
+    item = SelectField(
+        "Item",
+        coerce=int,
+        render_kw=item_search_render_kw(placeholder="Search items..."),
+    )
     unit = SelectField(
         "Unit", coerce=int, validators=[Optional()], validate_choice=False
     )
@@ -1686,7 +1707,13 @@ class SpoilageFilterForm(FlaskForm):
         validate_choice=False,
     )
     items = SelectMultipleField(
-        "Items", coerce=int, validators=[Optional()], validate_choice=False
+        "Items",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+        render_kw=item_search_render_kw(
+            multiple=True, placeholder="Search items..."
+        ),
     )
     submit = SubmitField("Filter")
 
@@ -2831,7 +2858,11 @@ class BulkProductUpdateForm(FlaskForm):
 
 
 class RecipeItemForm(FlaskForm):
-    item = SelectField("Item", coerce=int)
+    item = SelectField(
+        "Item",
+        coerce=int,
+        render_kw=item_search_render_kw(placeholder="Search items..."),
+    )
     unit = SelectField(
         "Unit", coerce=int, validators=[Optional()], validate_choice=False
     )
@@ -3096,7 +3127,12 @@ class PurchaseInventorySummaryForm(FlaskForm):
         "Items",
         coerce=int,
         validators=[Optional()],
-        render_kw={"size": 10},
+        render_kw={
+            "size": 10,
+            **item_search_render_kw(
+                multiple=True, placeholder="Search items..."
+            ),
+        },
     )
     gl_codes = SelectMultipleField(
         "GL Codes",
@@ -3122,7 +3158,12 @@ class InventoryVarianceReportForm(FlaskForm):
         "Items",
         coerce=int,
         validators=[Optional()],
-        render_kw={"size": 10},
+        render_kw={
+            "size": 10,
+            **item_search_render_kw(
+                multiple=True, placeholder="Search items..."
+            ),
+        },
     )
     gl_codes = SelectMultipleField(
         "GL Codes",
@@ -3357,7 +3398,11 @@ class VendorItemAliasResolutionRowForm(FlaskForm):
     quantity = HiddenField("Quantity")
     unit_cost = HiddenField("Unit Cost")
     item_id = SelectField(
-        "Item", coerce=int, validators=[DataRequired()], validate_choice=False
+        "Item",
+        coerce=int,
+        validators=[DataRequired()],
+        validate_choice=False,
+        render_kw=item_search_render_kw(placeholder="Search items..."),
     )
     unit_id = SelectField(
         "Default Unit", coerce=int, validators=[Optional()], validate_choice=False
@@ -3377,7 +3422,11 @@ class VendorItemAliasResolutionForm(FlaskForm):
 
 
 class InvoiceItemReceiveForm(FlaskForm):
-    item = SelectField("Item", coerce=int)
+    item = SelectField(
+        "Item",
+        coerce=int,
+        render_kw=item_search_render_kw(placeholder="Search items..."),
+    )
     vendor_sku = StringField(
         "Vendor SKU",
         validators=[Optional(), Length(max=100)],
@@ -3464,7 +3513,12 @@ class VendorItemAliasForm(FlaskForm):
     vendor_sku = StringField("Vendor SKU", validators=[Optional()])
     vendor_description = StringField("Vendor Description", validators=[Optional()])
     pack_size = StringField("Pack/Size", validators=[Optional()])
-    item_id = SelectField("Item", coerce=int, validators=[DataRequired()])
+    item_id = SelectField(
+        "Item",
+        coerce=int,
+        validators=[DataRequired()],
+        render_kw=item_search_render_kw(placeholder="Search items..."),
+    )
     item_unit_id = SelectField(
         "Default Unit", coerce=int, validators=[Optional()], validate_choice=False
     )
