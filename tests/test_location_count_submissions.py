@@ -269,7 +269,7 @@ def test_manager_approval_uses_first_opening_day_last_closing_day_and_aggregates
             response = client.post(
                 f"/locations/count-submissions/{submission_id}",
                 data={
-                    "action": "approve",
+                    "action": "approve_add",
                     "submitted_name": submitted_name,
                     "submission_type": submission_type,
                     "submission_date": submission_date,
@@ -281,7 +281,7 @@ def test_manager_approval_uses_first_opening_day_last_closing_day_and_aggregates
                 follow_redirects=True,
             )
             assert response.status_code == 200
-            assert b"Count submission approved and applied to the stand sheet." in response.data
+            assert b"Count submission approved and applied to the stand sheet using add mode." in response.data
 
     with app.app_context():
         sheet = EventStandSheetItem.query.filter_by(
@@ -291,6 +291,92 @@ def test_manager_approval_uses_first_opening_day_last_closing_day_and_aggregates
         assert sheet is not None
         assert sheet.opening_count == 13.0
         assert sheet.closing_count == 5.0
+
+
+def test_manager_approval_can_overwrite_same_day_counts(client, app):
+    context = _setup_location_count_context(app)
+
+    with app.app_context():
+        first_submission_id = _create_pending_submission(
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+            submission_type=LocationCountSubmission.TYPE_OPENING,
+            submission_date=context["today"],
+            count_value=10.0,
+            submitted_name="Alex",
+        )
+        second_submission_id = _create_pending_submission(
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+            submission_type=LocationCountSubmission.TYPE_OPENING,
+            submission_date=context["today"],
+            count_value=5.0,
+            submitted_name="Jordan",
+        )
+
+        first_submission = db.session.get(LocationCountSubmission, first_submission_id)
+        second_submission = db.session.get(LocationCountSubmission, second_submission_id)
+        first_row_id = first_submission.rows[0].id
+        second_row_id = second_submission.rows[0].id
+
+    with client:
+        login(client, "admin@example.com", "adminpass")
+
+        first_response = client.post(
+            f"/locations/count-submissions/{first_submission_id}",
+            data={
+                "action": "approve_add",
+                "submitted_name": "Alex",
+                "submission_type": "opening",
+                "submission_date": context["today"].isoformat(),
+                "location_id": str(context["location_id"]),
+                "event_location_id": str(context["event_location_id"]),
+                "review_note": "",
+                f"count_{first_row_id}": "10",
+            },
+            follow_redirects=True,
+        )
+        assert first_response.status_code == 200
+        assert (
+            b"Count submission approved and applied to the stand sheet using add mode."
+            in first_response.data
+        )
+
+        second_response = client.post(
+            f"/locations/count-submissions/{second_submission_id}",
+            data={
+                "action": "approve_overwrite",
+                "submitted_name": "Jordan",
+                "submission_type": "opening",
+                "submission_date": context["today"].isoformat(),
+                "location_id": str(context["location_id"]),
+                "event_location_id": str(context["event_location_id"]),
+                "review_note": "",
+                f"count_{second_row_id}": "5",
+            },
+            follow_redirects=True,
+        )
+        assert second_response.status_code == 200
+        assert (
+            b"Count submission approved and applied to the stand sheet using overwrite mode."
+            in second_response.data
+        )
+
+    with app.app_context():
+        sheet = EventStandSheetItem.query.filter_by(
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+        ).first()
+        assert sheet is not None
+        assert sheet.opening_count == 5.0
+
+        second_submission = db.session.get(LocationCountSubmission, second_submission_id)
+        assert (
+            second_submission.approval_mode
+            == LocationCountSubmission.APPROVAL_MODE_OVERWRITE
+        )
 
 
 def test_print_count_sign_returns_pdf(client, app):

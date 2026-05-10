@@ -53,6 +53,7 @@ from app.utils.filter_state import (
     get_filter_defaults,
     normalize_filters,
 )
+from app.utils.imports import _import_items
 from app.utils.pagination import build_pagination_args, get_per_page
 from app.utils.text import (
     build_text_match_predicate,
@@ -64,8 +65,8 @@ from app.utils.units import BASE_UNITS
 item = Blueprint("item", __name__)
 
 # Constants for the import_items route
-# Only plain text files are allowed and uploads are capped at 1MB
-ALLOWED_IMPORT_EXTENSIONS = {".txt"}
+# CSV and plain text files are allowed and uploads are capped at 1MB
+ALLOWED_IMPORT_EXTENSIONS = {".csv", ".txt"}
 MAX_IMPORT_SIZE = 1 * 1024 * 1024  # 1 MB
 
 
@@ -1514,7 +1515,7 @@ def item_last_cost(item_id):
 @item.route("/import_items", methods=["GET", "POST"])
 @login_required
 def import_items():
-    """Bulk import items from a text file."""
+    """Bulk import items from a CSV or plain text file."""
     form = ImportItemsForm()
     if form.validate_on_submit():
         file = form.file.data
@@ -1524,7 +1525,7 @@ def import_items():
         size = file.tell()
         file.seek(0)
         if ext not in ALLOWED_IMPORT_EXTENSIONS:
-            flash("Only .txt files are allowed.", "error")
+            flash("Only .csv and .txt files are allowed.", "error")
             return redirect(url_for("item.import_items"))
         if size > MAX_IMPORT_SIZE:
             flash("File is too large.", "error")
@@ -1532,26 +1533,14 @@ def import_items():
         filepath = os.path.join(current_app.config["UPLOAD_FOLDER"], filename)
         file.save(filepath)
 
-        # Read all unique item names from the uploaded file
-        with open(filepath, "r") as file:
-            names = {line.strip() for line in file if line.strip()}
-
-        # Fetch existing active items in a single query and build a lookup
-        existing_items = Item.query.filter(
-            Item.name.in_(names), Item.archived.is_(False)
-        ).all()
-        existing_lookup = {item.name for item in existing_items}
-
-        # Bulk create only the missing items
-        new_items = [
-            Item(name=name) for name in names if name not in existing_lookup
-        ]
-        if new_items:
-            db.session.bulk_save_objects(new_items)
-        db.session.commit()
+        try:
+            count = _import_items(filepath)
+        finally:
+            if os.path.exists(filepath):
+                os.remove(filepath)
         log_activity("Imported items from file")
 
-        flash("Items imported successfully.", "success")
+        flash(f"Imported {count} items successfully.", "success")
         return redirect(url_for("item.import_items"))
 
     return render_template("items/import_items.html", form=form)

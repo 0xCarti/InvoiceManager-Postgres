@@ -907,7 +907,12 @@ def count_submission_detail(submission_id: int):
 
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()
-        if action in {"save_review", "approve", "reject"} and not editable:
+        approval_mode_by_action = {
+            "approve": LocationCountSubmission.APPROVAL_MODE_ADD,
+            "approve_add": LocationCountSubmission.APPROVAL_MODE_ADD,
+            "approve_overwrite": LocationCountSubmission.APPROVAL_MODE_OVERWRITE,
+        }
+        if action in {"save_review", "approve", "approve_add", "approve_overwrite", "reject"} and not editable:
             flash("This submission has already been reviewed and is read only now.", "warning")
             return redirect(
                 url_for("locations.count_submission_detail", submission_id=submission.id)
@@ -925,7 +930,7 @@ def count_submission_detail(submission_id: int):
                 url_for("locations.count_submission_detail", submission_id=submission.id)
             )
 
-        if action in {"save_review", "approve"}:
+        if action in {"save_review", "approve", "approve_add", "approve_overwrite"}:
             submitted_name = (request.form.get("submitted_name") or "").strip()
             submission_type = (request.form.get("submission_type") or "").strip().lower()
             raw_date = (request.form.get("submission_date") or "").strip()
@@ -999,14 +1004,16 @@ def count_submission_detail(submission_id: int):
                         report_unit=metadata.get("report_unit"),
                     )
 
-                if action == "approve":
+                if action in approval_mode_by_action:
                     if submission.event_location_id is None:
                         flash(
                             "Map this submission to an event before approving it.",
                             "danger",
                         )
                     else:
+                        approval_mode = approval_mode_by_action[action]
                         submission.status = LocationCountSubmission.STATUS_APPROVED
+                        submission.approval_mode = approval_mode
                         submission.reviewed_by = current_user.id
                         submission.reviewed_at = datetime.utcnow()
                         sync_event_location_counts_from_approved_submissions(
@@ -1014,7 +1021,11 @@ def count_submission_detail(submission_id: int):
                         )
                         db.session.commit()
                         log_activity(f"Approved count submission {submission.id}")
-                        flash("Count submission approved and applied to the stand sheet.", "success")
+                        flash(
+                            "Count submission approved and applied to the stand sheet "
+                            f"using {approval_mode} mode.",
+                            "success",
+                        )
                         return redirect(
                             url_for(
                                 "locations.count_submission_detail",

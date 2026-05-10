@@ -4265,6 +4265,8 @@ class LocationCountSubmission(db.Model):
     STATUS_REJECTED = "rejected"
     TYPE_OPENING = "opening"
     TYPE_CLOSING = "closing"
+    APPROVAL_MODE_ADD = "add"
+    APPROVAL_MODE_OVERWRITE = "overwrite"
 
     id = db.Column(db.Integer, primary_key=True)
     source_location_id = db.Column(
@@ -4289,6 +4291,12 @@ class LocationCountSubmission(db.Model):
         nullable=False,
         default=STATUS_PENDING,
         server_default=STATUS_PENDING,
+    )
+    approval_mode = db.Column(
+        db.String(16),
+        nullable=False,
+        default=APPROVAL_MODE_ADD,
+        server_default=APPROVAL_MODE_ADD,
     )
     review_note = db.Column(db.Text, nullable=True)
     reviewed_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
@@ -4336,6 +4344,10 @@ class LocationCountSubmission(db.Model):
         db.CheckConstraint(
             "status IN ('pending', 'approved', 'rejected')",
             name="ck_location_count_submission_status",
+        ),
+        db.CheckConstraint(
+            "approval_mode IN ('add', 'overwrite')",
+            name="ck_location_count_submission_approval_mode",
         ),
         db.Index(
             "ix_location_count_submission_status_submitted_at",

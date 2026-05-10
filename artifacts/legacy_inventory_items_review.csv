@@ -1,0 +1,7 @@
+name,base_unit,cost,reason
+591ml Pepsi Zero,each,1.154167,duplicate name with conflicting costs
+591ml Pepsi Zero,each,1.397917,duplicate name with conflicting costs
+Eggnog,each,3.990000,duplicate name with multiple base units
+Eggnog,ounce,0.051476,duplicate name with multiple base units
+Portion Butter,each,0.093846,duplicate name with conflicting costs
+Portion Butter,each,0.134233,duplicate name with conflicting costs

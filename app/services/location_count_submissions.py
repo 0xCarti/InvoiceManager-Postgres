@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-from datetime import date as date_cls
+from datetime import date as date_cls, datetime as datetime_cls
 
 from flask import current_app
 from sqlalchemy.orm import selectinload
@@ -286,7 +285,7 @@ def _aggregate_submission_rows_for_type(
     *,
     use_latest_date: bool,
 ) -> dict[int, float]:
-    """Return summed item counts for the chosen approved submission date."""
+    """Return item counts for the chosen approved submission date."""
 
     approved_submissions = (
         LocationCountSubmission.query.options(
@@ -299,30 +298,45 @@ def _aggregate_submission_rows_for_type(
             LocationCountSubmission.status == LocationCountSubmission.STATUS_APPROVED,
             LocationCountSubmission.submission_type == submission_type,
         )
-        .order_by(
-            LocationCountSubmission.submission_date.asc(),
-            LocationCountSubmission.submitted_at.asc(),
-            LocationCountSubmission.id.asc(),
-        )
         .all()
     )
     if not approved_submissions:
         return {}
 
     target_date = (
-        approved_submissions[-1].submission_date
+        max(submission.submission_date for submission in approved_submissions)
         if use_latest_date
-        else approved_submissions[0].submission_date
+        else min(submission.submission_date for submission in approved_submissions)
     )
-    totals_by_item_id: dict[int, float] = defaultdict(float)
-    for submission in approved_submissions:
-        if submission.submission_date != target_date:
-            continue
+    totals_by_item_id: dict[int, float] = {}
+    target_submissions = [
+        submission
+        for submission in approved_submissions
+        if submission.submission_date == target_date
+    ]
+    target_submissions.sort(
+        key=lambda submission: (
+            submission.reviewed_at or submission.submitted_at or datetime_cls.min,
+            submission.id,
+        )
+    )
+
+    for submission in target_submissions:
+        approval_mode = (
+            submission.approval_mode
+            or LocationCountSubmission.APPROVAL_MODE_ADD
+        )
         for row in submission.rows:
             if row.item_id is None:
                 continue
-            totals_by_item_id[row.item_id] += float(row.count_value or 0.0)
-    return dict(totals_by_item_id)
+            row_value = float(row.count_value or 0.0)
+            if approval_mode == LocationCountSubmission.APPROVAL_MODE_OVERWRITE:
+                totals_by_item_id[row.item_id] = row_value
+            else:
+                totals_by_item_id[row.item_id] = (
+                    totals_by_item_id.get(row.item_id, 0.0) + row_value
+                )
+    return totals_by_item_id
 
 
 def sync_event_location_counts_from_approved_submissions(

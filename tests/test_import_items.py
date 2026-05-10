@@ -3,7 +3,7 @@ from io import BytesIO
 from werkzeug.security import generate_password_hash
 
 from app import db
-from app.models import User
+from app.models import Item, User
 from tests.utils import login
 
 
@@ -20,18 +20,43 @@ def create_user(app, email="import@example.com"):
         return user.email
 
 
-def test_reject_unsupported_extension(client, app):
+def test_csv_import_creates_item_with_cost_and_base_unit(client, app):
     email = create_user(app, "ext@example.com")
     with client:
         login(client, email, "pass")
-        data = {"file": (BytesIO(b"item1\nitem2"), "items.csv")}
+        data = {
+            "file": (
+                BytesIO(b"name,base_unit,cost\nWidget,each,0.50\n"),
+                "items.csv",
+            )
+        }
         resp = client.post(
             "/import_items",
             data=data,
             content_type="multipart/form-data",
             follow_redirects=True,
         )
-        assert b"Only .txt files are allowed." in resp.data
+        assert b"Imported 1 items successfully." in resp.data
+
+    with app.app_context():
+        item = Item.query.filter_by(name="Widget").first()
+        assert item is not None
+        assert item.base_unit == "each"
+        assert item.cost == 0.5
+
+
+def test_reject_unsupported_extension(client, app):
+    email = create_user(app, "unsupported@example.com")
+    with client:
+        login(client, email, "pass")
+        data = {"file": (BytesIO(b"item1\nitem2"), "items.xlsx")}
+        resp = client.post(
+            "/import_items",
+            data=data,
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+        assert b"Only .csv and .txt files are allowed." in resp.data
 
 
 def test_reject_large_file(client, app):
