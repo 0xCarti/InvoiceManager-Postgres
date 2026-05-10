@@ -44,17 +44,27 @@
         {% endif %}
     </td>
     <td class="col-archived" data-sort-value="{{ '1' if item.archived else '0' }}">{{ 'Yes' if item.archived else 'No' }}</td>
-    <td class="col-actions">
-        <div class="mobile-actions mobile-card-actions app-action-stack">
+    <td class="col-actions text-end">
+        {% set has_item_more_actions = can_access_endpoint('item.edit_item', 'GET') or can_access_endpoint('item.copy_item', 'GET') or can_access_endpoint('item.item_locations', 'GET') %}
+        <div class="app-row-actions">
             <a href="{{ url_for('item.view_item', item_id=item.id) }}" class="btn btn-primary btn-sm">View</a>
-            {% if can_access_endpoint('item.edit_item', 'GET') %}
-            <button type="button" class="btn btn-secondary btn-sm edit-item-btn" data-item-id="{{ item.id }}">Edit</button>
-            {% endif %}
-            {% if can_access_endpoint('item.copy_item', 'GET') %}
-            <button type="button" class="btn btn-secondary btn-sm copy-item-btn" data-item-id="{{ item.id }}">Copy</button>
-            {% endif %}
-            {% if can_access_endpoint('item.item_locations', 'GET') %}
-            <a href="{{ url_for('item.item_locations', item_id=item.id) }}" class="btn btn-info btn-sm">Locations</a>
+            {% if has_item_more_actions %}
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="item-actions-{{ item.id }}" data-bs-toggle="dropdown" aria-expanded="false">
+                    More
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="item-actions-{{ item.id }}">
+                    {% if can_access_endpoint('item.edit_item', 'GET') %}
+                    <li><button type="button" class="dropdown-item edit-item-btn" data-item-id="{{ item.id }}">Edit</button></li>
+                    {% endif %}
+                    {% if can_access_endpoint('item.copy_item', 'GET') %}
+                    <li><button type="button" class="dropdown-item copy-item-btn" data-item-id="{{ item.id }}">Copy</button></li>
+                    {% endif %}
+                    {% if can_access_endpoint('item.item_locations', 'GET') %}
+                    <li><a href="{{ url_for('item.item_locations', item_id=item.id) }}" class="dropdown-item">Locations</a></li>
+                    {% endif %}
+                </ul>
+            </div>
             {% endif %}
         </div>
     </td>

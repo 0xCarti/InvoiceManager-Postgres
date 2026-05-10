@@ -351,19 +351,28 @@
                     {% endif %}
                 </td>
                 <td class="col-invoice-user" data-sort-value="{{ inv.user_id or '' }}">{{ inv.user_id or '—' }}</td>
-                <td class="col-invoice-actions">
-                    <div class="mobile-actions mobile-card-actions">
+                <td class="col-invoice-actions text-end">
+                    <div class="app-row-actions">
                         <a href="{{ url_for('purchase.view_purchase_invoice', invoice_id=inv.id) }}" class="btn btn-sm btn-primary">View</a>
-                        {% if can_view_invoice_gl_report %}
-                        <a href="{{ url_for('report.invoice_gl_code_report', invoice_id=inv.id) }}" class="btn btn-sm btn-outline-primary">Invoice GL Code Report</a>
-                        {% endif %}
-                        <a href="{{ url_for('notes.entity_notes', entity_type='purchase_invoice', entity_id=inv.id) }}" class="btn btn-sm btn-outline-secondary">Notes</a>
-                        {% if can_reverse_purchase_invoices %}
-                        <form method="post" action="{{ url_for('purchase.reverse_purchase_invoice', invoice_id=inv.id) }}" class="d-inline">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button type="submit" class="btn btn-sm btn-danger">Reverse</button>
-                        </form>
-                        {% endif %}
+                        <div class="dropdown">
+                            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="purchase-invoice-actions-{{ inv.id }}" data-bs-toggle="dropdown" aria-expanded="false">
+                                More
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="purchase-invoice-actions-{{ inv.id }}">
+                                {% if can_view_invoice_gl_report %}
+                                <li><a href="{{ url_for('report.invoice_gl_code_report', invoice_id=inv.id) }}" class="dropdown-item">GL Report</a></li>
+                                {% endif %}
+                                <li><a href="{{ url_for('notes.entity_notes', entity_type='purchase_invoice', entity_id=inv.id) }}" class="dropdown-item">Notes</a></li>
+                                {% if can_reverse_purchase_invoices %}
+                                <li>
+                                    <form method="post" action="{{ url_for('purchase.reverse_purchase_invoice', invoice_id=inv.id) }}">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button type="submit" class="dropdown-item text-danger">Reverse</button>
+                                    </form>
+                                </li>
+                                {% endif %}
+                            </ul>
+                        </div>
                     </div>
                 </td>
             </tr>

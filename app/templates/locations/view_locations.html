@@ -513,24 +513,36 @@ document.addEventListener('DOMContentLoaded', function() {
             {% endif %}
             <td class=\"col-location-name\">${loc.name}</td>
             <td class=\"col-location-menu\">${menuLabel}</td>
-            <td class=\"col-location-actions\">
-                {% if can_edit_locations %}
-                <button type=\"button\" class=\"btn btn-info edit-location-btn\" data-id=\"${loc.id}\">Edit</button>
-                {% endif %}
-                <a href=\"/locations/${loc.id}/stand_sheet\" class=\"btn btn-secondary\">Stand Sheet</a>
-                {% if can_manage_location_items %}
-                <a href=\"/locations/${loc.id}/items\" class=\"btn btn-outline-secondary\">Manage Items</a>
-                {% endif %}
-                <a href=\"${notesUrl}\" class=\"btn btn-outline-secondary\">Notes</a>
-                {% if can_copy_location_items %}
-                <button type=\"button\" class=\"btn btn-warning copy-location-btn\" data-id=\"${loc.id}\">Copy Stand Sheet</button>
-                {% endif %}
-                {% if can_delete_locations %}
-                <form action=\"/locations/delete/${loc.id}\" method=\"post\" class=\"d-inline\">
-                    <input type=\"hidden\" name=\"csrf_token\" value=\"${csrfToken}\">
-                    <button type=\"submit\" class=\"btn btn-danger\">Delete</button>
-                </form>
-                {% endif %}
+            <td class=\"col-location-actions text-end\">
+                <div class=\"app-row-actions\">
+                    <a href=\"/locations/${loc.id}\" class=\"btn btn-outline-primary btn-sm\">View</a>
+                    <div class=\"dropdown\">
+                        <button class=\"btn btn-outline-secondary btn-sm dropdown-toggle\" type=\"button\" id=\"location-actions-${loc.id}\" data-bs-toggle=\"dropdown\" aria-expanded=\"false\">
+                            More
+                        </button>
+                        <ul class=\"dropdown-menu dropdown-menu-end\" aria-labelledby=\"location-actions-${loc.id}\">
+                            {% if can_edit_locations %}
+                            <li><button type=\"button\" class=\"dropdown-item edit-location-btn\" data-id=\"${loc.id}\">Edit</button></li>
+                            {% endif %}
+                            <li><a href=\"/locations/${loc.id}/stand_sheet\" class=\"dropdown-item\">Stand Sheet</a></li>
+                            {% if can_manage_location_items %}
+                            <li><a href=\"/locations/${loc.id}/items\" class=\"dropdown-item\">Items</a></li>
+                            {% endif %}
+                            <li><a href=\"${notesUrl}\" class=\"dropdown-item\">Notes</a></li>
+                            {% if can_copy_location_items %}
+                            <li><button type=\"button\" class=\"dropdown-item copy-location-btn\" data-id=\"${loc.id}\">Copy Stand Sheet</button></li>
+                            {% endif %}
+                            {% if can_delete_locations %}
+                            <li>
+                                <form action=\"/locations/delete/${loc.id}\" method=\"post\">
+                                    <input type=\"hidden\" name=\"csrf_token\" value=\"${csrfToken}\">
+                                    <button type=\"submit\" class=\"dropdown-item text-danger\">Delete</button>
+                                </form>
+                            </li>
+                            {% endif %}
+                        </ul>
+                    </div>
+                </div>
             </td>
         </tr>`;
         $('#locations-table tbody').append(row);

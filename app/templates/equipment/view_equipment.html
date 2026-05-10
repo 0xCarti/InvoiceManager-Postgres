@@ -339,31 +339,40 @@
                     <td class="col-equipment-custodian">{{ asset.custodian_label or '-' }}</td>
                     <td class="col-equipment-serial">{{ asset.serial_number or '-' }}</td>
                     <td class="col-equipment-cost">{% if asset.cost is not none %}${{ '%.2f'|format(asset.cost) }}{% else %}-{% endif %}</td>
-                    <td class="col-equipment-actions">
-                        <div class="mobile-actions">
+                    <td class="col-equipment-actions text-end">
+                        <div class="app-row-actions">
                             <a href="{{ url_for('equipment.view_equipment_asset', asset_id=asset.id) }}" class="btn btn-outline-secondary btn-sm">View</a>
-                            <a href="{{ url_for('notes.entity_notes', entity_type='equipment', entity_id=asset.id) }}" class="btn btn-outline-secondary btn-sm">Notes</a>
-                            {% if can_manage_custody %}
-                            <a href="{{ url_for('equipment.view_equipment_asset_scan', asset_id=asset.id) }}" class="btn btn-outline-secondary btn-sm">Scan</a>
-                            {% endif %}
-                            {% if can_view_maintenance %}
-                            <a href="{{ url_for('equipment.view_equipment_maintenance', asset_id=asset.id) }}" class="btn btn-outline-secondary btn-sm">Maintenance</a>
-                            {% endif %}
-                            {% if can_manage_maintenance %}
-                            <a href="{{ url_for('equipment.create_equipment_maintenance_issue', asset_id=asset.id) }}" class="btn btn-outline-secondary btn-sm">Report Issue</a>
-                            {% endif %}
-                            {% if can_edit_equipment %}
-                            <a href="{{ url_for('equipment.edit_equipment_asset', asset_id=asset.id) }}" class="btn btn-primary btn-sm">Edit</a>
-                            {% endif %}
-                            {% if can_print_labels %}
-                            <a href="{{ url_for('equipment.print_equipment_labels', equipment_id=asset.id) }}" class="btn btn-outline-secondary btn-sm" target="_blank" rel="noopener">Label</a>
-                            {% endif %}
-                            {% if can_archive_equipment %}
-                            <form action="{{ url_for('equipment.archive_equipment_asset', asset_id=asset.id) }}" method="post" class="d-inline">
-                                {{ delete_form.hidden_tag() }}
-                                <button type="submit" class="btn btn-danger btn-sm" data-confirm-message="Archive this equipment asset?">Archive</button>
-                            </form>
-                            {% endif %}
+                            <div class="dropdown">
+                                <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="equipment-actions-{{ asset.id }}" data-bs-toggle="dropdown" aria-expanded="false">
+                                    More
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="equipment-actions-{{ asset.id }}">
+                                    <li><a href="{{ url_for('notes.entity_notes', entity_type='equipment', entity_id=asset.id) }}" class="dropdown-item">Notes</a></li>
+                                    {% if can_manage_custody %}
+                                    <li><a href="{{ url_for('equipment.view_equipment_asset_scan', asset_id=asset.id) }}" class="dropdown-item">Scan</a></li>
+                                    {% endif %}
+                                    {% if can_view_maintenance %}
+                                    <li><a href="{{ url_for('equipment.view_equipment_maintenance', asset_id=asset.id) }}" class="dropdown-item">Maintenance</a></li>
+                                    {% endif %}
+                                    {% if can_manage_maintenance %}
+                                    <li><a href="{{ url_for('equipment.create_equipment_maintenance_issue', asset_id=asset.id) }}" class="dropdown-item">Report Issue</a></li>
+                                    {% endif %}
+                                    {% if can_edit_equipment %}
+                                    <li><a href="{{ url_for('equipment.edit_equipment_asset', asset_id=asset.id) }}" class="dropdown-item">Edit</a></li>
+                                    {% endif %}
+                                    {% if can_print_labels %}
+                                    <li><a href="{{ url_for('equipment.print_equipment_labels', equipment_id=asset.id) }}" class="dropdown-item" target="_blank" rel="noopener">Label</a></li>
+                                    {% endif %}
+                                    {% if can_archive_equipment %}
+                                    <li>
+                                        <form action="{{ url_for('equipment.archive_equipment_asset', asset_id=asset.id) }}" method="post">
+                                            {{ delete_form.hidden_tag() }}
+                                            <button type="submit" class="dropdown-item text-danger" data-confirm-message="Archive this equipment asset?">Archive</button>
+                                        </form>
+                                    </li>
+                                    {% endif %}
+                                </ul>
+                            </div>
                         </div>
                     </td>
                 </tr>

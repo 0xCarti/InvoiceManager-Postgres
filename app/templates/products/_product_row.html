@@ -67,25 +67,39 @@
             <span class="text-muted">No recipe items</span>
         {% endif %}
     </td>
-    <td class="col-product-actions">
-        <div class="mobile-actions mobile-card-actions app-action-stack">
+    <td class="col-product-actions text-end">
+        {% set has_product_more_actions = can_access_endpoint('product.edit_product', 'GET') or can_access_endpoint('product.copy_product', 'GET') or can_access_endpoint('product.delete_product', 'POST') %}
+        <div class="app-row-actions">
             {% if can_view_product %}
             <a href="{{ url_for('product.view_product', product_id=product.id) }}" class="btn btn-outline-primary btn-sm">View</a>
             {% endif %}
-            {% if can_access_endpoint('product.edit_product', 'GET') %}
-            <a href="{{ url_for('product.edit_product', product_id=product.id) }}"
-               class="btn btn-primary btn-sm edit-product-link"
-               data-product-id="{{ product.id }}">Edit</a>
-            {% endif %}
-            <a href="{{ url_for('notes.entity_notes', entity_type='product', entity_id=product.id) }}" class="btn btn-outline-secondary btn-sm">Notes</a>
-            {% if can_access_endpoint('product.copy_product', 'GET') %}
-            <a href="{{ url_for('product.copy_product', product_id=product.id) }}" class="btn btn-secondary btn-sm">Copy</a>
-            {% endif %}
-            {% if can_access_endpoint('product.delete_product', 'POST') %}
-            <form action="{{ url_for('product.delete_product', product_id=product.id) }}" method="post" class="d-inline-block">
-                {{ delete_form.hidden_tag() }}
-                <button type="submit" class="btn btn-danger btn-sm">Delete</button>
-            </form>
+            {% if has_product_more_actions or can_view_product %}
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="product-actions-{{ product.id }}" data-bs-toggle="dropdown" aria-expanded="false">
+                    More
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="product-actions-{{ product.id }}">
+                    {% if can_access_endpoint('product.edit_product', 'GET') %}
+                    <li>
+                        <a href="{{ url_for('product.edit_product', product_id=product.id) }}"
+                           class="dropdown-item edit-product-link"
+                           data-product-id="{{ product.id }}">Edit</a>
+                    </li>
+                    {% endif %}
+                    <li><a href="{{ url_for('notes.entity_notes', entity_type='product', entity_id=product.id) }}" class="dropdown-item">Notes</a></li>
+                    {% if can_access_endpoint('product.copy_product', 'GET') %}
+                    <li><a href="{{ url_for('product.copy_product', product_id=product.id) }}" class="dropdown-item">Copy</a></li>
+                    {% endif %}
+                    {% if can_access_endpoint('product.delete_product', 'POST') %}
+                    <li>
+                        <form action="{{ url_for('product.delete_product', product_id=product.id) }}" method="post">
+                            {{ delete_form.hidden_tag() }}
+                            <button type="submit" class="dropdown-item text-danger">Delete</button>
+                        </form>
+                    </li>
+                    {% endif %}
+                </ul>
+            </div>
             {% endif %}
         </div>
     </td>

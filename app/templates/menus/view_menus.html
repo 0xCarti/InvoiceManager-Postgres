@@ -145,18 +145,33 @@
                         {% endif %}
                     </td>
                     <td class="col-menu-actions text-end">
-                        <div class="mobile-actions mobile-card-actions">
-                            {% if can_edit_menus %}
+                        <div class="app-row-actions">
+                            {% set show_primary_edit = can_edit_menus %}
+                            {% set show_primary_assign = (not show_primary_edit) and can_assign_menus %}
+                            {% if show_primary_edit %}
                             <a href="{{ url_for('menu.edit_menu', menu_id=menu.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
-                            {% endif %}
-                            {% if can_assign_menus %}
+                            {% elif show_primary_assign %}
                             <a href="{{ url_for('menu.assign_menu', menu_id=menu.id) }}" class="btn btn-sm btn-outline-primary">Assign</a>
                             {% endif %}
-                            {% if can_delete_menus %}
-                            <form method="post" action="{{ url_for('menu.delete_menu', menu_id=menu.id) }}" class="d-inline">
-                                {{ delete_form.hidden_tag() }}
-                                <button type="submit" class="btn btn-sm btn-outline-danger" data-confirm-message="Delete this menu?">Delete</button>
-                            </form>
+                            {% if can_assign_menus or can_delete_menus %}
+                            <div class="dropdown">
+                                <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="menu-actions-{{ menu.id }}" data-bs-toggle="dropdown" aria-expanded="false">
+                                    More
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="menu-actions-{{ menu.id }}">
+                                    {% if can_assign_menus and not show_primary_assign %}
+                                    <li><a href="{{ url_for('menu.assign_menu', menu_id=menu.id) }}" class="dropdown-item">Assign</a></li>
+                                    {% endif %}
+                                    {% if can_delete_menus %}
+                                    <li>
+                                        <form method="post" action="{{ url_for('menu.delete_menu', menu_id=menu.id) }}">
+                                            {{ delete_form.hidden_tag() }}
+                                            <button type="submit" class="dropdown-item text-danger" data-confirm-message="Delete this menu?">Delete</button>
+                                        </form>
+                                    </li>
+                                    {% endif %}
+                                </ul>
+                            </div>
                             {% endif %}
                         </div>
                     </td>

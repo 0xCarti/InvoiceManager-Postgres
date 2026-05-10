@@ -354,28 +354,51 @@
                     {% endif %}
                 </td>
                 <td class="col-po-user" data-sort-value="{{ order.user_id or '' }}">{{ order.user_id or '—' }}</td>
-                <td class="col-po-actions">
-                    <div class="mobile-actions mobile-card-actions">
-                        <a href="{{ url_for('notes.entity_notes', entity_type='purchase_order', entity_id=order.id) }}" class="btn btn-sm btn-outline-secondary">Notes</a>
+                <td class="col-po-actions text-end">
+                    <div class="app-row-actions">
                         {% if not order.received %}
-                        {% if order.can_mark_ordered and can_mark_purchase_orders %}
-                        <form action="{{ url_for('purchase.mark_purchase_order_ordered', po_id=order.id) }}" method="post" class="d-inline">
-                            {{ mark_ordered_form.hidden_tag() }}
-                            <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
-                            <button type="submit" class="btn btn-sm btn-outline-primary">Mark Ordered</button>
-                        </form>
-                        {% endif %}
-                        {% if can_edit_purchase_orders %}
-                        <a href="{{ url_for('purchase.edit_purchase_order', po_id=order.id) }}" class="btn btn-sm btn-primary">Edit</a>
-                        {% endif %}
-                        {% if can_receive_purchase_invoices %}
+                        {% set show_primary_receive = can_receive_purchase_invoices %}
+                        {% set show_primary_edit = (not show_primary_receive) and can_edit_purchase_orders %}
+                        {% set show_primary_notes = (not show_primary_receive) and (not show_primary_edit) %}
+                        {% set has_order_more_actions = (not show_primary_notes) or (order.can_mark_ordered and can_mark_purchase_orders) or (can_edit_purchase_orders and not show_primary_edit) or can_delete_purchase_orders %}
+                        {% if show_primary_receive %}
                         <a href="{{ url_for('purchase.receive_invoice', po_id=order.id) }}" class="btn btn-sm btn-success">Receive</a>
+                        {% elif show_primary_edit %}
+                        <a href="{{ url_for('purchase.edit_purchase_order', po_id=order.id) }}" class="btn btn-sm btn-primary">Edit</a>
+                        {% else %}
+                        <a href="{{ url_for('notes.entity_notes', entity_type='purchase_order', entity_id=order.id) }}" class="btn btn-sm btn-outline-secondary">Notes</a>
                         {% endif %}
-                        {% if can_delete_purchase_orders %}
-                        <form action="{{ url_for('purchase.delete_purchase_order', po_id=order.id) }}" method="post" class="d-inline">
-                            {{ delete_form.hidden_tag() }}
-                            <button type="submit" class="btn btn-sm btn-danger" data-confirm-message="Are you sure?">Delete</button>
-                        </form>
+                        {% if has_order_more_actions %}
+                        <div class="dropdown">
+                            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="purchase-order-actions-{{ order.id }}" data-bs-toggle="dropdown" aria-expanded="false">
+                                More
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="purchase-order-actions-{{ order.id }}">
+                                {% if not show_primary_notes %}
+                                <li><a href="{{ url_for('notes.entity_notes', entity_type='purchase_order', entity_id=order.id) }}" class="dropdown-item">Notes</a></li>
+                                {% endif %}
+                                {% if order.can_mark_ordered and can_mark_purchase_orders %}
+                                <li>
+                                    <form action="{{ url_for('purchase.mark_purchase_order_ordered', po_id=order.id) }}" method="post">
+                                        {{ mark_ordered_form.hidden_tag() }}
+                                        <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+                                        <button type="submit" class="dropdown-item">Mark Ordered</button>
+                                    </form>
+                                </li>
+                                {% endif %}
+                                {% if can_edit_purchase_orders and not show_primary_edit %}
+                                <li><a href="{{ url_for('purchase.edit_purchase_order', po_id=order.id) }}" class="dropdown-item">Edit</a></li>
+                                {% endif %}
+                                {% if can_delete_purchase_orders %}
+                                <li>
+                                    <form action="{{ url_for('purchase.delete_purchase_order', po_id=order.id) }}" method="post">
+                                        {{ delete_form.hidden_tag() }}
+                                        <button type="submit" class="dropdown-item text-danger" data-confirm-message="Are you sure?">Delete</button>
+                                    </form>
+                                </li>
+                                {% endif %}
+                            </ul>
+                        </div>
                         {% endif %}
                         {% else %}
                         <span class="badge {{ order.purchase_status_badge_class }}">{{ order.purchase_status_label }}</span>
