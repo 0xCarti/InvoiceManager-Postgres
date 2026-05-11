@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Count Submissions{% endblock %}
+{% block title %}Location Submissions{% endblock %}
 
 {% block content %}
 <style nonce="{{ csp_nonce }}">
@@ -18,8 +18,8 @@
 <div class="container mt-5 app-page-shell">
     <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-4">
         <div>
-            <h2 class="mb-1">Count Submissions</h2>
-            <p class="text-muted mb-0">Review opening and closing counts submitted from location QR signs.</p>
+            <h2 class="mb-1">Location Submissions</h2>
+            <p class="text-muted mb-0">Review count, eaten, and spoilage entries submitted from location mobile pages.</p>
         </div>
         <div class="d-flex flex-wrap gap-2">
             <a class="btn btn-outline-secondary" href="{{ url_for('locations.view_locations') }}">Back to Locations</a>
@@ -28,7 +28,7 @@
 
     <form method="get" class="card card-body mb-3 count-submission-toolbar">
         <div class="row g-2 align-items-end">
-            <div class="col-lg-5">
+            <div class="col-lg-4">
                 <label class="form-label mb-1" for="search">Search</label>
                 <input id="search" type="text" name="search" class="form-control" value="{{ search_query }}" placeholder="Submission ID, staff name, or location">
             </div>
@@ -42,7 +42,17 @@
                 </select>
             </div>
             <div class="col-lg-2">
-                <label class="form-label mb-1" for="location_id">Location ID</label>
+                <label class="form-label mb-1" for="submission_type">Type</label>
+                <select id="submission_type" name="submission_type" class="form-select">
+                    <option value="">All types</option>
+                    <option value="opening" {% if submission_type_filter == 'opening' %}selected{% endif %}>Opening Count</option>
+                    <option value="closing" {% if submission_type_filter == 'closing' %}selected{% endif %}>Closing Count</option>
+                    <option value="eaten" {% if submission_type_filter == 'eaten' %}selected{% endif %}>Eaten Items</option>
+                    <option value="spoilage" {% if submission_type_filter == 'spoilage' %}selected{% endif %}>Spoilage Items</option>
+                </select>
+            </div>
+            <div class="col-lg-1">
+                <label class="form-label mb-1" for="location_id">Location</label>
                 <input id="location_id" type="text" name="location_id" class="form-control" value="{{ location_filter or '' }}" placeholder="Any">
             </div>
             <div class="col-lg-2 d-grid">
@@ -51,7 +61,7 @@
         </div>
     </form>
 
-    {% if search_query or status_filter or location_filter %}
+    {% if search_query or status_filter or submission_type_filter or location_filter %}
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
         <span class="text-muted small">Active filters:</span>
         {% if search_query %}
@@ -59,6 +69,9 @@
         {% endif %}
         {% if status_filter %}
         <span class="badge rounded-pill text-bg-light border">Status: {{ status_filter|title }}</span>
+        {% endif %}
+        {% if submission_type_filter %}
+        <span class="badge rounded-pill text-bg-light border">Type: {{ submission_type_label(submission_type_filter) }}</span>
         {% endif %}
         {% if location_filter %}
         <span class="badge rounded-pill text-bg-light border">Location: #{{ location_filter }}</span>
@@ -92,13 +105,13 @@
                             {{ submission.status|title }}
                         </span>
                     </td>
-                    <td>{{ submission.submission_type|title }}</td>
+                    <td>{{ submission_type_label(submission.submission_type) }}</td>
                     <td>
                         <div>{{ submission.submitted_name }}</div>
                         <div class="small text-muted">
                             {{ submission.submission_date.strftime('%Y-%m-%d') }}
                             {% if submission.submitted_at %}
-                            · {{ submission.submitted_at.strftime('%H:%M') }}
+                            &middot; {{ submission.submitted_at.strftime('%H:%M') }}
                             {% endif %}
                         </div>
                     </td>
@@ -127,13 +140,13 @@
     {% else %}
     <div class="card">
         <div class="card-body text-muted">
-            No count submissions matched the current filters.
+            No location submissions matched the current filters.
         </div>
     </div>
     {% endif %}
 
     <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3">
-        <nav aria-label="Count submission pagination">
+        <nav aria-label="Location submission pagination">
             <ul class="pagination mb-0">
                 <li class="page-item {% if not submissions.has_prev %}disabled{% endif %}">
                     <a class="page-link" href="{{ url_for('locations.count_submissions', page=submissions.prev_num if submissions.has_prev else 1, **pagination_args) }}"{% if not submissions.has_prev %} tabindex="-1" aria-disabled="true"{% endif %}>Previous</a>

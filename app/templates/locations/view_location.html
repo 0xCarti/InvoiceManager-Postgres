@@ -6,6 +6,7 @@
 {% set can_manage_terminal_location_mappings = can_access_endpoint('locations.remove_terminal_sale_alias', 'POST') %}
 {% set can_review_count_submissions = can_access_endpoint('locations.count_submissions', 'GET') %}
 {% set can_print_count_sign = can_access_endpoint('locations.print_count_sign', 'GET') %}
+{% set can_print_transfer_sign = can_access_endpoint('locations.print_transfer_sign', 'GET') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .location-detail-actions,
@@ -37,8 +38,11 @@
             {% if can_print_count_sign %}
             <a class="btn btn-outline-secondary" href="{{ url_for('locations.print_count_sign', location_id=location.id) }}">Print Count QR Sign</a>
             {% endif %}
+            {% if can_print_transfer_sign %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('locations.print_transfer_sign', location_id=location.id) }}">Print Transfer QR Sign</a>
+            {% endif %}
             {% if can_review_count_submissions %}
-            <a class="btn btn-outline-secondary" href="{{ url_for('locations.count_submissions', location_id=location.id) }}">Count Submissions</a>
+            <a class="btn btn-outline-secondary" href="{{ url_for('locations.count_submissions', location_id=location.id) }}">Location Submissions</a>
             {% endif %}
             <a class="btn btn-outline-secondary" href="{{ url_for('locations.view_stand_sheet', location_id=location.id) }}">Stand Sheet</a>
             {% if can_access_endpoint('locations.location_items', 'GET') %}
@@ -109,7 +113,7 @@
         <div class="col-md-6 col-xl-2">
             <div class="card h-100">
                 <div class="card-body">
-                    <div class="small text-muted">Last Count Submission</div>
+                    <div class="small text-muted">Last Submission</div>
                     <div class="h6 mb-0">{{ latest_count_submission_at.strftime('%Y-%m-%d %H:%M') if latest_count_submission_at else 'Never' }}</div>
                 </div>
             </div>
@@ -117,7 +121,7 @@
         <div class="col-md-6 col-xl-2">
             <div class="card h-100">
                 <div class="card-body">
-                    <div class="small text-muted">Pending Count Reviews</div>
+                    <div class="small text-muted">Pending Submission Reviews</div>
                     <div class="h6 mb-0">{{ pending_count_submission_count }}</div>
                 </div>
             </div>
@@ -176,8 +180,8 @@
                 <div class="card-body">
                     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
                         <div>
-                            <h3 class="h5 mb-1">Recent Count Submissions</h3>
-                            <p class="text-muted mb-0">Public opening and closing counts submitted from this location's QR sign.</p>
+                            <h3 class="h5 mb-1">Recent Location Submissions</h3>
+                            <p class="text-muted mb-0">Recent count, eaten, and spoilage entries submitted from this location's mobile pages.</p>
                         </div>
                         {% if can_review_count_submissions %}
                         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('locations.count_submissions', location_id=location.id) }}">Review Queue</a>
@@ -202,7 +206,7 @@
                                         <div>{{ submission.submitted_name }}</div>
                                         <div class="small text-muted">{{ submission.submitted_at.strftime('%Y-%m-%d %H:%M') if submission.submitted_at else 'Unknown' }}</div>
                                     </td>
-                                    <td>{{ submission.submission_type|title }}</td>
+                                    <td>{{ submission_type_label(submission.submission_type) }}</td>
                                     <td>
                                         <span class="badge {% if submission.status == 'approved' %}text-bg-success{% elif submission.status == 'rejected' %}text-bg-danger{% else %}text-bg-warning{% endif %}">
                                             {{ submission.status|title }}
@@ -228,7 +232,7 @@
                         </table>
                     </div>
                     {% else %}
-                    <p class="text-muted mb-0">No QR count submissions have been recorded for this location yet.</p>
+                    <p class="text-muted mb-0">No mobile submissions have been recorded for this location yet.</p>
                     {% endif %}
                 </div>
             </div>

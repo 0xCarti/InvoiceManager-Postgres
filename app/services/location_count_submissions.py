@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date as date_cls, datetime as datetime_cls
 
 from flask import current_app
@@ -165,6 +166,16 @@ def opening_submission_exists(
     return query.first() is not None
 
 
+def count_submission_type_uses_date_extreme(submission_type: str) -> str:
+    """Return how approved submissions of ``submission_type`` should roll up."""
+
+    if submission_type == LocationCountSubmission.TYPE_OPENING:
+        return "earliest"
+    if submission_type == LocationCountSubmission.TYPE_CLOSING:
+        return "latest"
+    return "all"
+
+
 def build_location_count_item_entries(location: Location) -> list[dict]:
     """Return countable item entries for a location's mobile count sheet."""
 
@@ -282,8 +293,6 @@ def parse_submission_count_value(
 def _aggregate_submission_rows_for_type(
     event_location_id: int,
     submission_type: str,
-    *,
-    use_latest_date: bool,
 ) -> dict[int, float]:
     """Return item counts for the chosen approved submission date."""
 
@@ -303,25 +312,60 @@ def _aggregate_submission_rows_for_type(
     if not approved_submissions:
         return {}
 
-    target_date = (
-        max(submission.submission_date for submission in approved_submissions)
-        if use_latest_date
-        else min(submission.submission_date for submission in approved_submissions)
-    )
-    totals_by_item_id: dict[int, float] = {}
-    target_submissions = [
-        submission
-        for submission in approved_submissions
-        if submission.submission_date == target_date
-    ]
-    target_submissions.sort(
+    approved_submissions.sort(
         key=lambda submission: (
+            submission.submission_date,
             submission.reviewed_at or submission.submitted_at or datetime_cls.min,
             submission.id,
         )
     )
 
-    for submission in target_submissions:
+    date_extreme = count_submission_type_uses_date_extreme(submission_type)
+    if date_extreme == "earliest":
+        target_date = min(
+            submission.submission_date for submission in approved_submissions
+        )
+        target_submissions = [
+            submission
+            for submission in approved_submissions
+            if submission.submission_date == target_date
+        ]
+        return _roll_up_submission_rows(target_submissions)
+
+    if date_extreme == "latest":
+        target_date = max(
+            submission.submission_date for submission in approved_submissions
+        )
+        target_submissions = [
+            submission
+            for submission in approved_submissions
+            if submission.submission_date == target_date
+        ]
+        return _roll_up_submission_rows(target_submissions)
+
+    totals_by_item_id: dict[int, float] = {}
+    rows_by_date: dict[date_cls, list[LocationCountSubmission]] = defaultdict(list)
+    for submission in approved_submissions:
+        rows_by_date[submission.submission_date].append(submission)
+
+    for submission_date in sorted(rows_by_date):
+        daily_totals = _roll_up_submission_rows(rows_by_date[submission_date])
+        for item_id, total_value in daily_totals.items():
+            totals_by_item_id[item_id] = (
+                totals_by_item_id.get(item_id, 0.0) + total_value
+            )
+
+    return totals_by_item_id
+
+
+def _roll_up_submission_rows(
+    submissions: list[LocationCountSubmission],
+) -> dict[int, float]:
+    """Combine submission rows honoring add vs overwrite approval modes."""
+
+    totals_by_item_id: dict[int, float] = {}
+
+    for submission in submissions:
         approval_mode = (
             submission.approval_mode
             or LocationCountSubmission.APPROVAL_MODE_ADD
@@ -339,7 +383,7 @@ def _aggregate_submission_rows_for_type(
     return totals_by_item_id
 
 
-def sync_event_location_counts_from_approved_submissions(
+def sync_event_location_inventory_from_approved_submissions(
     event_location_id: int,
 ) -> None:
     """Apply approved mobile submissions onto the event stand sheet."""
@@ -356,16 +400,15 @@ def sync_event_location_counts_from_approved_submissions(
     if event_location is None:
         return
 
-    opening_totals = _aggregate_submission_rows_for_type(
-        event_location_id,
-        LocationCountSubmission.TYPE_OPENING,
-        use_latest_date=False,
-    )
-    closing_totals = _aggregate_submission_rows_for_type(
-        event_location_id,
-        LocationCountSubmission.TYPE_CLOSING,
-        use_latest_date=True,
-    )
+    totals_by_type = {
+        submission_type: _aggregate_submission_rows_for_type(
+            event_location_id,
+            submission_type,
+        )
+        for submission_type in LocationCountSubmission.ALL_TYPES
+    }
+    opening_totals = totals_by_type[LocationCountSubmission.TYPE_OPENING]
+    closing_totals = totals_by_type[LocationCountSubmission.TYPE_CLOSING]
 
     sheet_by_item_id = {
         sheet.item_id: sheet for sheet in (event_location.stand_sheet_items or [])
@@ -374,11 +417,16 @@ def sync_event_location_counts_from_approved_submissions(
     for sheet in sheet_by_item_id.values():
         sheet.opening_count = 0.0
         sheet.closing_count = 0.0
+        sheet.eaten = 0.0
+        sheet.spoiled = 0.0
 
-    for source_totals, field_name in (
-        (opening_totals, "opening_count"),
-        (closing_totals, "closing_count"),
+    for submission_type, field_name in (
+        (LocationCountSubmission.TYPE_OPENING, "opening_count"),
+        (LocationCountSubmission.TYPE_CLOSING, "closing_count"),
+        (LocationCountSubmission.TYPE_EATEN, "eaten"),
+        (LocationCountSubmission.TYPE_SPOILAGE, "spoiled"),
     ):
+        source_totals = totals_by_type[submission_type]
         if not source_totals:
             continue
         for item_id, total_count in source_totals.items():
@@ -419,3 +467,11 @@ def sync_event_location_counts_from_approved_submissions(
                 db.session.add(record)
             record.countable = True
             record.expected_count = total_count
+
+
+def sync_event_location_counts_from_approved_submissions(
+    event_location_id: int,
+) -> None:
+    """Backward-compatible wrapper for the broadened inventory sync."""
+
+    sync_event_location_inventory_from_approved_submissions(event_location_id)

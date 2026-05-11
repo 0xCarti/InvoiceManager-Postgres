@@ -1,8 +1,13 @@
+from datetime import date, timedelta
+
 from werkzeug.security import generate_password_hash
 
 from app import db
 from app.models import (
     Customer,
+    Event,
+    EventLocation,
+    EventStandSheetItem,
     Invoice,
     Item,
     ItemUnit,
@@ -267,7 +272,7 @@ def test_transfer_expected_counts_updated(client, app):
         loc2 = Location(name="L2")
         item = Item(name="Countable", base_unit="each")
         db.session.add_all([loc1, loc2, item])
-        db.session.commit()
+        db.session.flush()
         unit = ItemUnit(
             item_id=item.id,
             name="each",
@@ -276,6 +281,23 @@ def test_transfer_expected_counts_updated(client, app):
             transfer_default=True,
         )
         db.session.add(unit)
+        today = date.today()
+        event = Event(
+            name="Transfer Event",
+            start_date=today - timedelta(days=1),
+            end_date=today + timedelta(days=1),
+        )
+        db.session.add(event)
+        db.session.flush()
+        from_event_location = EventLocation(
+            event_id=event.id,
+            location_id=loc1.id,
+        )
+        to_event_location = EventLocation(
+            event_id=event.id,
+            location_id=loc2.id,
+        )
+        db.session.add_all([from_event_location, to_event_location])
         lsi1 = LocationStandItem(
             location_id=loc1.id, item_id=item.id, expected_count=0
         )
@@ -285,6 +307,8 @@ def test_transfer_expected_counts_updated(client, app):
         db.session.add_all([lsi1, lsi2])
         db.session.commit()
         loc1_id, loc2_id, item_id, unit_id = loc1.id, loc2.id, item.id, unit.id
+        from_event_location_id = from_event_location.id
+        to_event_location_id = to_event_location.id
 
     with client:
         login(client, "expected@example.com", "pass")
@@ -324,8 +348,22 @@ def test_transfer_expected_counts_updated(client, app):
         l2 = LocationStandItem.query.filter_by(
             location_id=loc2_id, item_id=item_id
         ).first()
+        from_sheet = EventStandSheetItem.query.filter_by(
+            event_location_id=from_event_location_id,
+            item_id=item_id,
+        ).first()
+        to_sheet = EventStandSheetItem.query.filter_by(
+            event_location_id=to_event_location_id,
+            item_id=item_id,
+        ).first()
         assert l1.expected_count == -4
         assert l2.expected_count == 4
+        assert from_sheet is not None
+        assert to_sheet is not None
+        assert from_sheet.opening_count == 0
+        assert to_sheet.opening_count == 0
+        assert from_sheet.transferred_out == 4
+        assert to_sheet.transferred_in == 4
 
     with client:
         login(client, "expected@example.com", "pass")
@@ -347,8 +385,153 @@ def test_transfer_expected_counts_updated(client, app):
         l2 = LocationStandItem.query.filter_by(
             location_id=loc2_id, item_id=item_id
         ).first()
+        from_sheet = EventStandSheetItem.query.filter_by(
+            event_location_id=from_event_location_id,
+            item_id=item_id,
+        ).first()
+        to_sheet = EventStandSheetItem.query.filter_by(
+            event_location_id=to_event_location_id,
+            item_id=item_id,
+        ).first()
         assert l1.expected_count == 0
         assert l2.expected_count == 0
+        assert from_sheet.transferred_out == 0
+        assert to_sheet.transferred_in == 0
+
+
+def test_pre_event_transfer_updates_opening_counts_only(client, app):
+    user_id = create_user(app, "futuretransfer@example.com")
+    with app.app_context():
+        loc1 = Location(name="Future From")
+        loc2 = Location(name="Future To")
+        item = Item(name="Future Countable", base_unit="each")
+        db.session.add_all([loc1, loc2, item])
+        db.session.flush()
+        unit = ItemUnit(
+            item_id=item.id,
+            name="each",
+            factor=1,
+            receiving_default=True,
+            transfer_default=True,
+        )
+        db.session.add(unit)
+        today = date.today()
+        event = Event(
+            name="Future Transfer Event",
+            start_date=today + timedelta(days=2),
+            end_date=today + timedelta(days=4),
+        )
+        db.session.add(event)
+        db.session.flush()
+        from_event_location = EventLocation(
+            event_id=event.id,
+            location_id=loc1.id,
+        )
+        to_event_location = EventLocation(
+            event_id=event.id,
+            location_id=loc2.id,
+        )
+        db.session.add_all([from_event_location, to_event_location])
+        lsi1 = LocationStandItem(
+            location_id=loc1.id, item_id=item.id, expected_count=10
+        )
+        lsi2 = LocationStandItem(
+            location_id=loc2.id, item_id=item.id, expected_count=0
+        )
+        db.session.add_all([lsi1, lsi2])
+        db.session.commit()
+        loc1_id, loc2_id, item_id, unit_id = loc1.id, loc2.id, item.id, unit.id
+        from_event_location_id = from_event_location.id
+        to_event_location_id = to_event_location.id
+
+    with client:
+        login(client, "futuretransfer@example.com", "pass")
+        resp = client.post(
+            "/transfers/add",
+            data={
+                "from_location_id": loc1_id,
+                "to_location_id": loc2_id,
+                "items-0-item": item_id,
+                "items-0-unit": unit_id,
+                "items-0-quantity": 4,
+            },
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+
+    with app.app_context():
+        transfer = Transfer.query.filter_by(user_id=user_id).first()
+        tid = transfer.id
+
+    with client:
+        login(client, "futuretransfer@example.com", "pass")
+        resp = client.get(f"/transfers/complete/{tid}")
+        assert resp.status_code == 200
+        resp = client.post(
+            f"/transfers/complete/{tid}",
+            data={"submit": "1"},
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+
+    with app.app_context():
+        l1 = LocationStandItem.query.filter_by(
+            location_id=loc1_id, item_id=item_id
+        ).first()
+        l2 = LocationStandItem.query.filter_by(
+            location_id=loc2_id, item_id=item_id
+        ).first()
+        from_sheet = EventStandSheetItem.query.filter_by(
+            event_location_id=from_event_location_id,
+            item_id=item_id,
+        ).first()
+        to_sheet = EventStandSheetItem.query.filter_by(
+            event_location_id=to_event_location_id,
+            item_id=item_id,
+        ).first()
+        assert l1.expected_count == 6
+        assert l2.expected_count == 4
+        assert from_sheet is not None
+        assert to_sheet is not None
+        assert from_sheet.opening_count == 6
+        assert to_sheet.opening_count == 4
+        assert from_sheet.transferred_out == 0
+        assert to_sheet.transferred_in == 0
+
+    with client:
+        login(client, "futuretransfer@example.com", "pass")
+        resp = client.get(
+            f"/transfers/uncomplete/{tid}", follow_redirects=True
+        )
+        assert resp.status_code == 200
+        resp = client.post(
+            f"/transfers/uncomplete/{tid}",
+            data={"submit": "1"},
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+
+    with app.app_context():
+        l1 = LocationStandItem.query.filter_by(
+            location_id=loc1_id, item_id=item_id
+        ).first()
+        l2 = LocationStandItem.query.filter_by(
+            location_id=loc2_id, item_id=item_id
+        ).first()
+        from_sheet = EventStandSheetItem.query.filter_by(
+            event_location_id=from_event_location_id,
+            item_id=item_id,
+        ).first()
+        to_sheet = EventStandSheetItem.query.filter_by(
+            event_location_id=to_event_location_id,
+            item_id=item_id,
+        ).first()
+        assert l1.expected_count == 10
+        assert l2.expected_count == 0
+        assert from_sheet.opening_count == 10
+        assert to_sheet.opening_count == 0
+        assert from_sheet.transferred_out == 0
+        assert to_sheet.transferred_in == 0
 
 
 def test_transfer_completion_by_location_only_counts_open_transfers(app):

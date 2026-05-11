@@ -44,7 +44,10 @@ from app.models import (
     Transfer,
 )
 from app.services.notification_service import notify_users_for_event
-from app.services.location_count_labels import render_location_count_sign_pdf
+from app.services.location_count_labels import (
+    render_location_count_sign_pdf,
+    render_location_transfer_sign_pdf,
+)
 from app.services.location_count_submissions import (
     build_location_count_item_entries,
     build_submission_row_entries,
@@ -252,6 +255,258 @@ def _open_event_candidates_for_location(
         and not candidate.event.closed
         and candidate.event.start_date <= submission_date <= candidate.event.end_date
     ]
+
+
+def _submission_type_label(submission_type: str) -> str:
+    labels = {
+        LocationCountSubmission.TYPE_OPENING: "Opening Count",
+        LocationCountSubmission.TYPE_CLOSING: "Closing Count",
+        LocationCountSubmission.TYPE_EATEN: "Eaten Items",
+        LocationCountSubmission.TYPE_SPOILAGE: "Spoilage Items",
+    }
+    return labels.get(submission_type, submission_type.replace("_", " ").title())
+
+
+def _submission_detail_heading(submission_type: str) -> str:
+    headings = {
+        LocationCountSubmission.TYPE_OPENING: "Opening count",
+        LocationCountSubmission.TYPE_CLOSING: "Closing count",
+        LocationCountSubmission.TYPE_EATEN: "Eaten item",
+        LocationCountSubmission.TYPE_SPOILAGE: "Spoilage item",
+    }
+    return headings.get(submission_type, submission_type.replace("_", " "))
+
+
+def _submission_sentence_label(submission_type: str) -> str:
+    labels = {
+        LocationCountSubmission.TYPE_OPENING: "Opening count",
+        LocationCountSubmission.TYPE_CLOSING: "Closing count",
+        LocationCountSubmission.TYPE_EATEN: "Eaten items",
+        LocationCountSubmission.TYPE_SPOILAGE: "Spoilage items",
+    }
+    return labels.get(submission_type, submission_type.replace("_", " "))
+
+
+def _public_submission_links(token: str, active_key: str) -> list[dict[str, object]]:
+    links = [
+        {
+            "key": "counts",
+            "label": "Counts",
+            "url": url_for("locations.scan_count_submission", token=token),
+        },
+        {
+            "key": "eaten",
+            "label": "Eaten",
+            "url": url_for("locations.scan_eaten_submission", token=token),
+        },
+        {
+            "key": "spoilage",
+            "label": "Spoilage",
+            "url": url_for("locations.scan_spoilage_submission", token=token),
+        },
+    ]
+    for link in links:
+        link["active"] = link["key"] == active_key
+    return links
+
+
+def _public_submission_page_config(
+    *,
+    fixed_submission_type: str | None,
+    opening_exists: bool,
+) -> dict[str, object]:
+    count_type_options = [
+        {
+            "value": LocationCountSubmission.TYPE_OPENING,
+            "label": _submission_type_label(LocationCountSubmission.TYPE_OPENING),
+            "disabled": False,
+        },
+        {
+            "value": LocationCountSubmission.TYPE_CLOSING,
+            "label": _submission_type_label(LocationCountSubmission.TYPE_CLOSING),
+            "disabled": not opening_exists,
+        },
+    ]
+    if fixed_submission_type == LocationCountSubmission.TYPE_EATEN:
+        return {
+            "active_link_key": "eaten",
+            "page_title": "Submit Eaten Items",
+            "page_description": "Record eaten items for manager review.",
+            "submit_button_label": "Send Eaten Items For Review",
+            "show_submission_type_select": False,
+            "submission_type_options": [],
+            "submission_type_help_text": "",
+            "selected_type": LocationCountSubmission.TYPE_EATEN,
+        }
+    if fixed_submission_type == LocationCountSubmission.TYPE_SPOILAGE:
+        return {
+            "active_link_key": "spoilage",
+            "page_title": "Submit Spoilage Items",
+            "page_description": "Record spoiled items for manager review.",
+            "submit_button_label": "Send Spoilage For Review",
+            "show_submission_type_select": False,
+            "submission_type_options": [],
+            "submission_type_help_text": "",
+            "selected_type": LocationCountSubmission.TYPE_SPOILAGE,
+        }
+    return {
+        "active_link_key": "counts",
+        "page_title": "Submit Counts",
+        "page_description": "Submit opening or closing counts for manager review.",
+        "submit_button_label": "Send For Review",
+        "show_submission_type_select": True,
+        "submission_type_options": count_type_options,
+        "submission_type_help_text": (
+            "Closing counts unlock after an opening count has already been submitted."
+        ),
+        "selected_type": (
+            LocationCountSubmission.TYPE_CLOSING
+            if opening_exists
+            else LocationCountSubmission.TYPE_OPENING
+        ),
+    }
+
+
+def _handle_public_location_submission(
+    token: str,
+    *,
+    fixed_submission_type: str | None = None,
+):
+    """Render and handle public mobile entry for counts and waste."""
+
+    normalized_token = (token or "").strip()
+    location_obj = (
+        Location.query.filter(
+            Location.count_qr_token == normalized_token,
+            Location.archived.is_(False),
+        )
+        .first_or_404()
+    )
+    submission_date = _current_count_submission_date()
+    matched_event_location = choose_auto_matched_event_location(
+        location_obj.id, submission_date
+    )
+    open_event_candidates = _open_event_candidates_for_location(
+        location_obj.id, submission_date
+    )
+    opening_exists = opening_submission_exists(
+        location_obj.id,
+        submission_date,
+        event_location_id=(
+            matched_event_location.id if matched_event_location is not None else None
+        ),
+    )
+    items = build_location_count_item_entries(location_obj)
+    page_config = _public_submission_page_config(
+        fixed_submission_type=fixed_submission_type,
+        opening_exists=opening_exists,
+    )
+    allowed_types = (
+        {fixed_submission_type}
+        if fixed_submission_type is not None
+        else set(LocationCountSubmission.COUNT_TYPES)
+    )
+    selected_type = (
+        (
+            request.form.get("submission_type")
+            or request.args.get("submission_type")
+            or page_config["selected_type"]
+        )
+        .strip()
+        .lower()
+    )
+    if selected_type not in allowed_types:
+        selected_type = page_config["selected_type"]
+    clear_saved_draft_type = (request.args.get("clear_draft") or "").strip().lower()
+    if clear_saved_draft_type not in LocationCountSubmission.ALL_TYPES:
+        clear_saved_draft_type = ""
+
+    if request.method == "POST":
+        submitted_name = (request.form.get("submitted_name") or "").strip()
+        if not submitted_name:
+            flash("Please enter your name before submitting.", "danger")
+        elif (
+            selected_type == LocationCountSubmission.TYPE_CLOSING
+            and not opening_exists
+        ):
+            flash(
+                "Closing counts are locked until an opening count has been submitted.",
+                "danger",
+            )
+        elif not items:
+            flash("No countable items are configured for this location.", "danger")
+        else:
+            submission = LocationCountSubmission(
+                source_location_id=location_obj.id,
+                location_id=location_obj.id,
+                event_location_id=(
+                    matched_event_location.id if matched_event_location is not None else None
+                ),
+                submission_type=selected_type,
+                submitted_name=submitted_name,
+                submission_date=submission_date,
+                status=LocationCountSubmission.STATUS_PENDING,
+            )
+            db.session.add(submission)
+            db.session.flush()
+
+            for index, entry in enumerate(items):
+                item_id = entry["item"].id
+                count_value = parse_submission_count_value(
+                    request.form.get(f"count_{item_id}"),
+                    base_unit=entry.get("base_unit"),
+                    report_unit=entry.get("report_unit"),
+                )
+                db.session.add(
+                    LocationCountSubmissionRow(
+                        submission_id=submission.id,
+                        item_id=item_id,
+                        count_value=count_value,
+                        parse_index=index,
+                    )
+                )
+
+            db.session.commit()
+            log_activity(
+                f"Submitted {selected_type} location sheet {submission.id} for location {location_obj.id}"
+            )
+            flash(
+                f"{_submission_sentence_label(selected_type)} submitted for manager review.",
+                "success",
+            )
+            redirect_endpoint = {
+                LocationCountSubmission.TYPE_EATEN: "locations.scan_eaten_submission",
+                LocationCountSubmission.TYPE_SPOILAGE: "locations.scan_spoilage_submission",
+            }.get(selected_type, "locations.scan_count_submission")
+            return redirect(
+                url_for(
+                    redirect_endpoint,
+                    token=location_obj.count_qr_token,
+                    clear_draft=selected_type,
+                )
+            )
+
+    return render_template(
+        "locations/public_count_submission.html",
+        location=location_obj,
+        items=items,
+        submission_date=submission_date,
+        matched_event_location=matched_event_location,
+        open_event_candidates=open_event_candidates,
+        opening_exists=opening_exists,
+        selected_type=selected_type,
+        clear_saved_draft_type=clear_saved_draft_type,
+        page_title=page_config["page_title"],
+        page_description=page_config["page_description"],
+        submit_button_label=page_config["submit_button_label"],
+        show_submission_type_select=page_config["show_submission_type_select"],
+        submission_type_options=page_config["submission_type_options"],
+        submission_type_help_text=page_config["submission_type_help_text"],
+        public_submission_links=_public_submission_links(
+            location_obj.count_qr_token,
+            page_config["active_link_key"],
+        ),
+    )
 
 
 @location.route("/locations/add", methods=["GET", "POST"])
@@ -653,123 +908,26 @@ def email_stand_sheets(location_id: int | None = None):
 @location.route("/locations/scan/<token>", methods=["GET", "POST"])
 def scan_count_submission(token: str):
     """Public mobile entry page for opening and closing counts."""
+    return _handle_public_location_submission(token)
 
-    normalized_token = (token or "").strip()
-    location_obj = (
-        Location.query.filter(
-            Location.count_qr_token == normalized_token,
-            Location.archived.is_(False),
-        )
-        .first_or_404()
-    )
-    submission_date = _current_count_submission_date()
-    matched_event_location = choose_auto_matched_event_location(
-        location_obj.id, submission_date
-    )
-    open_event_candidates = _open_event_candidates_for_location(
-        location_obj.id, submission_date
-    )
-    opening_exists = opening_submission_exists(
-        location_obj.id,
-        submission_date,
-        event_location_id=(
-            matched_event_location.id if matched_event_location is not None else None
-        ),
-    )
-    items = build_location_count_item_entries(location_obj)
-    default_type = (
-        LocationCountSubmission.TYPE_CLOSING
-        if opening_exists
-        else LocationCountSubmission.TYPE_OPENING
-    )
-    selected_type = (
-        (request.form.get("submission_type") or request.args.get("submission_type") or default_type)
-        .strip()
-        .lower()
-    )
-    if selected_type not in {
-        LocationCountSubmission.TYPE_OPENING,
-        LocationCountSubmission.TYPE_CLOSING,
-    }:
-        selected_type = default_type
-    clear_saved_draft_type = (request.args.get("clear_draft") or "").strip().lower()
-    if clear_saved_draft_type not in {
-        LocationCountSubmission.TYPE_OPENING,
-        LocationCountSubmission.TYPE_CLOSING,
-    }:
-        clear_saved_draft_type = ""
 
-    if request.method == "POST":
-        submitted_name = (request.form.get("submitted_name") or "").strip()
-        if not submitted_name:
-            flash("Please enter your name before submitting counts.", "danger")
-        elif (
-            selected_type == LocationCountSubmission.TYPE_CLOSING
-            and not opening_exists
-        ):
-            flash(
-                "Closing counts are locked until an opening count has been submitted.",
-                "danger",
-            )
-        elif not items:
-            flash("No countable items are configured for this location.", "danger")
-        else:
-            submission = LocationCountSubmission(
-                source_location_id=location_obj.id,
-                location_id=location_obj.id,
-                event_location_id=(
-                    matched_event_location.id if matched_event_location is not None else None
-                ),
-                submission_type=selected_type,
-                submitted_name=submitted_name,
-                submission_date=submission_date,
-                status=LocationCountSubmission.STATUS_PENDING,
-            )
-            db.session.add(submission)
-            db.session.flush()
+@location.route("/locations/scan/<token>/eaten", methods=["GET", "POST"])
+def scan_eaten_submission(token: str):
+    """Public mobile entry page for eaten item submissions."""
 
-            for index, entry in enumerate(items):
-                item_id = entry["item"].id
-                count_value = parse_submission_count_value(
-                    request.form.get(f"count_{item_id}"),
-                    base_unit=entry.get("base_unit"),
-                    report_unit=entry.get("report_unit"),
-                )
-                db.session.add(
-                    LocationCountSubmissionRow(
-                        submission_id=submission.id,
-                        item_id=item_id,
-                        count_value=count_value,
-                        parse_index=index,
-                    )
-                )
+    return _handle_public_location_submission(
+        token,
+        fixed_submission_type=LocationCountSubmission.TYPE_EATEN,
+    )
 
-            db.session.commit()
-            log_activity(
-                f"Submitted {selected_type} count sheet {submission.id} for location {location_obj.id}"
-            )
-            flash(
-                f"{selected_type.title()} count submitted for manager review.",
-                "success",
-            )
-            return redirect(
-                url_for(
-                    "locations.scan_count_submission",
-                    token=location_obj.count_qr_token,
-                    clear_draft=selected_type,
-                )
-            )
 
-    return render_template(
-        "locations/public_count_submission.html",
-        location=location_obj,
-        items=items,
-        submission_date=submission_date,
-        matched_event_location=matched_event_location,
-        open_event_candidates=open_event_candidates,
-        opening_exists=opening_exists,
-        selected_type=selected_type,
-        clear_saved_draft_type=clear_saved_draft_type,
+@location.route("/locations/scan/<token>/spoilage", methods=["GET", "POST"])
+def scan_spoilage_submission(token: str):
+    """Public mobile entry page for spoilage submissions."""
+
+    return _handle_public_location_submission(
+        token,
+        fixed_submission_type=LocationCountSubmission.TYPE_SPOILAGE,
     )
 
 
@@ -804,15 +962,42 @@ def print_count_sign(location_id: int):
     return response
 
 
+@location.route("/locations/<int:location_id>/transfer-sign", methods=["GET"])
+@login_required
+def print_transfer_sign(location_id: int):
+    """Render a printable QR sign for transfer entry."""
+
+    location_obj = db.session.get(Location, location_id)
+    if location_obj is None:
+        abort(404)
+
+    qr_payload = url_for(
+        "transfer.add_transfer",
+        from_location_id=location_obj.id,
+        _external=True,
+    )
+    pdf_bytes = render_location_transfer_sign_pdf(
+        [location_obj],
+        {location_obj.id: qr_payload},
+    )
+    log_activity(f"Printed transfer sign for location {location_obj.id}")
+    response = Response(pdf_bytes, mimetype="application/pdf")
+    response.headers["Content-Disposition"] = (
+        f"inline; filename=location-{location_obj.id}-transfer-sign.pdf"
+    )
+    return response
+
+
 @location.route("/locations/count-submissions", methods=["GET"])
 @login_required
 def count_submissions():
-    """Review pending and processed public count submissions."""
+    """Review pending and processed public location submissions."""
 
     page = request.args.get("page", 1, type=int)
     per_page = get_per_page()
     search_query = (request.args.get("search") or "").strip()
     status_filter = (request.args.get("status") or "").strip().lower()
+    submission_type_filter = (request.args.get("submission_type") or "").strip().lower()
     location_filter = request.args.get("location_id", type=int)
     allowed_statuses = {
         LocationCountSubmission.STATUS_PENDING,
@@ -821,6 +1006,8 @@ def count_submissions():
     }
     if status_filter not in allowed_statuses:
         status_filter = ""
+    if submission_type_filter not in LocationCountSubmission.ALL_TYPES:
+        submission_type_filter = ""
 
     source_location_alias = aliased(Location)
     mapped_location_alias = aliased(Location)
@@ -850,6 +1037,10 @@ def count_submissions():
 
     if status_filter:
         query = query.filter(LocationCountSubmission.status == status_filter)
+    if submission_type_filter:
+        query = query.filter(
+            LocationCountSubmission.submission_type == submission_type_filter
+        )
     if location_filter:
         query = query.filter(
             or_(
@@ -874,16 +1065,18 @@ def count_submissions():
         submissions=submissions,
         search_query=search_query,
         status_filter=status_filter,
+        submission_type_filter=submission_type_filter,
         location_filter=location_filter,
         per_page=per_page,
         pagination_args=build_pagination_args(per_page),
+        submission_type_label=_submission_type_label,
     )
 
 
 @location.route("/locations/count-submissions/<int:submission_id>", methods=["GET", "POST"])
 @login_required
 def count_submission_detail(submission_id: int):
-    """Review a single public count submission."""
+    """Review a single public location submission."""
 
     submission = (
         LocationCountSubmission.query.options(
@@ -925,7 +1118,10 @@ def count_submission_detail(submission_id: int):
             submission.reviewed_at = datetime.utcnow()
             db.session.commit()
             log_activity(f"Rejected count submission {submission.id}")
-            flash("Count submission rejected.", "success")
+            flash(
+                f"{_submission_sentence_label(submission.submission_type)} rejected.",
+                "success",
+            )
             return redirect(
                 url_for("locations.count_submission_detail", submission_id=submission.id)
             )
@@ -941,11 +1137,8 @@ def count_submission_detail(submission_id: int):
             errors: list[str] = []
             if not submitted_name:
                 errors.append("Enter the submitter's name.")
-            if submission_type not in {
-                LocationCountSubmission.TYPE_OPENING,
-                LocationCountSubmission.TYPE_CLOSING,
-            }:
-                errors.append("Choose whether this is an opening or closing count.")
+            if submission_type not in LocationCountSubmission.ALL_TYPES:
+                errors.append("Choose a valid submission type.")
             try:
                 submission_date = date_cls.fromisoformat(raw_date)
             except ValueError:
@@ -1022,7 +1215,8 @@ def count_submission_detail(submission_id: int):
                         db.session.commit()
                         log_activity(f"Approved count submission {submission.id}")
                         flash(
-                            "Count submission approved and applied to the stand sheet "
+                            f"{_submission_sentence_label(submission.submission_type)} "
+                            "approved and applied to the stand sheet "
                             f"using {approval_mode} mode.",
                             "success",
                         )
@@ -1035,7 +1229,7 @@ def count_submission_detail(submission_id: int):
                 else:
                     db.session.commit()
                     log_activity(f"Saved review changes for count submission {submission.id}")
-                    flash("Count submission review saved.", "success")
+                    flash("Submission review saved.", "success")
                     return redirect(
                         url_for(
                             "locations.count_submission_detail",
@@ -1074,6 +1268,8 @@ def count_submission_detail(submission_id: int):
         auto_matched_event_location=auto_matched_event_location,
         row_entries=row_entries,
         format_event_location_label=_format_event_location_label,
+        submission_type_label=_submission_type_label,
+        submission_detail_heading=_submission_detail_heading,
     )
 
 
@@ -1198,6 +1394,7 @@ def view_location(location_id: int):
         latest_count_submission_at=latest_count_submission_at,
         pending_count_submission_count=pending_count_submission_count,
         format_event_location_label=_format_event_location_label,
+        submission_type_label=_submission_type_label,
     )
 
 

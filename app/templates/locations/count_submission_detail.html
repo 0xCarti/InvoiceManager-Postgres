@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 
-{% block title %}Count Submission{% endblock %}
+{% block title %}{{ submission_type_label(submission.submission_type) }} Submission{% endblock %}
 
 {% block content %}
+{% set is_count_submission = submission.submission_type in ('opening', 'closing') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .count-submission-detail-actions,
@@ -16,9 +17,9 @@
 <div class="container mt-5 app-page-shell">
     <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-start gap-3 mb-4">
         <div>
-            <h2 class="mb-1">Count Submission #{{ submission.id }}</h2>
+            <h2 class="mb-1">{{ submission_type_label(submission.submission_type) }} Submission #{{ submission.id }}</h2>
             <p class="text-muted mb-0">
-                {{ submission.submission_type|title }} count from {{ submission.submitted_name }}
+                {{ submission_type_label(submission.submission_type) }} from {{ submission.submitted_name }}
                 on {{ submission.submission_date.strftime('%Y-%m-%d') }}
             </p>
             <div class="mt-2 d-flex flex-wrap gap-2">
@@ -100,8 +101,10 @@
                 <div class="col-lg-2">
                     <label class="form-label" for="submission_type">Type</label>
                     <select class="form-select" id="submission_type" name="submission_type" {% if not editable %}disabled{% endif %}>
-                        <option value="opening" {% if submission.submission_type == 'opening' %}selected{% endif %}>Opening</option>
-                        <option value="closing" {% if submission.submission_type == 'closing' %}selected{% endif %}>Closing</option>
+                        <option value="opening" {% if submission.submission_type == 'opening' %}selected{% endif %}>Opening Count</option>
+                        <option value="closing" {% if submission.submission_type == 'closing' %}selected{% endif %}>Closing Count</option>
+                        <option value="eaten" {% if submission.submission_type == 'eaten' %}selected{% endif %}>Eaten Items</option>
+                        <option value="spoilage" {% if submission.submission_type == 'spoilage' %}selected{% endif %}>Spoilage Items</option>
                     </select>
                 </div>
                 <div class="col-lg-3">
@@ -137,7 +140,7 @@
 
             <div class="mb-4">
                 <div class="d-flex justify-content-between align-items-center mb-2">
-                    <h3 class="h5 mb-0">Counts</h3>
+                    <h3 class="h5 mb-0">{% if is_count_submission %}Counts{% else %}Quantities{% endif %}</h3>
                     <span class="text-muted small">{{ row_entries|length }} items</span>
                 </div>
                 <div class="table-responsive">
@@ -146,7 +149,7 @@
                             <tr>
                                 <th>Item</th>
                                 <th>Report Unit</th>
-                                <th>Count</th>
+                                <th>{% if is_count_submission %}Count{% else %}Quantity{% endif %}</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -183,7 +186,11 @@
             <div class="d-flex flex-wrap gap-2">
                 {% if editable %}
                 <div class="w-100 small text-muted">
-                    Add will sum this submission with already-approved counts for the same day. Overwrite will replace the current approved value for each item included in this submission.
+                    {% if is_count_submission %}
+                    Add will sum this submission with already-approved values for the same day. Overwrite will replace the current approved value for each item included in this submission.
+                    {% else %}
+                    Add will sum this submission with already-approved values for the same day. Overwrite will replace the approved value for each item on that day before totals are rolled up to the stand sheet.
+                    {% endif %}
                 </div>
                 <button type="submit" class="btn btn-outline-primary" name="action" value="save_review">Save Review</button>
                 <button type="submit" class="btn btn-success" name="action" value="approve_add">Approve And Add</button>

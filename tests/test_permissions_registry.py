@@ -272,6 +272,14 @@ def test_user_can_access_endpoint_requires_matching_permission():
         DummyUser("locations.edit"),
         "locations.print_count_sign",
     )
+    assert not user_can_access_endpoint(
+        DummyUser("locations.view"),
+        "locations.print_transfer_sign",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("locations.edit"),
+        "locations.print_transfer_sign",
+    )
 
 
 def test_super_admin_bypasses_endpoint_permission_checks():

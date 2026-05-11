@@ -54,6 +54,43 @@ def _fit_text(
 def render_location_count_sign_pdf(locations, qr_payloads: dict[int, str]) -> bytes:
     """Render one or more full-page count-entry QR signs."""
 
+    return _render_location_action_sign_pdf(
+        locations,
+        qr_payloads,
+        title="Scan For Counts",
+        instruction_lines=(
+            "Use your phone camera to open the count page for this stand.",
+            "Enter your name, choose opening or closing count, and submit.",
+        ),
+        footer_line="Opening must be submitted before closing becomes available.",
+    )
+
+
+def render_location_transfer_sign_pdf(locations, qr_payloads: dict[int, str]) -> bytes:
+    """Render one or more full-page transfer-entry QR signs."""
+
+    return _render_location_action_sign_pdf(
+        locations,
+        qr_payloads,
+        title="Scan For Transfer",
+        instruction_lines=(
+            "Use your phone camera to open a transfer form for this location.",
+            "Log in, confirm the destination, add items, and submit the transfer.",
+        ),
+        footer_line="This sign starts a transfer with this location pre-selected.",
+    )
+
+
+def _render_location_action_sign_pdf(
+    locations,
+    qr_payloads: dict[int, str],
+    *,
+    title: str,
+    instruction_lines: tuple[str, str],
+    footer_line: str,
+) -> bytes:
+    """Render one or more full-page QR signs for a location action."""
+
     if not locations:
         raise ValueError("At least one location is required.")
 
@@ -80,7 +117,6 @@ def render_location_count_sign_pdf(locations, qr_payloads: dict[int, str]) -> by
         payload = qr_payloads.get(location.id) or ""
         _draw_qr_code(pdf, payload, qr_x, qr_y, qr_size)
 
-        title = "Scan For Counts"
         pdf.setFillColor(_TITLE)
         pdf.setFont("Helvetica-Bold", 24)
         pdf.drawCentredString(page_width / 2, page_height - margin - 0.85 * inch, title)
@@ -102,12 +138,12 @@ def render_location_count_sign_pdf(locations, qr_payloads: dict[int, str]) -> by
         pdf.drawCentredString(
             page_width / 2,
             qr_y - 0.45 * inch,
-            "Use your phone camera to open the count page for this stand.",
+            instruction_lines[0],
         )
         pdf.drawCentredString(
             page_width / 2,
             qr_y - 0.75 * inch,
-            "Enter your name, choose opening or closing count, and submit.",
+            instruction_lines[1],
         )
 
         pdf.setFillColor(_MUTED)
@@ -115,7 +151,7 @@ def render_location_count_sign_pdf(locations, qr_payloads: dict[int, str]) -> by
         pdf.drawCentredString(
             page_width / 2,
             card_y + 0.55 * inch,
-            "Opening must be submitted before closing becomes available.",
+            footer_line,
         )
 
     pdf.save()

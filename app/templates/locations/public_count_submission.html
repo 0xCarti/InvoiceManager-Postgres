@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Submit Counts{% endblock %}
+{% block title %}{{ page_title }}{% endblock %}
 
 {% block content %}
 <style nonce="{{ csp_nonce }}">
@@ -29,9 +29,13 @@
     margin: 0;
 }
 
-.public-count-draft-status {
-    min-height: 1.25rem;
-}
+    .public-count-draft-status {
+        min-height: 1.25rem;
+    }
+
+    .public-submission-nav .btn {
+        min-width: 6.5rem;
+    }
 
 @media (max-width: 767.98px) {
     .public-count-shell {
@@ -44,19 +48,29 @@
 <div class="container mt-4 mb-5 public-count-shell">
     <div class="text-center mb-4">
         <h1 class="h3 mb-1">{{ location.name }}</h1>
-        <p class="text-muted mb-0">Submit opening or closing counts for manager review.</p>
+        <p class="text-muted mb-0">{{ page_description }}</p>
         <p class="small text-muted mb-0">Date: {{ submission_date.strftime('%Y-%m-%d') }}</p>
     </div>
 
     <div class="card shadow-sm border-0 mb-4">
         <div class="card-body">
+            <div class="d-flex flex-wrap justify-content-center gap-2 mb-3 public-submission-nav">
+                {% for link in public_submission_links %}
+                <a
+                    class="btn {% if link.active %}btn-primary{% else %}btn-outline-secondary{% endif %} btn-sm"
+                    href="{{ link.url }}"
+                >
+                    {{ link.label }}
+                </a>
+                {% endfor %}
+            </div>
             {% if matched_event_location and matched_event_location.event %}
             <div class="alert alert-success mb-3">
-                Counts will be queued against <strong>{{ matched_event_location.event.name }}</strong> for review.
+                This submission will be queued against <strong>{{ matched_event_location.event.name }}</strong> for review.
             </div>
             {% elif open_event_candidates|length > 1 %}
             <div class="alert alert-warning mb-3">
-                Multiple open events match this location today. Submit the counts anyway and a manager will choose the right event during review.
+                Multiple open events match this location today. Submit this anyway and a manager will choose the right event during review.
             </div>
             {% else %}
             <div class="alert alert-secondary mb-3">
@@ -104,14 +118,26 @@
                 </div>
 
                 <div class="mb-4">
+                    {% if show_submission_type_select %}
                     <label for="submission_type" class="form-label">Count Type</label>
                     <select class="form-select" id="submission_type" name="submission_type">
-                        <option value="opening" {% if selected_type == 'opening' %}selected{% endif %}>Opening Count</option>
-                        <option value="closing" {% if selected_type == 'closing' %}selected{% endif %} {% if not opening_exists %}disabled{% endif %}>Closing Count</option>
+                        {% for option in submission_type_options %}
+                        <option
+                            value="{{ option.value }}"
+                            {% if selected_type == option.value %}selected{% endif %}
+                            {% if option.disabled %}disabled{% endif %}
+                        >
+                            {{ option.label }}
+                        </option>
+                        {% endfor %}
                     </select>
                     <div class="form-text">
-                        Closing counts unlock after an opening count has already been submitted.
+                        {{ submission_type_help_text }}
                     </div>
+                    {% else %}
+                    <div class="small text-muted text-uppercase mb-1">Submission Type</div>
+                    <div class="fw-semibold">{{ page_title }}</div>
+                    {% endif %}
                 </div>
 
                 {% if items %}
@@ -158,7 +184,7 @@
                     data-count-submit="1"
                     {% if not items %}disabled{% endif %}
                 >
-                    Send For Review
+                    {{ submit_button_label }}
                 </button>
             </form>
         </div>

@@ -24,6 +24,9 @@ from sqlalchemy.orm import aliased
 from app import db, socketio
 from app.forms import ConfirmForm, DateRangeForm, TransferForm
 from app.models import (
+    Event,
+    EventLocation,
+    EventStandSheetItem,
     Item,
     ItemUnit,
     Location,
@@ -194,6 +197,169 @@ def _sync_transfer_completed(transfer_obj):
     )
 
 
+def _transfer_item_activity_date(transfer_obj, transfer_item):
+    completed_at = (
+        transfer_item.completed_at
+        or transfer_obj.date_created
+        or datetime.utcnow()
+    )
+    return completed_at.date()
+
+
+def _load_transfer_event_location_matches(
+    location_id: int | None,
+    activity_date,
+    cache: dict[tuple[str, int, object], list[EventLocation]],
+    *,
+    match_mode: str,
+) -> list[EventLocation]:
+    if not location_id or activity_date is None:
+        return []
+
+    cache_key = (match_mode, location_id, activity_date)
+    if cache_key in cache:
+        return cache[cache_key]
+
+    query = (
+        EventLocation.query.join(Event, Event.id == EventLocation.event_id)
+        .filter(EventLocation.location_id == location_id)
+    )
+
+    if match_mode == "active":
+        cache[cache_key] = (
+            query.filter(
+                Event.start_date <= activity_date,
+                Event.end_date >= activity_date,
+            )
+            .order_by(Event.start_date.asc(), Event.end_date.asc(), Event.id.asc())
+            .all()
+        )
+        return cache[cache_key]
+
+    if match_mode == "prestart":
+        match = (
+            query.filter(Event.start_date > activity_date)
+            .order_by(Event.start_date.asc(), Event.end_date.asc(), Event.id.asc())
+            .first()
+        )
+        cache[cache_key] = [match] if match is not None else []
+        return cache[cache_key]
+
+    raise ValueError(f"Unsupported transfer event match mode: {match_mode}")
+
+
+def _get_transfer_event_sheet(
+    event_location_id: int,
+    item_id: int,
+    *,
+    sheet_cache: dict[tuple[int, int], EventStandSheetItem],
+    item_obj: Item | None = None,
+) -> EventStandSheetItem:
+    sheet_key = (event_location_id, item_id)
+    sheet = sheet_cache.get(sheet_key)
+    if sheet is None:
+        sheet = EventStandSheetItem.query.filter_by(
+            event_location_id=event_location_id,
+            item_id=item_id,
+        ).first()
+        if sheet is None:
+            sheet = EventStandSheetItem(
+                event_location_id=event_location_id,
+                item_id=item_id,
+            )
+            db.session.add(sheet)
+        sheet_cache[sheet_key] = sheet
+
+    if item_obj is not None and sheet.item_id is None:
+        sheet.item_id = item_obj.id
+    return sheet
+
+
+def update_event_transfer_counts(
+    transfer_obj, multiplier=1, transfer_items=None, quantities=None
+):
+    """Sync stand-sheet opening or transfer columns for matched event locations."""
+
+    transfer_items = transfer_items or transfer_obj.transfer_items
+    quantities = quantities or {}
+    if not transfer_items:
+        return
+
+    event_location_cache: dict[tuple[str, int, object], list[EventLocation]] = {}
+    sheet_cache: dict[tuple[int, int], EventStandSheetItem] = {}
+    inventory_cache: dict[tuple[int, int], LocationStandItem | None] = {}
+    item_ids = {
+        transfer_item.item_id
+        for transfer_item in transfer_items
+        if transfer_item.item_id
+    }
+    items_by_id = {
+        item.id: item for item in Item.query.filter(Item.id.in_(item_ids)).all()
+    } if item_ids else {}
+
+    for transfer_item in transfer_items:
+        quantity = quantities.get(transfer_item.id, transfer_item.quantity)
+        if not quantity:
+            continue
+
+        activity_date = _transfer_item_activity_date(transfer_obj, transfer_item)
+        item_obj = items_by_id.get(transfer_item.item_id)
+
+        for location_id, field_name in (
+            (transfer_obj.from_location_id, "transferred_out"),
+            (transfer_obj.to_location_id, "transferred_in"),
+        ):
+            active_matches = _load_transfer_event_location_matches(
+                location_id,
+                activity_date,
+                event_location_cache,
+                match_mode="active",
+            )
+            if len(active_matches) == 1:
+                event_location = active_matches[0]
+                sheet = _get_transfer_event_sheet(
+                    event_location.id,
+                    transfer_item.item_id,
+                    sheet_cache=sheet_cache,
+                    item_obj=item_obj,
+                )
+                current_value = getattr(sheet, field_name) or 0.0
+                setattr(sheet, field_name, current_value + (multiplier * quantity))
+                continue
+
+            if active_matches:
+                continue
+
+            prestart_matches = _load_transfer_event_location_matches(
+                location_id,
+                activity_date,
+                event_location_cache,
+                match_mode="prestart",
+            )
+            if not prestart_matches:
+                continue
+            event_location = prestart_matches[0]
+
+            inventory_key = (location_id, transfer_item.item_id)
+            inventory_record = inventory_cache.get(inventory_key)
+            if inventory_key not in inventory_cache:
+                inventory_record = LocationStandItem.query.filter_by(
+                    location_id=location_id,
+                    item_id=transfer_item.item_id,
+                ).first()
+                inventory_cache[inventory_key] = inventory_record
+
+            sheet = _get_transfer_event_sheet(
+                event_location.id,
+                transfer_item.item_id,
+                sheet_cache=sheet_cache,
+                item_obj=item_obj,
+            )
+            sheet.opening_count = float(
+                inventory_record.expected_count if inventory_record else 0.0
+            )
+
+
 def _replace_transfer_items(transfer_obj, item_entries):
     transfer_obj.transfer_items.clear()
 
@@ -218,6 +384,12 @@ def _apply_transfer_form_update(transfer_obj, form, item_entries):
     )
     if applied_items:
         update_expected_counts(
+            transfer_obj,
+            multiplier=-1,
+            transfer_items=applied_items,
+            quantities=applied_quantities,
+        )
+        update_event_transfer_counts(
             transfer_obj,
             multiplier=-1,
             transfer_items=applied_items,
@@ -432,6 +604,19 @@ def view_transfers():
 def add_transfer():
     """Create a transfer between locations."""
     form = TransferForm()
+    prefilled_from_location = None
+    requested_from_location_id = request.args.get("from_location_id", type=int)
+    if request.method == "GET" and requested_from_location_id:
+        prefilled_from_location = db.session.get(Location, requested_from_location_id)
+        if (
+            prefilled_from_location is not None
+            and not prefilled_from_location.archived
+            and any(
+                choice_value == prefilled_from_location.id
+                for choice_value, _ in form.from_location_id.choices
+            )
+        ):
+            form.from_location_id.data = prefilled_from_location.id
     if form.validate_on_submit():
         item_entries = _extract_transfer_items("items")
         if not item_entries:
@@ -479,7 +664,11 @@ def add_transfer():
     elif form.errors:
         flash("There was an error submitting the transfer.", "error")
 
-    return render_template("transfers/add_transfer.html", form=form)
+    return render_template(
+        "transfers/add_transfer.html",
+        form=form,
+        prefilled_from_location=prefilled_from_location,
+    )
 
 
 @transfer.route("/transfers/ajax_add", methods=["POST"])
@@ -678,6 +867,12 @@ def delete_transfer(transfer_id):
             transfer_items=applied_items,
             quantities=applied_quantities,
         )
+        update_event_transfer_counts(
+            transfer,
+            multiplier=-1,
+            transfer_items=applied_items,
+            quantities=applied_quantities,
+        )
     db.session.delete(transfer)
     db.session.commit()
     log_activity(f"Deleted transfer {transfer.id}")
@@ -736,6 +931,12 @@ def complete_transfer(transfer_id):
         transfer_item.completed_by_id = current_user.id
     transfer.completed = True
     update_expected_counts(
+        transfer,
+        multiplier=1,
+        transfer_items=transfer_items,
+        quantities=quantities,
+    )
+    update_event_transfer_counts(
         transfer,
         multiplier=1,
         transfer_items=transfer_items,
@@ -813,6 +1014,12 @@ def complete_transfer_item(transfer_item_id):
         transfer_items=transfer_items,
         quantities=quantities,
     )
+    update_event_transfer_counts(
+        transfer,
+        multiplier=1,
+        transfer_items=transfer_items,
+        quantities=quantities,
+    )
     was_completed = transfer.completed
     _sync_transfer_completed(transfer)
     db.session.commit()
@@ -866,17 +1073,23 @@ def uncomplete_transfer(transfer_id):
             title="Confirm Transfer Incomplete",
             default_message="Are you sure you want to mark this transfer incomplete?",
         )
-    transfer.completed = False
-    for transfer_item in transfer.transfer_items:
-        transfer_item.completed_quantity = 0.0
-        transfer_item.completed_at = None
-        transfer_item.completed_by_id = None
     update_expected_counts(
         transfer,
         multiplier=-1,
         transfer_items=transfer_items,
         quantities=quantities,
     )
+    update_event_transfer_counts(
+        transfer,
+        multiplier=-1,
+        transfer_items=transfer_items,
+        quantities=quantities,
+    )
+    transfer.completed = False
+    for transfer_item in transfer.transfer_items:
+        transfer_item.completed_quantity = 0.0
+        transfer_item.completed_at = None
+        transfer_item.completed_by_id = None
     db.session.commit()
     log_activity(f"Uncompleted transfer {transfer.id}")
     _notify_transfer_activity(
@@ -939,15 +1152,21 @@ def uncomplete_transfer_item(transfer_item_id):
             title="Confirm Transfer Item Incomplete",
             default_message="Are you sure you want to mark this transfer item incomplete?",
         )
-    transfer_item.completed_quantity = 0.0
-    transfer_item.completed_at = None
-    transfer_item.completed_by_id = None
     update_expected_counts(
         transfer,
         multiplier=-1,
         transfer_items=transfer_items,
         quantities=quantities,
     )
+    update_event_transfer_counts(
+        transfer,
+        multiplier=-1,
+        transfer_items=transfer_items,
+        quantities=quantities,
+    )
+    transfer_item.completed_quantity = 0.0
+    transfer_item.completed_at = None
+    transfer_item.completed_by_id = None
     was_completed = transfer.completed
     _sync_transfer_completed(transfer)
     db.session.commit()

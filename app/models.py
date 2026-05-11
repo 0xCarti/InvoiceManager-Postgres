@@ -4265,6 +4265,11 @@ class LocationCountSubmission(db.Model):
     STATUS_REJECTED = "rejected"
     TYPE_OPENING = "opening"
     TYPE_CLOSING = "closing"
+    TYPE_EATEN = "eaten"
+    TYPE_SPOILAGE = "spoilage"
+    COUNT_TYPES = (TYPE_OPENING, TYPE_CLOSING)
+    VARIANCE_TYPES = (TYPE_EATEN, TYPE_SPOILAGE)
+    ALL_TYPES = COUNT_TYPES + VARIANCE_TYPES
     APPROVAL_MODE_ADD = "add"
     APPROVAL_MODE_OVERWRITE = "overwrite"
 
@@ -4338,7 +4343,7 @@ class LocationCountSubmission(db.Model):
 
     __table_args__ = (
         db.CheckConstraint(
-            "submission_type IN ('opening', 'closing')",
+            "submission_type IN ('opening', 'closing', 'eaten', 'spoilage')",
             name="ck_location_count_submission_type",
         ),
         db.CheckConstraint(
