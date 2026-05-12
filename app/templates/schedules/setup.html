@@ -67,7 +67,7 @@
     {% endif %}
 
     <div class="row g-3">
-        <div class="col-12 col-xl-4">
+        <div class="col-12 col-xl-3">
             <div class="card h-100">
                 <div class="card-body">
                     <h2 class="h5">Departments</h2>
@@ -100,7 +100,7 @@
             </div>
         </div>
 
-        <div class="col-12 col-xl-4">
+        <div class="col-12 col-xl-3">
             <div class="card h-100">
                 <div class="card-body">
                     <h2 class="h5">Positions</h2>
@@ -133,7 +133,78 @@
             </div>
         </div>
 
-        <div class="col-12 col-xl-4">
+        <div class="col-12 col-xl-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h2 class="h5">Membership Roles</h2>
+                    <p class="text-muted small">These roles drive the membership role select list in user scheduling settings.</p>
+
+                    {% if can_manage_setup %}
+                    <form method="post" class="row g-2 align-items-end mb-3">
+                        {{ role_form.hidden_tag() }}
+                        <input type="hidden" name="action" value="add_membership_role">
+                        <div class="col-12 col-md-7">
+                            {{ role_form.name.label(class_='form-label') }}
+                            {{ role_form.name(class_='form-control', placeholder='assistant manager') }}
+                            {% for error in role_form.name.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="col-12 col-md-5">
+                            <div class="form-check mt-md-4">
+                                {{ role_form.is_management(class_='form-check-input') }}
+                                {{ role_form.is_management.label(class_='form-check-label') }}
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-primary">Add Role</button>
+                        </div>
+                    </form>
+                    {% endif %}
+
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle table-mobile-card">
+                            <thead><tr><th>Role</th><th>Management</th><th>In Use</th>{% if can_manage_setup %}<th></th>{% endif %}</tr></thead>
+                            <tbody>
+                                {% for role_definition in membership_roles %}
+                                {% set role_name = role_definition.name if role_definition.name is defined else role_definition['name'] %}
+                                {% set is_management = role_definition.is_management if role_definition.is_management is defined else role_definition['is_management'] %}
+                                <tr>
+                                    <td class="mobile-card-primary">{{ format_schedule_membership_role_label(role_name) }}</td>
+                                    <td>{{ 'Yes' if is_management else 'No' }}</td>
+                                    <td>{{ role_usage_counts.get(role_name, 0) }}</td>
+                                    {% if can_manage_setup %}
+                                    <td class="text-end mobile-card-actions">
+                                        <div class="d-flex flex-wrap justify-content-end gap-2">
+                                            <form method="post">
+                                                {{ action_form.hidden_tag() }}
+                                                <input type="hidden" name="action" value="toggle_membership_role_management">
+                                                <input type="hidden" name="role_name" value="{{ role_name }}">
+                                                <button type="submit" class="btn btn-sm btn-outline-secondary">
+                                                    {{ 'Set Staff' if is_management else 'Set Management' }}
+                                                </button>
+                                            </form>
+                                            <form method="post">
+                                                {{ action_form.hidden_tag() }}
+                                                <input type="hidden" name="action" value="remove_membership_role">
+                                                <input type="hidden" name="role_name" value="{{ role_name }}">
+                                                <button type="submit" class="btn btn-sm btn-outline-danger" {% if role_usage_counts.get(role_name, 0) %}disabled{% endif %}>Remove</button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                    {% endif %}
+                                </tr>
+                                {% else %}
+                                <tr><td colspan="{{ 4 if can_manage_setup else 3 }}" class="text-muted">No membership roles configured.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-xl-3">
             <div class="card h-100">
                 <div class="card-body">
                     <h2 class="h5">User Scheduling Profiles</h2>

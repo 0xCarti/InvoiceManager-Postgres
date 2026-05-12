@@ -77,7 +77,7 @@
                         {{ membership_form.hidden_tag() }}
                         <input type="hidden" name="action" value="add_membership">
                         <div class="col-12 col-md-4">{{ membership_form.department_id.label(class_='form-label') }}{{ membership_form.department_id(class_='form-select') }}</div>
-                        <div class="col-12 col-md-3">{{ membership_form.role.label(class_='form-label') }}{{ membership_form.role(class_='form-control', list='membership-role-suggestions', placeholder='staff') }}</div>
+                        <div class="col-12 col-md-3">{{ membership_form.role.label(class_='form-label') }}{{ membership_form.role(class_='form-select') }}</div>
                         <div class="col-12 col-md-5">{{ membership_form.reports_to_user_id.label(class_='form-label') }}{{ membership_form.reports_to_user_id(class_='form-select') }}</div>
                         <div class="col-12">
                             <div class="form-check">
@@ -87,7 +87,7 @@
                         </div>
                         <div class="col-12">
                             <div class="form-text">
-                                Custom role labels are allowed. `manager` and `gm` still drive scheduling management behavior. Auto-assign access is now an explicit per-department setting so IT can decide exactly where a user may run auto-schedule.
+                                Roles are managed from Scheduling Setup. Add the user to each department they should be able to see, and use the auto-assign checkbox only for departments where they may run auto-schedule.
                             </div>
                         </div>
                         <div class="col-12">
@@ -118,13 +118,14 @@
                                             <input type="hidden" name="action" value="update_membership_role">
                                             <input type="hidden" name="membership_id" value="{{ membership.id }}">
                                             <input type="hidden" name="can_auto_assign" value="{{ 1 if membership.can_auto_assign else 0 }}">
-                                            <input
-                                                type="text"
+                                            <select
                                                 name="role"
-                                                class="form-control form-control-sm"
-                                                value="{{ membership.role }}"
-                                                list="membership-role-suggestions"
+                                                class="form-select form-select-sm"
                                             >
+                                                {% for role_name, role_label in membership_role_choices %}
+                                                <option value="{{ role_name }}" {% if membership.role == role_name %}selected{% endif %}>{{ role_label }}</option>
+                                                {% endfor %}
+                                            </select>
                                             <button type="submit" class="btn btn-sm btn-outline-secondary">Save</button>
                                         </form>
                                         {% else %}
@@ -173,12 +174,6 @@
                             </tbody>
                         </table>
                     </div>
-                    <datalist id="membership-role-suggestions">
-                        {% for role in membership_role_suggestions %}
-                        <option value="{{ role }}">{{ role|replace('_', ' ')|title }}</option>
-                        {% endfor %}
-                    </datalist>
-
                     <hr>
 
                     <h2 class="h5">Position Eligibility</h2>

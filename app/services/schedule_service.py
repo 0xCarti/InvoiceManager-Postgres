@@ -103,7 +103,7 @@ def get_user_membership(user: User, department_id: int) -> UserDepartmentMembers
 
 
 def user_department_ids(user: User) -> set[int]:
-    if getattr(user, "is_super_admin", False) or user_is_schedule_gm(user):
+    if getattr(user, "is_super_admin", False):
         return {
             department.id
             for department in Department.query.filter_by(active=True).all()
@@ -116,7 +116,7 @@ def user_department_ids(user: User) -> set[int]:
 
 
 def user_can_view_department(user: User, department_id: int) -> bool:
-    if getattr(user, "is_super_admin", False) or user_is_schedule_gm(user):
+    if getattr(user, "is_super_admin", False):
         return True
     if user.has_any_permission(
         "schedules.view_team",
@@ -143,7 +143,7 @@ def user_can_view_department(user: User, department_id: int) -> bool:
 
 
 def user_can_manage_department(user: User, department_id: int) -> bool:
-    if getattr(user, "is_super_admin", False) or user_is_schedule_gm(user):
+    if getattr(user, "is_super_admin", False):
         return True
     membership = get_user_membership(user, department_id)
     if membership is None:
@@ -154,7 +154,7 @@ def user_can_manage_department(user: User, department_id: int) -> bool:
 def user_can_auto_assign_department(user: User, department_id: int) -> bool:
     if not user.has_permission("schedules.auto_assign"):
         return False
-    if getattr(user, "is_super_admin", False) or user_is_schedule_gm(user):
+    if getattr(user, "is_super_admin", False):
         return True
     membership = get_user_membership(user, department_id)
     if membership is None:
@@ -169,7 +169,7 @@ def user_can_manage_other_user(
 ) -> bool:
     if actor.id == target_user.id:
         return True
-    if getattr(actor, "is_super_admin", False) or user_is_schedule_gm(actor):
+    if getattr(actor, "is_super_admin", False):
         return True
     if user_can_manage_department(actor, department_id):
         target_membership = get_user_membership(target_user, department_id)
@@ -187,7 +187,7 @@ def get_visible_departments(
 ) -> list[Department]:
     department_ids = user_department_ids(user)
     query = Department.query.filter(Department.active.is_(True))
-    if not (getattr(user, "is_super_admin", False) or user_is_schedule_gm(user)):
+    if not getattr(user, "is_super_admin", False):
         if not department_ids:
             return []
         query = query.filter(Department.id.in_(department_ids))
@@ -628,7 +628,7 @@ def scoped_time_off_approvers(request_user: User) -> list[User]:
     for candidate in query.all():
         if not candidate.has_permission("schedules.approve_time_off"):
             continue
-        if getattr(candidate, "is_super_admin", False) or user_is_schedule_gm(candidate):
+        if getattr(candidate, "is_super_admin", False):
             approvers.append(candidate)
             continue
         if any(

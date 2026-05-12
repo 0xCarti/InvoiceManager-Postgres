@@ -15,6 +15,7 @@ from app.forms import (
     AvailabilityWindowForm,
     CSRFOnlyForm,
     DepartmentForm,
+    ScheduleMembershipRoleForm,
     ScheduleTemplateApplyForm,
     ScheduleTemplateCreateForm,
     ScheduleTemplateEntryForm,
@@ -27,6 +28,9 @@ from app.forms import (
     UserDepartmentMembershipForm,
     UserPositionEligibilityForm,
     UserScheduleProfileForm,
+    format_schedule_membership_role_label,
+    load_schedule_membership_role_choices,
+    load_schedule_membership_role_definitions,
     load_schedule_position_choices,
 )
 from app.models import (
@@ -38,6 +42,7 @@ from app.models import (
     RecurringAvailabilityWindow,
     ScheduleTemplate,
     ScheduleTemplateEntry,
+    Setting,
     Shift,
     ShiftPosition,
     TimeOffRequest,
@@ -70,7 +75,6 @@ from app.services.schedule_service import (
     user_can_manage_department,
     user_can_manage_other_user,
     user_department_ids,
-    user_is_schedule_gm,
 )
 from app.utils.filter_state import get_filter_defaults
 from app.utils.pagination import PAGINATION_SIZES, build_pagination_args, get_per_page
@@ -93,6 +97,31 @@ def _parse_int(value, default=None):
 
 def _parse_checkbox(value) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "y", "yes", "on"}
+
+
+def _schedule_membership_role_usage_counts() -> dict[str, int]:
+    usage_rows = (
+        db.session.query(
+            UserDepartmentMembership.role,
+            db.func.count(UserDepartmentMembership.id),
+        )
+        .group_by(UserDepartmentMembership.role)
+        .all()
+    )
+    return {
+        Setting.normalize_schedule_role_name(role_name): int(count or 0)
+        for role_name, count in usage_rows
+        if Setting.normalize_schedule_role_name(role_name)
+    }
+
+
+def _configured_schedule_role_names(*, extra_roles: list[str] | None = None) -> set[str]:
+    return {
+        role_name
+        for role_name, _label in load_schedule_membership_role_choices(
+            extra_roles=extra_roles
+        )
+    }
 
 
 def _managed_schedule_departments(actor: User) -> list[Department]:
@@ -243,7 +272,7 @@ def _parse_department_filter_value(value) -> str | int | None:
 
 
 def _manager_scope_users(actor: User) -> list[User]:
-    if getattr(actor, "is_super_admin", False) or user_is_schedule_gm(actor):
+    if getattr(actor, "is_super_admin", False):
         users = User.query.filter(User.active.is_(True)).all()
         return sorted(users, key=lambda user: (user.sort_key, user.email.casefold()))
     department_ids = sorted(user_department_ids(actor))
@@ -437,7 +466,7 @@ def _current_seen_count_for_users(
 
 
 def _can_manage_user_in_any_department(actor: User, target_user: User) -> bool:
-    if getattr(actor, "is_super_admin", False) or user_is_schedule_gm(actor):
+    if getattr(actor, "is_super_admin", False):
         return True
     for membership in target_user.department_memberships:
         if user_can_manage_other_user(actor, target_user, membership.department_id):
@@ -849,6 +878,8 @@ def _validate_manual_assignment(
 def team_schedule():
     """Show and manage the weekly schedule board."""
     can_team_access, can_self_schedule = _team_schedule_access_mode()
+    can_manage_team_shifts = current_user.has_permission("schedules.edit_team")
+    can_edit_shift_entries = can_manage_team_shifts or can_self_schedule
     visible_departments = get_visible_departments(
         current_user,
         require_team_access=can_team_access or can_self_schedule,
@@ -920,6 +951,8 @@ def team_schedule():
                 schedule_event_location_map={},
                 can_team_access=can_team_access,
                 can_self_schedule=can_self_schedule,
+                can_manage_team_shifts=can_manage_team_shifts,
+                can_edit_shift_entries=can_edit_shift_entries,
                 can_auto_assign_selected_scope=False,
                 auto_assign_action_label="Auto Assign",
                 can_publish_selected_scope=False,
@@ -1149,6 +1182,8 @@ def team_schedule():
             schedule_event_location_map=schedule_event_location_map,
             can_team_access=can_team_access,
             can_self_schedule=can_self_schedule,
+            can_manage_team_shifts=can_manage_team_shifts,
+            can_edit_shift_entries=can_edit_shift_entries,
             can_auto_assign_selected_scope=False,
             auto_assign_action_label="Auto Assign",
             can_publish_selected_scope=False,
@@ -1172,7 +1207,7 @@ def team_schedule():
             ),
         }
         if action == "save_shift":
-            if not (can_team_access or can_self_schedule):
+            if not can_edit_shift_entries:
                 abort(403)
             if shift_form.validate_on_submit():
                 shift_id = _parse_int(shift_form.shift_id.data)
@@ -1274,7 +1309,7 @@ def team_schedule():
                     if assigned_user is not None and target_department is not None
                     else []
                 )
-                if not can_team_access:
+                if not can_manage_team_shifts:
                     if assignment_mode != Shift.ASSIGNMENT_ASSIGNED:
                         shift_form.assignment_mode.errors.append(
                             "Self scheduling only supports assigned shifts."
@@ -1809,6 +1844,8 @@ def team_schedule():
         schedule_event_location_map=schedule_event_location_map,
         can_team_access=can_team_access,
         can_self_schedule=can_self_schedule,
+        can_manage_team_shifts=can_manage_team_shifts,
+        can_edit_shift_entries=can_edit_shift_entries,
         can_auto_assign_selected_scope=can_auto_assign_selected_scope,
         auto_assign_action_label=auto_assign_action_label,
         can_publish_selected_scope=can_publish_selected_scope,
@@ -2078,10 +2115,7 @@ def time_off():
         )
         .all()
     )
-    if not (
-        getattr(current_user, "is_super_admin", False)
-        or user_is_schedule_gm(current_user)
-    ):
+    if not getattr(current_user, "is_super_admin", False):
         managed_user_ids = {user.id for user in manageable_users}
         team_requests = [
             request_obj
@@ -2962,10 +2996,12 @@ def template_detail(template_id: int):
 @schedule.route("/schedules/setup", methods=["GET", "POST"])
 @login_required
 def setup():
-    """Manage scheduling departments and positions."""
+    """Manage scheduling departments, positions, and membership roles."""
     department_form = DepartmentForm(prefix="department")
     position_form = ShiftPositionForm(prefix="position")
+    role_form = ScheduleMembershipRoleForm(prefix="membership_role")
     action_form = CSRFOnlyForm(prefix="setup")
+    can_manage_setup = current_user.has_permission("schedules.manage_setup")
     departments = Department.query.order_by(Department.name.asc()).all()
     positions = (
         ShiftPosition.query.options(selectinload(ShiftPosition.department))
@@ -2978,11 +3014,96 @@ def setup():
     )
     users = User.query.filter(User.active.is_(True)).all()
     users = sorted(users, key=lambda user: (user.sort_key, user.email.casefold()))
+    membership_roles = load_schedule_membership_role_definitions()
+    role_usage_counts = _schedule_membership_role_usage_counts()
 
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()
-        if action == "add_department":
-            if not current_user.has_permission("schedules.manage_setup"):
+        configured_roles = Setting.get_schedule_membership_roles(include_legacy=False)
+
+        if action == "add_membership_role":
+            if not can_manage_setup:
+                abort(403)
+            if role_form.validate_on_submit():
+                role_name = role_form.name.data
+                if any(
+                    str(role_definition["name"]) == role_name
+                    for role_definition in configured_roles
+                ):
+                    role_form.name.errors.append("That role already exists.")
+                else:
+                    configured_roles.append(
+                        {
+                            "name": role_name,
+                            "is_management": bool(role_form.is_management.data),
+                        }
+                    )
+                    Setting.set_schedule_membership_roles(configured_roles)
+                    db.session.commit()
+                    flash("Schedule role added.", "success")
+                    return redirect(url_for("schedule.setup"))
+        elif action == "toggle_membership_role_management":
+            if not can_manage_setup:
+                abort(403)
+            role_name = Setting.normalize_schedule_role_name(
+                request.form.get("role_name")
+            )
+            if not role_name:
+                abort(400)
+            role_definition = next(
+                (
+                    dict(definition)
+                    for definition in membership_roles
+                    if str(definition["name"]) == role_name
+                ),
+                None,
+            )
+            if role_definition is None:
+                abort(404)
+            matching_configured_role = next(
+                (
+                    definition
+                    for definition in configured_roles
+                    if str(definition["name"]) == role_name
+                ),
+                None,
+            )
+            if matching_configured_role is None:
+                configured_roles.append(role_definition)
+                matching_configured_role = configured_roles[-1]
+            matching_configured_role["is_management"] = not bool(
+                matching_configured_role.get("is_management")
+            )
+            Setting.set_schedule_membership_roles(configured_roles)
+            db.session.commit()
+            flash("Schedule role updated.", "success")
+            return redirect(url_for("schedule.setup"))
+        elif action == "remove_membership_role":
+            if not can_manage_setup:
+                abort(403)
+            role_name = Setting.normalize_schedule_role_name(
+                request.form.get("role_name")
+            )
+            if not role_name:
+                abort(400)
+            usage_count = int(role_usage_counts.get(role_name, 0))
+            if usage_count:
+                flash("That role is still assigned to one or more memberships.", "danger")
+                return redirect(url_for("schedule.setup"))
+            configured_roles = [
+                role_definition
+                for role_definition in configured_roles
+                if str(role_definition["name"]) != role_name
+            ]
+            if not configured_roles:
+                flash("At least one schedule role must remain configured.", "danger")
+                return redirect(url_for("schedule.setup"))
+            Setting.set_schedule_membership_roles(configured_roles)
+            db.session.commit()
+            flash("Schedule role removed.", "success")
+            return redirect(url_for("schedule.setup"))
+        elif action == "add_department":
+            if not can_manage_setup:
                 abort(403)
             if department_form.validate_on_submit():
                 db.session.add(
@@ -2997,7 +3118,7 @@ def setup():
                 flash("Department added.", "success")
                 return redirect(url_for("schedule.setup"))
         elif action == "add_position":
-            if not current_user.has_permission("schedules.manage_setup"):
+            if not can_manage_setup:
                 abort(403)
             if position_form.validate_on_submit():
                 db.session.add(
@@ -3016,7 +3137,7 @@ def setup():
                 flash("Position added.", "success")
                 return redirect(url_for("schedule.setup"))
         elif action == "toggle_department":
-            if not current_user.has_permission("schedules.manage_setup"):
+            if not can_manage_setup:
                 abort(403)
             department = db.session.get(
                 Department, _parse_int(request.form.get("department_id"))
@@ -3028,7 +3149,7 @@ def setup():
             flash("Department updated.", "success")
             return redirect(url_for("schedule.setup"))
         elif action == "toggle_position":
-            if not current_user.has_permission("schedules.manage_setup"):
+            if not can_manage_setup:
                 abort(403)
             position = db.session.get(
                 ShiftPosition, _parse_int(request.form.get("position_id"))
@@ -3044,11 +3165,15 @@ def setup():
         "schedules/setup.html",
         department_form=department_form,
         position_form=position_form,
+        role_form=role_form,
         action_form=action_form,
         departments=departments,
         positions=positions,
         users=users,
-        can_manage_setup=current_user.has_permission("schedules.manage_setup"),
+        membership_roles=membership_roles,
+        role_usage_counts=role_usage_counts,
+        format_schedule_membership_role_label=format_schedule_membership_role_label,
+        can_manage_setup=can_manage_setup,
         can_manage_pay_rates=current_user.has_permission(
             "schedules.manage_pay_rates"
         ),
@@ -3078,8 +3203,19 @@ def user_settings(user_id: int):
     ):
         abort(403)
 
+    existing_membership_roles = [
+        membership.role for membership in target_user.department_memberships
+    ]
+    membership_role_choices = load_schedule_membership_role_choices(
+        extra_roles=existing_membership_roles
+    )
+    valid_membership_role_names = {
+        role_name for role_name, _label in membership_role_choices
+    }
+
     profile_form = UserScheduleProfileForm(prefix="profile")
     membership_form = UserDepartmentMembershipForm(prefix="membership")
+    membership_form.role.choices = membership_role_choices
     eligibility_form = UserPositionEligibilityForm(prefix="eligibility")
     action_form = CSRFOnlyForm(prefix="usersettings")
 
@@ -3158,13 +3294,14 @@ def user_settings(user_id: int):
             )
             if membership is None or membership.user_id != target_user.id:
                 abort(404)
-            role_value = " ".join((request.form.get("role") or "").strip().split())
-            if not role_value:
-                flash("Role is required.", "danger")
+            normalized_role = Setting.normalize_schedule_role_name(
+                request.form.get("role")
+            )
+            if not normalized_role:
+                flash("Select a role.", "danger")
                 return redirect(url_for("schedule.user_settings", user_id=user_id))
-            normalized_role = UserDepartmentMembership.normalize_role(role_value)
-            if len(normalized_role) > 50:
-                flash("Role must be 50 characters or fewer.", "danger")
+            if normalized_role not in valid_membership_role_names:
+                flash("Select a configured role.", "danger")
                 return redirect(url_for("schedule.user_settings", user_id=user_id))
             membership.role = normalized_role
             membership.can_auto_assign = _parse_checkbox(
@@ -3240,7 +3377,7 @@ def user_settings(user_id: int):
         target_user=target_user,
         profile_form=profile_form,
         membership_form=membership_form,
-        membership_role_suggestions=membership_form.role_suggestions,
+        membership_role_choices=membership_role_choices,
         eligibility_form=eligibility_form,
         action_form=action_form,
         can_manage_setup=current_user.has_permission("schedules.manage_setup"),

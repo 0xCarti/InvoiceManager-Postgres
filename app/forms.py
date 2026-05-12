@@ -65,6 +65,7 @@ from app.models import (
     PurchaseInvoice,
     PurchaseOrder,
     ScheduleTemplate,
+    Setting,
     ShiftPosition,
     SignageMediaAsset,
     User,
@@ -625,24 +626,56 @@ def load_purchase_invoice_choices(include_blank: bool = True):
     return choices
 
 
-def load_schedule_membership_role_suggestions() -> list[str]:
-    defaults = list(UserDepartmentMembership.DEFAULT_ROLE_SUGGESTIONS)
-    existing_roles = [
-        UserDepartmentMembership.normalize_role(role)
-        for role, in UserDepartmentMembership.query.with_entities(
-            UserDepartmentMembership.role
-        )
-        .distinct()
-        .order_by(UserDepartmentMembership.role.asc())
-        .all()
-        if role
+def format_schedule_membership_role_label(role_name: str | None) -> str:
+    words = [
+        word
+        for word in str(role_name or "").replace("_", " ").strip().split()
+        if word
     ]
-    suggestions = {
-        role
-        for role in defaults + existing_roles
-        if role
-    }
-    return sorted(suggestions)
+    if not words:
+        return "Unassigned"
+    return " ".join(
+        word.upper() if len(word) <= 3 else word.capitalize()
+        for word in words
+    )
+
+
+def load_schedule_membership_role_definitions(
+    *,
+    extra_roles: list[str] | None = None,
+) -> list[dict[str, object]]:
+    definitions = [
+        dict(definition)
+        for definition in Setting.get_schedule_membership_roles(include_legacy=True)
+    ]
+    seen_names = {str(definition["name"]) for definition in definitions}
+    for role_name in extra_roles or []:
+        normalized_name = Setting.normalize_schedule_role_name(role_name)
+        if not normalized_name or normalized_name in seen_names:
+            continue
+        definitions.append(
+            {
+                "name": normalized_name,
+                "is_management": Setting.is_schedule_management_role(normalized_name),
+            }
+        )
+        seen_names.add(normalized_name)
+    return definitions
+
+
+def load_schedule_membership_role_choices(
+    *,
+    extra_roles: list[str] | None = None,
+) -> list[tuple[str, str]]:
+    return [
+        (
+            str(definition["name"]),
+            format_schedule_membership_role_label(str(definition["name"])),
+        )
+        for definition in load_schedule_membership_role_definitions(
+            extra_roles=extra_roles
+        )
+    ]
 
 
 def load_purchase_gl_code_choices():
@@ -4164,9 +4197,10 @@ class UserDepartmentMembershipForm(FlaskForm):
         validators=[DataRequired()],
         validate_choice=False,
     )
-    role = StringField(
+    role = SelectField(
         "Role",
-        validators=[DataRequired(), Length(max=50)],
+        coerce=str,
+        validators=[DataRequired()],
     )
     reports_to_user_id = SelectField(
         "Reports To",
@@ -4182,12 +4216,29 @@ class UserDepartmentMembershipForm(FlaskForm):
         super().__init__(*args, **kwargs)
         self.department_id.choices = load_schedule_department_choices()
         self.reports_to_user_id.choices = [(0, "No direct supervisor")] + load_active_user_choices()
-        self.role_suggestions = load_schedule_membership_role_suggestions()
-        if not self.role.raw_data and not self.role.data:
-            self.role.data = UserDepartmentMembership.ROLE_STAFF
+        self.role.choices = load_schedule_membership_role_choices()
+        if not self.role.raw_data and not self.role.data and self.role.choices:
+            self.role.data = str(self.role.choices[0][0])
 
     def validate_role(self, field):
         field.data = UserDepartmentMembership.normalize_role(field.data)
+        valid_role_names = {role_name for role_name, _label in self.role.choices}
+        if field.data not in valid_role_names:
+            raise ValidationError("Select a configured role.")
+
+
+class ScheduleMembershipRoleForm(FlaskForm):
+    name = StringField(
+        "Role Name",
+        validators=[DataRequired(), Length(max=50)],
+    )
+    is_management = BooleanField("Management role")
+    submit = SubmitField("Add Role")
+
+    def validate_name(self, field):
+        field.data = Setting.normalize_schedule_role_name(field.data)
+        if not field.data:
+            raise ValidationError("Enter a role name.")
 
 
 class UserPositionEligibilityForm(FlaskForm):

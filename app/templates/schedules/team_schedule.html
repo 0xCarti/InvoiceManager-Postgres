@@ -222,7 +222,7 @@
                 {{ 'Published' if schedule_week.is_published else 'Draft' }}
             </span>
             {% endif %}
-            {% if shift_form and view_mode == 'position' %}
+            {% if shift_form and view_mode == 'position' and can_manage_team_shifts %}
             <button
                 type="button"
                 class="btn btn-sm btn-primary"
@@ -447,7 +447,7 @@
                 <div class="d-flex flex-wrap align-items-center gap-2 text-end">
                     <span class="badge text-bg-light border">{{ day.shift_count }} shift{{ '' if day.shift_count == 1 else 's' }}</span>
                     <span class="badge text-bg-light border">{{ '%.2f'|format(day.total_hours) }} hrs</span>
-                    {% if shift_form %}
+                    {% if shift_form and can_manage_team_shifts %}
                     <button
                         type="button"
                         class="btn btn-sm btn-outline-primary"
@@ -517,7 +517,7 @@
                                         {% endif %}
                                     </div>
                                     <div class="d-flex flex-wrap gap-2">
-                                        {% if shift_form %}
+                                        {% if shift_form and (can_manage_team_shifts or (can_self_schedule and shift.assigned_user_id == current_user.id)) %}
                                         <button
                                             type="button"
                                             class="btn btn-sm btn-outline-secondary"
@@ -596,7 +596,7 @@
                         {% for day in week_dates %}
                         <td class="schedule-day-cell">
                             <div class="schedule-empty-cell">
-                                {% if can_team_access and shift_form %}
+                                {% if can_manage_team_shifts and shift_form %}
                                 <button
                                     type="button"
                                     class="btn btn-sm btn-outline-primary mb-2"
@@ -621,7 +621,7 @@
                                             {% endif %}
                                             <div class="small text-muted">{{ shift.assignment_mode|replace('_', ' ')|title }}</div>
                                         </div>
-                                        {% if can_team_access and shift_form %}
+                                        {% if can_manage_team_shifts and shift_form %}
                                         <button
                                             type="button"
                                             class="btn btn-sm btn-outline-secondary"
@@ -688,7 +688,7 @@
                         {% for day in week_dates %}
                         <td class="schedule-day-cell">
                             <div class="schedule-empty-cell">
-                                {% if shift_form %}
+                                {% if shift_form and (can_manage_team_shifts or (can_self_schedule and user.id == current_user.id)) %}
                                 <button
                                     type="button"
                                     class="btn btn-sm btn-outline-primary mb-2"
@@ -714,7 +714,7 @@
                                             {% endif %}
                                             <div class="small text-muted">{{ '%.2f'|format(shift.paid_hours or 0.0) }} paid hrs</div>
                                         </div>
-                                        {% if shift_form %}
+                                        {% if shift_form and (can_manage_team_shifts or (can_self_schedule and shift.assigned_user_id == current_user.id)) %}
                                         <button
                                             type="button"
                                             class="btn btn-sm btn-outline-secondary"
@@ -782,6 +782,7 @@
                         <div class="fw-semibold">{{ day.strftime('%A') }}</div>
                         <div class="small text-muted">{{ day.strftime('%b %d') }}</div>
                     </div>
+                    {% if shift_form and (can_manage_team_shifts or (can_self_schedule and user.id == current_user.id)) %}
                     <button
                         type="button"
                         class="btn btn-sm btn-outline-primary"
@@ -795,6 +796,7 @@
                     >
                         Add
                     </button>
+                    {% endif %}
                 </div>
                 {% for shift in shifts_by_row.get((user.id, day), []) %}
                 <div class="schedule-shift-card mb-2">
@@ -807,9 +809,9 @@
                     {% if shift.notes %}
                     <div class="small mt-1">{{ shift.notes }}</div>
                     {% endif %}
-                    {% if shift_form or (selected_department and current_user.has_permission('schedules.delete') and not schedule_week.is_published) %}
+                    {% if (shift_form and (can_manage_team_shifts or (can_self_schedule and shift.assigned_user_id == current_user.id))) or (selected_department and current_user.has_permission('schedules.delete') and not schedule_week.is_published) %}
                     <div class="d-flex flex-wrap gap-2 mt-2">
-                        {% if shift_form %}
+                        {% if shift_form and (can_manage_team_shifts or (can_self_schedule and shift.assigned_user_id == current_user.id)) %}
                         <button
                             type="button"
                             class="btn btn-sm btn-outline-secondary"
@@ -862,7 +864,7 @@
     {% endif %}
 </div>
 
-{% if shift_form and schedule_week %}
+{% if shift_form and schedule_week and can_edit_shift_entries %}
 <div
     class="modal fade"
     id="scheduleShiftModal"

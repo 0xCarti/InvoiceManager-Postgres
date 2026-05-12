@@ -113,6 +113,28 @@ def test_schedule_setup_and_user_settings_flow(client, app):
             position_id = position.id
 
         response = client.post(
+            "/schedules/setup",
+            data={
+                "action": "add_membership_role",
+                "membership_role-name": "lead",
+                "membership_role-is_management": "y",
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+
+        response = client.post(
+            "/schedules/setup",
+            data={
+                "action": "add_membership_role",
+                "membership_role-name": "assistant operations lead",
+                "membership_role-is_management": "y",
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+
+        response = client.post(
             f"/schedules/users/{target_user_id}",
             data={
                 "action": "save_profile",
@@ -184,6 +206,129 @@ def test_schedule_setup_and_user_settings_flow(client, app):
         assert UserPositionEligibility.query.filter_by(
             user_id=target_user_id, position_id=position_id
         ).first()
+
+
+def test_schedule_role_catalog_scopes_gm_visibility_by_department(client, app):
+    gm_user_id = create_user(app, "gm-scope@example.com")
+    worker_a_id = create_user(app, "gm-scope-worker-a@example.com")
+    worker_b_id = create_user(app, "gm-scope-worker-b@example.com")
+
+    with app.app_context():
+        gm_user = db.session.get(User, gm_user_id)
+        grant_permissions(
+            gm_user,
+            "schedules.view_team",
+            group_name="GM Scoped Schedule",
+            description="Can view team schedules within assigned departments.",
+        )
+
+        department_a = Department(name="Scoped GM A", active=True)
+        department_b = Department(name="Scoped GM B", active=True)
+        db.session.add_all([department_a, department_b])
+        db.session.flush()
+
+        position_a = ShiftPosition(
+            department_id=department_a.id,
+            name="Scoped GM Position A",
+            active=True,
+        )
+        position_b = ShiftPosition(
+            department_id=department_b.id,
+            name="Scoped GM Position B",
+            active=True,
+        )
+        db.session.add_all([position_a, position_b])
+        db.session.flush()
+
+        db.session.add_all(
+            [
+                UserDepartmentMembership(
+                    user_id=gm_user_id,
+                    department_id=department_a.id,
+                    role=UserDepartmentMembership.ROLE_GM,
+                    is_primary=True,
+                ),
+                UserDepartmentMembership(
+                    user_id=worker_a_id,
+                    department_id=department_a.id,
+                    role=UserDepartmentMembership.ROLE_STAFF,
+                    is_primary=True,
+                ),
+                UserDepartmentMembership(
+                    user_id=worker_b_id,
+                    department_id=department_b.id,
+                    role=UserDepartmentMembership.ROLE_STAFF,
+                    is_primary=True,
+                ),
+                UserPositionEligibility(
+                    user_id=worker_a_id,
+                    position_id=position_a.id,
+                    priority=10,
+                    active=True,
+                ),
+                UserPositionEligibility(
+                    user_id=worker_b_id,
+                    position_id=position_b.id,
+                    priority=10,
+                    active=True,
+                ),
+            ]
+        )
+        week_a = DepartmentScheduleWeek(
+            department_id=department_a.id,
+            week_start=date(2026, 4, 6),
+            is_published=False,
+            current_version=0,
+        )
+        week_b = DepartmentScheduleWeek(
+            department_id=department_b.id,
+            week_start=date(2026, 4, 6),
+            is_published=False,
+            current_version=0,
+        )
+        db.session.add_all([week_a, week_b])
+        db.session.flush()
+
+        db.session.add_all(
+            [
+                Shift(
+                    schedule_week_id=week_a.id,
+                    position_id=position_a.id,
+                    shift_date=date(2026, 4, 7),
+                    start_time=time(9, 0),
+                    end_time=time(17, 0),
+                    paid_hours=8.0,
+                    assignment_mode=Shift.ASSIGNMENT_ASSIGNED,
+                    assigned_user_id=worker_a_id,
+                    live_version=0,
+                ),
+                Shift(
+                    schedule_week_id=week_b.id,
+                    position_id=position_b.id,
+                    shift_date=date(2026, 4, 8),
+                    start_time=time(10, 0),
+                    end_time=time(18, 0),
+                    paid_hours=8.0,
+                    assignment_mode=Shift.ASSIGNMENT_ASSIGNED,
+                    assigned_user_id=worker_b_id,
+                    live_version=0,
+                ),
+            ]
+        )
+        db.session.commit()
+
+    with client:
+        login(client, "gm-scope@example.com", "pass")
+        response = client.get(
+            "/schedules?week_start=2026-04-06",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"Scoped GM A" in response.data
+    assert b"gm-scope-worker-a@example.com" in response.data
+    assert b"Scoped GM B" not in response.data
+    assert b"gm-scope-worker-b@example.com" not in response.data
 
 
 def test_schedule_setup_hides_manage_controls_for_pay_rate_only_users(client, app):
@@ -435,6 +580,173 @@ def test_team_schedule_modal_renders_all_department_positions(client, app):
         assert b'data-user-position-map-by-department=' in response.data
         assert b'name="shift-department_id"' in response.data
         assert b"Save Department as Default" in response.data
+
+
+def test_team_schedule_view_only_user_cannot_see_or_save_shift_controls(client, app):
+    viewer_id = create_user(app, "schedule-view-only@example.com")
+
+    with app.app_context():
+        viewer = db.session.get(User, viewer_id)
+        grant_permissions(
+            viewer,
+            "schedules.view_team",
+            group_name="Schedule View Only",
+            description="Can view team schedules without editing shifts.",
+        )
+
+        department = Department(name="View Only Schedule Ops", active=True)
+        db.session.add(department)
+        db.session.flush()
+
+        position = ShiftPosition(
+            department_id=department.id,
+            name="View Only Cashier",
+            active=True,
+        )
+        db.session.add(position)
+        db.session.add(
+            UserDepartmentMembership(
+                user_id=viewer_id,
+                department_id=department.id,
+                role="staff",
+                is_primary=True,
+            )
+        )
+        db.session.commit()
+        department_id = department.id
+        position_id = position.id
+
+    with client:
+        login(client, "schedule-view-only@example.com", "pass")
+        for view_mode in ("user", "position"):
+            response = client.get(
+                f"/schedules?department_id={department_id}&week_start=2026-04-06&view_mode={view_mode}",
+                follow_redirects=True,
+            )
+            assert response.status_code == 200
+            assert b"Add Shift" not in response.data
+            assert b'scheduleShiftModal"' not in response.data
+            assert b'name="action" value="save_shift"' not in response.data
+
+        response = client.post(
+            f"/schedules?department_id={department_id}&week_start=2026-04-06",
+            data={
+                "action": "save_shift",
+                "page_department_id": str(department_id),
+                "week_start": "2026-04-06",
+                "view_mode": "user",
+                "shift-shift_id": "",
+                "shift-schedule_week_id": "",
+                "shift-shift_date": "2026-04-07",
+                "shift-department_id": str(department_id),
+                "shift-assigned_user_id": str(viewer_id),
+                "shift-position_id": str(position_id),
+                "shift-assignment_mode": "assigned",
+                "shift-start_time": "09:00",
+                "shift-end_time": "17:00",
+                "shift-paid_hours": "",
+                "shift-location_id": "0",
+                "shift-event_id": "0",
+                "shift-notes": "",
+                "shift-color": "",
+                "shift-copy_count": "1",
+                "shift-repeat_weeks": "0",
+                "shift-target_days": ["1"],
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 403
+
+
+def test_team_schedule_self_schedule_user_can_still_save_own_shift(client, app):
+    scheduler_id = create_user(app, "self-scheduler@example.com")
+
+    with app.app_context():
+        scheduler = db.session.get(User, scheduler_id)
+        grant_permissions(
+            scheduler,
+            "schedules.self_schedule",
+            group_name="Self Scheduler",
+            description="Can create and edit their own assigned shifts.",
+        )
+
+        department = Department(name="Self Schedule Ops", active=True)
+        db.session.add(department)
+        db.session.flush()
+
+        position = ShiftPosition(
+            department_id=department.id,
+            name="Self Schedule Cashier",
+            active=True,
+        )
+        db.session.add(position)
+        db.session.add_all(
+            [
+                UserDepartmentMembership(
+                    user_id=scheduler_id,
+                    department_id=department.id,
+                    role="staff",
+                    is_primary=True,
+                ),
+                UserPositionEligibility(
+                    user_id=scheduler_id,
+                    position_id=position.id,
+                    priority=10,
+                    active=True,
+                ),
+            ]
+        )
+        db.session.commit()
+        department_id = department.id
+        position_id = position.id
+
+    with client:
+        login(client, "self-scheduler@example.com", "pass")
+        response = client.get(
+            f"/schedules?department_id={department_id}&week_start=2026-04-06",
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b'name="action" value="save_shift"' in response.data
+        assert b"Add Shift" in response.data
+
+        response = client.post(
+            f"/schedules?department_id={department_id}&week_start=2026-04-06",
+            data={
+                "action": "save_shift",
+                "page_department_id": str(department_id),
+                "week_start": "2026-04-06",
+                "view_mode": "user",
+                "shift-shift_id": "",
+                "shift-schedule_week_id": "",
+                "shift-shift_date": "2026-04-07",
+                "shift-department_id": str(department_id),
+                "shift-assigned_user_id": str(scheduler_id),
+                "shift-position_id": str(position_id),
+                "shift-assignment_mode": "assigned",
+                "shift-start_time": "09:00",
+                "shift-end_time": "17:00",
+                "shift-paid_hours": "",
+                "shift-location_id": "0",
+                "shift-event_id": "0",
+                "shift-notes": "",
+                "shift-color": "",
+                "shift-copy_count": "1",
+                "shift-repeat_weeks": "0",
+                "shift-target_days": ["1"],
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Shift saved." in response.data
+
+    with app.app_context():
+        shift = Shift.query.filter_by(
+            assigned_user_id=scheduler_id,
+            position_id=position_id,
+            shift_date=date(2026, 4, 7),
+        ).first()
+        assert shift is not None
 
 
 def test_team_schedule_defaults_to_all_departments_for_new_users(client, app):
