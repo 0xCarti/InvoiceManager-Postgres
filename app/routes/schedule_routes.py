@@ -2158,6 +2158,7 @@ def tradeboard():
     week_start = normalize_week_start(request.values.get("week_start"))
     review_form = TradeboardClaimReviewForm(prefix="claimreview")
     action_form = CSRFOnlyForm(prefix="tradeboard")
+    can_manage_claims = current_user.has_permission("schedules.approve_tradeboard")
 
     schedule_week = None
     shifts: list[Shift] = []
@@ -2184,9 +2185,6 @@ def tradeboard():
                 if eligibility.active
                 and eligibility.position.department_id == selected_department.id
             }
-            can_manage_claims = current_user.has_permission(
-                "schedules.approve_tradeboard"
-            )
             for shift in schedule_week.shifts:
                 if shift.assignment_mode not in (
                     Shift.ASSIGNMENT_OPEN,
@@ -2328,6 +2326,7 @@ def tradeboard():
         pending_claims=pending_claims,
         review_form=review_form,
         action_form=action_form,
+        can_manage_claims=can_manage_claims,
     )
 
 

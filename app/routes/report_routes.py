@@ -45,6 +45,7 @@ from app.models import (
     GLCode,
     Invoice,
     InvoiceProduct,
+    InvoiceProductRecipeItemSnapshot,
     Item,
     ItemUnit,
     Location,
@@ -95,6 +96,135 @@ def _get_base_unit_conversions():
     if conversions:
         merged.update(conversions)
     return merged
+
+
+def _load_invoice_recipe_usage_rows(
+    *,
+    start,
+    end,
+    selected_item_ids: list[int] | None = None,
+    selected_product_ids: list[int] | None = None,
+    selected_gl_code_ids: list[int] | None = None,
+    payment_status: str | None = None,
+) -> list[dict]:
+    snapshot_query = (
+        db.session.query(
+            InvoiceProductRecipeItemSnapshot.item_id.label("item_id"),
+            InvoiceProductRecipeItemSnapshot.item_name.label("item_name"),
+            InvoiceProductRecipeItemSnapshot.base_unit.label("base_unit"),
+            InvoiceProductRecipeItemSnapshot.item_cost.label("item_cost"),
+            func.sum(
+                InvoiceProduct.quantity
+                * InvoiceProductRecipeItemSnapshot.quantity
+                * func.coalesce(InvoiceProductRecipeItemSnapshot.unit_factor, 1)
+            ).label("total_quantity"),
+        )
+        .join(
+            InvoiceProduct,
+            InvoiceProduct.id == InvoiceProductRecipeItemSnapshot.invoice_product_id,
+        )
+        .join(Invoice, Invoice.id == InvoiceProduct.invoice_id)
+        .join(Product, _invoice_product_matches_catalog_product())
+        .filter(
+            Invoice.date_created >= start,
+            Invoice.date_created <= end,
+        )
+    )
+
+    fallback_query = (
+        db.session.query(
+            Item.id.label("item_id"),
+            Item.name.label("item_name"),
+            Item.base_unit.label("base_unit"),
+            Item.cost.label("item_cost"),
+            func.sum(
+                InvoiceProduct.quantity
+                * ProductRecipeItem.quantity
+                * func.coalesce(ItemUnit.factor, 1)
+            ).label("total_quantity"),
+        )
+        .join(ProductRecipeItem, ProductRecipeItem.item_id == Item.id)
+        .join(Product, Product.id == ProductRecipeItem.product_id)
+        .join(
+            InvoiceProduct,
+            _invoice_product_matches_catalog_product(),
+        )
+        .join(Invoice, Invoice.id == InvoiceProduct.invoice_id)
+        .outerjoin(ItemUnit, ItemUnit.id == ProductRecipeItem.unit_id)
+        .outerjoin(
+            InvoiceProductRecipeItemSnapshot,
+            InvoiceProductRecipeItemSnapshot.invoice_product_id == InvoiceProduct.id,
+        )
+        .filter(
+            Invoice.date_created >= start,
+            Invoice.date_created <= end,
+            InvoiceProductRecipeItemSnapshot.id.is_(None),
+        )
+    )
+
+    for query_name, query in (
+        ("snapshot", snapshot_query),
+        ("fallback", fallback_query),
+    ):
+        if payment_status == "paid":
+            query = query.filter(Invoice.is_paid.is_(True))
+        elif payment_status == "unpaid":
+            query = query.filter(Invoice.is_paid.is_(False))
+        if selected_product_ids:
+            query = query.filter(Product.id.in_(selected_product_ids))
+        if selected_item_ids:
+            query = query.filter(
+                (
+                    InvoiceProductRecipeItemSnapshot.item_id
+                    if query_name == "snapshot"
+                    else Item.id
+                ).in_(selected_item_ids)
+            )
+        if selected_gl_code_ids:
+            included_ids = [gid for gid in selected_gl_code_ids if gid != -1]
+            conditions = []
+            if included_ids:
+                conditions.append(Product.sales_gl_code_id.in_(included_ids))
+            if -1 in selected_gl_code_ids:
+                conditions.append(Product.sales_gl_code_id.is_(None))
+            if conditions:
+                query = query.filter(or_(*conditions))
+        if query_name == "snapshot":
+            snapshot_query = query
+        else:
+            fallback_query = query
+
+    usage_totals: dict[tuple[object, str], dict] = {}
+    for row in snapshot_query.group_by(
+        InvoiceProductRecipeItemSnapshot.item_id,
+        InvoiceProductRecipeItemSnapshot.item_name,
+        InvoiceProductRecipeItemSnapshot.base_unit,
+        InvoiceProductRecipeItemSnapshot.item_cost,
+    ).all():
+        key = (row.item_id, row.item_name or "")
+        usage_totals[key] = {
+            "item_id": row.item_id,
+            "item_name": row.item_name,
+            "base_unit": row.base_unit or "",
+            "item_cost": float(row.item_cost or 0.0),
+            "total_quantity": float(row.total_quantity or 0.0),
+        }
+
+    for row in fallback_query.group_by(Item.id).order_by(Item.name).all():
+        key = (row.item_id, row.item_name or "")
+        entry = usage_totals.setdefault(
+            key,
+            {
+                "item_id": row.item_id,
+                "item_name": row.item_name,
+                "base_unit": row.base_unit or "",
+                "item_cost": float(row.item_cost or 0.0),
+                "total_quantity": 0.0,
+            },
+        )
+        entry["total_quantity"] += float(row.total_quantity or 0.0)
+
+    return sorted(usage_totals.values(), key=lambda row: (row["item_name"] or "").casefold())
 
 
 def _allocate_amount(total: Decimal, weights: Dict[str, Decimal]):
@@ -1418,55 +1548,26 @@ def inventory_variance_report():
                 entry["report_unit"] = report_unit
                 entry["unit_label"] = get_unit_label(report_unit)
 
-            usage_query = (
-                db.session.query(
-                    Item.id.label("item_id"),
-                    Item.name.label("item_name"),
-                    Item.base_unit.label("base_unit"),
-                    Item.cost.label("item_cost"),
-                    db.func.sum(
-                        InvoiceProduct.quantity
-                        * ProductRecipeItem.quantity
-                        * db.func.coalesce(ItemUnit.factor, 1)
-                    ).label("total_quantity"),
-                )
-                .join(ProductRecipeItem, ProductRecipeItem.item_id == Item.id)
-                .join(Product, Product.id == ProductRecipeItem.product_id)
-                .join(
-                    InvoiceProduct,
-                    _invoice_product_matches_catalog_product(),
-                )
-                .join(Invoice, Invoice.id == InvoiceProduct.invoice_id)
-                .outerjoin(ItemUnit, ItemUnit.id == ProductRecipeItem.unit_id)
-                .filter(
-                    Invoice.date_created >= start,
-                    Invoice.date_created <= end,
-                )
-            )
-
-            if selected_item_ids:
-                usage_query = usage_query.filter(Item.id.in_(selected_item_ids))
-
-            usage_rows = (
-                usage_query.group_by(Item.id)
-                .order_by(Item.name)
-                .all()
+            usage_rows = _load_invoice_recipe_usage_rows(
+                start=start,
+                end=end,
+                selected_item_ids=selected_item_ids,
             )
 
             usage_totals: dict[int, dict] = {}
             for usage_row in usage_rows:
-                quantity = float(usage_row.total_quantity or 0.0)
-                base_unit = usage_row.base_unit or ""
+                quantity = float(usage_row["total_quantity"] or 0.0)
+                base_unit = usage_row["base_unit"] or ""
                 quantity, report_unit = convert_quantity_for_reporting(
                     quantity, base_unit, conversions
                 )
                 unit_cost = convert_cost_for_reporting(
-                    float(usage_row.item_cost or 0.0), base_unit, conversions
+                    float(usage_row["item_cost"] or 0.0), base_unit, conversions
                 )
                 total_cost = float(quantity or 0.0) * float(unit_cost or 0.0)
 
-                usage_totals[usage_row.item_id] = {
-                    "item_name": usage_row.item_name,
+                usage_totals[usage_row["item_id"]] = {
+                    "item_name": usage_row["item_name"],
                     "used_quantity": float(quantity or 0.0),
                     "used_value": float(total_cost or 0.0),
                     "report_unit": report_unit,
@@ -2119,53 +2220,12 @@ def product_stock_usage_report():
             selected_product_ids = form.products.data or []
             selected_gl_code_ids = form.gl_codes.data or []
 
-            items_query = (
-                db.session.query(
-                    Item.id.label("item_id"),
-                    Item.name.label("item_name"),
-                    Item.base_unit.label("base_unit"),
-                    Item.cost.label("item_cost"),
-                    db.func.sum(
-                        InvoiceProduct.quantity
-                        * ProductRecipeItem.quantity
-                        * db.func.coalesce(ItemUnit.factor, 1)
-                    ).label("total_quantity"),
-                )
-                .join(ProductRecipeItem, ProductRecipeItem.item_id == Item.id)
-                .join(Product, Product.id == ProductRecipeItem.product_id)
-                .join(
-                    InvoiceProduct,
-                    _invoice_product_matches_catalog_product(),
-                )
-                .join(Invoice, Invoice.id == InvoiceProduct.invoice_id)
-                .outerjoin(ItemUnit, ItemUnit.id == ProductRecipeItem.unit_id)
-                .filter(
-                    Invoice.date_created >= start,
-                    Invoice.date_created <= end,
-                )
-            )
-            if selected_payment_status == "paid":
-                items_query = items_query.filter(Invoice.is_paid.is_(True))
-            elif selected_payment_status == "unpaid":
-                items_query = items_query.filter(Invoice.is_paid.is_(False))
-
-            if selected_product_ids:
-                items_query = items_query.filter(Product.id.in_(selected_product_ids))
-
-            if selected_gl_code_ids:
-                included_ids = [gid for gid in selected_gl_code_ids if gid != -1]
-                conditions = []
-                if included_ids:
-                    conditions.append(Product.sales_gl_code_id.in_(included_ids))
-                if -1 in selected_gl_code_ids:
-                    conditions.append(Product.sales_gl_code_id.is_(None))
-                if conditions:
-                    items_query = items_query.filter(or_(*conditions))
-
-            items = (
-                items_query.group_by(Item.id)
-                .order_by(Item.name)
-                .all()
+            items = _load_invoice_recipe_usage_rows(
+                start=start,
+                end=end,
+                selected_product_ids=selected_product_ids,
+                selected_gl_code_ids=selected_gl_code_ids,
+                payment_status=selected_payment_status,
             )
 
             excluded_query = (
@@ -2183,12 +2243,21 @@ def product_stock_usage_report():
                 )
                 .join(Customer, Customer.id == Invoice.customer_id)
                 .outerjoin(
+                    InvoiceProductRecipeItemSnapshot,
+                    InvoiceProductRecipeItemSnapshot.invoice_product_id
+                    == InvoiceProduct.id,
+                )
+                .outerjoin(
                     ProductRecipeItem,
-                    ProductRecipeItem.product_id == Product.id,
+                    and_(
+                        ProductRecipeItem.product_id == Product.id,
+                        InvoiceProductRecipeItemSnapshot.id.is_(None),
+                    ),
                 )
                 .filter(
                     Invoice.date_created >= start,
                     Invoice.date_created <= end,
+                    InvoiceProductRecipeItemSnapshot.id.is_(None),
                     ProductRecipeItem.id.is_(None),
                 )
             )
@@ -2237,9 +2306,9 @@ def product_stock_usage_report():
             conversions = _get_base_unit_conversions()
 
             for item_row in items:
-                quantity = float(item_row.total_quantity or 0.0)
-                cost_each = float(item_row.item_cost or 0.0)
-                base_unit = item_row.base_unit or ""
+                quantity = float(item_row["total_quantity"] or 0.0)
+                cost_each = float(item_row["item_cost"] or 0.0)
+                base_unit = item_row["base_unit"] or ""
                 quantity, report_unit = convert_quantity_for_reporting(
                     quantity, base_unit, conversions
                 )
@@ -2251,8 +2320,8 @@ def product_stock_usage_report():
 
                 report_data.append(
                     {
-                        "id": item_row.item_id,
-                        "name": item_row.item_name,
+                        "id": item_row["item_id"],
+                        "name": item_row["item_name"],
                         "unit": get_unit_label(report_unit),
                         "quantity": quantity,
                         "cost": cost_each,
@@ -2576,20 +2645,7 @@ def event_spoilage_report():
         conversions = _get_base_unit_conversions()
 
         spoilage_rows = (
-            db.session.query(
-                Event.id.label("event_id"),
-                Event.name.label("event_name"),
-                Event.start_date.label("start_date"),
-                Event.end_date.label("end_date"),
-                Event.closed.label("event_closed"),
-                Location.id.label("location_id"),
-                Location.name.label("location_name"),
-                Item.id.label("item_id"),
-                Item.name.label("item_name"),
-                Item.base_unit.label("base_unit"),
-                Item.cost.label("item_cost"),
-                func.sum(EventStandSheetItem.spoiled).label("spoiled_quantity"),
-            )
+            db.session.query(Event, EventLocation, Location, EventStandSheetItem, Item)
             .select_from(Event)
             .join(EventLocation, EventLocation.event_id == Event.id)
             .join(Location, EventLocation.location_id == Location.id)
@@ -2597,27 +2653,15 @@ def event_spoilage_report():
                 EventStandSheetItem,
                 EventStandSheetItem.event_location_id == EventLocation.id,
             )
-            .join(Item, EventStandSheetItem.item_id == Item.id)
+            .outerjoin(Item, EventStandSheetItem.item_id == Item.id)
             .filter(Event.id.in_(selected_event_ids))
             .filter(EventStandSheetItem.spoiled > 0)
             .filter(or_(Event.closed.is_(True), EventLocation.confirmed.is_(True)))
-            .group_by(
-                Event.id,
-                Event.name,
-                Event.start_date,
-                Event.end_date,
-                Event.closed,
-                Location.id,
-                Location.name,
-                Item.id,
-                Item.name,
-                Item.base_unit,
-                Item.cost,
-            )
             .order_by(
                 Event.start_date.desc(),
                 Event.name,
                 Location.name,
+                EventStandSheetItem.item_name_snapshot,
                 Item.name,
             )
             .all()
@@ -2626,15 +2670,29 @@ def event_spoilage_report():
         report_rows = []
         total_cost = 0.0
 
-        for row in spoilage_rows:
+        for event_obj, _, location_obj, sheet, item in spoilage_rows:
+            base_unit = (
+                sheet.item_base_unit_snapshot
+                or (item.base_unit if item is not None else "")
+                or ""
+            )
+            item_cost = (
+                sheet.item_cost_snapshot
+                if sheet.item_cost_snapshot is not None
+                else float(item.cost or 0.0) if item is not None else 0.0
+            )
+            item_name = (
+                sheet.item_name_snapshot
+                or (item.name if item is not None else f"Item #{sheet.item_id}")
+            )
             spoiled_quantity, report_unit = convert_quantity_for_reporting(
-                float(row.spoiled_quantity or 0.0),
-                row.base_unit or "",
+                float(sheet.spoiled or 0.0),
+                base_unit,
                 conversions,
             )
             unit_cost = convert_cost_for_reporting(
-                float(row.item_cost or 0.0),
-                row.base_unit or "",
+                float(item_cost or 0.0),
+                base_unit,
                 conversions,
             )
             spoilage_cost = float(spoiled_quantity or 0.0) * float(unit_cost or 0.0)
@@ -2642,15 +2700,15 @@ def event_spoilage_report():
 
             report_rows.append(
                 {
-                    "event_id": row.event_id,
-                    "event_name": row.event_name,
-                    "start_date": row.start_date,
-                    "end_date": row.end_date,
-                    "event_closed": bool(row.event_closed),
-                    "location_id": row.location_id,
-                    "location_name": row.location_name,
-                    "item_id": row.item_id,
-                    "item_name": row.item_name,
+                    "event_id": event_obj.id,
+                    "event_name": event_obj.name,
+                    "start_date": event_obj.start_date,
+                    "end_date": event_obj.end_date,
+                    "event_closed": bool(event_obj.closed),
+                    "location_id": location_obj.id,
+                    "location_name": location_obj.name,
+                    "item_id": sheet.item_id,
+                    "item_name": item_name,
                     "unit_label": get_unit_label(report_unit),
                     "spoiled_quantity": float(spoiled_quantity or 0.0),
                     "unit_cost": float(unit_cost or 0.0),

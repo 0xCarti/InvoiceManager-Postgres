@@ -70,7 +70,7 @@
     {% for row in rows %}
     <tr>
       <td data-label="Location">{{ row.location.name }}</td>
-      <td data-label="Item">{{ row.item.name }}</td>
+      <td data-label="Item">{{ row.item.name if row.item else row.item_name }}</td>
       <td data-label="Expected">{{ row.expected }}</td>
       <td data-label="Actual">{{ row.actual }}</td>
       <td data-label="Variance">{{ row.variance }}</td>

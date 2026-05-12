@@ -615,7 +615,6 @@ def test_closed_event_report_uses_recipe_yield_for_physical_amounts(app, client)
         )
         db.session.add(event_location)
         db.session.commit()
-
         db.session.add(
             EventStandSheetItem(
                 event_location_id=event_location.id,
@@ -657,3 +656,88 @@ def test_closed_event_report_uses_recipe_yield_for_physical_amounts(app, client)
     )
     assert stand_entry["physical_units_display"] == pytest.approx(15.0)
     assert stand_entry["physical_amount"] == Decimal("30.00")
+
+
+def test_closed_event_report_uses_sheet_snapshots_not_live_recipe(app, client):
+    with app.app_context():
+        user = User(
+            email="close-snapshot@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        location = Location(name="Snapshot Stand")
+        old_item = Item(name="4oz Fry Cup", base_unit="each", cost=0.25)
+        new_item = Item(name="6oz Fry Cup", base_unit="each", cost=0.5)
+        product = Product(name="Fries Snapshot", price=5.0, cost=0.25)
+        event = Event(
+            name="Snapshot Event",
+            start_date=date(2024, 4, 1),
+            end_date=date(2024, 4, 2),
+            closed=True,
+        )
+        db.session.add_all([user, location, old_item, new_item, product, event])
+        db.session.commit()
+        grant_event_permissions(user)
+
+        event_location = EventLocation(
+            event_id=event.id,
+            location_id=location.id,
+            confirmed=True,
+        )
+        db.session.add(event_location)
+        db.session.commit()
+
+        db.session.add(
+            EventStandSheetItem(
+                event_location_id=event_location.id,
+                item_id=old_item.id,
+                opening_count=10,
+                closing_count=0,
+                item_name_snapshot="4oz Fry Cup",
+                item_base_unit_snapshot="each",
+                item_cost_snapshot=0.25,
+                price_per_unit_snapshot=5.0,
+            )
+        )
+        db.session.add(
+            ProductRecipeItem(
+                product_id=product.id,
+                item_id=new_item.id,
+                quantity=1.0,
+                countable=True,
+            )
+        )
+        db.session.add(
+            EventLocationTerminalSalesSummary(
+                event_location_id=event_location.id,
+                total_quantity=2.0,
+                total_amount=10.0,
+            )
+        )
+        db.session.commit()
+        event_id = event.id
+        user_email = user.email
+
+    with captured_templates(app) as templates:
+        login_response = login(client, user_email, "pass")
+        assert login_response.status_code == 200
+        response = client.get(f"/events/{event_id}/close-report")
+        assert response.status_code == 200
+
+    template_matches = [
+        (template, context)
+        for template, context in templates
+        if template.name == "events/close_report.html"
+    ]
+    assert template_matches
+    _, context = template_matches[0]
+    location_report = context["locations"][0]
+    assert location_report.terminal.amount == Decimal("10.00")
+    assert any(
+        entry["item_name"] == "4oz Fry Cup"
+        for entry in location_report.stand_items
+    )
+    assert not any(
+        entry["item_name"] == "6oz Fry Cup"
+        for entry in location_report.stand_items
+    )

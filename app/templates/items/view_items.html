@@ -72,7 +72,7 @@
         <a href="{{ url_for('item.import_items') }}" class="btn btn-outline-secondary">Import Items</a>
         {% endif %}
         {% if can_bulk_delete_items %}
-        <button type="submit" form="bulk-delete-form" class="btn btn-warning" data-confirm-message="Are you sure?">Delete Items</button>
+        <button type="submit" form="bulk-delete-form" class="btn btn-warning" id="bulkDeleteItemsBtn" data-confirm-message="Are you sure?" disabled>Delete Items</button>
         {% endif %}
         <div class="dropdown d-md-none">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
@@ -344,11 +344,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const selectAll = document.getElementById('select-all');
     function updateBulkButtonState() {
         const bulkButton = document.getElementById('bulkEditItemsBtn');
-        if (!bulkButton) {
-            return;
-        }
+        const bulkDeleteButton = document.getElementById('bulkDeleteItemsBtn');
         const selectedCount = document.querySelectorAll('input[name="item_ids"]:checked').length;
-        bulkButton.disabled = selectedCount === 0;
+        if (bulkButton) {
+            bulkButton.disabled = selectedCount === 0;
+        }
+        if (bulkDeleteButton) {
+            bulkDeleteButton.disabled = selectedCount === 0;
+        }
     }
 
     window.updateItemBulkButtonState = updateBulkButtonState;

@@ -52,6 +52,7 @@ from app.utils.filter_state import (
 )
 from app.utils.numeric import coerce_float
 from app.utils.pagination import build_pagination_args, get_per_page
+from app.utils.recipe_history import backfill_invoice_product_recipe_snapshots
 from app.utils.text import (
     build_text_match_predicate,
     normalize_request_text_filter,
@@ -467,6 +468,8 @@ def _replace_product_recipe_items(
     product_obj: Product,
     recipe_entries: list[dict[str, object]],
 ) -> None:
+    if product_obj.id is not None:
+        backfill_invoice_product_recipe_snapshots(product_obj)
     ProductRecipeItem.query.filter_by(product_id=product_obj.id).delete()
     for entry in recipe_entries:
         db.session.add(

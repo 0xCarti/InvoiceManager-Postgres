@@ -32,6 +32,7 @@ from app.utils.filter_state import (
 )
 from app.utils.numeric import coerce_float
 from app.utils.pagination import build_pagination_args, get_per_page
+from app.utils.recipe_history import sync_invoice_product_recipe_snapshots
 from app.utils.recipe_usage import recipe_item_base_units_per_sale
 from app.utils.text import normalize_request_text_filter
 
@@ -373,6 +374,8 @@ def _create_invoice_from_form(form):
                 line_pst=line_pst,
             )
             db.session.add(invoice_product)
+            db.session.flush()
+            sync_invoice_product_recipe_snapshots(invoice_product, product=product)
             created_line_count += 1
             line_items_to_log.append({"product_id": product.id, "quantity": quantity})
 

@@ -87,6 +87,10 @@ from app.utils.pos_import import (
     parse_terminal_sales_number,
     terminal_sales_cell_is_blank,
 )
+from app.utils.recipe_history import (
+    sync_closed_event_sheet_snapshots,
+    sync_terminal_sale_recipe_snapshots,
+)
 from app.utils.recipe_usage import recipe_item_base_units_per_sale
 from app.utils.units import (
     DEFAULT_BASE_UNIT_CONVERSIONS,
@@ -523,6 +527,68 @@ def _build_item_price_lookup(
     return price_lookup
 
 
+def _sheet_item_name(sheet: EventStandSheetItem) -> str:
+    if sheet.item_name_snapshot:
+        return sheet.item_name_snapshot
+    if sheet.item is not None and sheet.item.name:
+        return sheet.item.name
+    return f"Item #{sheet.item_id}"
+
+
+def _sheet_item_base_unit(sheet: EventStandSheetItem) -> str:
+    if sheet.item_base_unit_snapshot:
+        return sheet.item_base_unit_snapshot
+    if sheet.item is not None and sheet.item.base_unit:
+        return sheet.item.base_unit
+    return ""
+
+
+def _sheet_item_cost(sheet: EventStandSheetItem) -> float:
+    if sheet.item_cost_snapshot is not None:
+        return float(sheet.item_cost_snapshot or 0.0)
+    if sheet.item is not None:
+        return float(sheet.item.cost or 0.0)
+    return 0.0
+
+
+def _build_closed_event_stand_items(event_location: EventLocation) -> list[dict]:
+    stand_items: list[dict] = []
+    conversions = _conversion_mapping()
+    for sheet in sorted(
+        event_location.stand_sheet_items,
+        key=lambda record: normalize_name_for_sorting(_sheet_item_name(record)).casefold(),
+    ):
+        stand_items.append(
+            {
+                "item": sheet.item,
+                "item_name": _sheet_item_name(sheet),
+                "base_unit": _sheet_item_base_unit(sheet),
+                "expected": float(sheet.opening_count or 0.0),
+                "expected_display": _convert_value_for_reporting(
+                    float(sheet.opening_count or 0.0),
+                    _sheet_item_base_unit(sheet),
+                    conversions,
+                ),
+                "sales": None,
+                "sales_display": None,
+                "sheet": sheet,
+                "sheet_values": SimpleNamespace(
+                    opening_count=float(sheet.opening_count or 0.0),
+                    transferred_in=float(sheet.transferred_in or 0.0),
+                    transferred_out=float(sheet.transferred_out or 0.0),
+                    adjustments=float(sheet.adjustments or 0.0),
+                    eaten=float(sheet.eaten or 0.0),
+                    spoiled=float(sheet.spoiled or 0.0),
+                    closing_count=float(sheet.closing_count or 0.0),
+                ),
+                "report_unit_label": get_unit_label(_sheet_item_base_unit(sheet)),
+                "receiving_unit_label": None,
+                "transfer_unit_label": None,
+            }
+        )
+    return stand_items
+
+
 def _calculate_physical_vs_terminal_variance(event: Event) -> float | None:
     """Return the total dollar variance for confirmed locations in an event."""
 
@@ -877,15 +943,17 @@ def _apply_pending_sales(
         ).first()
         if sale:
             sale.quantity = quantity_value
+            sync_terminal_sale_recipe_snapshots(sale, product=product)
         else:
-            db.session.add(
-                TerminalSale(
-                    event_location_id=event_location.id,
-                    product_id=product.id,
-                    quantity=quantity_value,
-                    sold_at=datetime.utcnow(),
-                )
+            sale = TerminalSale(
+                event_location_id=event_location.id,
+                product_id=product.id,
+                quantity=quantity_value,
+                sold_at=datetime.utcnow(),
             )
+            db.session.add(sale)
+            db.session.flush()
+            sync_terminal_sale_recipe_snapshots(sale, product=product)
         if (
             link_products_to_locations
             and location_obj is not None
@@ -1428,9 +1496,9 @@ def closed_event_report(event_id):
     event = (
         Event.query.options(
             selectinload(Event.locations).selectinload(EventLocation.location),
-            selectinload(Event.locations)
-            .selectinload(EventLocation.terminal_sales)
-            .selectinload(TerminalSale.product),
+            selectinload(Event.locations).selectinload(
+                EventLocation.terminal_sales_summary
+            ),
             selectinload(Event.locations)
             .selectinload(EventLocation.stand_sheet_items)
             .selectinload(EventStandSheetItem.item),
@@ -1455,33 +1523,41 @@ def closed_event_report(event_id):
         event.locations,
         key=lambda el: (el.location.name.lower() if el.location else ""),
     ):
-        location_obj, stand_items = _get_stand_items(
-            event_location.location_id, event.id
-        )
+        location_obj = event_location.location
+        stand_items = _build_closed_event_stand_items(event_location)
         stand_items.sort(
             key=lambda entry: (
-                entry.get("item").name.casefold()
-                if entry.get("item") is not None
+                entry.get("item_name", "").casefold()
+                if entry.get("item_name") is not None
                 else ""
             ),
             reverse=True,
         )
-        price_lookup = _build_item_price_lookup(event_location, stand_items)
+        price_lookup = {
+            sheet.item_id: float(sheet.price_per_unit_snapshot)
+            for sheet in event_location.stand_sheet_items
+            if sheet.price_per_unit_snapshot is not None
+        }
 
         location_terminal_quantity = 0.0
         location_terminal_amount = Decimal("0.00")
-        for sale in event_location.terminal_sales:
-            quantity_value = sale.quantity or 0.0
-            quantity = float(quantity_value)
-            quantity_decimal = Decimal(str(quantity_value or 0.0))
-            product = sale.product
-            price_decimal = (
-                Decimal(str(getattr(product, "price", 0.0) or 0.0))
-                if product
-                else Decimal("0.00")
-            )
-            location_terminal_quantity += quantity
-            location_terminal_amount += quantity_decimal * price_decimal
+        summary = event_location.terminal_sales_summary
+        if summary is not None:
+            location_terminal_quantity = float(summary.total_quantity or 0.0)
+            location_terminal_amount = Decimal(str(summary.total_amount or 0.0))
+        else:
+            for sale in event_location.terminal_sales:
+                quantity_value = sale.quantity or 0.0
+                quantity = float(quantity_value)
+                quantity_decimal = Decimal(str(quantity_value or 0.0))
+                product = sale.product
+                price_decimal = (
+                    Decimal(str(getattr(product, "price", 0.0) or 0.0))
+                    if product
+                    else Decimal("0.00")
+                )
+                location_terminal_quantity += quantity
+                location_terminal_amount += quantity_decimal * price_decimal
 
         location_physical_quantity = 0.0
         location_physical_amount = Decimal("0.00")
@@ -1489,13 +1565,12 @@ def closed_event_report(event_id):
         location_has_sheet_data = False
 
         for entry in stand_items:
-            item = entry.get("item")
+            sheet = entry.get("sheet")
             price_per_unit = (
-                price_lookup.get(item.id) if item is not None else None
+                price_lookup.get(sheet.item_id) if sheet is not None else None
             )
             entry["price_per_unit"] = price_per_unit
 
-            sheet = entry.get("sheet")
             if sheet is None:
                 entry["physical_units"] = None
                 entry["physical_units_display"] = None
@@ -1861,6 +1936,8 @@ def add_terminal_sale(event_id, el_id):
                         sold_at=datetime.utcnow(),
                     )
                     db.session.add(sale)
+                    db.session.flush()
+                    sync_terminal_sale_recipe_snapshots(sale, product=product)
                     updated = True
             for extra_manual_sale in manual_sales[1:]:
                 db.session.delete(extra_manual_sale)
@@ -5764,6 +5841,10 @@ def close_event(event_id):
         )
         return redirect(url_for("event.view_event", event_id=event_id))
     for el in ev.locations:
+        price_lookup = _build_item_price_lookup(
+            el, _get_stand_items(el.location_id, ev.id)[1]
+        )
+        sync_closed_event_sheet_snapshots(el, price_lookup)
         counted_item_ids = set()
         for sheet in el.stand_sheet_items:
             counted_item_ids.add(sheet.item_id)
@@ -5828,18 +5909,26 @@ def inventory_report(event_id):
         loc = el.location
         for sheet in el.stand_sheet_items:
             item = sheet.item
-            lsi = LocationStandItem.query.filter_by(
-                location_id=loc.id, item_id=item.id
-            ).first()
+            lsi = None
+            if item is not None:
+                lsi = LocationStandItem.query.filter_by(
+                    location_id=loc.id, item_id=item.id
+                ).first()
             expected = lsi.expected_count if lsi else 0
             variance = sheet.closing_count - expected
-            cost_total = sheet.closing_count * item.cost
-            gl_obj = item.purchase_gl_code_for_location(loc.id)
+            item_cost = _sheet_item_cost(sheet)
+            cost_total = float(sheet.closing_count or 0.0) * item_cost
+            gl_obj = (
+                item.purchase_gl_code_for_location(loc.id)
+                if item is not None
+                else None
+            )
             gl_code = gl_obj.code if gl_obj else "Unassigned"
             rows.append(
                 {
                     "location": loc,
                     "item": item,
+                    "item_name": _sheet_item_name(sheet),
                     "expected": expected,
                     "actual": sheet.closing_count,
                     "variance": variance,

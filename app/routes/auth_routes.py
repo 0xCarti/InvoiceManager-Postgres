@@ -1527,6 +1527,9 @@ def edit_permission_group(group_id):
 @login_required
 def delete_permission_group(group_id):
     """Delete a permission group."""
+    if not current_user.has_permission("permission_groups.manage"):
+        abort(403)
+
     form = DeleteForm()
     if not form.validate_on_submit():
         abort(400)

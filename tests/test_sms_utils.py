@@ -14,6 +14,40 @@ def test_send_sms_missing_settings(monkeypatch):
         sms.send_sms("+123", "hi")
 
 
+def test_send_sms_uses_app_config_over_env(monkeypatch, app):
+    monkeypatch.delenv("TWILIO_ACCOUNT_SID", raising=False)
+    monkeypatch.delenv("TWILIO_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("TWILIO_PHONE_NUMBER", raising=False)
+
+    calls = []
+
+    class DummyClient:
+        def __init__(self, sid, token):
+            calls.append(("init", sid, token))
+            self.messages = self
+
+        def create(self, to, from_, body):
+            calls.append(("send", to, from_, body))
+
+    monkeypatch.setattr("app.utils.sms.Client", DummyClient)
+    from app.utils import sms
+
+    with app.app_context():
+        app.config.update(
+            {
+                "TWILIO_ACCOUNT_SID": "config-sid",
+                "TWILIO_AUTH_TOKEN": "config-token",
+                "TWILIO_PHONE_NUMBER": "+1888",
+            }
+        )
+        sms.send_sms("+1555", "Config Hello")
+
+    assert calls == [
+        ("init", "config-sid", "config-token"),
+        ("send", "+1555", "+1888", "Config Hello"),
+    ]
+
+
 def test_send_sms_success(monkeypatch):
     monkeypatch.setenv("TWILIO_ACCOUNT_SID", "sid")
     monkeypatch.setenv("TWILIO_AUTH_TOKEN", "token")

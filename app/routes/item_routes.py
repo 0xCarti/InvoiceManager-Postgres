@@ -55,6 +55,10 @@ from app.utils.filter_state import (
 )
 from app.utils.imports import _import_items
 from app.utils.pagination import build_pagination_args, get_per_page
+from app.utils.recipe_history import (
+    archive_item_for_current_operations,
+    item_open_event_dependencies,
+)
 from app.utils.text import (
     build_text_match_predicate,
     normalize_request_text_filter,
@@ -1121,27 +1125,97 @@ def delete_item(item_id):
     item = db.session.get(Item, item_id)
     if item is None:
         abort(404)
-    item.archived = True
+    dependencies = item_open_event_dependencies(item)
+    if dependencies:
+        flash(
+            "Item cannot be archived while it is used by open events: "
+            + "; ".join(dependencies)
+            + ".",
+            "warning",
+        )
+        return redirect(url_for("item.view_items"))
+    affected_product_ids, removed_location_count = archive_item_for_current_operations(item)
     db.session.commit()
-    log_activity(f"Archived item {item.id}")
-    flash("Item archived successfully!")
+    log_activity(
+        f"Archived item {item.id}; unlinked from products "
+        f"{','.join(str(product_id) for product_id in affected_product_ids) or 'none'}; "
+        f"removed {removed_location_count} location records"
+    )
+    flash(
+        "Item archived and removed from current recipes and location sheets.",
+        "success",
+    )
     return redirect(url_for("item.view_items"))
 
 
 @item.route("/items/bulk_delete", methods=["POST"])
 @login_required
 def bulk_delete_items():
-    """Delete multiple items in one request."""
-    item_ids = request.form.getlist("item_ids")
-    if item_ids:
-        Item.query.filter(Item.id.in_(item_ids)).update(
-            {"archived": True}, synchronize_session="fetch"
-        )
-        db.session.commit()
-        log_activity(f'Bulk archived items {",".join(item_ids)}')
-        flash("Selected items have been archived.", "success")
-    else:
+    """Archive multiple items in one request."""
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        abort(400)
+
+    selected_ids: list[int] = []
+    seen_ids: set[int] = set()
+    for raw_item_id in request.form.getlist("item_ids"):
+        try:
+            item_id = int(raw_item_id)
+        except (TypeError, ValueError):
+            continue
+        if item_id <= 0 or item_id in seen_ids:
+            continue
+        seen_ids.add(item_id)
+        selected_ids.append(item_id)
+
+    if not selected_ids:
         flash("No items selected.", "warning")
+        return redirect(url_for("item.view_items"))
+
+    items = Item.query.filter(Item.id.in_(selected_ids)).all()
+    if not items:
+        flash("No matching items were found.", "warning")
+        return redirect(url_for("item.view_items"))
+
+    archived_ids: list[int] = []
+    blocked_items: list[str] = []
+    for item_obj in items:
+        if item_obj.archived:
+            continue
+        dependencies = item_open_event_dependencies(item_obj)
+        if dependencies:
+            blocked_items.append(
+                f"{item_obj.name} ({'; '.join(dependencies)})"
+            )
+            continue
+        archive_item_for_current_operations(item_obj)
+        archived_ids.append(item_obj.id)
+
+    db.session.commit()
+
+    if archived_ids:
+        archived_ids.sort()
+        log_activity(
+            "Bulk archived items " + ",".join(str(item_id) for item_id in archived_ids)
+        )
+        flash(
+            "Selected items have been archived and removed from current operational links.",
+            "success",
+        )
+    elif blocked_items:
+        flash("No items were archived.", "info")
+    else:
+        flash("Selected items were already archived.", "info")
+
+    if blocked_items:
+        blocked_items.sort()
+        flash(
+            "Some items were not archived because they are used by open events: "
+            + ", ".join(blocked_items[:5])
+            + ("." if len(blocked_items) <= 5 else ", and more."),
+            "warning",
+        )
+
     return redirect(url_for("item.view_items"))
 
 

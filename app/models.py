@@ -3323,6 +3323,56 @@ class InvoiceProduct(db.Model):
     override_pst = db.Column(
         db.Boolean, nullable=True
     )  # True = apply PST, False = exempt, None = fallback to customer
+    recipe_item_snapshots = relationship(
+        "InvoiceProductRecipeItemSnapshot",
+        back_populates="invoice_product",
+        cascade="all, delete-orphan",
+        order_by="InvoiceProductRecipeItemSnapshot.id",
+    )
+
+
+class InvoiceProductRecipeItemSnapshot(db.Model):
+    __tablename__ = "invoice_product_recipe_item_snapshot"
+
+    id = db.Column(db.Integer, primary_key=True)
+    invoice_product_id = db.Column(
+        db.Integer,
+        db.ForeignKey("invoice_product.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    item_id = db.Column(
+        db.Integer,
+        db.ForeignKey("item.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    unit_id = db.Column(
+        db.Integer,
+        db.ForeignKey("item_unit.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    item_name = db.Column(db.String(100), nullable=False)
+    base_unit = db.Column(db.String(50), nullable=True)
+    item_cost = db.Column(db.Float, nullable=False, default=0.0, server_default="0.0")
+    unit_name = db.Column(db.String(50), nullable=True)
+    unit_factor = db.Column(db.Float, nullable=False, default=1.0, server_default="1.0")
+    quantity = db.Column(db.Float, nullable=False)
+    countable = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
+
+    invoice_product = relationship(
+        "InvoiceProduct", back_populates="recipe_item_snapshots"
+    )
+    item = relationship("Item")
+    unit = relationship("ItemUnit")
+
+    __table_args__ = (
+        db.Index(
+            "ix_invoice_product_recipe_snapshot_invoice_product",
+            "invoice_product_id",
+        ),
+        db.Index("ix_invoice_product_recipe_snapshot_item_id", "item_id"),
+    )
 
 
 class ProductRecipeItem(db.Model):
@@ -3899,6 +3949,12 @@ class TerminalSale(db.Model):
     )
     product = relationship("Product", back_populates="terminal_sales")
     pos_sales_import = relationship("PosSalesImport")
+    recipe_item_snapshots = relationship(
+        "TerminalSaleRecipeItemSnapshot",
+        back_populates="terminal_sale",
+        cascade="all, delete-orphan",
+        order_by="TerminalSaleRecipeItemSnapshot.id",
+    )
 
     __table_args__ = (
         db.Index(
@@ -3907,6 +3963,50 @@ class TerminalSale(db.Model):
             "approval_batch_id",
         ),
         db.Index("ix_terminal_sale_pos_sales_import", "pos_sales_import_id"),
+    )
+
+
+class TerminalSaleRecipeItemSnapshot(db.Model):
+    __tablename__ = "terminal_sale_recipe_item_snapshot"
+
+    id = db.Column(db.Integer, primary_key=True)
+    terminal_sale_id = db.Column(
+        db.Integer,
+        db.ForeignKey("terminal_sale.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    item_id = db.Column(
+        db.Integer,
+        db.ForeignKey("item.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    unit_id = db.Column(
+        db.Integer,
+        db.ForeignKey("item_unit.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    item_name = db.Column(db.String(100), nullable=False)
+    base_unit = db.Column(db.String(50), nullable=True)
+    item_cost = db.Column(db.Float, nullable=False, default=0.0, server_default="0.0")
+    unit_name = db.Column(db.String(50), nullable=True)
+    unit_factor = db.Column(db.Float, nullable=False, default=1.0, server_default="1.0")
+    quantity = db.Column(db.Float, nullable=False)
+    countable = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
+
+    terminal_sale = relationship(
+        "TerminalSale", back_populates="recipe_item_snapshots"
+    )
+    item = relationship("Item")
+    unit = relationship("ItemUnit")
+
+    __table_args__ = (
+        db.Index(
+            "ix_terminal_sale_recipe_snapshot_terminal_sale",
+            "terminal_sale_id",
+        ),
+        db.Index("ix_terminal_sale_recipe_snapshot_item_id", "item_id"),
     )
 
 
@@ -4253,6 +4353,12 @@ class EventStandSheetItem(db.Model):
     closing_count = db.Column(
         db.Float, nullable=False, default=0.0, server_default="0.0"
     )
+    item_name_snapshot = db.Column(db.String(100), nullable=True)
+    item_base_unit_snapshot = db.Column(db.String(50), nullable=True)
+    item_cost_snapshot = db.Column(
+        db.Float, nullable=True
+    )
+    price_per_unit_snapshot = db.Column(db.Float, nullable=True)
 
     event_location = relationship(
         "EventLocation", back_populates="stand_sheet_items"

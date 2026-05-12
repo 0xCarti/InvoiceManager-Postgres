@@ -413,6 +413,136 @@ def test_permissions_manager_can_open_permission_group_editor(client, app):
     assert b"You can review the group details here" in response.data
 
 
+def test_permission_group_view_only_user_hides_manage_actions_and_cannot_mutate(
+    client, app
+):
+    with app.app_context():
+        viewer = User(
+            email="permission-group-viewer@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        target_group = PermissionGroup(
+            name="Front Counter Access",
+            description="Used to verify read-only permission group access.",
+        )
+        db.session.add_all([viewer, target_group])
+        db.session.commit()
+        grant_permissions(
+            viewer,
+            "permission_groups.view",
+            group_name="Permission Group Viewers",
+            description="Can review permission groups without managing them.",
+        )
+        target_group_id = target_group.id
+
+    with client:
+        login(client, "permission-group-viewer@example.com", "pass")
+        list_response = client.get("/controlpanel/permission-groups")
+        detail_response = client.get(
+            f"/controlpanel/permission-groups/{target_group_id}"
+        )
+        create_response = client.get("/controlpanel/permission-groups/create")
+        update_response = client.post(
+            f"/controlpanel/permission-groups/{target_group_id}",
+            data={
+                "group-name": "Changed Name",
+                "group-description": "Changed Description",
+                "group-submit": "1",
+            },
+        )
+        delete_response = client.post(
+            f"/controlpanel/permission-groups/{target_group_id}/delete",
+            data={"submit": "Delete"},
+        )
+
+    list_body = list_response.get_data(as_text=True)
+    detail_body = detail_response.get_data(as_text=True)
+
+    assert list_response.status_code == 200
+    assert "Front Counter Access" in list_body
+    assert "Create Group" not in list_body
+    assert "Delete this permission group?" not in list_body
+
+    assert detail_response.status_code == 200
+    assert "You can view this group, but you do not have access to edit it." in detail_body
+    assert "Save Changes" not in detail_body
+    assert "Delete this permission group?" not in detail_body
+
+    assert create_response.status_code == 403
+    assert update_response.status_code == 403
+    assert delete_response.status_code == 403
+
+    with app.app_context():
+        group = db.session.get(PermissionGroup, target_group_id)
+        assert group is not None
+        assert group.name == "Front Counter Access"
+        assert group.description == "Used to verify read-only permission group access."
+
+
+def test_permissions_view_only_user_can_review_catalog_without_management_controls(
+    client, app
+):
+    with app.app_context():
+        viewer = User(
+            email="permission-catalog-viewer@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        target_group = PermissionGroup(
+            name="Catalog Review Group",
+            description="Used to verify permission catalog read-only access.",
+        )
+        target_group.permissions = [
+            Permission.query.filter_by(code="communications.view").one()
+        ]
+        db.session.add_all([viewer, target_group])
+        db.session.commit()
+        grant_permissions(
+            viewer,
+            "permissions.view",
+            group_name="Permission Catalog Viewers",
+            description="Can review permission definitions without editing groups.",
+        )
+        target_group_id = target_group.id
+
+    with client:
+        login(client, "permission-catalog-viewer@example.com", "pass")
+        catalog_response = client.get("/controlpanel/permissions")
+        detail_response = client.get(
+            f"/controlpanel/permission-groups/{target_group_id}"
+        )
+        groups_response = client.get("/controlpanel/permission-groups")
+        update_response = client.post(
+            f"/controlpanel/permission-groups/{target_group_id}",
+            data={
+                "group-name": "Changed Name",
+                "group-description": "Changed Description",
+                "group-submit": "1",
+            },
+        )
+        delete_response = client.post(
+            f"/controlpanel/permission-groups/{target_group_id}/delete",
+            data={"submit": "Delete"},
+        )
+
+    catalog_body = catalog_response.get_data(as_text=True)
+    detail_body = detail_response.get_data(as_text=True)
+
+    assert catalog_response.status_code == 200
+    assert "Permission Catalog" in catalog_body
+    assert "View Communications" in catalog_body
+    assert 'href="/controlpanel/permission-groups"' not in catalog_body
+
+    assert detail_response.status_code == 200
+    assert "You can view this group, but you do not have access to edit it." in detail_body
+    assert "Save Changes" not in detail_body
+    assert "Delete this permission group?" not in detail_body
+
+    assert groups_response.status_code == 403
+    assert update_response.status_code == 403
+    assert delete_response.status_code == 403
+
 def test_import_page_hides_upload_actions_for_view_only_users(client, app):
     with app.app_context():
         user = User(

@@ -45,7 +45,7 @@
     </div>
 
     <div class="row g-3">
-        <div class="col-12 col-xl-7">
+        <div class="col-12 {{ 'col-xl-7' if can_manage_claims else '' }}">
             <div class="card h-100">
                 <div class="card-body">
                     <h2 class="h5">Open / Tradeboard Shifts</h2>
@@ -98,6 +98,7 @@
             </div>
         </div>
 
+        {% if can_manage_claims %}
         <div class="col-12 col-xl-5">
             <div class="card h-100">
                 <div class="card-body">
@@ -127,6 +128,7 @@
                 </div>
             </div>
         </div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

@@ -16,6 +16,7 @@ from app.models import (
     GLCode,
     Invoice,
     InvoiceProduct,
+    InvoiceProductRecipeItemSnapshot,
     Item,
     Location,
     Product,
@@ -32,6 +33,7 @@ from app.routes.report_routes import (
     _auto_resolve_department_products,
     _calculate_department_usage,
     _collect_department_product_totals,
+    _load_invoice_recipe_usage_rows,
     _department_sales_serializer,
     _CREATE_SELECTION_VALUE,
     _SKIP_SELECTION_VALUE,
@@ -1511,6 +1513,77 @@ def test_invoice_gl_code_report(client, app):
     assert b"$5.00" in resp.data
     assert b"$3.75" in resp.data
     assert b"$62.50" in resp.data
+
+
+def test_invoice_recipe_usage_snapshots_preserve_historical_items(app):
+    with app.app_context():
+        user = User(
+            email="snapshot-report@example.com",
+            password=generate_password_hash("pass"),
+            is_admin=True,
+            active=True,
+        )
+        customer = Customer(first_name="Snapshot", last_name="Customer")
+        old_item = Item(name="4oz Fry Cup", base_unit="each", cost=0.2)
+        new_item = Item(name="6oz Fry Cup", base_unit="each", cost=0.4)
+        product = Product(name="Fries", price=5.0, cost=0.2)
+        db.session.add_all([user, customer, old_item, new_item, product])
+        db.session.commit()
+
+        db.session.add(
+            ProductRecipeItem(
+                product_id=product.id,
+                item_id=new_item.id,
+                quantity=1.0,
+                countable=True,
+            )
+        )
+        invoice = Invoice(
+            id="SNAP001",
+            user_id=user.id,
+            customer_id=customer.id,
+            date_created=date(2024, 3, 1),
+            is_paid=True,
+        )
+        db.session.add(invoice)
+        db.session.commit()
+
+        invoice_product = InvoiceProduct(
+            invoice_id=invoice.id,
+            product_id=product.id,
+            product_name=product.name,
+            quantity=3,
+            unit_price=product.price,
+            line_subtotal=15.0,
+            line_gst=0.0,
+            line_pst=0.0,
+        )
+        db.session.add(invoice_product)
+        db.session.commit()
+
+        db.session.add(
+            InvoiceProductRecipeItemSnapshot(
+                invoice_product_id=invoice_product.id,
+                item_id=old_item.id,
+                item_name=old_item.name,
+                base_unit=old_item.base_unit,
+                item_cost=old_item.cost,
+                unit_name=None,
+                unit_factor=1.0,
+                quantity=1.0,
+                countable=True,
+            )
+        )
+        db.session.commit()
+
+        rows = _load_invoice_recipe_usage_rows(
+            start=date(2024, 3, 1),
+            end=date(2024, 3, 31),
+            payment_status="paid",
+        )
+
+        assert any(row["item_name"] == "4oz Fry Cup" for row in rows)
+        assert not any(row["item_name"] == "6oz Fry Cup" for row in rows)
 
 
 def test_department_sales_forecast_workflow(client, app):

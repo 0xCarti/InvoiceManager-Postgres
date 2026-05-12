@@ -791,3 +791,117 @@ def test_bulletin_read_receipts_require_permission(client, app):
     assert visible_response.status_code == 200
     assert "Read receipts" in visible_body
     assert "bulletin-receipts-staff@example.com" in visible_body
+
+
+def test_communications_view_only_user_hides_actions_and_forbids_direct_posts(
+    client, app
+):
+    with app.app_context():
+        viewer_id = create_user("communications-viewer@example.com")
+        viewer = db.session.get(User, viewer_id)
+        grant_permissions(
+            viewer,
+            "communications.view",
+            group_name="Communications View Only",
+            description="Can open communications pages without compose access.",
+        )
+
+    with client:
+        login(client, "communications-viewer@example.com", "pass")
+        center_response = client.get("/communications", follow_redirects=True)
+        messages_response = client.get(
+            "/communications/messages", follow_redirects=True
+        )
+        send_response = client.post(
+            "/communications",
+            data={"action": "send_message"},
+        )
+        bulletin_response = client.post(
+            "/communications",
+            data={"action": "post_bulletin"},
+        )
+        mailbox_send_response = client.post(
+            "/communications/messages",
+            data={"action": "send_message"},
+        )
+
+    center_body = center_response.get_data(as_text=True)
+    messages_body = messages_response.get_data(as_text=True)
+
+    assert center_response.status_code == 200
+    assert "View Messages" in center_body
+    assert "Send Message" not in center_body
+    assert "Post Bulletin" not in center_body
+    assert "Scoped History" not in center_body
+
+    assert messages_response.status_code == 200
+    assert "Send New Message" not in messages_body
+
+    assert send_response.status_code == 403
+    assert bulletin_response.status_code == 403
+    assert mailbox_send_response.status_code == 403
+
+
+def test_communications_center_shows_only_actions_granted_by_permissions(client, app):
+    with app.app_context():
+        sender_id = create_user("communications-sender@example.com")
+        bulletin_manager_id = create_user("communications-bulletin@example.com")
+        history_viewer_id = create_user("communications-history@example.com")
+
+        sender = db.session.get(User, sender_id)
+        bulletin_manager = db.session.get(User, bulletin_manager_id)
+        history_viewer = db.session.get(User, history_viewer_id)
+
+        grant_permissions(
+            sender,
+            "communications.view",
+            "communications.send_direct",
+            group_name="Communications Direct Sender",
+            description="Can send direct messages from communications pages.",
+        )
+        grant_permissions(
+            bulletin_manager,
+            "communications.view",
+            "communications.manage_bulletin",
+            group_name="Communications Bulletin Manager",
+            description="Can manage bulletins from communications pages.",
+        )
+        grant_permissions(
+            history_viewer,
+            "communications.view_history",
+            group_name="Communications History Viewer",
+            description="Can review scoped communication history only.",
+        )
+
+    with client:
+        login(client, "communications-sender@example.com", "pass")
+        sender_response = client.get("/communications", follow_redirects=True)
+
+        login(client, "communications-bulletin@example.com", "pass")
+        bulletin_manager_response = client.get(
+            "/communications", follow_redirects=True
+        )
+
+        login(client, "communications-history@example.com", "pass")
+        history_viewer_response = client.get(
+            "/communications", follow_redirects=True
+        )
+
+    sender_body = sender_response.get_data(as_text=True)
+    bulletin_manager_body = bulletin_manager_response.get_data(as_text=True)
+    history_viewer_body = history_viewer_response.get_data(as_text=True)
+
+    assert sender_response.status_code == 200
+    assert "Send Message" in sender_body
+    assert "Post Bulletin" not in sender_body
+    assert "Scoped History" not in sender_body
+
+    assert bulletin_manager_response.status_code == 200
+    assert "Post Bulletin" in bulletin_manager_body
+    assert "Send Message" not in bulletin_manager_body
+    assert "Scoped History" not in bulletin_manager_body
+
+    assert history_viewer_response.status_code == 200
+    assert "Scoped History" in history_viewer_body
+    assert "Send Message" not in history_viewer_body
+    assert "Post Bulletin" not in history_viewer_body

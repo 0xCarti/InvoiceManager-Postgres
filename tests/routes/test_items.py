@@ -1,8 +1,22 @@
+import re
+from datetime import date
+
 import pytest
 
 from app import db, create_admin_user
 from werkzeug.security import generate_password_hash
-from app.models import ActivityLog, GLCode, Item, User
+from app.models import (
+    ActivityLog,
+    Event,
+    EventLocation,
+    GLCode,
+    Item,
+    Location,
+    LocationStandItem,
+    Product,
+    ProductRecipeItem,
+    User,
+)
 from app.utils.activity import flush_activity_logs
 
 
@@ -104,3 +118,170 @@ def test_bulk_update_items_constraint_failure(client, app):
         item2 = db.session.get(Item, item2_id)
         assert item1.archived is True
         assert item2.archived is True
+
+
+def test_bulk_delete_items_archives_selected_rows(client, app):
+    with app.app_context():
+        item1 = Item(name="Bulk Delete One", base_unit="each", archived=False)
+        item2 = Item(name="Bulk Delete Two", base_unit="each", archived=False)
+        item3 = Item(name="Bulk Delete Three", base_unit="each", archived=True)
+        db.session.add_all([item1, item2, item3])
+        db.session.commit()
+        item1_id, item2_id, item3_id = item1.id, item2.id, item3.id
+
+    login_admin(client, app)
+
+    list_response = client.get("/items", follow_redirects=True)
+    assert list_response.status_code == 200
+
+    html = list_response.get_data(as_text=True)
+    csrf_match = re.search(
+        r'<form id="bulk-delete-form" action="[^"]+" method="post">\s*<input id="csrf_token" name="csrf_token" type="hidden" value="([^"]+)"',
+        html,
+    )
+    assert csrf_match is not None
+    csrf_token = csrf_match.group(1)
+
+    response = client.post(
+        "/items/bulk_delete",
+        data={
+            "csrf_token": csrf_token,
+            "item_ids": [str(item1_id), str(item2_id), str(item2_id), "bad-value"],
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Selected items have been archived and removed from current operational links." in response.data
+
+    with app.app_context():
+        item1 = db.session.get(Item, item1_id)
+        item2 = db.session.get(Item, item2_id)
+        item3 = db.session.get(Item, item3_id)
+        assert item1.archived is True
+        assert item2.archived is True
+        assert item3.archived is True
+        flush_activity_logs()
+        assert (
+            ActivityLog.query.filter(
+                ActivityLog.activity.ilike("%Bulk archived items%")
+            ).count()
+            == 1
+        )
+
+
+def test_delete_item_unlinks_current_recipe_and_location_records(client, app):
+    with app.app_context():
+        item = Item(name="Archive Target", base_unit="each", cost=2.5, archived=False)
+        product = Product(
+            name="Archive Product",
+            price=8.0,
+            cost=5.0,
+            auto_update_recipe_cost=True,
+            recipe_yield_quantity=1.0,
+        )
+        location = Location(name="Archive Location")
+        db.session.add_all([item, product, location])
+        db.session.commit()
+
+        db.session.add(
+            ProductRecipeItem(
+                product_id=product.id,
+                item_id=item.id,
+                quantity=2.0,
+                countable=True,
+            )
+        )
+        db.session.add(
+            LocationStandItem(
+                location_id=location.id,
+                item_id=item.id,
+                countable=True,
+                expected_count=4.0,
+            )
+        )
+        db.session.commit()
+        item_id = item.id
+        product_id = product.id
+        location_id = location.id
+
+    login_admin(client, app)
+
+    list_response = client.get("/items", follow_redirects=True)
+    html = list_response.get_data(as_text=True)
+    csrf_match = re.search(
+        r'<form id="bulk-delete-form" action="[^"]+" method="post">\s*<input id="csrf_token" name="csrf_token" type="hidden" value="([^"]+)"',
+        html,
+    )
+    assert csrf_match is not None
+    csrf_token = csrf_match.group(1)
+
+    response = client.post(
+        f"/items/delete/{item_id}",
+        data={"csrf_token": csrf_token},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Item archived and removed from current recipes and location sheets." in response.data
+
+    with app.app_context():
+        item = db.session.get(Item, item_id)
+        product = db.session.get(Product, product_id)
+        assert item.archived is True
+        assert ProductRecipeItem.query.filter_by(product_id=product_id).count() == 0
+        assert LocationStandItem.query.filter_by(location_id=location_id, item_id=item_id).count() == 0
+        assert product.cost == pytest.approx(0.0)
+
+
+def test_delete_item_blocked_while_open_event_uses_item(client, app):
+    with app.app_context():
+        item = Item(name="Blocked Archive Item", base_unit="each", archived=False)
+        product = Product(name="Blocked Product", price=5.0, cost=1.0)
+        location = Location(name="Blocked Location")
+        event = Event(
+            name="Open Event",
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 1, 2),
+            closed=False,
+        )
+        db.session.add_all([item, product, location, event])
+        db.session.commit()
+        location.products.append(product)
+        db.session.add(
+            ProductRecipeItem(
+                product_id=product.id,
+                item_id=item.id,
+                quantity=1.0,
+                countable=True,
+            )
+        )
+        db.session.add(
+            EventLocation(
+                event_id=event.id,
+                location_id=location.id,
+                confirmed=False,
+            )
+        )
+        db.session.commit()
+        item_id = item.id
+
+    login_admin(client, app)
+
+    list_response = client.get("/items", follow_redirects=True)
+    html = list_response.get_data(as_text=True)
+    csrf_match = re.search(
+        r'<form id="bulk-delete-form" action="[^"]+" method="post">\s*<input id="csrf_token" name="csrf_token" type="hidden" value="([^"]+)"',
+        html,
+    )
+    assert csrf_match is not None
+    csrf_token = csrf_match.group(1)
+
+    response = client.post(
+        f"/items/delete/{item_id}",
+        data={"csrf_token": csrf_token},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Item cannot be archived while it is used by open events" in response.data
+
+    with app.app_context():
+        assert db.session.get(Item, item_id).archived is False

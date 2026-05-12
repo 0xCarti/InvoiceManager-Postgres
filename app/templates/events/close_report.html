@@ -138,6 +138,8 @@
                                         <td data-label="Item">
                                             {% if entry.item %}
                                                 {{ entry.item.name }}
+                                            {% elif entry.item_name %}
+                                                {{ entry.item_name }}
                                             {% else %}
                                                 <span class="text-muted">Unknown Item</span>
                                             {% endif %}
@@ -180,7 +182,13 @@
                                                 <span class="text-muted">—</span>
                                             {% endif %}
                                         </td>
-                                        <td data-label="Terminal Sales">{{ '%.2f'|format(entry.sales) }}</td>
+                                        <td data-label="Terminal Sales">
+                                            {% if entry.sales is not none %}
+                                                {{ '%.2f'|format(entry.sales) }}
+                                            {% else %}
+                                                <span class="text-muted">—</span>
+                                            {% endif %}
+                                        </td>
                                         <td data-label="Eaten">
                                             {% if entry.sheet_values.eaten is not none %}
                                                 {{ '%.2f'|format(entry.sheet_values.eaten) }}
