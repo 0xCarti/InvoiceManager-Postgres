@@ -11,7 +11,7 @@ from datetime import datetime
 from threading import Event, Thread
 
 from flask import current_app
-from sqlalchemy import MetaData, Table, create_engine, inspect
+from sqlalchemy import Index, MetaData, Table, create_engine, inspect
 from sqlalchemy.sql.schema import ColumnCollectionConstraint
 from sqlalchemy.exc import DBAPIError, DataError, IntegrityError
 
@@ -28,6 +28,26 @@ BACKUP_SCHEMA_VERSION = "2026.03"
 
 class RestoreBackupError(RuntimeError):
     """Raised when a restore fails during runtime schema rebuild."""
+
+
+def _normalize_backup_table_indexes(table_copy: Table) -> None:
+    """Drop or relax backend-specific partial unique indexes for SQLite backups."""
+
+    for index in list(table_copy.indexes):
+        pg_where = None
+        try:
+            pg_where = index.dialect_options["postgresql"].get("where")
+        except Exception:
+            pg_where = None
+        if not index.unique or pg_where is None:
+            continue
+
+        table_copy.indexes.discard(index)
+        Index(
+            index.name,
+            *[table_copy.c[column.name] for column in index.columns],
+            unique=False,
+        )
 
 
 def _truncate_value(value, max_length: int = 80) -> str:
@@ -619,6 +639,7 @@ def create_backup(*, initiated_by_system: bool = False):
         with backup_engine.begin() as backup_conn:
             for table in db.metadata.sorted_tables:
                 table_copy = table.to_metadata(backup_metadata)
+                _normalize_backup_table_indexes(table_copy)
                 table_copy.create(bind=backup_conn, checkfirst=True)
 
                 rows = db.session.execute(table.select()).mappings().all()
