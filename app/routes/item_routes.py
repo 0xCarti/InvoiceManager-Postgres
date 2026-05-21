@@ -670,7 +670,7 @@ def duplicate_items():
             continue
         candidate_groups.append(
             {
-                "items": group_items,
+                "candidates": group_items,
                 "score": group.score,
                 "reasons": group.reasons,
             }
