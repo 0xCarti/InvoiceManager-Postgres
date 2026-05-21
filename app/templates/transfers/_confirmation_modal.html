@@ -1,0 +1,33 @@
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 575.98px) {
+    #transferConfirmationModal .modal-dialog {
+        margin: 0.5rem;
+    }
+    #transferConfirmationModal .modal-footer {
+        align-items: stretch;
+        flex-direction: column-reverse;
+    }
+    #transferConfirmationModal .modal-footer .btn {
+        width: 100%;
+    }
+}
+</style>
+<div class="modal fade" id="transferConfirmationModal" tabindex="-1" aria-labelledby="transferConfirmationModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="transferConfirmationModalTitle">Confirm Transfer</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-warning mb-0" role="alert">
+                    <ul class="mb-0 ps-3" data-transfer-confirmation-warnings></ul>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" data-transfer-confirmation-confirm>Confirm</button>
+            </div>
+        </div>
+    </div>
+</div>

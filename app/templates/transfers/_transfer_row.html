@@ -24,12 +24,12 @@
         {% endif %}
         {% if can_complete_transfers %}
         {% if transfer.completed %}
-        <form method="post" action="{{ url_for('transfer.uncomplete_transfer', transfer_id=transfer.id) }}" class="d-inline">
+        <form method="post" action="{{ url_for('transfer.uncomplete_transfer', transfer_id=transfer.id) }}" class="d-inline js-transfer-confirm-form">
             {{ form.hidden_tag() }}
             <button type="submit" class="btn btn-success btn-sm">Incomplete</button>
         </form>
         {% else %}
-        <form method="post" action="{{ url_for('transfer.complete_transfer', transfer_id=transfer.id) }}" class="d-inline">
+        <form method="post" action="{{ url_for('transfer.complete_transfer', transfer_id=transfer.id) }}" class="d-inline js-transfer-confirm-form">
             {{ form.hidden_tag() }}
             <button type="submit" class="btn btn-success btn-sm">
                 {% if ns.completed_items > 0 %}Finish{% else %}Complete{% endif %}

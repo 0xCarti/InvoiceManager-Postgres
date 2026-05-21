@@ -137,6 +137,27 @@ def test_transfer_flow(client, app):
 
     with client:
         login(client, "transfer@example.com", "pass")
+        list_resp = client.get("/transfers")
+        list_html = list_resp.get_data(as_text=True)
+        assert 'id="transferConfirmationModal"' in list_html
+        assert "transfer_confirmation_modal.js" in list_html
+        assert "js-transfer-confirm-form" in list_html
+
+        preflight = client.post(
+            f"/transfers/complete/{tid}",
+            headers={"X-Transfer-Confirmation-Check": "1"},
+        )
+        assert preflight.status_code == 200
+        payload = preflight.get_json()
+        assert payload["requires_confirmation"] is True
+        assert "Confirm Transfer Completion" == payload["title"]
+        assert any("negative inventory" in warning for warning in payload["warnings"])
+
+    with app.app_context():
+        assert not db.session.get(Transfer, tid).completed
+
+    with client:
+        login(client, "transfer@example.com", "pass")
         resp = client.get(f"/transfers/complete/{tid}")
         assert resp.status_code == 200
         assert b"Confirm Transfer Completion" in resp.data
@@ -174,6 +195,68 @@ def test_transfer_flow(client, app):
 
     with app.app_context():
         assert db.session.get(Transfer, tid) is None
+
+
+def test_transfer_confirmation_preflight_without_warnings_does_not_complete(
+    client, app
+):
+    user_id = create_user(app, "transfer-preflight@example.com")
+    with app.app_context():
+        loc1 = Location(name="Preflight From")
+        loc2 = Location(name="Preflight To")
+        item = Item(name="Preflight Thing", base_unit="each")
+        db.session.add_all([loc1, loc2, item])
+        db.session.flush()
+        unit = ItemUnit(
+            item_id=item.id,
+            name="each",
+            factor=1,
+            receiving_default=True,
+            transfer_default=True,
+        )
+        db.session.add(unit)
+        db.session.add(
+            LocationStandItem(
+                location_id=loc1.id,
+                item_id=item.id,
+                expected_count=10,
+            )
+        )
+        db.session.commit()
+        loc1_id, loc2_id, item_id, unit_id = loc1.id, loc2.id, item.id, unit.id
+
+    with client:
+        login(client, "transfer-preflight@example.com", "pass")
+        client.post(
+            "/transfers/add",
+            data={
+                "from_location_id": loc1_id,
+                "to_location_id": loc2_id,
+                "items-0-item": item_id,
+                "items-0-unit": unit_id,
+                "items-0-quantity": 5,
+            },
+            follow_redirects=True,
+        )
+
+    with app.app_context():
+        transfer = Transfer.query.filter_by(user_id=user_id).first()
+        assert transfer is not None
+        transfer_id = transfer.id
+
+    with client:
+        login(client, "transfer-preflight@example.com", "pass")
+        preflight = client.post(
+            f"/transfers/complete/{transfer_id}",
+            headers={"X-Transfer-Confirmation-Check": "1"},
+        )
+
+    assert preflight.status_code == 200
+    assert preflight.get_json()["requires_confirmation"] is False
+    with app.app_context():
+        transfer = db.session.get(Transfer, transfer_id)
+        assert transfer is not None
+        assert not transfer.completed
 
 
 def test_ajax_edit_transfer_updates_quantity(client, app):

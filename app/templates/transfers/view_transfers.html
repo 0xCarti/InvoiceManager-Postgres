@@ -262,7 +262,9 @@
   </div>
 </div>
 
+{% include 'transfers/_confirmation_modal.html' %}
 <script src="{{ url_for('static', filename='js/transfer_workflow.js') }}" nonce="{{ csp_nonce }}"></script>
+<script src="{{ url_for('static', filename='js/transfer_confirmation_modal.js') }}" nonce="{{ csp_nonce }}"></script>
 <script nonce="{{ csp_nonce }}">
     var socket = null;
     if (window.io && typeof window.io.connect === 'function') {

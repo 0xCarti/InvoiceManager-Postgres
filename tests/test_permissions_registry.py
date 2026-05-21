@@ -215,6 +215,31 @@ def test_user_can_access_endpoint_requires_matching_permission():
         "POST",
     )
     assert user_can_access_endpoint(
+        DummyUser("items.view"),
+        "item.item_units",
+        "GET",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("transfers.create"),
+        "item.item_units",
+        "GET",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("purchase_orders.resolve_vendor_items"),
+        "item.item_units",
+        "GET",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("transfers.create"),
+        "item.item_units",
+        "POST",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("items.manage_units"),
+        "item.item_units",
+        "POST",
+    )
+    assert user_can_access_endpoint(
         DummyUser("reports.equipment_procurement"),
         "report.equipment_procurement_report",
     )

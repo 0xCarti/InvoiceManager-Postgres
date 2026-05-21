@@ -45,7 +45,7 @@
                     <form
                         method="post"
                         action="{{ url_for('transfer.complete_transfer_item', transfer_item_id=item.id) }}"
-                        class="d-inline js-transfer-item-status-form"
+                        class="d-inline js-transfer-item-status-form js-transfer-confirm-form"
                         data-complete-url="{{ url_for('transfer.complete_transfer_item', transfer_item_id=item.id) }}"
                         data-uncomplete-url="{{ url_for('transfer.uncomplete_transfer_item', transfer_item_id=item.id) }}"
                     >
@@ -73,6 +73,8 @@
     </table>
     </div>
 </div>
+{% include 'transfers/_confirmation_modal.html' %}
+<script src="{{ url_for('static', filename='js/transfer_confirmation_modal.js') }}" nonce="{{ csp_nonce }}"></script>
 <script nonce="{{ csp_nonce }}">
     document.querySelectorAll('.js-transfer-item-toggle').forEach(function(toggle) {
         toggle.addEventListener('change', function(event) {
@@ -80,9 +82,29 @@
             if (!form) {
                 return;
             }
-            form.action = event.target.checked
+            const desiredChecked = event.target.checked;
+            const previousChecked = !desiredChecked;
+            const label = form.querySelector('label[for="' + event.target.id + '"]');
+
+            function setToggleState(checked) {
+                event.target.checked = checked;
+                if (label) {
+                    label.textContent = checked ? 'Complete' : 'Incomplete';
+                }
+            }
+
+            setToggleState(desiredChecked);
+            form.action = desiredChecked
                 ? form.dataset.completeUrl
                 : form.dataset.uncompleteUrl;
+            if (window.TransferConfirmation && typeof window.TransferConfirmation.submit === 'function') {
+                window.TransferConfirmation.submit(form, {
+                    onCancel: function () {
+                        setToggleState(previousChecked);
+                    },
+                });
+                return;
+            }
             form.submit();
         });
     });

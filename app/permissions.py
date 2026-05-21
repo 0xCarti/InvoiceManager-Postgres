@@ -796,7 +796,24 @@ ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] =
     ("item.bulk_update_items", "POST"): requirement(any_of=("items.bulk_update",)),
     ("item.item_locations", "GET"): requirement(any_of=("items.view", "locations.manage_items")),
     ("item.item_locations", "POST"): requirement(any_of=("locations.manage_items",)),
-    ("item.item_units", "GET"): requirement(any_of=("items.edit", "items.manage_units")),
+    ("item.item_units", "GET"): requirement(
+        any_of=(
+            "items.view",
+            "items.edit",
+            "items.manage_units",
+            "locations.manage_items",
+            "menus.edit",
+            "products.create",
+            "products.edit",
+            "products.manage_recipe",
+            "purchase_orders.create",
+            "purchase_orders.edit",
+            "purchase_orders.resolve_vendor_items",
+            "purchase_invoices.receive",
+            "transfers.create",
+            "transfers.edit",
+        )
+    ),
     ("item.item_units", "POST"): requirement(any_of=("items.manage_units",)),
     ("item.item_last_cost", "GET"): requirement(
         any_of=(
