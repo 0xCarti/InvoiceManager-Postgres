@@ -1,4 +1,5 @@
 import os
+from urllib.parse import urlsplit
 
 from flask import (
     Blueprint,
@@ -53,6 +54,7 @@ from app.utils.filter_state import (
     get_filter_defaults,
     normalize_filters,
 )
+from app.utils.item_duplicates import find_duplicate_item_groups
 from app.utils.imports import _import_items
 from app.utils.pagination import build_pagination_args, get_per_page
 from app.utils.recipe_history import (
@@ -72,6 +74,50 @@ item = Blueprint("item", __name__)
 # CSV and plain text files are allowed and uploads are capped at 1MB
 ALLOWED_IMPORT_EXTENSIONS = {".csv", ".txt"}
 MAX_IMPORT_SIZE = 1 * 1024 * 1024  # 1 MB
+
+
+def _safe_next_url(raw_value: str | None) -> str | None:
+    """Return a safe relative redirect target."""
+
+    if not raw_value:
+        return None
+
+    parsed = urlsplit(raw_value)
+    if parsed.scheme or parsed.netloc:
+        return None
+
+    sanitized = parsed.geturl().replace("\\", "")
+    if not sanitized:
+        return None
+    if sanitized.endswith("?"):
+        sanitized = sanitized[:-1]
+    if not sanitized.startswith("/"):
+        sanitized = f"/{sanitized}"
+    if sanitized.startswith("//"):
+        return None
+    return sanitized
+
+
+def _load_item_last_received_map(item_ids: list[int]) -> dict[int, object]:
+    if not item_ids:
+        return {}
+
+    results = (
+        db.session.query(
+            PurchaseInvoiceItem.item_id,
+            func.max(PurchaseInvoice.received_date).label(
+                "last_purchase_received_date"
+            ),
+        )
+        .join(
+            PurchaseInvoice,
+            PurchaseInvoiceItem.invoice_id == PurchaseInvoice.id,
+        )
+        .filter(PurchaseInvoiceItem.item_id.in_(item_ids))
+        .group_by(PurchaseInvoiceItem.item_id)
+        .all()
+    )
+    return {item_id: last_received for item_id, last_received in results}
 
 
 def _populate_item_barcode_form(form, item=None):
@@ -300,27 +346,8 @@ def view_items():
             page=page, per_page=per_page, error_out=False
         )
 
-    item_last_received_map = {}
     page_item_ids = [item.id for item in items.items]
-    if page_item_ids:
-        results = (
-            db.session.query(
-                PurchaseInvoiceItem.item_id,
-                func.max(PurchaseInvoice.received_date).label(
-                    "last_purchase_received_date"
-                ),
-            )
-            .join(
-                PurchaseInvoice,
-                PurchaseInvoiceItem.invoice_id == PurchaseInvoice.id,
-            )
-            .filter(PurchaseInvoiceItem.item_id.in_(page_item_ids))
-            .group_by(PurchaseInvoiceItem.item_id)
-            .all()
-        )
-        item_last_received_map = {
-            item_id: last_received for item_id, last_received in results
-        }
+    item_last_received_map = _load_item_last_received_map(page_item_ids)
 
     for item in items.items:
         item.last_purchase_received_date = item_last_received_map.get(item.id)
@@ -611,6 +638,50 @@ def bulk_update_items():
         return jsonify({"success": False, "form_html": _render_item_bulk_form(form)})
 
     return _render_item_bulk_form(form)
+
+
+@item.route("/items/duplicates", methods=["GET"])
+@login_required
+def duplicate_items():
+    """Show likely duplicate inventory items for manual bulk archive review."""
+
+    items = (
+        Item.query.options(
+            selectinload(Item.purchase_gl_code),
+            selectinload(Item.gl_code_rel),
+        )
+        .filter(Item.archived.is_(False))
+        .order_by(Item.name, Item.id)
+        .all()
+    )
+    item_by_id = {item_obj.id: item_obj for item_obj in items}
+    item_last_received_map = _load_item_last_received_map(list(item_by_id))
+    for item_obj in items:
+        item_obj.last_purchase_received_date = item_last_received_map.get(item_obj.id)
+
+    candidate_groups = []
+    for group in find_duplicate_item_groups(items):
+        group_items = [
+            item_by_id[item_id]
+            for item_id in group.item_ids
+            if item_id in item_by_id
+        ]
+        if len(group_items) < 2:
+            continue
+        candidate_groups.append(
+            {
+                "items": group_items,
+                "score": group.score,
+                "reasons": group.reasons,
+            }
+        )
+
+    return render_template(
+        "items/duplicate_candidates.html",
+        duplicate_groups=candidate_groups,
+        bulk_delete_form=CSRFOnlyForm(),
+        item_count=len(items),
+    )
 
 
 @item.route("/items/recipe-cost-calculator")
@@ -1155,6 +1226,9 @@ def bulk_delete_items():
     form = CSRFOnlyForm()
     if not form.validate_on_submit():
         abort(400)
+    redirect_target = _safe_next_url(request.form.get("next")) or url_for(
+        "item.view_items"
+    )
 
     selected_ids: list[int] = []
     seen_ids: set[int] = set()
@@ -1170,12 +1244,12 @@ def bulk_delete_items():
 
     if not selected_ids:
         flash("No items selected.", "warning")
-        return redirect(url_for("item.view_items"))
+        return redirect(redirect_target)
 
     items = Item.query.filter(Item.id.in_(selected_ids)).all()
     if not items:
         flash("No matching items were found.", "warning")
-        return redirect(url_for("item.view_items"))
+        return redirect(redirect_target)
 
     archived_ids: list[int] = []
     blocked_items: list[str] = []
@@ -1216,7 +1290,7 @@ def bulk_delete_items():
             "warning",
         )
 
-    return redirect(url_for("item.view_items"))
+    return redirect(redirect_target)
 
 
 @item.route("/items/search", methods=["GET"])

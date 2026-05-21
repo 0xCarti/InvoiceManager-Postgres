@@ -1,0 +1,225 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style nonce="{{ csp_nonce }}">
+    .duplicate-review-table th,
+    .duplicate-review-table td {
+        vertical-align: middle;
+    }
+
+    .duplicate-review-table .col-select {
+        width: 3rem;
+    }
+
+    @media (max-width: 767.98px) {
+        .duplicate-review-toolbar,
+        .duplicate-group-actions {
+            align-items: stretch !important;
+            flex-direction: column;
+        }
+
+        .duplicate-review-toolbar > *,
+        .duplicate-group-actions > * {
+            width: 100%;
+        }
+
+        .duplicate-review-table th,
+        .duplicate-review-table td {
+            white-space: normal;
+        }
+    }
+</style>
+
+<div class="container mt-5 mobile-list-page app-page-shell">
+    <div class="app-page-header">
+        <div class="app-page-header-copy">
+            <h2 class="mb-1">Potential Duplicate Items</h2>
+            <p class="text-muted mb-0">{{ duplicate_groups|length }} groups from {{ item_count }} active items</p>
+        </div>
+        <div class="app-page-header-actions">
+            <a href="{{ url_for('item.view_items') }}" class="btn btn-outline-secondary">Back to Items</a>
+        </div>
+    </div>
+
+    {% if duplicate_groups %}
+    <form id="duplicate-bulk-delete-form" action="{{ url_for('item.bulk_delete_items') }}" method="post">
+        {{ bulk_delete_form.hidden_tag() }}
+        <input type="hidden" name="next" value="{{ url_for('item.duplicate_items') }}">
+
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-3 duplicate-review-toolbar">
+            <button type="submit" class="btn btn-warning" id="duplicateDeleteBtn" disabled>Delete Selected Items</button>
+            <button type="button" class="btn btn-outline-secondary" id="duplicateClearBtn" disabled>Clear Selection</button>
+            <span class="text-muted small" id="duplicateSelectedCount">0 selected</span>
+        </div>
+
+        {% for group in duplicate_groups %}
+        <section class="border rounded p-3 mb-3 duplicate-group" data-duplicate-group>
+            <div class="d-flex flex-column flex-md-row justify-content-between gap-2 mb-3">
+                <div>
+                    <h3 class="h6 mb-1">Group {{ loop.index }}</h3>
+                    <div class="d-flex flex-wrap gap-2">
+                        <span class="badge text-bg-light border">{{ group.items|length }} items</span>
+                        <span class="badge text-bg-light border">{{ '%.0f'|format(group.score * 100) }}% match</span>
+                        {% for reason in group.reasons %}
+                        <span class="badge text-bg-light border">{{ reason }}</span>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="d-flex flex-wrap gap-2 duplicate-group-actions">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-role="select-older">Select Older Received</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-role="clear-group">Clear Group</button>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-sm duplicate-review-table table-mobile-card mb-0">
+                    <thead>
+                        <tr>
+                            <th scope="col" class="col-select">Delete</th>
+                            <th scope="col">ID</th>
+                            <th scope="col">Name</th>
+                            <th scope="col">Last Received</th>
+                            <th scope="col">Base Unit</th>
+                            <th scope="col">Quantity</th>
+                            <th scope="col">Cost / Base Unit</th>
+                            <th scope="col">Purchase GL</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in group.items %}
+                        {% set last_received = item.last_purchase_received_date %}
+                        <tr data-last-received-sort="{{ last_received.strftime('%Y%m%d') if last_received else '' }}">
+                            <td class="col-select" data-label="Delete">
+                                <input
+                                    class="form-check-input duplicate-item-checkbox"
+                                    type="checkbox"
+                                    name="item_ids"
+                                    value="{{ item.id }}"
+                                    aria-label="Delete {{ item.name }}">
+                            </td>
+                            <td data-label="ID">{{ item.id }}</td>
+                            <td data-label="Name">
+                                <a href="{{ url_for('item.view_item', item_id=item.id) }}">{{ item.name }}</a>
+                            </td>
+                            <td data-label="Last Received">
+                                {{ last_received.strftime('%Y-%m-%d') if last_received else '-' }}
+                            </td>
+                            <td data-label="Base Unit">{{ item.base_unit or '-' }}</td>
+                            <td data-label="Quantity">{{ '%.6f'|format(item.quantity or 0) }}</td>
+                            <td data-label="Cost / Base Unit">{{ '%.6f'|format(item.cost or 0) }} / {{ item.base_unit or '-' }}</td>
+                            <td data-label="Purchase GL">
+                                {% if item.purchase_gl_code %}
+                                {{ item.purchase_gl_code.code }}
+                                {% else %}
+                                -
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        {% endfor %}
+    </form>
+    {% else %}
+    <div class="alert alert-info" role="status">No likely duplicate active items were found.</div>
+    {% endif %}
+</div>
+
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('duplicate-bulk-delete-form');
+    if (!form) {
+        return;
+    }
+
+    const deleteButton = document.getElementById('duplicateDeleteBtn');
+    const clearButton = document.getElementById('duplicateClearBtn');
+    const countLabel = document.getElementById('duplicateSelectedCount');
+
+    function selectedCheckboxes() {
+        return Array.from(form.querySelectorAll('input[name="item_ids"]:checked'));
+    }
+
+    function updateSelectionState() {
+        const selectedCount = selectedCheckboxes().length;
+        if (deleteButton) {
+            deleteButton.disabled = selectedCount === 0;
+        }
+        if (clearButton) {
+            clearButton.disabled = selectedCount === 0;
+        }
+        if (countLabel) {
+            countLabel.textContent = selectedCount + (selectedCount === 1 ? ' selected' : ' selected');
+        }
+    }
+
+    form.addEventListener('change', function(event) {
+        if (event.target && event.target.matches('input[name="item_ids"]')) {
+            updateSelectionState();
+        }
+    });
+
+    form.addEventListener('click', function(event) {
+        const selectOlderButton = event.target.closest('[data-role="select-older"]');
+        const clearGroupButton = event.target.closest('[data-role="clear-group"]');
+
+        if (selectOlderButton) {
+            const group = selectOlderButton.closest('[data-duplicate-group]');
+            const rows = Array.from(group.querySelectorAll('tbody tr'));
+            const datedRows = rows
+                .map((row) => ({
+                    row,
+                    sortValue: row.getAttribute('data-last-received-sort') || '',
+                }))
+                .filter((entry) => entry.sortValue);
+            if (!datedRows.length) {
+                return;
+            }
+            const newestDate = datedRows
+                .map((entry) => entry.sortValue)
+                .sort()
+                .pop();
+            datedRows.forEach((entry) => {
+                const checkbox = entry.row.querySelector('input[name="item_ids"]');
+                if (checkbox) {
+                    checkbox.checked = entry.sortValue < newestDate;
+                }
+            });
+            updateSelectionState();
+        }
+
+        if (clearGroupButton) {
+            const group = clearGroupButton.closest('[data-duplicate-group]');
+            group.querySelectorAll('input[name="item_ids"]').forEach((checkbox) => {
+                checkbox.checked = false;
+            });
+            updateSelectionState();
+        }
+    });
+
+    if (clearButton) {
+        clearButton.addEventListener('click', function() {
+            form.querySelectorAll('input[name="item_ids"]').forEach((checkbox) => {
+                checkbox.checked = false;
+            });
+            updateSelectionState();
+        });
+    }
+
+    form.addEventListener('submit', function(event) {
+        const selectedCount = selectedCheckboxes().length;
+        if (!selectedCount) {
+            event.preventDefault();
+            return;
+        }
+        if (!window.confirm('Archive ' + selectedCount + ' selected item' + (selectedCount === 1 ? '?' : 's?'))) {
+            event.preventDefault();
+        }
+    });
+
+    updateSelectionState();
+});
+</script>
+{% endblock %}

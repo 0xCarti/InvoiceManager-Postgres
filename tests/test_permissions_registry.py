@@ -240,6 +240,21 @@ def test_user_can_access_endpoint_requires_matching_permission():
         "POST",
     )
     assert user_can_access_endpoint(
+        DummyUser("items.view", "items.delete"),
+        "item.duplicate_items",
+        "GET",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("items.view"),
+        "item.duplicate_items",
+        "GET",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("items.delete"),
+        "item.duplicate_items",
+        "GET",
+    )
+    assert user_can_access_endpoint(
         DummyUser("reports.equipment_procurement"),
         "report.equipment_procurement_report",
     )

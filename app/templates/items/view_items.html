@@ -10,6 +10,7 @@
 {% set can_view_item_locations = can_access_endpoint('item.item_locations', 'GET') %}
 {% set can_recipe_cost_calculator = can_access_endpoint('item.recipe_cost_calculator', 'GET') %}
 {% set can_bulk_delete_items = can_access_endpoint('item.bulk_delete_items', 'POST') %}
+{% set can_find_duplicate_items = can_access_endpoint('item.duplicate_items', 'GET') %}
 {% set can_purchase_cost_forecast = can_access_endpoint('report.purchase_cost_forecast', 'GET') %}
 {% set can_select_items = can_bulk_update_items or can_bulk_delete_items %}
 <style nonce="{{ csp_nonce }}">
@@ -70,6 +71,9 @@
         {% endif %}
         {% if can_import_items %}
         <a href="{{ url_for('item.import_items') }}" class="btn btn-outline-secondary">Import Items</a>
+        {% endif %}
+        {% if can_find_duplicate_items %}
+        <a href="{{ url_for('item.duplicate_items') }}" class="btn btn-outline-secondary">Find Duplicates</a>
         {% endif %}
         {% if can_bulk_delete_items %}
         <button type="submit" form="bulk-delete-form" class="btn btn-warning" id="bulkDeleteItemsBtn" data-confirm-message="Are you sure?" disabled>Delete Items</button>

@@ -349,6 +349,7 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "item.edit_item": requirement(any_of=("items.edit",)),
     "item.delete_item": requirement(any_of=("items.delete",)),
     "item.bulk_delete_items": requirement(any_of=("items.delete",)),
+    "item.duplicate_items": requirement(all_of=("items.view", "items.delete")),
     "item.quick_add_item": requirement(any_of=("items.create",)),
     "item.import_items": requirement(any_of=("items.import",)),
     "equipment.view_equipment": requirement(any_of=("equipment.view",)),
