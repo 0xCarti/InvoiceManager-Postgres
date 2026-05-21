@@ -163,7 +163,7 @@ def test_transfer_flow(client, app):
         assert b"Confirm Transfer Completion" in resp.data
         resp = client.post(
             f"/transfers/complete/{tid}",
-            data={"submit": "1"},
+            data={"_transfer_confirmed": "1"},
             follow_redirects=True,
         )
         assert resp.status_code == 200

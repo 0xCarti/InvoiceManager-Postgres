@@ -2,7 +2,8 @@
   'use strict';
 
   const checkHeader = 'X-Transfer-Confirmation-Check';
-  const submitFieldName = 'submit';
+  const confirmedFieldName = '_transfer_confirmed';
+  const legacySubmitFieldName = 'submit';
 
   let activeForm = null;
   let activeCancelHandler = null;
@@ -25,11 +26,11 @@
   }
 
   function ensureSubmitMarker(form) {
-    let marker = form.querySelector(`input[name="${submitFieldName}"][data-transfer-confirmation-marker="1"]`);
+    let marker = form.querySelector(`input[name="${confirmedFieldName}"][data-transfer-confirmation-marker="1"]`);
     if (!marker) {
       marker = document.createElement('input');
       marker.type = 'hidden';
-      marker.name = submitFieldName;
+      marker.name = confirmedFieldName;
       marker.value = '1';
       marker.dataset.transferConfirmationMarker = '1';
       form.appendChild(marker);
@@ -38,10 +39,18 @@
   }
 
   function removeSubmitMarker(form) {
-    const marker = form.querySelector(`input[name="${submitFieldName}"][data-transfer-confirmation-marker="1"]`);
+    const marker = form.querySelector(`input[name="${confirmedFieldName}"][data-transfer-confirmation-marker="1"]`);
     if (marker) {
       marker.remove();
     }
+  }
+
+  function nativeSubmit(form) {
+    if (window.HTMLFormElement && window.HTMLFormElement.prototype.submit) {
+      window.HTMLFormElement.prototype.submit.call(form);
+      return;
+    }
+    form.submit();
   }
 
   function submitForm(form, confirmed) {
@@ -50,7 +59,7 @@
     } else {
       removeSubmitMarker(form);
     }
-    form.submit();
+    nativeSubmit(form);
   }
 
   function setWarnings(warnings) {
@@ -96,7 +105,8 @@
 
   async function checkConfirmation(form) {
     const data = new FormData(form);
-    data.delete(submitFieldName);
+    data.delete(confirmedFieldName);
+    data.delete(legacySubmitFieldName);
     const response = await window.fetch(form.action, {
       method: (form.method || 'POST').toUpperCase(),
       body: data,

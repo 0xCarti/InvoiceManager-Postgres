@@ -168,7 +168,9 @@ def _applied_transfer_item_quantities(transfer_obj):
 
 
 def _transfer_confirmation_submitted() -> bool:
-    return request.method == "POST" and "submit" in request.form
+    return request.method == "POST" and (
+        "_transfer_confirmed" in request.form or "submit" in request.form
+    )
 
 
 def _transfer_confirmation_check_requested() -> bool:
