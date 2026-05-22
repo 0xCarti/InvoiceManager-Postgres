@@ -381,6 +381,9 @@ def test_all_non_public_registered_endpoints_have_permission_rules(app):
         "signage.tizen_activate",
         "signage.tizen_launcher",
         "static",
+        "transfer.public_transfer_request",
+        "transfer.public_transfer_request_item_search",
+        "transfer.public_transfer_request_item_units",
     }
     covered_methods = {"GET", "POST", "PUT", "PATCH", "DELETE"}
 

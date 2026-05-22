@@ -1,0 +1,183 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between gap-3 mb-4">
+        <div>
+            <h2 class="mb-1">Transfer Request #{{ transfer_request.id }}</h2>
+            <p class="text-muted mb-0">
+                Requested for {{ transfer_request.to_location.name if transfer_request.to_location else 'Unknown location' }}
+                on {{ transfer_request.submitted_at|format_utc_datetime('%Y-%m-%d %H:%M') if transfer_request.submitted_at else 'Unknown date' }}
+            </p>
+        </div>
+        <div>
+            <a class="btn btn-outline-secondary" href="{{ url_for('transfer.view_transfers', record_type='requests') }}">Back to Transfers</a>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-muted">Status</div>
+                    <div class="h6 mb-0">{{ transfer_request.status|title }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-muted">Requested By</div>
+                    <div class="h6 mb-0">{{ transfer_request.requested_by_name or 'Not provided' }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-muted">Converted Transfer</div>
+                    <div class="h6 mb-0">
+                        {% if transfer_request.converted_transfer_id %}
+                        <a href="{{ url_for('transfer.view_transfer', transfer_id=transfer_request.converted_transfer_id) }}">#{{ transfer_request.converted_transfer_id }}</a>
+                        {% else %}
+                        Not converted
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% if transfer_request.notes %}
+    <div class="alert alert-light border">
+        <div class="fw-semibold mb-1">Request Notes</div>
+        <div style="white-space: pre-wrap;">{{ transfer_request.notes }}</div>
+    </div>
+    {% endif %}
+
+    <form method="post" class="card">
+        <div class="card-body">
+            {{ form.hidden_tag() }}
+            <input type="hidden" name="to_location_id" value="{{ transfer_request.to_location_id }}">
+
+            <div class="row g-3 mb-4">
+                <div class="col-md-6">
+                    {{ form.from_location_id.label(class="form-label") }}
+                    {{ form.from_location_id(class="form-select", disabled=(transfer_request.status != 'pending')) }}
+                    {% for error in form.from_location_id.errors %}
+                    <div class="text-danger small mt-1">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">To Location</label>
+                    <input class="form-control" value="{{ transfer_request.to_location.name if transfer_request.to_location else 'Unknown location' }}" disabled>
+                </div>
+            </div>
+
+            <h3 class="h5">Items</h3>
+            {% if transfer_request.status == 'pending' %}
+            <div class="form-group mb-3">
+                <label for="item-name" class="form-label">Item Name</label>
+                <input type="text" id="item-name" class="form-control" autocomplete="off">
+                <div id="suggestions"></div>
+            </div>
+            {% endif %}
+            <div id="item-list" class="mb-4"></div>
+
+            <div class="mb-4">
+                <label for="review_note" class="form-label">Review Note</label>
+                <textarea
+                    class="form-control"
+                    id="review_note"
+                    name="review_note"
+                    rows="3"
+                    {% if transfer_request.status != 'pending' %}disabled{% endif %}
+                >{{ transfer_request.review_note or '' }}</textarea>
+            </div>
+
+            {% if transfer_request.status == 'pending' %}
+            <div class="d-flex flex-wrap gap-2">
+                <button type="submit" class="btn btn-success" name="action" value="convert">Create Transfer</button>
+                <button type="submit" class="btn btn-outline-danger" name="action" value="reject">Reject Request</button>
+            </div>
+            {% else %}
+            <div class="text-muted">This request has already been reviewed.</div>
+            {% endif %}
+        </div>
+    </form>
+</div>
+
+<script src="{{ url_for('static', filename='js/transfer_workflow.js') }}" nonce="{{ csp_nonce }}"></script>
+<script nonce="{{ csp_nonce }}">
+    const requestIsPending = {{ (transfer_request.status == 'pending')|tojson }};
+    const initialItems = {{ items|tojson }};
+    const itemInput = document.getElementById('item-name');
+    const suggestions = document.getElementById('suggestions');
+    const itemList = document.getElementById('item-list');
+    let itemIndex = 0;
+
+    function addItem(item, index) {
+        const rowIndex = typeof index === 'number' ? index : itemIndex++;
+        fetch(`/items/${item.id}/units`)
+            .then(response => response.json())
+            .then(data => {
+                const row = TransferWorkflow.createRow({
+                    prefix: 'items',
+                    index: rowIndex,
+                    itemId: item.id,
+                    itemName: item.name,
+                    unitsData: data,
+                    existingValues: {
+                        unitId: item.unit_id,
+                        unitQuantity: item.unit_quantity,
+                        baseQuantity: item.base_quantity,
+                        totalQuantity: item.quantity,
+                    },
+                });
+                if (!requestIsPending) {
+                    row.querySelectorAll('input, select, button').forEach(function(control) {
+                        control.disabled = true;
+                    });
+                }
+                itemList.appendChild(row);
+            });
+    }
+
+    initialItems.forEach(function(item) {
+        const rowIndex = itemIndex++;
+        addItem(item, rowIndex);
+    });
+
+    if (itemInput) {
+        itemInput.addEventListener('input', function() {
+            const input = this.value.trim();
+            if (input === '') {
+                suggestions.innerHTML = '';
+                return;
+            }
+            fetch('/items/search?term=' + encodeURIComponent(input))
+                .then(response => response.json())
+                .then(data => {
+                    suggestions.innerHTML = '';
+                    data.forEach(function(item) {
+                        const suggestion = document.createElement('button');
+                        suggestion.type = 'button';
+                        suggestion.textContent = item.name;
+                        suggestion.dataset.id = item.id;
+                        suggestion.className = 'suggestion btn btn-outline-secondary btn-sm me-2 mt-2';
+                        suggestions.appendChild(suggestion);
+                    });
+                });
+        });
+    }
+
+    document.addEventListener('click', function(event) {
+        if (!event.target || !event.target.classList.contains('suggestion')) {
+            return;
+        }
+        addItem({id: event.target.dataset.id, name: event.target.textContent});
+        suggestions.innerHTML = '';
+        itemInput.value = '';
+    });
+</script>
+{% endblock %}

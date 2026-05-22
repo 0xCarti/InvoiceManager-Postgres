@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date as date_cls, datetime as datetime_cls
+from datetime import date as date_cls, datetime as datetime_cls, timedelta
 
 from flask import current_app
 from sqlalchemy.orm import selectinload
@@ -12,12 +12,15 @@ from app import db
 from app.models import (
     Event,
     EventLocation,
+    EventLocationOperatingDay,
     EventStandSheetItem,
     Item,
     Location,
     LocationCountSubmission,
     LocationCountSubmissionRow,
     LocationStandItem,
+    Transfer,
+    TransferItem,
 )
 from app.utils.menu_assignments import (
     get_authoritative_location_products,
@@ -39,12 +42,118 @@ def _conversion_mapping() -> dict[str, str]:
     return conversions
 
 
+def event_operating_dates(event: Event) -> list[date_cls]:
+    """Return every calendar date in an event's inclusive date range."""
+
+    if event.start_date is None or event.end_date is None:
+        return []
+    start_date = min(event.start_date, event.end_date)
+    end_date = max(event.start_date, event.end_date)
+    day_count = (end_date - start_date).days
+    return [start_date + timedelta(days=offset) for offset in range(day_count + 1)]
+
+
+def ensure_event_location_operating_days(
+    event_location: EventLocation,
+    open_dates: set[date_cls] | list[date_cls] | tuple[date_cls, ...] | None = None,
+) -> list[EventLocationOperatingDay]:
+    """Ensure an event location has rows for the dates it is open."""
+
+    if event_location is None or event_location.event is None:
+        return []
+
+    valid_dates = set(event_operating_dates(event_location.event))
+    if open_dates is None:
+        desired_dates = valid_dates
+    else:
+        desired_dates = {
+            date_value for date_value in open_dates if date_value in valid_dates
+        }
+
+    existing_by_date = {
+        day.operating_date: day
+        for day in EventLocationOperatingDay.query.filter_by(
+            event_location_id=event_location.id
+        ).all()
+    }
+
+    for operating_date in sorted(desired_dates):
+        if operating_date in existing_by_date:
+            continue
+        day = EventLocationOperatingDay(
+            event_location_id=event_location.id,
+            operating_date=operating_date,
+        )
+        db.session.add(day)
+        existing_by_date[operating_date] = day
+
+    return [
+        existing_by_date[operating_date]
+        for operating_date in sorted(existing_by_date)
+    ]
+
+
+def ensure_event_operating_days(event: Event) -> None:
+    """Backfill all-day operating rows for event locations that have none."""
+
+    for event_location in event.locations or []:
+        has_days = (
+            EventLocationOperatingDay.query.filter_by(
+                event_location_id=event_location.id
+            ).first()
+            is not None
+        )
+        if not has_days:
+            ensure_event_location_operating_days(event_location)
+
+
+def event_operating_day_for_submission(
+    event_location: EventLocation | None,
+    submission_date: date_cls | None,
+    *,
+    create_if_missing: bool = False,
+) -> EventLocationOperatingDay | None:
+    """Return the operating day row matching an event location and date."""
+
+    if event_location is None or submission_date is None:
+        return None
+
+    day = EventLocationOperatingDay.query.filter_by(
+        event_location_id=event_location.id,
+        operating_date=submission_date,
+    ).first()
+    if day is not None:
+        return day
+
+    has_any_day = (
+        EventLocationOperatingDay.query.filter_by(
+            event_location_id=event_location.id
+        ).first()
+        is not None
+    )
+    if has_any_day or not create_if_missing:
+        return None
+
+    event = event_location.event
+    if event is None or submission_date not in set(event_operating_dates(event)):
+        return None
+
+    ensure_event_location_operating_days(event_location)
+    db.session.flush()
+    return EventLocationOperatingDay.query.filter_by(
+        event_location_id=event_location.id,
+        operating_date=submission_date,
+    ).first()
+
+
 def load_open_event_location_candidates(
     target_date: date_cls, location_ids: list[int] | tuple[int, ...]
 ) -> dict[int, list[EventLocation]]:
     """Return open event-location matches for ``target_date`` keyed by location."""
 
-    unique_location_ids = sorted({location_id for location_id in location_ids if location_id})
+    unique_location_ids = sorted(
+        {location_id for location_id in location_ids if location_id}
+    )
     if not unique_location_ids:
         return {}
 
@@ -52,6 +161,7 @@ def load_open_event_location_candidates(
         EventLocation.query.options(
             selectinload(EventLocation.event),
             selectinload(EventLocation.location),
+            selectinload(EventLocation.operating_days),
         )
         .join(Event, Event.id == EventLocation.event_id)
         .filter(EventLocation.location_id.in_(unique_location_ids))
@@ -69,6 +179,11 @@ def load_open_event_location_candidates(
 
     lookup: dict[int, list[EventLocation]] = {}
     for row in rows:
+        operating_days = row.operating_days or []
+        if operating_days and not any(
+            day.operating_date == target_date for day in operating_days
+        ):
+            continue
         lookup.setdefault(row.location_id, []).append(row)
     return lookup
 
@@ -102,6 +217,7 @@ def list_event_location_candidates(
         EventLocation.query.options(
             selectinload(EventLocation.event),
             selectinload(EventLocation.location),
+            selectinload(EventLocation.operating_days),
         )
         .join(Event, Event.id == EventLocation.event_id)
         .filter(EventLocation.location_id == location_id)
@@ -117,7 +233,13 @@ def list_event_location_candidates(
         event = event_location.event
         if event is None:
             return (3, 0, 0, 0)
-        matches_date = event.start_date <= submission_date <= event.end_date
+        operating_days = event_location.operating_days or []
+        if operating_days:
+            matches_date = any(
+                day.operating_date == submission_date for day in operating_days
+            )
+        else:
+            matches_date = event.start_date <= submission_date <= event.end_date
         closed_rank = 1 if event.closed else 0
         distance = min(
             abs((event.start_date - submission_date).days),
@@ -155,7 +277,8 @@ def opening_submission_exists(
 
     if event_location_id is not None:
         query = query.filter(
-            LocationCountSubmission.event_location_id == event_location_id
+            LocationCountSubmission.event_location_id == event_location_id,
+            LocationCountSubmission.submission_date == submission_date,
         )
     else:
         query = query.filter(
@@ -164,6 +287,126 @@ def opening_submission_exists(
         )
 
     return query.first() is not None
+
+
+def aggregate_submission_rows_for_event_location_day(
+    event_location_id: int,
+    submission_type: str,
+    operating_date: date_cls,
+    *,
+    approved_only: bool = True,
+) -> dict[int, float]:
+    """Return rolled-up submission rows for one event location on one date."""
+
+    query = (
+        LocationCountSubmission.query.options(
+            selectinload(LocationCountSubmission.rows)
+        )
+        .filter(
+            LocationCountSubmission.event_location_id == event_location_id,
+            LocationCountSubmission.submission_type == submission_type,
+            LocationCountSubmission.submission_date == operating_date,
+        )
+        .order_by(
+            LocationCountSubmission.reviewed_at.asc(),
+            LocationCountSubmission.submitted_at.asc(),
+            LocationCountSubmission.id.asc(),
+        )
+    )
+    if approved_only:
+        query = query.filter(
+            LocationCountSubmission.status == LocationCountSubmission.STATUS_APPROVED
+        )
+    return _roll_up_submission_rows(query.all())
+
+
+def _event_location_transfer_totals_for_date(
+    event_location: EventLocation,
+    operating_date: date_cls,
+) -> tuple[dict[int, float], dict[int, float]]:
+    """Return completed transfer quantities into and out of a location on a date."""
+
+    if event_location.location_id is None:
+        return {}, {}
+
+    transfers = (
+        TransferItem.query.join(Transfer, Transfer.id == TransferItem.transfer_id)
+        .filter(
+            (Transfer.from_location_id == event_location.location_id)
+            | (Transfer.to_location_id == event_location.location_id)
+        )
+        .all()
+    )
+
+    incoming: dict[int, float] = defaultdict(float)
+    outgoing: dict[int, float] = defaultdict(float)
+    for transfer_item in transfers:
+        transfer_obj = transfer_item.transfer
+        if transfer_obj is None or transfer_item.item_id is None:
+            continue
+        activity_date = (
+            transfer_item.completed_at
+            or transfer_obj.date_created
+            or datetime_cls.utcnow()
+        ).date()
+        if activity_date != operating_date:
+            continue
+        quantity = float(transfer_item.completed_quantity or 0.0)
+        if not quantity and transfer_obj.completed:
+            quantity = float(transfer_item.quantity or 0.0)
+        if not quantity:
+            continue
+        if transfer_obj.to_location_id == event_location.location_id:
+            incoming[transfer_item.item_id] += quantity
+        if transfer_obj.from_location_id == event_location.location_id:
+            outgoing[transfer_item.item_id] += quantity
+    return dict(incoming), dict(outgoing)
+
+
+def expected_opening_counts_for_event_day(
+    event_location: EventLocation,
+    operating_date: date_cls,
+) -> dict[int, float]:
+    """Compute expected opening counts for one open event-location day."""
+
+    previous_day = (
+        EventLocationOperatingDay.query.filter(
+            EventLocationOperatingDay.event_location_id == event_location.id,
+            EventLocationOperatingDay.operating_date < operating_date,
+        )
+        .order_by(EventLocationOperatingDay.operating_date.desc())
+        .first()
+    )
+
+    if previous_day is None:
+        counts: dict[int, float] = {
+            sheet.item_id: float(sheet.opening_count or 0.0)
+            for sheet in event_location.stand_sheet_items or []
+            if sheet.item_id is not None
+        }
+        if not counts and event_location.location_id is not None:
+            for record in LocationStandItem.query.filter_by(
+                location_id=event_location.location_id,
+                countable=True,
+            ).all():
+                if record.item_id is not None:
+                    counts[record.item_id] = float(record.expected_count or 0.0)
+    else:
+        counts = aggregate_submission_rows_for_event_location_day(
+            event_location.id,
+            LocationCountSubmission.TYPE_CLOSING,
+            previous_day.operating_date,
+        )
+
+    incoming, outgoing = _event_location_transfer_totals_for_date(
+        event_location,
+        operating_date,
+    )
+    for item_id, quantity in incoming.items():
+        counts[item_id] = counts.get(item_id, 0.0) + quantity
+    for item_id, quantity in outgoing.items():
+        counts[item_id] = counts.get(item_id, 0.0) - quantity
+    return counts
 
 
 def count_submission_type_uses_date_extreme(submission_type: str) -> str:

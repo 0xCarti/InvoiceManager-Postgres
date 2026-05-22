@@ -1633,6 +1633,92 @@ class TransferItem(db.Model):
     item_name = db.Column(db.String(100), nullable=False, server_default="")
 
 
+class TransferRequest(db.Model):
+    STATUS_PENDING = "pending"
+    STATUS_REJECTED = "rejected"
+    STATUS_CONVERTED = "converted"
+    STATUSES = (STATUS_PENDING, STATUS_REJECTED, STATUS_CONVERTED)
+
+    id = db.Column(db.Integer, primary_key=True)
+    to_location_id = db.Column(
+        db.Integer, db.ForeignKey("location.id"), nullable=False
+    )
+    requested_by_name = db.Column(db.String(120), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+    status = db.Column(
+        db.String(16),
+        nullable=False,
+        default=STATUS_PENDING,
+        server_default=STATUS_PENDING,
+    )
+    review_note = db.Column(db.Text, nullable=True)
+    reviewed_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    converted_transfer_id = db.Column(
+        db.Integer, db.ForeignKey("transfer.id"), nullable=True
+    )
+    submitted_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    to_location = relationship("Location", foreign_keys=[to_location_id])
+    reviewer = relationship("User", foreign_keys=[reviewed_by])
+    converted_transfer = relationship("Transfer", foreign_keys=[converted_transfer_id])
+    items = relationship(
+        "TransferRequestItem",
+        back_populates="transfer_request",
+        cascade="all, delete-orphan",
+        order_by="TransferRequestItem.id.asc()",
+    )
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "status IN ('pending', 'rejected', 'converted')",
+            name="ck_transfer_request_status",
+        ),
+        db.Index("ix_transfer_request_status_submitted", "status", "submitted_at"),
+        db.Index("ix_transfer_request_to_location", "to_location_id"),
+        db.Index("ix_transfer_request_converted_transfer", "converted_transfer_id"),
+    )
+
+
+class TransferRequestItem(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    transfer_request_id = db.Column(
+        db.Integer,
+        db.ForeignKey("transfer_request.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    quantity = db.Column(db.Float, nullable=False)
+    unit_id = db.Column(db.Integer, db.ForeignKey("item_unit.id"), nullable=True)
+    unit_quantity = db.Column(db.Float, nullable=True)
+    base_quantity = db.Column(db.Float, nullable=True)
+    item_name = db.Column(db.String(100), nullable=False, server_default="")
+
+    transfer_request = relationship("TransferRequest", back_populates="items")
+    item = relationship("Item")
+    unit = relationship("ItemUnit", foreign_keys=[unit_id])
+
+    __table_args__ = (
+        db.Index(
+            "ix_transfer_request_item_request",
+            "transfer_request_id",
+        ),
+        db.Index("ix_transfer_request_item_item", "item_id"),
+    )
+
+
 class Customer(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     first_name = db.Column(db.String(50), nullable=False)
@@ -3924,6 +4010,12 @@ class EventLocation(db.Model):
         back_populates="event_location",
         cascade="all, delete-orphan",
     )
+    operating_days = relationship(
+        "EventLocationOperatingDay",
+        back_populates="event_location",
+        cascade="all, delete-orphan",
+        order_by="EventLocationOperatingDay.operating_date.asc()",
+    )
     count_submissions = relationship(
         "LocationCountSubmission",
         back_populates="event_location",
@@ -3932,6 +4024,52 @@ class EventLocation(db.Model):
 
     __table_args__ = (
         db.UniqueConstraint("event_id", "location_id", name="_event_loc_uc"),
+    )
+
+
+class EventLocationOperatingDay(db.Model):
+    __tablename__ = "event_location_operating_day"
+
+    id = db.Column(db.Integer, primary_key=True)
+    event_location_id = db.Column(
+        db.Integer,
+        db.ForeignKey("event_location.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    operating_date = db.Column(db.Date, nullable=False)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    event_location = relationship(
+        "EventLocation", back_populates="operating_days"
+    )
+    count_submissions = relationship(
+        "LocationCountSubmission",
+        back_populates="event_operating_day",
+        order_by="LocationCountSubmission.submitted_at.desc()",
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "event_location_id",
+            "operating_date",
+            name="uq_event_location_operating_day",
+        ),
+        db.Index(
+            "ix_event_location_operating_day_date",
+            "operating_date",
+        ),
     )
 
 
@@ -4391,6 +4529,8 @@ class LocationCountSubmission(db.Model):
     ALL_TYPES = COUNT_TYPES + VARIANCE_TYPES
     APPROVAL_MODE_ADD = "add"
     APPROVAL_MODE_OVERWRITE = "overwrite"
+    APPLIED_SOURCE_SUBMITTED = "submitted"
+    APPLIED_SOURCE_EXPECTED = "expected"
 
     id = db.Column(db.Integer, primary_key=True)
     source_location_id = db.Column(
@@ -4401,6 +4541,11 @@ class LocationCountSubmission(db.Model):
     )
     event_location_id = db.Column(
         db.Integer, db.ForeignKey("event_location.id"), nullable=True
+    )
+    event_operating_day_id = db.Column(
+        db.Integer,
+        db.ForeignKey("event_location_operating_day.id", ondelete="SET NULL"),
+        nullable=True,
     )
     submission_type = db.Column(
         db.String(16),
@@ -4421,6 +4566,12 @@ class LocationCountSubmission(db.Model):
         nullable=False,
         default=APPROVAL_MODE_ADD,
         server_default=APPROVAL_MODE_ADD,
+    )
+    applied_count_source = db.Column(
+        db.String(16),
+        nullable=False,
+        default=APPLIED_SOURCE_SUBMITTED,
+        server_default=APPLIED_SOURCE_SUBMITTED,
     )
     review_note = db.Column(db.Text, nullable=True)
     reviewed_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
@@ -4452,6 +4603,9 @@ class LocationCountSubmission(db.Model):
     event_location = relationship(
         "EventLocation", back_populates="count_submissions"
     )
+    event_operating_day = relationship(
+        "EventLocationOperatingDay", back_populates="count_submissions"
+    )
     reviewer = relationship("User", foreign_keys=[reviewed_by])
     rows = relationship(
         "LocationCountSubmissionRow",
@@ -4473,6 +4627,10 @@ class LocationCountSubmission(db.Model):
             "approval_mode IN ('add', 'overwrite')",
             name="ck_location_count_submission_approval_mode",
         ),
+        db.CheckConstraint(
+            "applied_count_source IN ('submitted', 'expected')",
+            name="ck_location_count_submission_applied_count_source",
+        ),
         db.Index(
             "ix_location_count_submission_status_submitted_at",
             "status",
@@ -4492,6 +4650,10 @@ class LocationCountSubmission(db.Model):
             "ix_location_count_submission_event_location",
             "event_location_id",
         ),
+        db.Index(
+            "ix_location_count_submission_event_operating_day",
+            "event_operating_day_id",
+        ),
     )
 
 
@@ -4509,6 +4671,8 @@ class LocationCountSubmissionRow(db.Model):
         default=0.0,
         server_default="0.0",
     )
+    submitted_count_value = db.Column(db.Float, nullable=True)
+    expected_count_value = db.Column(db.Float, nullable=True)
     parse_index = db.Column(db.Integer, nullable=False)
 
     submission = relationship(

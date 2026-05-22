@@ -21,8 +21,45 @@
                 {{ form.csrf_token }}
                 <div class="mb-3">
                     {{ form.location_id.label(class='form-label') }}
-                    {{ form.location_id(class='form-select', size=10) }}
-                    <small class="form-text text-muted">Hold Ctrl (Windows) or Command (Mac) to select multiple locations.</small>
+                    <div class="border rounded p-3">
+                        {% for location_id, location_name in form.location_id.choices %}
+                        <div class="py-2{% if not loop.last %} border-bottom{% endif %}">
+                            <div class="form-check">
+                                <input
+                                    class="form-check-input"
+                                    type="checkbox"
+                                    name="{{ form.location_id.name }}"
+                                    id="location-{{ location_id }}"
+                                    value="{{ location_id }}"
+                                    {% if location_id in (form.location_id.data or []) %}checked{% endif %}
+                                >
+                                <label class="form-check-label fw-semibold" for="location-{{ location_id }}">
+                                    {{ location_name }}
+                                </label>
+                            </div>
+                            {% if event_dates|length > 1 %}
+                            <div class="d-flex flex-wrap gap-2 mt-2 ms-4">
+                                {% for event_date in event_dates %}
+                                <div class="form-check form-check-inline mb-0">
+                                    <input
+                                        class="form-check-input"
+                                        type="checkbox"
+                                        name="open_dates_{{ location_id }}"
+                                        id="open-date-{{ location_id }}-{{ event_date.isoformat() }}"
+                                        value="{{ event_date.isoformat() }}"
+                                        checked
+                                    >
+                                    <label class="form-check-label small" for="open-date-{{ location_id }}-{{ event_date.isoformat() }}">
+                                        {{ event_date.strftime('%a %b') }} {{ event_date.day }}
+                                    </label>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <small class="form-text text-muted">Selected locations are open on every event day by default. Clear a day only when that location will be closed.</small>
                 </div>
                 {{ form.submit(class='btn btn-primary w-100') }}
             </div>

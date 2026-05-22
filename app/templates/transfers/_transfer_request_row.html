@@ -1,0 +1,31 @@
+<tr id="transfer-request-row-{{ transfer_request.id }}">
+    {% set can_review_requests = can_access_endpoint('transfer.review_transfer_request') %}
+    <th scope="row" class="col-transfer-id">
+        <span class="badge text-bg-info">Request</span>
+        #{{ transfer_request.id }}
+    </th>
+    <td class="col-transfer-from">
+        {% if transfer_request.status == 'converted' and transfer_request.converted_transfer %}
+        {{ transfer_request.converted_transfer.from_location.name if transfer_request.converted_transfer.from_location else transfer_request.converted_transfer.from_location_name }}
+        {% else %}
+        <span class="text-muted">Needs review</span>
+        {% endif %}
+    </td>
+    <td class="col-transfer-to">{{ transfer_request.to_location.name if transfer_request.to_location else 'Unknown location' }}</td>
+    <td class="col-transfer-completion">
+        <span class="badge {% if transfer_request.status == 'pending' %}text-bg-warning{% elif transfer_request.status == 'converted' %}text-bg-success{% else %}text-bg-danger{% endif %}">
+            {{ transfer_request.status|title }}
+        </span>
+        <div class="small text-muted">{{ transfer_request.items|length }} item{% if transfer_request.items|length != 1 %}s{% endif %}</div>
+    </td>
+    <td class="col-transfer-actions">
+        <div class="mobile-actions mobile-card-actions">
+            {% if can_review_requests %}
+            <a href="{{ url_for('transfer.review_transfer_request', request_id=transfer_request.id) }}" class="btn btn-primary btn-sm">Review</a>
+            {% endif %}
+            {% if transfer_request.converted_transfer_id %}
+            <a href="{{ url_for('transfer.view_transfer', transfer_id=transfer_request.converted_transfer_id) }}" class="btn btn-outline-secondary btn-sm">Transfer #{{ transfer_request.converted_transfer_id }}</a>
+            {% endif %}
+        </div>
+    </td>
+</tr>

@@ -134,6 +134,11 @@
                     <div class="form-text">
                         {{ submission_type_help_text }}
                     </div>
+                    {% if matched_event_location and matched_event_location.event and matched_event_location.event.start_date != matched_event_location.event.end_date %}
+                    <div class="alert alert-info mt-3 mb-0">
+                        This is a multi-day event. Submit opening and closing counts for each day this location is open so managers can review daily variance.
+                    </div>
+                    {% endif %}
                     {% else %}
                     <div class="small text-muted text-uppercase mb-1">Submission Type</div>
                     <div class="fw-semibold">{{ page_title }}</div>

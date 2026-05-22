@@ -35,6 +35,9 @@
                 <span class="badge text-bg-light border text-dark">
                     Applied As {{ submission.approval_mode|title }}
                 </span>
+                <span class="badge text-bg-light border text-dark">
+                    Source {{ (submission.applied_count_source or 'submitted')|title }}
+                </span>
                 {% endif %}
             </div>
         </div>
@@ -138,6 +141,25 @@
                 </div>
             </div>
 
+            {% if submission.event_location and submission.event_location.event and submission.event_location.event.start_date != submission.event_location.event.end_date %}
+            <div class="alert alert-info">
+                Multi-day daily review: opening and closing submissions are tracked by the selected event day. For opening counts, compare the submitted values to the expected opening before approving.
+            </div>
+            {% endif %}
+
+            {% if expected_opening_context %}
+            <div class="alert {% if expected_opening_context.has_difference %}alert-warning{% else %}alert-success{% endif %}">
+                <div class="fw-semibold">Expected opening for {{ submission.submission_date.isoformat() }}</div>
+                <div>
+                    {% if expected_opening_context.previous_date %}
+                    Expected values start from the approved closing count on {{ expected_opening_context.previous_date.isoformat() }}, plus same-day transfers in and minus same-day transfers out.
+                    {% else %}
+                    This is the first open day for this location, so expected values start from the event opening count.
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
             <div class="mb-4">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                     <h3 class="h5 mb-0">{% if is_count_submission %}Counts{% else %}Quantities{% endif %}</h3>
@@ -149,6 +171,10 @@
                             <tr>
                                 <th>Item</th>
                                 <th>Report Unit</th>
+                                {% if expected_opening_context %}
+                                <th>Expected Opening</th>
+                                <th>Difference</th>
+                                {% endif %}
                                 <th>{% if is_count_submission %}Count{% else %}Quantity{% endif %}</th>
                             </tr>
                         </thead>
@@ -157,6 +183,13 @@
                             <tr>
                                 <td>{{ entry.item.name }}</td>
                                 <td>{{ entry.report_unit_label or '-' }}</td>
+                                {% if expected_opening_context %}
+                                {% set expected_entry = expected_opening_context.by_row_id.get(entry.row.id) %}
+                                <td>{{ '%.4f'|format(expected_entry.expected_display if expected_entry else 0) }}</td>
+                                <td class="{% if expected_entry and (expected_entry.difference_display > 0.0001 or expected_entry.difference_display < -0.0001) %}text-danger fw-semibold{% else %}text-muted{% endif %}">
+                                    {{ '%+.4f'|format(expected_entry.difference_display if expected_entry else 0) }}
+                                </td>
+                                {% endif %}
                                 <td>
                                     <input
                                         type="text"
@@ -187,13 +220,18 @@
                 {% if editable %}
                 <div class="w-100 small text-muted">
                     {% if is_count_submission %}
-                    Add will sum this submission with already-approved values for the same day. Overwrite will replace the current approved value for each item included in this submission.
+                    Add will sum this submission with already-approved values for the same count date. Overwrite will replace the current approved value for each item included in this submission.
                     {% else %}
                     Add will sum this submission with already-approved values for the same day. Overwrite will replace the approved value for each item on that day before totals are rolled up to the stand sheet.
                     {% endif %}
                 </div>
                 <button type="submit" class="btn btn-outline-primary" name="action" value="save_review">Save Review</button>
-                <button type="submit" class="btn btn-success" name="action" value="approve_add">Approve And Add</button>
+                <button type="submit" class="btn btn-success" name="action" value="approve_add">
+                    {% if expected_opening_context %}Approve Submitted Count{% else %}Approve And Add{% endif %}
+                </button>
+                {% if expected_opening_context %}
+                <button type="submit" class="btn btn-outline-success" name="action" value="approve_expected_opening">Approve Expected Opening</button>
+                {% endif %}
                 <button type="submit" class="btn btn-outline-success" name="action" value="approve_overwrite">Approve And Overwrite</button>
                 <button type="submit" class="btn btn-outline-danger" name="action" value="reject">Reject</button>
                 {% else %}

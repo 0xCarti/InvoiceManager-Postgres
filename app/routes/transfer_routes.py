@@ -4,7 +4,9 @@
 
 
 import re
+import math
 from datetime import datetime
+from types import SimpleNamespace
 
 from flask import (
     Blueprint,
@@ -18,7 +20,7 @@ from flask import (
     url_for,
 )
 from flask_login import current_user, login_required
-from sqlalchemy import func, tuple_
+from sqlalchemy import false, func, tuple_
 from sqlalchemy.orm import aliased
 
 from app import db, socketio
@@ -33,6 +35,8 @@ from app.models import (
     LocationStandItem,
     Transfer,
     TransferItem,
+    TransferRequest,
+    TransferRequestItem,
     User,
 )
 from app.services.notification_service import notify_users_for_event
@@ -40,7 +44,6 @@ from app.utils.activity import log_activity
 from app.utils.numeric import coerce_float
 from app.utils.pagination import build_pagination_args, get_per_page
 from app.utils.text import build_text_match_predicate, normalize_request_text_filter
-from app.utils.text import normalize_request_text_filter
 
 transfer = Blueprint("transfer", __name__)
 
@@ -130,6 +133,64 @@ def _extract_transfer_items(prefix: str):
             )
 
     return results
+
+
+def _serialize_transfer_item_units(item: Item) -> dict:
+    sorted_units = sorted(
+        item.units,
+        key=lambda unit: (unit.name != item.base_unit, unit.name.lower()),
+    )
+    return {
+        "base_unit": item.base_unit,
+        "units": [
+            {
+                "id": unit.id,
+                "name": unit.name,
+                "factor": unit.factor,
+                "receiving_default": unit.receiving_default,
+                "transfer_default": unit.transfer_default,
+            }
+            for unit in sorted_units
+        ],
+    }
+
+
+def _transfer_request_items_from_entries(
+    transfer_request: TransferRequest,
+    item_entries,
+) -> None:
+    for entry in item_entries:
+        item = entry["item"]
+        transfer_request.items.append(
+            TransferRequestItem(
+                transfer_request=transfer_request,
+                item_id=item.id,
+                quantity=entry["total_quantity"],
+                unit_id=entry["unit_id"],
+                unit_quantity=entry["unit_quantity"],
+                base_quantity=entry["base_quantity"],
+                item_name=item.name,
+            )
+        )
+
+
+def _manual_paginate(items, *, page: int, per_page: int):
+    total = len(items)
+    pages = max(math.ceil(total / per_page), 1) if per_page else 1
+    page = min(max(page or 1, 1), pages)
+    start = (page - 1) * per_page
+    end = start + per_page
+    return SimpleNamespace(
+        items=items[start:end],
+        page=page,
+        pages=pages,
+        total=total,
+        per_page=per_page,
+        has_prev=page > 1,
+        has_next=page < pages,
+        prev_num=page - 1,
+        next_num=page + 1,
+    )
 
 
 def _build_transfer_item_quantities(transfer_items, multiplier):
@@ -455,6 +516,102 @@ def _prefill_transfer_from_location(form, location_id):
         form.from_location_id.data = location_id
 
 
+@transfer.route("/transfers/request/<token>", methods=["GET", "POST"])
+def public_transfer_request(token: str):
+    """Public transfer request page opened from a location QR sign."""
+
+    normalized_token = (token or "").strip()
+    location_obj = (
+        Location.query.filter(
+            Location.count_qr_token == normalized_token,
+            Location.archived.is_(False),
+        )
+        .first_or_404()
+    )
+
+    if request.method == "POST":
+        requested_by_name = (request.form.get("requested_by_name") or "").strip()
+        notes = (request.form.get("notes") or "").strip() or None
+        item_entries = _extract_transfer_items("request-items")
+        if not item_entries:
+            flash("Please add at least one item to request.", "danger")
+        else:
+            transfer_request = TransferRequest(
+                to_location_id=location_obj.id,
+                requested_by_name=requested_by_name or None,
+                notes=notes,
+                status=TransferRequest.STATUS_PENDING,
+            )
+            db.session.add(transfer_request)
+            db.session.flush()
+            _transfer_request_items_from_entries(transfer_request, item_entries)
+            db.session.commit()
+            log_activity(
+                f"Submitted transfer request {transfer_request.id} for location {location_obj.id}"
+            )
+            flash("Transfer request submitted for manager review.", "success")
+            return redirect(
+                url_for("transfer.public_transfer_request", token=normalized_token)
+            )
+
+    return render_template(
+        "transfers/public_transfer_request.html",
+        location=location_obj,
+        token=normalized_token,
+    )
+
+
+@transfer.route("/transfers/request/<token>/items/search", methods=["GET"])
+def public_transfer_request_item_search(token: str):
+    """Public item search scoped to transfer requests."""
+
+    normalized_token = (token or "").strip()
+    location_exists = (
+        Location.query.filter(
+            Location.count_qr_token == normalized_token,
+            Location.archived.is_(False),
+        ).first()
+        is not None
+    )
+    if not location_exists:
+        abort(404)
+    search_term = normalize_request_text_filter(request.args.get("term"))
+    if not search_term:
+        return jsonify([])
+    items = (
+        Item.query.filter(Item.archived.is_(False))
+        .filter(
+            build_text_match_predicate(Item.name, search_term, "contains")
+            | (Item.upc == search_term)
+        )
+        .order_by(Item.name)
+        .limit(20)
+        .all()
+    )
+    return jsonify([{"id": item.id, "name": item.name} for item in items])
+
+
+@transfer.route("/transfers/request/<token>/items/<int:item_id>/units", methods=["GET"])
+def public_transfer_request_item_units(token: str, item_id: int):
+    """Public item unit metadata for transfer requests."""
+
+    normalized_token = (token or "").strip()
+    location_exists = (
+        Location.query.filter(
+            Location.count_qr_token == normalized_token,
+            Location.archived.is_(False),
+        ).first()
+        is not None
+    )
+    if not location_exists:
+        abort(404)
+    item_obj = Item.query.filter(
+        Item.id == item_id,
+        Item.archived.is_(False),
+    ).first_or_404()
+    return jsonify(_serialize_transfer_item_units(item_obj))
+
+
 def check_negative_transfer(
     transfer_obj, multiplier=1, transfer_items=None, quantities=None
 ):
@@ -582,6 +739,16 @@ def update_expected_counts(
 def view_transfers():
     """Show transfers with optional filtering."""
     filter_option = request.args.get("filter", "not_completed")
+    record_type_filter = (request.args.get("record_type") or "all").strip().lower()
+    request_status_filter = (request.args.get("request_status") or "").strip().lower()
+    if record_type_filter not in {"all", "transfers", "requests"}:
+        record_type_filter = "all"
+    if request_status_filter not in {
+        "",
+        "all",
+        *TransferRequest.STATUSES,
+    }:
+        request_status_filter = ""
     user_id = request.args.get("user_id", type=int)
     transfer_id = request.args.get(
         "transfer_id", "", type=int
@@ -628,7 +795,74 @@ def view_transfers():
         query = query.filter(~Transfer.completed)
 
     per_page = get_per_page()
-    transfers = query.paginate(page=page, per_page=per_page)
+    entries = []
+    if record_type_filter in {"all", "transfers"}:
+        transfer_rows = query.order_by(
+            Transfer.date_created.desc(),
+            Transfer.id.desc(),
+        ).all()
+        entries.extend(
+            SimpleNamespace(
+                record_type="transfer",
+                transfer=transfer_obj,
+                transfer_request=None,
+                sort_datetime=transfer_obj.date_created,
+                sort_id=transfer_obj.id,
+            )
+            for transfer_obj in transfer_rows
+        )
+
+    if record_type_filter in {"all", "requests"}:
+        request_query = TransferRequest.query
+        request_to_location_alias = aliased(Location)
+        if to_location_name:
+            request_query = request_query.join(
+                request_to_location_alias,
+                TransferRequest.to_location_id == request_to_location_alias.id,
+            ).filter(
+                build_text_match_predicate(
+                    request_to_location_alias.name, to_location_name, "contains"
+                )
+            )
+        if transfer_id != "":
+            request_query = request_query.filter(TransferRequest.id == transfer_id)
+        if from_location_name:
+            request_query = request_query.filter(false())
+        if request_status_filter and request_status_filter != "all":
+            request_query = request_query.filter(
+                TransferRequest.status == request_status_filter
+            )
+        elif filter_option == "completed":
+            request_query = request_query.filter(
+                TransferRequest.status == TransferRequest.STATUS_CONVERTED
+            )
+        elif filter_option == "not_completed":
+            request_query = request_query.filter(
+                TransferRequest.status == TransferRequest.STATUS_PENDING
+            )
+        request_rows = request_query.order_by(
+            TransferRequest.submitted_at.desc(),
+            TransferRequest.id.desc(),
+        ).all()
+        entries.extend(
+            SimpleNamespace(
+                record_type="request",
+                transfer=None,
+                transfer_request=request_obj,
+                sort_datetime=request_obj.submitted_at,
+                sort_id=request_obj.id,
+            )
+            for request_obj in request_rows
+        )
+
+    entries.sort(
+        key=lambda entry: (
+            entry.sort_datetime or datetime.min,
+            entry.sort_id or 0,
+        ),
+        reverse=True,
+    )
+    transfers = _manual_paginate(entries, page=page, per_page=per_page)
 
     form = TransferForm()
     add_form = TransferForm(prefix="add")
@@ -640,6 +874,9 @@ def view_transfers():
         form=form,
         add_form=add_form,
         edit_form=edit_form,
+        filter_option=filter_option,
+        record_type_filter=record_type_filter,
+        request_status_filter=request_status_filter,
         per_page=per_page,
         pagination_args=build_pagination_args(
             per_page,
@@ -719,6 +956,113 @@ def add_transfer():
         "transfers/add_transfer.html",
         form=form,
         prefilled_from_location=prefilled_from_location,
+    )
+
+
+@transfer.route("/transfers/requests/<int:request_id>", methods=["GET", "POST"])
+@login_required
+def review_transfer_request(request_id: int):
+    """Review a public transfer request and optionally convert it."""
+
+    transfer_request = db.session.get(TransferRequest, request_id)
+    if transfer_request is None:
+        abort(404)
+
+    form = TransferForm()
+    form.to_location_id.data = transfer_request.to_location_id
+    if request.method == "GET":
+        _prefill_transfer_from_location(form, _default_transfer_from_location_id())
+
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip()
+        review_note = (request.form.get("review_note") or "").strip() or None
+        if transfer_request.status != TransferRequest.STATUS_PENDING:
+            flash("This transfer request has already been reviewed.", "warning")
+            return redirect(
+                url_for("transfer.review_transfer_request", request_id=request_id)
+            )
+
+        if action == "reject":
+            transfer_request.status = TransferRequest.STATUS_REJECTED
+            transfer_request.review_note = review_note
+            transfer_request.reviewed_by = current_user.id
+            transfer_request.reviewed_at = datetime.utcnow()
+            db.session.commit()
+            log_activity(f"Rejected transfer request {transfer_request.id}")
+            flash("Transfer request rejected.", "success")
+            return redirect(url_for("transfer.view_transfers"))
+
+        if action == "convert":
+            item_entries = _extract_transfer_items("items")
+            if not item_entries:
+                form.errors.setdefault("items", []).append(
+                    "Add at least one item with a quantity."
+                )
+                flash("Please add at least one item to the transfer.", "error")
+            elif form.validate_on_submit():
+                from_location = db.session.get(Location, form.from_location_id.data)
+                to_location = db.session.get(Location, transfer_request.to_location_id)
+                transfer_obj = Transfer(
+                    from_location_id=form.from_location_id.data,
+                    to_location_id=transfer_request.to_location_id,
+                    user_id=current_user.id,
+                    from_location_name=from_location.name if from_location else "",
+                    to_location_name=to_location.name if to_location else "",
+                )
+                db.session.add(transfer_obj)
+                for entry in item_entries:
+                    item = entry["item"]
+                    transfer_obj.transfer_items.append(
+                        TransferItem(
+                            transfer=transfer_obj,
+                            item_id=item.id,
+                            quantity=entry["total_quantity"],
+                            unit_id=entry["unit_id"],
+                            unit_quantity=entry["unit_quantity"],
+                            base_quantity=entry["base_quantity"],
+                            item_name=item.name,
+                        )
+                    )
+                db.session.flush()
+                transfer_request.status = TransferRequest.STATUS_CONVERTED
+                transfer_request.review_note = review_note
+                transfer_request.reviewed_by = current_user.id
+                transfer_request.reviewed_at = datetime.utcnow()
+                transfer_request.converted_transfer_id = transfer_obj.id
+                db.session.commit()
+                log_activity(
+                    f"Converted transfer request {transfer_request.id} to transfer {transfer_obj.id}"
+                )
+                socketio.emit("new_transfer", {"message": "New transfer added"})
+                _notify_transfer_activity(
+                    transfer_obj, event_key="transfer_created", action="created"
+                )
+                flash("Transfer request converted to a transfer.", "success")
+                return redirect(
+                    url_for("transfer.view_transfer", transfer_id=transfer_obj.id)
+                )
+            else:
+                flash("There was an error converting the request.", "error")
+
+    items = []
+    for request_item in transfer_request.items:
+        item_obj = request_item.item
+        items.append(
+            {
+                "id": request_item.item_id,
+                "name": item_obj.name if item_obj else request_item.item_name,
+                "quantity": request_item.quantity,
+                "unit_id": request_item.unit_id,
+                "unit_quantity": request_item.unit_quantity,
+                "base_quantity": request_item.base_quantity,
+            }
+        )
+
+    return render_template(
+        "transfers/review_transfer_request.html",
+        form=form,
+        transfer_request=transfer_request,
+        items=items,
     )
 
 

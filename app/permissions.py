@@ -329,6 +329,7 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     ),
     "transfer.view_transfers": requirement(any_of=("transfers.view",)),
     "transfer.add_transfer": requirement(any_of=("transfers.create",)),
+    "transfer.review_transfer_request": requirement(any_of=("transfers.create",)),
     "transfer.ajax_add_transfer": requirement(any_of=("transfers.create",)),
     "transfer.edit_transfer": requirement(any_of=("transfers.edit",)),
     "transfer.transfer_json": requirement(any_of=("transfers.view",)),

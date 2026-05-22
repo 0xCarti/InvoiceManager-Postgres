@@ -18,6 +18,8 @@ from app.models import (
     ProductRecipeItem,
     Transfer,
     TransferItem,
+    TransferRequest,
+    TransferRequestItem,
     User,
 )
 from app.services.dashboard_metrics import transfer_completion_by_location
@@ -196,6 +198,90 @@ def test_transfer_flow(client, app):
 
     with app.app_context():
         assert db.session.get(Transfer, tid) is None
+
+
+def test_public_transfer_request_converts_to_transfer(client, app):
+    user_id = create_user(app, "transferrequest@example.com")
+    with app.app_context():
+        from_location = Location(name="Request Warehouse")
+        to_location = Location(name="Request Canteen")
+        item = Item(name="Request Stock", base_unit="each")
+        db.session.add_all([from_location, to_location, item])
+        db.session.flush()
+        to_location.ensure_count_qr_token()
+        unit = ItemUnit(
+            item_id=item.id,
+            name="case",
+            factor=12,
+            receiving_default=False,
+            transfer_default=True,
+        )
+        db.session.add(unit)
+        db.session.commit()
+        from_location_id = from_location.id
+        to_location_id = to_location.id
+        token = to_location.count_qr_token
+        item_id = item.id
+        unit_id = unit.id
+
+    response = client.get(f"/transfers/request/{token}")
+    assert response.status_code == 200
+    assert b"Request Canteen" in response.data
+
+    response = client.post(
+        f"/transfers/request/{token}",
+        data={
+            "requested_by_name": "Stand Staff",
+            "notes": "Running low",
+            "request-items-0-item": item_id,
+            "request-items-0-unit": unit_id,
+            "request-items-0-quantity": "2",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Transfer request submitted for manager review." in response.data
+
+    with app.app_context():
+        transfer_request = TransferRequest.query.one()
+        request_id = transfer_request.id
+        request_item = TransferRequestItem.query.one()
+        assert transfer_request.to_location_id == to_location_id
+        assert transfer_request.status == TransferRequest.STATUS_PENDING
+        assert request_item.quantity == 24
+
+    with client:
+        login(client, "transferrequest@example.com", "pass")
+        response = client.get("/transfers?record_type=requests")
+        assert response.status_code == 200
+        assert b"Request" in response.data
+        assert b"Needs review" in response.data
+
+        response = client.post(
+            f"/transfers/requests/{request_id}",
+            data={
+                "action": "convert",
+                "from_location_id": from_location_id,
+                "to_location_id": to_location_id,
+                "items-0-item": item_id,
+                "items-0-unit": unit_id,
+                "items-0-quantity": "2",
+                "review_note": "Approved",
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Transfer Details" in response.data
+
+    with app.app_context():
+        transfer_request = db.session.get(TransferRequest, request_id)
+        transfer = db.session.get(Transfer, transfer_request.converted_transfer_id)
+        assert transfer_request.status == TransferRequest.STATUS_CONVERTED
+        assert transfer is not None
+        assert transfer.from_location_id == from_location_id
+        assert transfer.to_location_id == to_location_id
+        assert transfer.user_id == user_id
+        assert transfer.transfer_items[0].quantity == 24
 
 
 def test_transfer_forms_prefill_profile_default_from_location(client, app):

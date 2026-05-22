@@ -1,0 +1,121 @@
+{% extends 'base.html' %}
+
+{% block title %}Transfer Request{% endblock %}
+
+{% block content %}
+<style nonce="{{ csp_nonce }}">
+@media (max-width: 767.98px) {
+    .public-transfer-shell {
+        margin-top: 1rem !important;
+    }
+    .public-transfer-actions .btn {
+        width: 100%;
+    }
+}
+</style>
+
+<div class="container mt-5 public-transfer-shell">
+    <div class="row justify-content-center">
+        <div class="col-12 col-lg-8">
+            <div class="mb-4">
+                <h1 class="h3 mb-1">Transfer Request</h1>
+                <p class="text-muted mb-0">Request stock for {{ location.name }}.</p>
+            </div>
+
+            <div class="alert alert-info">
+                The destination is set from this QR code. A manager will review the request and choose where the stock comes from.
+            </div>
+
+            <form method="post" class="card" data-public-transfer-request-form="1">
+                <div class="card-body">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                    <div class="mb-3">
+                        <label for="requested_by_name" class="form-label">Your Name</label>
+                        <input
+                            type="text"
+                            class="form-control"
+                            id="requested_by_name"
+                            name="requested_by_name"
+                            value="{{ request.form.get('requested_by_name', '') }}"
+                            maxlength="120"
+                        >
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="request-item-name">Item</label>
+                        <input type="text" id="request-item-name" class="form-control" autocomplete="off">
+                        <div id="request-suggestions"></div>
+                    </div>
+
+                    <div id="request-item-list" class="mb-3"></div>
+
+                    <div class="mb-4">
+                        <label for="notes" class="form-label">Notes</label>
+                        <textarea class="form-control" id="notes" name="notes" rows="3">{{ request.form.get('notes', '') }}</textarea>
+                    </div>
+
+                    <div class="d-flex public-transfer-actions">
+                        <button type="submit" class="btn btn-primary">Submit Request</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/transfer_workflow.js') }}" nonce="{{ csp_nonce }}"></script>
+<script nonce="{{ csp_nonce }}">
+    const requestToken = {{ token|tojson }};
+    const itemInput = document.getElementById('request-item-name');
+    const suggestions = document.getElementById('request-suggestions');
+    const itemList = document.getElementById('request-item-list');
+    let itemIndex = 0;
+
+    if (itemInput) {
+        itemInput.addEventListener('input', function() {
+            const input = this.value.trim();
+            if (input === '') {
+                suggestions.innerHTML = '';
+                return;
+            }
+            fetch(`/transfers/request/${encodeURIComponent(requestToken)}/items/search?term=${encodeURIComponent(input)}`)
+                .then(response => response.json())
+                .then(data => {
+                    suggestions.innerHTML = '';
+                    data.forEach(function(item) {
+                        const suggestion = document.createElement('button');
+                        suggestion.type = 'button';
+                        suggestion.textContent = item.name;
+                        suggestion.dataset.id = item.id;
+                        suggestion.className = 'suggestion btn btn-outline-secondary btn-sm me-2 mt-2';
+                        suggestions.appendChild(suggestion);
+                    });
+                });
+        });
+    }
+
+    document.addEventListener('click', function(event) {
+        if (!event.target || !event.target.classList.contains('suggestion')) {
+            return;
+        }
+        const itemId = event.target.dataset.id;
+        const itemName = event.target.textContent;
+        fetch(`/transfers/request/${encodeURIComponent(requestToken)}/items/${itemId}/units`)
+            .then(response => response.json())
+            .then(data => {
+                const row = TransferWorkflow.createRow({
+                    prefix: 'request-items',
+                    index: itemIndex,
+                    itemId: itemId,
+                    itemName: itemName,
+                    unitsData: data,
+                });
+                itemList.appendChild(row);
+                suggestions.innerHTML = '';
+                itemInput.value = '';
+                itemIndex += 1;
+            });
+    });
+</script>
+{% endblock %}

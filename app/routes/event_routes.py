@@ -5,7 +5,7 @@ import math
 import os
 from decimal import Decimal, ROUND_HALF_UP
 from collections import defaultdict
-from datetime import datetime
+from datetime import date as date_cls, datetime, timedelta
 from secrets import token_urlsafe
 from types import SimpleNamespace
 
@@ -44,11 +44,13 @@ from app.models import (
     Event,
     EventDocument,
     EventLocation,
+    EventLocationOperatingDay,
     EventLocationTerminalSalesSummary,
     EventStandSheetItem,
     GLCode,
     Item,
     Location,
+    LocationCountSubmission,
     LocationStandItem,
     Product,
     ProductRecipeItem,
@@ -56,6 +58,10 @@ from app.models import (
     TerminalSaleProductAlias,
     TerminalSaleLocationAlias,
     TerminalSalesResolutionState,
+)
+from app.services.location_count_submissions import (
+    ensure_event_location_operating_days,
+    event_operating_dates,
 )
 from app.services.event_documents import (
     cleanup_orphaned_event_document_storage,
@@ -136,6 +142,7 @@ def _find_terminal_sales_event_location_conflicts(
     end_date,
     location_ids,
     exclude_event_id=None,
+    open_dates_by_location_id=None,
 ):
     """Return overlapping event/location assignments that POS sales cannot split."""
 
@@ -148,8 +155,22 @@ def _find_terminal_sales_event_location_conflicts(
     ):
         return []
 
+    requested_dates_by_location_id = {}
+    all_requested_dates = {
+        start_date + timedelta(days=offset)
+        for offset in range((end_date - start_date).days + 1)
+    }
+    for location_id in unique_location_ids:
+        configured_dates = (
+            open_dates_by_location_id or {}
+        ).get(location_id)
+        requested_dates_by_location_id[location_id] = set(
+            configured_dates or all_requested_dates
+        )
+
     query = (
-        db.session.query(Event, EventLocation.location_id, Location.name)
+        db.session.query(Event, EventLocation, Location.name)
+        .options(selectinload(EventLocation.operating_days))
         .join(EventLocation, EventLocation.event_id == Event.id)
         .join(Location, Location.id == EventLocation.location_id)
         .filter(EventLocation.location_id.in_(unique_location_ids))
@@ -160,9 +181,19 @@ def _find_terminal_sales_event_location_conflicts(
         query = query.filter(Event.id != exclude_event_id)
 
     conflicts = []
-    for event_obj, location_id, location_name in query.all():
-        overlap_start = max(start_date, event_obj.start_date)
-        overlap_end = min(end_date, event_obj.end_date)
+    for event_obj, event_location, location_name in query.all():
+        location_id = event_location.location_id
+        requested_dates = requested_dates_by_location_id.get(location_id, set())
+        existing_open_dates = {
+            day.operating_date for day in event_location.operating_days or []
+        }
+        if not existing_open_dates:
+            existing_open_dates = set(event_operating_dates(event_obj))
+        overlapping_dates = sorted(requested_dates & existing_open_dates)
+        if not overlapping_dates:
+            continue
+        overlap_start = overlapping_dates[0]
+        overlap_end = overlapping_dates[-1]
         conflicts.append(
             {
                 "event_id": event_obj.id,
@@ -182,11 +213,19 @@ def _terminal_sales_conflicts_for_event(event_obj: Event):
     """Return overlapping location assignments for the given event."""
 
     location_ids = [event_location.location_id for event_location in event_obj.locations]
+    open_dates_by_location_id = {}
+    for event_location in event_obj.locations:
+        operating_dates = {
+            day.operating_date for day in event_location.operating_days or []
+        }
+        if operating_dates:
+            open_dates_by_location_id[event_location.location_id] = operating_dates
     return _find_terminal_sales_event_location_conflicts(
         start_date=event_obj.start_date,
         end_date=event_obj.end_date,
         location_ids=location_ids,
         exclude_event_id=event_obj.id,
+        open_dates_by_location_id=open_dates_by_location_id,
     )
 
 
@@ -670,6 +709,133 @@ def _sync_event_location_opening_counts(event_location: EventLocation) -> int:
         updated += 1
 
     return updated
+
+
+def _event_day_status(submissions: list[LocationCountSubmission]) -> str:
+    if any(
+        submission.status == LocationCountSubmission.STATUS_PENDING
+        for submission in submissions
+    ):
+        return "pending"
+    if any(
+        submission.status == LocationCountSubmission.STATUS_APPROVED
+        for submission in submissions
+    ):
+        return "approved"
+    if any(
+        submission.status == LocationCountSubmission.STATUS_REJECTED
+        for submission in submissions
+    ):
+        return "rejected"
+    return "missing"
+
+
+def _build_event_day_summaries(event_obj: Event) -> list[SimpleNamespace]:
+    event_locations = list(event_obj.locations or [])
+    event_location_ids = [event_location.id for event_location in event_locations]
+    if not event_location_ids:
+        return [
+            SimpleNamespace(date=operating_date, locations=[])
+            for operating_date in event_operating_dates(event_obj)
+        ]
+
+    submissions = (
+        LocationCountSubmission.query.filter(
+            LocationCountSubmission.event_location_id.in_(event_location_ids),
+            LocationCountSubmission.submission_date >= event_obj.start_date,
+            LocationCountSubmission.submission_date <= event_obj.end_date,
+        )
+        .order_by(LocationCountSubmission.submitted_at.asc())
+        .all()
+    )
+    submissions_by_key: dict[
+        tuple[int, date_cls, str], list[LocationCountSubmission]
+    ] = defaultdict(list)
+    for submission in submissions:
+        submissions_by_key[
+            (
+                submission.event_location_id,
+                submission.submission_date,
+                submission.submission_type,
+            )
+        ].append(submission)
+
+    start_dt = datetime.combine(event_obj.start_date, datetime.min.time())
+    end_dt = datetime.combine(event_obj.end_date, datetime.max.time())
+    terminal_sales = (
+        TerminalSale.query.filter(
+            TerminalSale.event_location_id.in_(event_location_ids),
+            TerminalSale.sold_at >= start_dt,
+            TerminalSale.sold_at <= end_dt,
+        )
+        .all()
+    )
+    sales_by_key: dict[tuple[int, date_cls], list[TerminalSale]] = defaultdict(list)
+    for sale in terminal_sales:
+        if sale.sold_at is None:
+            continue
+        sales_by_key[(sale.event_location_id, sale.sold_at.date())].append(sale)
+
+    operating_days = (
+        EventLocationOperatingDay.query.filter(
+            EventLocationOperatingDay.event_location_id.in_(event_location_ids)
+        )
+        .all()
+    )
+    open_dates_by_event_location_id: dict[int, set[date_cls]] = defaultdict(set)
+    for day in operating_days:
+        open_dates_by_event_location_id[day.event_location_id].add(day.operating_date)
+
+    summaries: list[SimpleNamespace] = []
+    sorted_event_locations = sorted(
+        event_locations,
+        key=lambda event_location: (
+            event_location.location.name.casefold()
+            if event_location.location is not None
+            else ""
+        ),
+    )
+    for operating_date in event_operating_dates(event_obj):
+        location_entries: list[SimpleNamespace] = []
+        for event_location in sorted_event_locations:
+            open_dates = open_dates_by_event_location_id.get(event_location.id, set())
+            if open_dates and operating_date not in open_dates:
+                continue
+            opening_submissions = submissions_by_key.get(
+                (
+                    event_location.id,
+                    operating_date,
+                    LocationCountSubmission.TYPE_OPENING,
+                ),
+                [],
+            )
+            closing_submissions = submissions_by_key.get(
+                (
+                    event_location.id,
+                    operating_date,
+                    LocationCountSubmission.TYPE_CLOSING,
+                ),
+                [],
+            )
+            sales_rows = sales_by_key.get((event_location.id, operating_date), [])
+            location_entries.append(
+                SimpleNamespace(
+                    event_location=event_location,
+                    location=event_location.location,
+                    opening_status=_event_day_status(opening_submissions),
+                    closing_status=_event_day_status(closing_submissions),
+                    opening_submission_count=len(opening_submissions),
+                    closing_submission_count=len(closing_submissions),
+                    sales_count=len(sales_rows),
+                    sales_quantity=sum(
+                        float(sale.quantity or 0.0) for sale in sales_rows
+                    ),
+                )
+            )
+        summaries.append(
+            SimpleNamespace(date=operating_date, locations=location_entries)
+        )
+    return summaries
 
 
 def _convert_report_value_to_base(value, base_unit, report_unit):
@@ -1373,7 +1539,10 @@ def delete_event(event_id):
 def view_event(event_id):
     ev = (
         Event.query.options(
-            selectinload(Event.locations).selectinload(EventLocation.location)
+            selectinload(Event.locations).selectinload(EventLocation.location),
+            selectinload(Event.locations).selectinload(
+                EventLocation.operating_days
+            ),
         )
         .filter(Event.id == event_id)
         .first()
@@ -1404,6 +1573,7 @@ def view_event(event_id):
         document_upload_form=EventDocumentUploadForm(),
         document_action_form=CSRFOnlyForm(),
         event_documents=event_documents,
+        event_day_summaries=_build_event_day_summaries(ev),
         event_document_accept=event_document_accept_attribute(),
         confirmed_sales=confirmed_sales,
         physical_terminal_variance=physical_terminal_variance,
@@ -1747,16 +1917,32 @@ def add_location(event_id):
     if ev is None:
         abort(404)
     form = EventLocationForm(event_id=event_id)
+    event_dates = event_operating_dates(ev)
     if not form.location_id.choices:
         flash("All available locations have already been assigned to this event.")
         return redirect(url_for("event.view_event", event_id=event_id))
     if form.validate_on_submit():
         selected_ids = form.location_id.data
+        valid_event_dates = set(event_dates)
+        open_dates_by_location_id: dict[int, set[date_cls]] = {}
+        for location_id in selected_ids:
+            selected_date_values: set[date_cls] = set()
+            for raw_date in request.form.getlist(f"open_dates_{location_id}"):
+                try:
+                    selected_date = date_cls.fromisoformat(raw_date)
+                except ValueError:
+                    continue
+                if selected_date in valid_event_dates:
+                    selected_date_values.add(selected_date)
+            open_dates_by_location_id[location_id] = (
+                selected_date_values or valid_event_dates
+            )
         conflicts = _find_terminal_sales_event_location_conflicts(
             start_date=ev.start_date,
             end_date=ev.end_date,
             location_ids=selected_ids,
             exclude_event_id=event_id,
+            open_dates_by_location_id=open_dates_by_location_id,
         )
         if conflicts:
             message = _build_terminal_sales_conflict_message(conflicts)
@@ -1765,6 +1951,7 @@ def add_location(event_id):
                 "events/add_location.html",
                 form=form,
                 event=ev,
+                event_dates=event_dates,
                 terminal_sales_conflict_guidance=_TERMINAL_SALES_CONFLICT_GUIDANCE,
             )
         event_locations = []
@@ -1777,6 +1964,12 @@ def add_location(event_id):
         if event_locations:
             db.session.flush()
             for event_location in event_locations:
+                ensure_event_location_operating_days(
+                    event_location,
+                    open_dates_by_location_id.get(
+                        event_location.location_id, valid_event_dates
+                    ),
+                )
                 _sync_event_location_opening_counts(event_location)
         db.session.commit()
         location_names = []
@@ -1804,6 +1997,7 @@ def add_location(event_id):
         "events/add_location.html",
         form=form,
         event=ev,
+        event_dates=event_dates,
         terminal_sales_conflict_guidance=_TERMINAL_SALES_CONFLICT_GUIDANCE,
     )
 

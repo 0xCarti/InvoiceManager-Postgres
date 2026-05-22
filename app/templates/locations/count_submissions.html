@@ -27,6 +27,12 @@
     </div>
 
     <form method="get" class="card card-body mb-3 count-submission-toolbar">
+        {% if event_location_filter %}
+        <input type="hidden" name="event_location_id" value="{{ event_location_filter }}">
+        {% endif %}
+        {% if submission_date_filter %}
+        <input type="hidden" name="submission_date" value="{{ submission_date_filter }}">
+        {% endif %}
         <div class="row g-2 align-items-end">
             <div class="col-lg-4">
                 <label class="form-label mb-1" for="search">Search</label>
@@ -61,7 +67,7 @@
         </div>
     </form>
 
-    {% if search_query or status_filter or submission_type_filter or location_filter %}
+    {% if search_query or status_filter or submission_type_filter or location_filter or event_location_filter or submission_date_filter %}
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
         <span class="text-muted small">Active filters:</span>
         {% if search_query %}
@@ -75,6 +81,12 @@
         {% endif %}
         {% if location_filter %}
         <span class="badge rounded-pill text-bg-light border">Location: #{{ location_filter }}</span>
+        {% endif %}
+        {% if event_location_filter %}
+        <span class="badge rounded-pill text-bg-light border">Event location: #{{ event_location_filter }}</span>
+        {% endif %}
+        {% if submission_date_filter %}
+        <span class="badge rounded-pill text-bg-light border">Date: {{ submission_date_filter }}</span>
         {% endif %}
     </div>
     {% endif %}

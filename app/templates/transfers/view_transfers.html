@@ -46,7 +46,7 @@
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
         <div>
             <h2 class="mb-1">Transfers</h2>
-            <p class="text-muted mb-0">Track transfers between locations</p>
+            <p class="text-muted mb-0">Track transfers and public transfer requests between locations</p>
         </div>
         {% if can_create_transfers %}
         <div>
@@ -111,8 +111,14 @@
         </thead>
         <tbody id="transfer-table-body">
         {% set transfer_items = transfers.items if transfers is defined else [] %}
-        {% for transfer in transfer_items %}
+        {% for entry in transfer_items %}
+            {% if entry.record_type == 'request' %}
+                {% set transfer_request = entry.transfer_request %}
+                {% include 'transfers/_transfer_request_row.html' %}
+            {% else %}
+                {% set transfer = entry.transfer %}
             {% include 'transfers/_transfer_row.html' %}
+            {% endif %}
         {% endfor %}
         </tbody>
     </table>
@@ -247,10 +253,22 @@
           {% if request.args.get('user_id') %}
           <input type="hidden" name="user_id" value="{{ request.args.get('user_id') }}">
           {% endif %}
+          <select name="record_type" class="form-control me-2 mt-1 narrow-field">
+            <option value="all" {% if record_type_filter == 'all' %}selected{% endif %}>Transfers & Requests</option>
+            <option value="transfers" {% if record_type_filter == 'transfers' %}selected{% endif %}>Transfers Only</option>
+            <option value="requests" {% if record_type_filter == 'requests' %}selected{% endif %}>Requests Only</option>
+          </select>
           <select name="filter" class="form-control me-2 mt-1 narrow-field">
-            <option value="not_completed">Not Completed</option>
-            <option value="completed" {% if request.args.get('filter') == 'completed' %}selected{% endif %}>Completed</option>
-            <option value="all" {% if request.args.get('filter') == 'all' %}selected{% endif %}>All Transfers</option>
+            <option value="not_completed" {% if filter_option == 'not_completed' %}selected{% endif %}>Open / Pending</option>
+            <option value="completed" {% if filter_option == 'completed' %}selected{% endif %}>Completed / Converted</option>
+            <option value="all" {% if filter_option == 'all' %}selected{% endif %}>All Statuses</option>
+          </select>
+          <select name="request_status" class="form-control me-2 mt-1 narrow-field">
+            <option value="">Request Status Auto</option>
+            <option value="all" {% if request_status_filter == 'all' %}selected{% endif %}>All Requests</option>
+            <option value="pending" {% if request_status_filter == 'pending' %}selected{% endif %}>Pending Requests</option>
+            <option value="converted" {% if request_status_filter == 'converted' %}selected{% endif %}>Converted Requests</option>
+            <option value="rejected" {% if request_status_filter == 'rejected' %}selected{% endif %}>Rejected Requests</option>
           </select>
           <input type="text" name="transfer_id" class="form-control me-2 mt-1 narrow-field" placeholder="Transfer ID" value="{{ request.args.get('transfer_id', '') }}">
           <input type="text" name="from_location" class="form-control me-2 mt-1 narrow-field" placeholder="From Location" value="{{ request.args.get('from_location', '') }}">

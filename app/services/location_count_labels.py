@@ -67,17 +67,17 @@ def render_location_count_sign_pdf(locations, qr_payloads: dict[int, str]) -> by
 
 
 def render_location_transfer_sign_pdf(locations, qr_payloads: dict[int, str]) -> bytes:
-    """Render one or more full-page transfer-entry QR signs."""
+    """Render one or more full-page transfer-request QR signs."""
 
     return _render_location_action_sign_pdf(
         locations,
         qr_payloads,
         title="Scan For Transfer",
         instruction_lines=(
-            "Use your phone camera to open a transfer form for this location.",
-            "Log in, confirm the destination, add items, and submit the transfer.",
+            "Use your phone camera to request stock for this location.",
+            "Add items and quantities. A manager will review the request.",
         ),
-        footer_line="This sign starts a transfer with this location pre-selected.",
+        footer_line="This sign starts a request only. Inventory moves after manager approval.",
     )
 
 

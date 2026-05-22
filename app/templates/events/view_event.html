@@ -18,6 +18,7 @@
 {% set can_upload_event_documents = can_access_endpoint('event.upload_event_document', 'POST') %}
 {% set can_download_event_documents = can_access_endpoint('event.download_event_document') %}
 {% set can_delete_event_documents = can_access_endpoint('event.delete_event_document_file', 'POST') %}
+{% set can_review_count_submissions = can_access_endpoint('locations.count_submissions', 'GET') %}
 <div class="container mt-4 app-page-shell">
     <div class="app-page-header">
         <div class="app-page-header-copy">
@@ -230,6 +231,107 @@
         {{ opening_form.hidden_tag() }}
     </form>
     {% endif %}
+        {% if event_day_summaries %}
+        <div class="mb-4">
+            <div class="d-flex flex-column flex-lg-row justify-content-between gap-2 mb-2">
+                <div>
+                    <h5 class="mb-1">Event Days</h5>
+                    <p class="text-muted mb-0">Review daily openings, closings, and sales by the day the location was open.</p>
+                </div>
+            </div>
+            <ul class="nav nav-tabs" id="event-day-tabs" role="tablist">
+                {% for day in event_day_summaries %}
+                <li class="nav-item" role="presentation">
+                    <button
+                        class="nav-link {% if loop.first %}active{% endif %}"
+                        id="event-day-tab-{{ loop.index }}"
+                        data-bs-toggle="tab"
+                        data-bs-target="#event-day-pane-{{ loop.index }}"
+                        type="button"
+                        role="tab"
+                        aria-controls="event-day-pane-{{ loop.index }}"
+                        aria-selected="{{ 'true' if loop.first else 'false' }}"
+                    >
+                        {{ day.date.strftime('%a') }} {{ day.date.month }}/{{ day.date.day }}
+                    </button>
+                </li>
+                {% endfor %}
+            </ul>
+            <div class="tab-content border border-top-0 rounded-bottom p-3" id="event-day-tab-content">
+                {% for day in event_day_summaries %}
+                <div
+                    class="tab-pane fade {% if loop.first %}show active{% endif %}"
+                    id="event-day-pane-{{ loop.index }}"
+                    role="tabpanel"
+                    aria-labelledby="event-day-tab-{{ loop.index }}"
+                    tabindex="0"
+                >
+                    {% if day.locations %}
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Location</th>
+                                    <th scope="col">Opening</th>
+                                    <th scope="col">Closing</th>
+                                    <th scope="col">Sales</th>
+                                    <th scope="col" class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for entry in day.locations %}
+                                <tr>
+                                    <td>{{ entry.location.name if entry.location else 'Unknown location' }}</td>
+                                    <td>
+                                        <span class="badge {% if entry.opening_status == 'approved' %}text-bg-success{% elif entry.opening_status == 'pending' %}text-bg-warning{% elif entry.opening_status == 'rejected' %}text-bg-danger{% else %}text-bg-light border text-dark{% endif %}">
+                                            {{ entry.opening_status|title }}
+                                        </span>
+                                        {% if entry.opening_submission_count %}
+                                        <span class="small text-muted">{{ entry.opening_submission_count }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <span class="badge {% if entry.closing_status == 'approved' %}text-bg-success{% elif entry.closing_status == 'pending' %}text-bg-warning{% elif entry.closing_status == 'rejected' %}text-bg-danger{% else %}text-bg-light border text-dark{% endif %}">
+                                            {{ entry.closing_status|title }}
+                                        </span>
+                                        {% if entry.closing_submission_count %}
+                                        <span class="small text-muted">{{ entry.closing_submission_count }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if entry.sales_count %}
+                                        <span class="badge text-bg-success">{{ entry.sales_count }} row{% if entry.sales_count != 1 %}s{% endif %}</span>
+                                        <span class="small text-muted">{{ '%.2f'|format(entry.sales_quantity) }} units</span>
+                                        {% else %}
+                                        <span class="badge text-bg-light border text-dark">Missing</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        <div class="d-flex flex-wrap justify-content-end gap-2">
+                                            {% if can_review_count_submissions %}
+                                            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('locations.count_submissions', event_location_id=entry.event_location.id, submission_date=day.date.isoformat()) }}">Counts</a>
+                                            {% endif %}
+                                            {% if can_add_terminal_sale %}
+                                            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('event.add_terminal_sale', event_id=event.id, el_id=entry.event_location.id) }}">Sales</a>
+                                            {% endif %}
+                                            {% if can_view_stand_sheet %}
+                                            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.stand_sheet', event_id=event.id, location_id=entry.event_location.location_id) }}">Stand Sheet</a>
+                                            {% endif %}
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="text-muted">No locations are marked open for this day.</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
         <div class="table-responsive mobile-table-wrap">
             <table class="table table-sm align-middle" id="locations-table">
         <thead>

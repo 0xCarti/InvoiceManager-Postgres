@@ -5,6 +5,7 @@ from app import db
 from app.models import (
     Event,
     EventLocation,
+    EventLocationOperatingDay,
     EventStandSheetItem,
     Item,
     Location,
@@ -82,6 +83,7 @@ def _create_pending_submission(
         submission_id=submission.id,
         item_id=item_id,
         count_value=count_value,
+        submitted_count_value=count_value,
         parse_index=0,
     )
     db.session.add(row)
@@ -232,7 +234,7 @@ def test_manager_approval_uses_first_opening_day_last_closing_day_and_aggregates
             event_location_id=context["event_location_id"],
             item_id=context["item_id"],
             submission_type=LocationCountSubmission.TYPE_OPENING,
-            submission_date=context["today"] - timedelta(days=2),
+            submission_date=context["today"] - timedelta(days=1),
             count_value=10.0,
             submitted_name="Alex",
         )
@@ -241,7 +243,7 @@ def test_manager_approval_uses_first_opening_day_last_closing_day_and_aggregates
             event_location_id=context["event_location_id"],
             item_id=context["item_id"],
             submission_type=LocationCountSubmission.TYPE_OPENING,
-            submission_date=context["today"] - timedelta(days=2),
+            submission_date=context["today"] - timedelta(days=1),
             count_value=3.0,
             submitted_name="Jordan",
         )
@@ -250,7 +252,7 @@ def test_manager_approval_uses_first_opening_day_last_closing_day_and_aggregates
             event_location_id=context["event_location_id"],
             item_id=context["item_id"],
             submission_type=LocationCountSubmission.TYPE_OPENING,
-            submission_date=context["today"] - timedelta(days=1),
+            submission_date=context["today"],
             count_value=12.0,
             submitted_name="Bailey",
         )
@@ -259,7 +261,7 @@ def test_manager_approval_uses_first_opening_day_last_closing_day_and_aggregates
             event_location_id=context["event_location_id"],
             item_id=context["item_id"],
             submission_type=LocationCountSubmission.TYPE_CLOSING,
-            submission_date=context["today"],
+            submission_date=context["today"] + timedelta(days=1),
             count_value=4.0,
             submitted_name="Casey",
         )
@@ -268,7 +270,7 @@ def test_manager_approval_uses_first_opening_day_last_closing_day_and_aggregates
             event_location_id=context["event_location_id"],
             item_id=context["item_id"],
             submission_type=LocationCountSubmission.TYPE_CLOSING,
-            submission_date=context["today"],
+            submission_date=context["today"] + timedelta(days=1),
             count_value=1.0,
             submitted_name="Morgan",
         )
@@ -293,7 +295,7 @@ def test_manager_approval_uses_first_opening_day_last_closing_day_and_aggregates
         for submission_id, submission_date, submission_type, submitted_name, row_id, value in (
             (
                 opening_first_id,
-                (context["today"] - timedelta(days=2)).isoformat(),
+                (context["today"] - timedelta(days=1)).isoformat(),
                 "opening",
                 "Alex",
                 opening_first_row_id,
@@ -301,7 +303,7 @@ def test_manager_approval_uses_first_opening_day_last_closing_day_and_aggregates
             ),
             (
                 opening_first_same_day_id,
-                (context["today"] - timedelta(days=2)).isoformat(),
+                (context["today"] - timedelta(days=1)).isoformat(),
                 "opening",
                 "Jordan",
                 opening_first_same_day_row_id,
@@ -309,7 +311,7 @@ def test_manager_approval_uses_first_opening_day_last_closing_day_and_aggregates
             ),
             (
                 opening_later_id,
-                (context["today"] - timedelta(days=1)).isoformat(),
+                context["today"].isoformat(),
                 "opening",
                 "Bailey",
                 opening_later_row_id,
@@ -317,7 +319,7 @@ def test_manager_approval_uses_first_opening_day_last_closing_day_and_aggregates
             ),
             (
                 closing_last_id,
-                context["today"].isoformat(),
+                (context["today"] + timedelta(days=1)).isoformat(),
                 "closing",
                 "Casey",
                 closing_last_row_id,
@@ -325,7 +327,7 @@ def test_manager_approval_uses_first_opening_day_last_closing_day_and_aggregates
             ),
             (
                 closing_last_same_day_id,
-                context["today"].isoformat(),
+                (context["today"] + timedelta(days=1)).isoformat(),
                 "closing",
                 "Morgan",
                 closing_last_same_day_row_id,
@@ -443,6 +445,99 @@ def test_manager_approval_can_overwrite_same_day_counts(client, app):
             second_submission.approval_mode
             == LocationCountSubmission.APPROVAL_MODE_OVERWRITE
         )
+
+
+def test_manager_can_approve_expected_opening_for_event_day(client, app):
+    context = _setup_location_count_context(app)
+
+    with app.app_context():
+        for operating_date in (
+            context["today"] - timedelta(days=1),
+            context["today"],
+            context["today"] + timedelta(days=1),
+        ):
+            db.session.add(
+                EventLocationOperatingDay(
+                    event_location_id=context["event_location_id"],
+                    operating_date=operating_date,
+                )
+            )
+        previous_closing = LocationCountSubmission(
+            source_location_id=context["location_id"],
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            submission_type=LocationCountSubmission.TYPE_CLOSING,
+            submission_date=context["today"] - timedelta(days=1),
+            submitted_name="Night Lead",
+            status=LocationCountSubmission.STATUS_APPROVED,
+            approval_mode=LocationCountSubmission.APPROVAL_MODE_OVERWRITE,
+        )
+        db.session.add(previous_closing)
+        db.session.flush()
+        db.session.add(
+            LocationCountSubmissionRow(
+                submission_id=previous_closing.id,
+                item_id=context["item_id"],
+                count_value=4.0,
+                submitted_count_value=4.0,
+                parse_index=0,
+            )
+        )
+        db.session.commit()
+
+        opening_id = _create_pending_submission(
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+            submission_type=LocationCountSubmission.TYPE_OPENING,
+            submission_date=context["today"],
+            count_value=12.0,
+            submitted_name="Day Lead",
+        )
+        opening = db.session.get(LocationCountSubmission, opening_id)
+        opening_row_id = opening.rows[0].id
+
+    with client:
+        login(client, "admin@example.com", "adminpass")
+        response = client.get(f"/locations/count-submissions/{opening_id}")
+        assert response.status_code == 200
+        assert b"Expected opening for" in response.data
+        assert b"Approve Expected Opening" in response.data
+
+        response = client.post(
+            f"/locations/count-submissions/{opening_id}",
+            data={
+                "action": "approve_expected_opening",
+                "submitted_name": "Day Lead",
+                "submission_type": "opening",
+                "submission_date": context["today"].isoformat(),
+                "location_id": str(context["location_id"]),
+                "event_location_id": str(context["event_location_id"]),
+                "review_note": "",
+                f"count_{opening_row_id}": "12",
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert (
+            b"Opening count approved and applied to the stand sheet using overwrite mode."
+            in response.data
+        )
+
+    with app.app_context():
+        opening = db.session.get(LocationCountSubmission, opening_id)
+        row = opening.rows[0]
+        assert opening.applied_count_source == LocationCountSubmission.APPLIED_SOURCE_EXPECTED
+        assert row.submitted_count_value == 12.0
+        assert row.expected_count_value == 4.0
+        assert row.count_value == 4.0
+
+        sheet = EventStandSheetItem.query.filter_by(
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+        ).first()
+        assert sheet is not None
+        assert sheet.opening_count == 4.0
 
 
 def test_print_count_sign_returns_pdf(client, app):
