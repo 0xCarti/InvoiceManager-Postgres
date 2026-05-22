@@ -36,6 +36,8 @@ def test_recipe_calculator_page_renders(client, app):
         assert "Recipe Cost Calculator" in page
         assert "Base Cost per Product" in page
         assert "Recipe Calculator Test Item" in page
+        assert "case" in page
+        assert "select2:select select2:clear" in page
 
 
 def test_items_page_links_to_recipe_calculator(client, app):

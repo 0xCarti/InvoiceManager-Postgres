@@ -3,6 +3,7 @@
 
     const SELECTOR = [
         "select[data-item-search=\"1\"]",
+        "select[data-search-select=\"1\"]",
         "select.item-select",
         "select[data-role=\"alias-item-select\"]",
         "select[data-countable-select]"
@@ -20,6 +21,7 @@
         );
         const placeholder =
             select.dataset.itemSearchPlaceholder ||
+            select.dataset.searchSelectPlaceholder ||
             (isMultiple ? "Search items..." : "Search items...");
         const modal = select.closest(".modal");
         const config = {

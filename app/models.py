@@ -163,6 +163,9 @@ class User(UserMixin, db.Model):
     active = db.Column(db.Boolean, default=False, nullable=False)
     favorites = db.Column(db.Text, default="")
     timezone = db.Column(db.String(50))
+    default_transfer_from_location_id = db.Column(
+        db.Integer, db.ForeignKey("location.id"), nullable=True
+    )
     phone_number = db.Column(db.String(20))
     notify_transfers = db.Column(db.Boolean, default=False, nullable=False)
     notify_transfers_email = db.Column(
@@ -251,6 +254,9 @@ class User(UserMixin, db.Model):
         "UserFilterPreference",
         back_populates="user",
         cascade="all, delete-orphan",
+    )
+    default_transfer_from_location = relationship(
+        "Location", foreign_keys=[default_transfer_from_location_id]
     )
     department_memberships = relationship(
         "UserDepartmentMembership",

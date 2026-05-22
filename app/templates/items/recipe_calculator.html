@@ -69,8 +69,17 @@
     const batchCostElement = document.getElementById('batch-cost');
 
     const ITEM_OPTIONS_HTML = ['<option value="">Select an item</option>']
-        .concat((ITEMS || []).map((item) => `<option value="${item.id}">${item.name}</option>`))
+        .concat((ITEMS || []).map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`))
         .join('');
+
+    function escapeHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
 
     function formatCurrency(value) {
         if (typeof value !== 'number' || !isFinite(value)) {
@@ -184,7 +193,7 @@
             option.dataset.isBase = unit.is_base ? '1' : '0';
             option.textContent = unit.is_base
                 ? `${unit.name} (base unit)`
-                : `${unit.name} (×${factor} ${item.base_unit})`;
+                : `${unit.name} (x${factor} ${item.base_unit})`;
             unitSelect.appendChild(option);
             if (unit.is_base && index === 0) {
                 option.selected = true;
@@ -239,14 +248,16 @@
         const quantityInput = row.querySelector('.quantity-input');
         const removeButton = row.querySelector('.remove-row');
 
-        itemSelect.addEventListener('change', () => {
+        function handleItemChange() {
             const selectedItem = itemLookup.get(itemSelect.value);
             if (!selectedItem) {
                 resetRow(row);
                 return;
             }
             populateUnits(row, selectedItem);
-        });
+        }
+
+        itemSelect.addEventListener('change', handleItemChange);
 
         unitSelect.addEventListener('change', () => {
             updateUnitCost(row);
@@ -269,6 +280,9 @@
         if (window.initItemSearchSelects) {
             window.initItemSearchSelects(row);
         }
+        if (window.jQuery) {
+            window.jQuery(itemSelect).on('select2:select select2:clear', handleItemChange);
+        }
         refreshColumnHeaders();
         updateTotals();
         return row;
@@ -278,7 +292,11 @@
         const row = createRow();
         const firstItem = ITEMS[0];
         if (firstItem) {
-            row.querySelector('.item-select').value = String(firstItem.id);
+            const itemSelect = row.querySelector('.item-select');
+            itemSelect.value = String(firstItem.id);
+            if (window.jQuery && window.jQuery(itemSelect).data('select2')) {
+                window.jQuery(itemSelect).trigger('change.select2');
+            }
             populateUnits(row, firstItem);
         }
     }

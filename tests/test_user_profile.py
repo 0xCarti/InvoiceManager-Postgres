@@ -132,3 +132,26 @@ def test_user_can_set_timezone(client, app):
         assert user.timezone == "US/Eastern"
 
 
+def test_user_can_set_default_transfer_from_location(client, app):
+    user_id = create_user(app, "transfer-default-profile@example.com")
+    with app.app_context():
+        location = Location(name="Profile Default From")
+        db.session.add(location)
+        db.session.commit()
+        location_id = location.id
+
+    with client:
+        login(client, "transfer-default-profile@example.com", "oldpass")
+        resp = client.post(
+            "/auth/profile",
+            data={"default_transfer_from_location_id": location_id},
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+        assert b"Transfer defaults updated." in resp.data
+
+    with app.app_context():
+        user = db.session.get(User, user_id)
+        assert user.default_transfer_from_location_id == location_id
+
+

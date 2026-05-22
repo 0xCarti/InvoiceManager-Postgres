@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+import re
 
 from werkzeug.security import generate_password_hash
 
@@ -195,6 +196,49 @@ def test_transfer_flow(client, app):
 
     with app.app_context():
         assert db.session.get(Transfer, tid) is None
+
+
+def test_transfer_forms_prefill_profile_default_from_location(client, app):
+    user_id = create_user(app, "transferdefault@example.com")
+    with app.app_context():
+        default_from = Location(name="Default Transfer From")
+        other_location = Location(name="Other Transfer Location")
+        db.session.add_all([default_from, other_location])
+        db.session.commit()
+        default_from_id = default_from.id
+        user = db.session.get(User, user_id)
+        user.default_transfer_from_location_id = default_from_id
+        db.session.commit()
+
+    with client:
+        login(client, "transferdefault@example.com", "pass")
+        add_resp = client.get("/transfers/add")
+        assert add_resp.status_code == 200
+        add_page = add_resp.get_data(as_text=True)
+        assert _selected_option_value(add_page, "from_location_id") == str(
+            default_from_id
+        )
+
+        list_resp = client.get("/transfers")
+        assert list_resp.status_code == 200
+        list_page = list_resp.get_data(as_text=True)
+        assert _selected_option_value(list_page, "add-from_location_id") == str(
+            default_from_id
+        )
+
+
+def _selected_option_value(page, select_id):
+    match = re.search(
+        rf'<select[^>]+id="{re.escape(select_id)}"[^>]*>(?P<body>.*?)</select>',
+        page,
+        re.DOTALL,
+    )
+    assert match is not None
+    selected = re.search(r"<option[^>]*\bselected\b[^>]*>", match.group("body"))
+    assert selected is not None
+    value = re.search(r'\bvalue="(?P<value>[^"]+)"', selected.group(0))
+    assert value is not None
+    return value.group("value")
 
 
 def test_transfer_confirmation_preflight_without_warnings_does_not_complete(

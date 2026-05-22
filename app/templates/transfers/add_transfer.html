@@ -14,7 +14,7 @@
             <div class="col-md-6">
                 <div class="form-group">
                     {{ form.from_location_id.label(class="form-label") }}
-                    {{ form.from_location_id(class="form-control") }}
+                    {{ form.from_location_id(class="form-select") }}
                     {% for error in form.from_location_id.errors %}
                     <div class="alert alert-danger">{{ error }}</div>
                     {% endfor %}
@@ -23,7 +23,7 @@
             <div class="col-md-6">
                 <div class="form-group">
                     {{ form.to_location_id.label(class="form-label") }}
-                    {{ form.to_location_id(class="form-control") }}
+                    {{ form.to_location_id(class="form-select") }}
                     {% for error in form.to_location_id.errors %}
                     <div class="alert alert-danger">{{ error }}</div>
                     {% endfor %}

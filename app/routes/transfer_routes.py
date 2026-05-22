@@ -432,6 +432,29 @@ def _apply_transfer_form_update(transfer_obj, form, item_entries):
     return bool(applied_items)
 
 
+def _active_location_choice_contains(form_field, location_id):
+    return any(
+        choice_value == location_id for choice_value, _ in form_field.choices
+    )
+
+
+def _default_transfer_from_location_id():
+    location_id = getattr(current_user, "default_transfer_from_location_id", None)
+    if not location_id:
+        return None
+    location = db.session.get(Location, location_id)
+    if location is None or location.archived:
+        return None
+    return location.id
+
+
+def _prefill_transfer_from_location(form, location_id):
+    if location_id and _active_location_choice_contains(
+        form.from_location_id, location_id
+    ):
+        form.from_location_id.data = location_id
+
+
 def check_negative_transfer(
     transfer_obj, multiplier=1, transfer_items=None, quantities=None
 ):
@@ -609,6 +632,7 @@ def view_transfers():
 
     form = TransferForm()
     add_form = TransferForm(prefix="add")
+    _prefill_transfer_from_location(add_form, _default_transfer_from_location_id())
     edit_form = TransferForm(prefix="edit")
     return render_template(
         "transfers/view_transfers.html",
@@ -642,6 +666,8 @@ def add_transfer():
             )
         ):
             form.from_location_id.data = prefilled_from_location.id
+    elif request.method == "GET":
+        _prefill_transfer_from_location(form, _default_transfer_from_location_id())
     if form.validate_on_submit():
         item_entries = _extract_transfer_items("items")
         if not item_entries:

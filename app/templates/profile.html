@@ -294,6 +294,29 @@
 
                 <div class="card profile-section-card">
                     <div class="card-body">
+                        <h3 class="h5 mb-3">Transfer Defaults</h3>
+                        <form method="post" class="profile-form">
+                            {{ transfer_defaults_form.hidden_tag() }}
+                            <div class="form-group profile-field">
+                                {{ transfer_defaults_form.default_transfer_from_location_id.label(class_='form-label mb-0') }}
+                                {{ transfer_defaults_form.default_transfer_from_location_id(class_='form-select' + (' is-invalid' if transfer_defaults_submitted and transfer_defaults_form.default_transfer_from_location_id.errors else '')) }}
+                                {% if transfer_defaults_submitted and transfer_defaults_form.default_transfer_from_location_id.errors %}
+                                <div class="profile-feedback text-danger">{{ transfer_defaults_form.default_transfer_from_location_id.errors[0] }}</div>
+                                {% elif status_messages.get('transfer_defaults') %}
+                                <div class="profile-feedback text-success">{{ status_messages.get('transfer_defaults')[1] }}</div>
+                                {% else %}
+                                <div class="profile-feedback text-muted">Used to prefill new transfer forms. You can still change the location on each transfer.</div>
+                                {% endif %}
+                            </div>
+                            <div class="profile-actions">
+                                <button type="submit" class="btn btn-primary">{{ transfer_defaults_form.submit.label.text }}</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card profile-section-card">
+                    <div class="card-body">
                         <h3 class="h5 mb-3">Contact / Notifications</h3>
                         <form method="post" class="profile-form">
                             {{ notif_form.hidden_tag() }}

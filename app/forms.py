@@ -298,6 +298,15 @@ def item_search_render_kw(*, multiple: bool = False, placeholder: str | None = N
     return attrs
 
 
+def search_select_render_kw(*, placeholder: str | None = None):
+    """Return common render kwargs for searchable select fields."""
+
+    attrs = {"data-search-select": "1"}
+    if placeholder:
+        attrs["data-search-select-placeholder"] = placeholder
+    return attrs
+
+
 def load_unit_choices():
     """Return a list of item unit choices."""
     return [(u.id, u.name) for u in ItemUnit.query.all()]
@@ -1540,10 +1549,16 @@ class TransferItemForm(FlaskForm):
 class TransferForm(FlaskForm):
     # Your existing fields
     from_location_id = SelectField(
-        "From Location", coerce=int, validators=[DataRequired()]
+        "From Location",
+        coerce=int,
+        validators=[DataRequired()],
+        render_kw=search_select_render_kw(placeholder="Search from locations..."),
     )
     to_location_id = SelectField(
-        "To Location", coerce=int, validators=[DataRequired()]
+        "To Location",
+        coerce=int,
+        validators=[DataRequired()],
+        render_kw=search_select_render_kw(placeholder="Search to locations..."),
     )
     items = FieldList(FormField(TransferItemForm), min_entries=1)
     submit = SubmitField("Transfer")
@@ -1561,6 +1576,23 @@ class TransferForm(FlaskForm):
         for item_form in self.items:
             item_form.item.choices = items
             item_form.unit.choices = []
+
+
+class TransferDefaultsForm(FlaskForm):
+    default_transfer_from_location_id = SelectField(
+        "Default Transfer From Location",
+        coerce=int,
+        validators=[Optional()],
+        render_kw=search_select_render_kw(placeholder="Search locations..."),
+    )
+    submit = SubmitField("Update Transfer Defaults")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        locations = Location.query.filter_by(archived=False).order_by(Location.name)
+        self.default_transfer_from_location_id.choices = [
+            (0, "No default")
+        ] + [(location.id, location.name) for location in locations]
 
 
 class UserForm(FlaskForm):

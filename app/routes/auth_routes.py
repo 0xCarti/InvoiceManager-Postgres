@@ -49,6 +49,7 @@ from app.forms import (
     SetPasswordForm,
     SettingsForm,
     TimezoneForm,
+    TransferDefaultsForm,
     UserAccessForm,
     VendorItemAliasForm,
     UserForm,
@@ -879,6 +880,11 @@ def profile():
 
     form = ChangePasswordForm()
     tz_form = TimezoneForm(timezone=current_user.timezone or "")
+    transfer_defaults_form = TransferDefaultsForm(
+        default_transfer_from_location_id=(
+            current_user.default_transfer_from_location_id or 0
+        )
+    )
     notif_form = _build_notification_form(current_user)
     status_messages = {}
     if request.args.get("password_status") == "updated":
@@ -890,9 +896,15 @@ def profile():
             "success",
             "Notification settings updated.",
         )
+    if request.args.get("transfer_defaults_status") == "updated":
+        status_messages["transfer_defaults"] = (
+            "success",
+            "Transfer defaults updated.",
+        )
 
     password_submitted = "new_password" in request.form
     timezone_submitted = "timezone" in request.form
+    transfer_defaults_submitted = "default_transfer_from_location_id" in request.form
     notifications_submitted = _notifications_submitted(request.form)
 
     if password_submitted and form.validate_on_submit():
@@ -910,6 +922,16 @@ def profile():
         current_user.timezone = tz_form.timezone.data or None
         db.session.commit()
         return redirect(url_for("auth.profile", timezone_status="updated"))
+    elif (
+        transfer_defaults_submitted
+        and transfer_defaults_form.validate_on_submit()
+    ):
+        location_id = transfer_defaults_form.default_transfer_from_location_id.data
+        current_user.default_transfer_from_location_id = location_id or None
+        db.session.commit()
+        return redirect(
+            url_for("auth.profile", transfer_defaults_status="updated")
+        )
     elif notifications_submitted and notif_form.validate_on_submit():
         _apply_notification_preferences(current_user, notif_form)
         db.session.commit()
@@ -933,6 +955,7 @@ def profile():
         user=current_user,
         form=form,
         tz_form=tz_form,
+        transfer_defaults_form=transfer_defaults_form,
         notif_form=notif_form,
         operational_notification_groups=_build_operational_notification_groups(
             current_user
@@ -940,6 +963,7 @@ def profile():
         status_messages=status_messages,
         password_submitted=password_submitted,
         timezone_submitted=timezone_submitted,
+        transfer_defaults_submitted=transfer_defaults_submitted,
         notifications_submitted=notifications_submitted,
         transfers=transfers,
         invoices=invoices,
@@ -974,6 +998,11 @@ def user_profile(user_id):
 
     form = SetPasswordForm()
     tz_form = TimezoneForm(timezone=user.timezone or "")
+    transfer_defaults_form = TransferDefaultsForm(
+        default_transfer_from_location_id=(
+            user.default_transfer_from_location_id or 0
+        )
+    )
     notif_form = _build_notification_form(user)
     status_messages = {}
     if request.args.get("password_status") == "updated":
@@ -985,9 +1014,15 @@ def user_profile(user_id):
             "success",
             "Notification settings updated.",
         )
+    if request.args.get("transfer_defaults_status") == "updated":
+        status_messages["transfer_defaults"] = (
+            "success",
+            "Transfer defaults updated.",
+        )
 
     password_submitted = "new_password" in request.form
     timezone_submitted = "timezone" in request.form
+    transfer_defaults_submitted = "default_transfer_from_location_id" in request.form
     notifications_submitted = _notifications_submitted(request.form)
 
     if password_submitted and form.validate_on_submit():
@@ -1004,6 +1039,20 @@ def user_profile(user_id):
         return redirect(
             url_for(
                 "admin.user_profile", user_id=user_id, timezone_status="updated"
+            )
+        )
+    elif (
+        transfer_defaults_submitted
+        and transfer_defaults_form.validate_on_submit()
+    ):
+        location_id = transfer_defaults_form.default_transfer_from_location_id.data
+        user.default_transfer_from_location_id = location_id or None
+        db.session.commit()
+        return redirect(
+            url_for(
+                "admin.user_profile",
+                user_id=user_id,
+                transfer_defaults_status="updated",
             )
         )
     elif notifications_submitted and notif_form.validate_on_submit():
@@ -1033,11 +1082,13 @@ def user_profile(user_id):
         user=user,
         form=form,
         tz_form=tz_form,
+        transfer_defaults_form=transfer_defaults_form,
         notif_form=notif_form,
         operational_notification_groups=_build_operational_notification_groups(user),
         status_messages=status_messages,
         password_submitted=password_submitted,
         timezone_submitted=timezone_submitted,
+        transfer_defaults_submitted=transfer_defaults_submitted,
         notifications_submitted=notifications_submitted,
         transfers=transfers,
         invoices=invoices,

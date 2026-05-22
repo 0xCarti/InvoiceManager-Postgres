@@ -167,13 +167,13 @@
             <div class="col-md-6">
               <div class="form-group">
                 {{ add_form.from_location_id.label(class="form-label") }}
-                {{ add_form.from_location_id(class="form-control") }}
+                {{ add_form.from_location_id(class="form-select") }}
               </div>
             </div>
             <div class="col-md-6">
               <div class="form-group">
                 {{ add_form.to_location_id.label(class="form-label") }}
-                {{ add_form.to_location_id(class="form-control") }}
+                {{ add_form.to_location_id(class="form-select") }}
               </div>
             </div>
           </div>
@@ -209,13 +209,13 @@
             <div class="col-md-6">
               <div class="form-group">
                 {{ edit_form.from_location_id.label(class="form-label") }}
-                {{ edit_form.from_location_id(class="form-control") }}
+                {{ edit_form.from_location_id(class="form-select") }}
               </div>
             </div>
             <div class="col-md-6">
               <div class="form-group">
                 {{ edit_form.to_location_id.label(class="form-label") }}
-                {{ edit_form.to_location_id(class="form-control") }}
+                {{ edit_form.to_location_id(class="form-select") }}
               </div>
             </div>
           </div>
@@ -292,6 +292,28 @@
     const editItemList = document.getElementById('edit-item-list');
     const editTransferForm = document.getElementById('edit-transfer-form');
     const editTransferModalEl = document.getElementById('editTransferModal');
+
+    function setSearchSelectValue(selectId, value) {
+        const select = document.getElementById(selectId);
+        if (!select) {
+            return;
+        }
+        select.value = value == null ? '' : String(value);
+        if (window.jQuery && window.jQuery(select).data('select2')) {
+            window.jQuery(select).trigger('change');
+        }
+    }
+
+    function refreshSearchSelects(root) {
+        if (window.initItemSearchSelects) {
+            window.initItemSearchSelects(root || document);
+        }
+        if (window.jQuery) {
+            window.jQuery(root || document)
+                .find('select[data-search-select="1"]')
+                .trigger('change');
+        }
+    }
 
     let addItemIndex = 0;
     if (addItemInput) {
@@ -373,6 +395,7 @@
                         modal.hide();
                     }
                     this.reset();
+                    refreshSearchSelects(this);
                     if (addItemList) {
                         addItemList.innerHTML = '';
                     }
@@ -453,8 +476,8 @@
         }
         fetch(`/transfers/${id}/json`).then(r => r.json()).then(data => {
             document.getElementById('edit-transfer-id').value = data.id;
-            document.getElementById('edit-from_location_id').value = data.from_location_id;
-            document.getElementById('edit-to_location_id').value = data.to_location_id;
+            setSearchSelectValue('edit-from_location_id', data.from_location_id);
+            setSearchSelectValue('edit-to_location_id', data.to_location_id);
             if (editItemList) {
                 editItemList.innerHTML = '';
             }
