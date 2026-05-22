@@ -1,7 +1,7 @@
 """add user default transfer from location
 
 Revision ID: fc6d7e8f9a0
-Revises: fb5c6d7e8f9
+Revises: f9a0b1c2d3e4
 Create Date: 2026-05-21 23:00:00.000000
 """
 
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "fc6d7e8f9a0"
-down_revision = "fb5c6d7e8f9"
+down_revision = "f9a0b1c2d3e4"
 branch_labels = None
 depends_on = None
 
