@@ -54,6 +54,7 @@ def test_admin_can_update_settings(client, app):
         from app import DEFAULT_TIMEZONE
 
         assert DEFAULT_TIMEZONE == "US/Eastern"
+        assert app.config["DEFAULT_TIMEZONE"] == "US/Eastern"
         auto_setting = Setting.query.filter_by(
             name="AUTO_BACKUP_ENABLED"
         ).first()

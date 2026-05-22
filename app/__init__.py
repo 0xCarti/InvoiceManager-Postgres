@@ -4,10 +4,9 @@ import secrets
 import sys
 import traceback
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone as dt_timezone
 from logging.handlers import RotatingFileHandler
 from urllib.parse import urlsplit
-from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from flask import Flask, Response, abort, flash, g, jsonify, redirect, render_template, request, url_for
@@ -453,6 +452,12 @@ def create_admin_user():
 def create_app(args=None):
     """Application factory used by Flask."""
     global socketio, GST, RETAIL_POP_PRICE, DEFAULT_TIMEZONE, BASE_UNIT_CONVERSIONS
+    from app.utils.timezone import (
+        get_default_timezone_name,
+        get_timezone,
+        normalize_timezone_name,
+    )
+
     if args is None:
         args = sys.argv[1:]
     else:
@@ -485,6 +490,7 @@ def create_app(args=None):
         REMEMBER_COOKIE_DURATION=timedelta(days=7),
     )
     app.config["START_TIME"] = datetime.utcnow()
+    app.config["DEFAULT_TIMEZONE"] = normalize_timezone_name(DEFAULT_TIMEZONE)
     # Use absolute paths so that changing the working directory after app
     # creation does not break file references. This occurs in the test suite
     # which creates the app in a temporary directory and then changes back to
@@ -655,16 +661,16 @@ def create_app(args=None):
 
     from flask_login import current_user
 
+    def _display_timezone():
+        tz_name = getattr(current_user, "timezone", None)
+        if not tz_name:
+            tz_name = get_default_timezone_name()
+        return get_timezone(tz_name)
+
     def format_datetime(value, fmt="%Y-%m-%d %H:%M:%S"):
         if value is None:
             return ""
-        tz_name = getattr(current_user, "timezone", None)
-        if not tz_name:
-            tz_name = DEFAULT_TIMEZONE or "UTC"
-        try:
-            tz = ZoneInfo(tz_name)
-        except Exception:
-            tz = ZoneInfo("UTC")
+        tz = _display_timezone()
         if isinstance(value, date) and not isinstance(value, datetime):
             value = datetime.combine(value, datetime.min.time())
         if isinstance(value, datetime):
@@ -676,6 +682,22 @@ def create_app(args=None):
         return value.strftime(fmt)
 
     app.jinja_env.filters["format_datetime"] = format_datetime
+
+    def format_utc_datetime(value, fmt="%Y-%m-%d %H:%M:%S"):
+        if value is None:
+            return ""
+        tz = _display_timezone()
+        if isinstance(value, date) and not isinstance(value, datetime):
+            value = datetime.combine(value, datetime.min.time()).replace(tzinfo=tz)
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=dt_timezone.utc)
+            value = value.astimezone(tz)
+        if sys.platform.startswith("win"):
+            fmt = fmt.replace("%-", "%#")
+        return value.strftime(fmt)
+
+    app.jinja_env.filters["format_utc_datetime"] = format_utc_datetime
 
     @app.context_processor
     def inject_gst():
@@ -951,7 +973,8 @@ def create_app(args=None):
 
             tz_setting = Setting.query.filter_by(name="DEFAULT_TIMEZONE").first()
             if tz_setting is not None and tz_setting.value:
-                DEFAULT_TIMEZONE = tz_setting.value
+                DEFAULT_TIMEZONE = normalize_timezone_name(tz_setting.value)
+                app.config["DEFAULT_TIMEZONE"] = DEFAULT_TIMEZONE
 
             auto_setting = Setting.query.filter_by(name="AUTO_BACKUP_ENABLED").first()
             interval_value_setting = Setting.query.filter_by(

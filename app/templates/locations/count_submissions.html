@@ -111,7 +111,7 @@
                         <div class="small text-muted">
                             {{ submission.submission_date.strftime('%Y-%m-%d') }}
                             {% if submission.submitted_at %}
-                            &middot; {{ submission.submitted_at.strftime('%H:%M') }}
+                            &middot; {{ submission.submitted_at|format_utc_datetime('%H:%M') }}
                             {% endif %}
                         </div>
                     </td>

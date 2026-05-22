@@ -114,7 +114,7 @@
             <div class="card h-100">
                 <div class="card-body">
                     <div class="small text-muted">Last Submission</div>
-                    <div class="h6 mb-0">{{ latest_count_submission_at.strftime('%Y-%m-%d %H:%M') if latest_count_submission_at else 'Never' }}</div>
+                    <div class="h6 mb-0">{{ latest_count_submission_at|format_utc_datetime('%Y-%m-%d %H:%M') if latest_count_submission_at else 'Never' }}</div>
                 </div>
             </div>
         </div>
@@ -204,7 +204,7 @@
                                 <tr>
                                     <td class="mobile-card-primary">
                                         <div>{{ submission.submitted_name }}</div>
-                                        <div class="small text-muted">{{ submission.submitted_at.strftime('%Y-%m-%d %H:%M') if submission.submitted_at else 'Unknown' }}</div>
+                                        <div class="small text-muted">{{ submission.submitted_at|format_utc_datetime('%Y-%m-%d %H:%M') if submission.submitted_at else 'Unknown' }}</div>
                                     </td>
                                     <td>{{ submission_type_label(submission.submission_type) }}</td>
                                     <td>

@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
 from app import db
@@ -133,6 +133,72 @@ def test_public_count_submission_blocks_closing_until_opening_exists(client, app
     response = client.get(scan_url)
     assert response.status_code == 200
     assert b'value="closing" selected' in response.data
+
+
+def test_public_count_submission_uses_default_timezone_for_event_mapping(
+    client, app, monkeypatch
+):
+    from app.utils import timezone as timezone_utils
+
+    local_event_date = date(2026, 5, 21)
+    with app.app_context():
+        app.config["DEFAULT_TIMEZONE"] = "american/winnipeg"
+        suffix = uuid4().hex[:8]
+        location = Location(name=f"Late Count Stand {suffix}")
+        item = Item(name=f"Late Count Item {suffix}", base_unit="each")
+        db.session.add_all([location, item])
+        db.session.flush()
+
+        db.session.add(
+            LocationStandItem(
+                location_id=location.id,
+                item_id=item.id,
+                countable=True,
+                expected_count=0.0,
+            )
+        )
+        event = Event(
+            name=f"Late Count Event {suffix}",
+            start_date=local_event_date,
+            end_date=local_event_date,
+        )
+        db.session.add(event)
+        db.session.flush()
+
+        event_location = EventLocation(
+            event_id=event.id,
+            location_id=location.id,
+        )
+        db.session.add(event_location)
+        db.session.commit()
+
+        token = location.count_qr_token
+        item_id = item.id
+        event_location_id = event_location.id
+
+    monkeypatch.setattr(
+        timezone_utils,
+        "utc_now",
+        lambda: datetime(2026, 5, 22, 0, 54, tzinfo=timezone.utc),
+    )
+
+    response = client.post(
+        f"/locations/scan/{token}",
+        data={
+            "submitted_name": "Night Crew",
+            "submission_type": "opening",
+            f"count_{item_id}": "8",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Opening count submitted for manager review." in response.data
+
+    with app.app_context():
+        submission = LocationCountSubmission.query.one()
+        assert submission.submission_date == local_event_date
+        assert submission.event_location_id == event_location_id
 
 
 def test_public_count_submission_renders_mobile_numeric_entry_inputs(client, app):

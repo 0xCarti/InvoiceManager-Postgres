@@ -84,6 +84,7 @@ from app.utils.text import (
     normalize_text_match_mode,
 )
 from app.utils.email import SMTPConfigurationError, send_email
+from app.utils.timezone import default_timezone_date
 
 location = Blueprint("locations", __name__)
 
@@ -216,10 +217,10 @@ def _safe_next_url(raw_value: str | None) -> str | None:
     return sanitized
 
 
-def _current_count_submission_date() -> date_cls:
+def _current_count_submission_date(reference_time: datetime | None = None) -> date_cls:
     """Return the local date used for public count submissions."""
 
-    return datetime.now().date()
+    return default_timezone_date(reference_time)
 
 
 def _count_submission_is_editable(submission: LocationCountSubmission) -> bool:

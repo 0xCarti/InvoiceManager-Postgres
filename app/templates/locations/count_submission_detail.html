@@ -28,7 +28,7 @@
                 </span>
                 {% if submission.reviewed_at %}
                 <span class="badge text-bg-light border text-dark">
-                    Reviewed {{ submission.reviewed_at.strftime('%Y-%m-%d %H:%M') }}
+                    Reviewed {{ submission.reviewed_at|format_utc_datetime('%Y-%m-%d %H:%M') }}
                 </span>
                 {% endif %}
                 {% if submission.status == 'approved' %}
@@ -83,7 +83,7 @@
             <div class="card h-100">
                 <div class="card-body">
                     <div class="small text-muted">Submitted At</div>
-                    <div class="h6 mb-0">{{ submission.submitted_at.strftime('%Y-%m-%d %H:%M') if submission.submitted_at else 'Unknown' }}</div>
+                    <div class="h6 mb-0">{{ submission.submitted_at|format_utc_datetime('%Y-%m-%d %H:%M') if submission.submitted_at else 'Unknown' }}</div>
                 </div>
             </div>
         </div>

@@ -63,3 +63,25 @@ def test_format_datetime_localizes_naive_values(app):
             assert fmt(naive_datetime, "%Y-%m-%d %H:%M") == "2024-03-15 05:00"
 
             logout_user()
+
+
+def test_format_utc_datetime_converts_naive_utc_values(app):
+    with app.app_context():
+        user = User(
+            email="utcdisplay@example.com",
+            password="pass",
+            active=True,
+            timezone="America/Winnipeg",
+        )
+        db.session.add(user)
+        db.session.commit()
+
+        fmt = app.jinja_env.filters["format_utc_datetime"]
+        submitted_at = datetime(2026, 5, 22, 0, 54, 0)
+
+        with app.test_request_context():
+            login_user(user)
+
+            assert fmt(submitted_at, "%Y-%m-%d %H:%M") == "2026-05-21 19:54"
+
+            logout_user()

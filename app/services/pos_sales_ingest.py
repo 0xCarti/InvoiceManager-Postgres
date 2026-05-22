@@ -6,7 +6,6 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone as dt_timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from flask import current_app
 from sqlalchemy.exc import IntegrityError
@@ -35,6 +34,7 @@ from app.utils.pos_import import (
     parse_terminal_sales_number,
     terminal_sales_cell_is_blank,
 )
+from app.utils.timezone import get_default_timezone
 
 
 class EmptyPosSalesImportError(ValueError):
@@ -61,11 +61,7 @@ def _get_pos_sales_import_interval() -> tuple[int, str]:
 def _default_sales_import_date(received_at: datetime | None = None):
     """Infer the business date for an imported POS sales file."""
 
-    tz_name = current_app.config.get("DEFAULT_TIMEZONE") or "UTC"
-    try:
-        tz = ZoneInfo(tz_name)
-    except Exception:
-        tz = ZoneInfo("UTC")
+    tz = get_default_timezone()
     interval_value, interval_unit = _get_pos_sales_import_interval()
     reference_time = received_at or datetime.now(dt_timezone.utc)
     if reference_time.tzinfo is None:

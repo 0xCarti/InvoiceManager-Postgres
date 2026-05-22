@@ -133,6 +133,7 @@ from app.utils.units import (
 )
 from app.utils.pos_import import normalize_pos_alias
 from app.utils.text import build_text_match_predicate
+from app.utils.timezone import normalize_timezone_name
 
 auth = Blueprint("auth", __name__)
 admin = Blueprint("admin", __name__)
@@ -2338,9 +2339,10 @@ def settings():
     receive_defaults = Setting.get_receive_location_defaults()
     enabled_import_vendors = Setting.get_enabled_purchase_import_vendors()
     pos_sales_import_interval = Setting.get_pos_sales_import_interval()
+    default_timezone = normalize_timezone_name(tz_setting.value or "UTC")
     settings_snapshot = {
         "gst_number": gst_setting.value or "",
-        "default_timezone": tz_setting.value or "UTC",
+        "default_timezone": default_timezone,
         "auto_backup_enabled": auto_setting.value == "1",
         "auto_backup_interval": (
             int(interval_value_setting.value),
@@ -2364,7 +2366,7 @@ def settings():
 
     form = SettingsForm(
         gst_number=gst_setting.value,
-        default_timezone=tz_setting.value,
+        default_timezone=default_timezone,
         auto_backup_enabled=auto_setting.value == "1",
         auto_backup_interval_value=int(interval_value_setting.value),
         auto_backup_interval_unit=interval_unit_setting.value,
@@ -2419,7 +2421,9 @@ def settings():
                 receive_location_updates[department] = field.data
 
         new_gst_number = form.gst_number.data or ""
-        new_default_timezone = form.default_timezone.data or "UTC"
+        new_default_timezone = normalize_timezone_name(
+            form.default_timezone.data or "UTC"
+        )
         new_auto_backup_enabled = bool(form.auto_backup_enabled.data)
         new_auto_backup_interval = (
             form.auto_backup_interval_value.data,
@@ -2489,6 +2493,7 @@ def settings():
             retail_pop_price_setting.value or "0.00"
         )
         app.DEFAULT_TIMEZONE = tz_setting.value
+        current_app.config["DEFAULT_TIMEZONE"] = app.DEFAULT_TIMEZONE
         current_app.config["AUTO_BACKUP_ENABLED"] = (
             form.auto_backup_enabled.data
         )

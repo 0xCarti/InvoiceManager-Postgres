@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from calendar import monthrange
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone as dt_timezone
+from datetime import date, datetime, timedelta
 from typing import Iterable, List
-from zoneinfo import ZoneInfo
 
-from flask import current_app
 from flask_login import current_user
 from app.models import Event
+from app.utils.timezone import get_default_timezone_name, get_timezone, utc_now
 
 
 @dataclass
@@ -29,7 +28,7 @@ class CalendarDay:
 def _utcnow() -> datetime:
     """Return the current UTC datetime for computing local dates."""
 
-    return datetime.now(dt_timezone.utc)
+    return utc_now()
 
 
 def current_user_today(today: date | None = None) -> date:
@@ -38,18 +37,8 @@ def current_user_today(today: date | None = None) -> date:
     if today is not None:
         return today
 
-    tz_name = getattr(current_user, "timezone", None)
-    if not tz_name:
-        tz_name = current_app.config.get("DEFAULT_TIMEZONE") if current_app else None
-    if not tz_name:
-        import app as app_module
-
-        tz_name = getattr(app_module, "DEFAULT_TIMEZONE", None)
-    tz_name = tz_name or "UTC"
-    try:
-        tz = ZoneInfo(tz_name)
-    except Exception:
-        tz = ZoneInfo("UTC")
+    tz_name = getattr(current_user, "timezone", None) or get_default_timezone_name()
+    tz = get_timezone(tz_name)
 
     return _utcnow().astimezone(tz).date()
 
