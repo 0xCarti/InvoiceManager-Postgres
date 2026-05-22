@@ -146,15 +146,19 @@ def upgrade():
         end_date = max(event_row.start_date, event_row.end_date)
         current_date = start_date
         while current_date <= end_date:
-            result = bind.execute(
+            bind.execute(
                 operating_day_table.insert().values(
                     event_location_id=event_location.id,
                     operating_date=current_date,
                 )
             )
-            operating_day_ids[(event_location.id, current_date)] = (
-                result.inserted_primary_key[0]
-            )
+            operating_day_id = bind.execute(
+                sa.select(operating_day_table.c.id).where(
+                    operating_day_table.c.event_location_id == event_location.id,
+                    operating_day_table.c.operating_date == current_date,
+                )
+            ).scalar_one()
+            operating_day_ids[(event_location.id, current_date)] = operating_day_id
             current_date = current_date + timedelta(days=1)
 
     for submission in bind.execute(
