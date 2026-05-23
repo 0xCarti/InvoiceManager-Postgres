@@ -4037,6 +4037,15 @@ class EventLocationOperatingDay(db.Model):
         nullable=False,
     )
     operating_date = db.Column(db.Date, nullable=False)
+    confirmed = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
+    confirmed_at = db.Column(db.DateTime, nullable=True)
+    confirmed_by_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at = db.Column(
         db.DateTime,
         nullable=False,
@@ -4054,6 +4063,7 @@ class EventLocationOperatingDay(db.Model):
     event_location = relationship(
         "EventLocation", back_populates="operating_days"
     )
+    confirmed_by = relationship("User")
     count_submissions = relationship(
         "LocationCountSubmission",
         back_populates="event_operating_day",

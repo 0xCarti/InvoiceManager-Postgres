@@ -3692,7 +3692,7 @@ class EventLocationForm(FlaskForm):
     location_id = SelectMultipleField(
         "Locations", coerce=int, validators=[DataRequired()]
     )
-    submit = SubmitField("Submit")
+    submit = SubmitField("Add Locations")
 
     def __init__(self, event_id=None, *args, **kwargs):
         super(EventLocationForm, self).__init__(*args, **kwargs)

@@ -16,50 +16,54 @@
             {% endfor %}
         </div>
         {% endif %}
-        <form method="post" class="card">
+        {% set selected_location_ids = form.location_id.data or [] %}
+        <form method="post" class="card" data-location-picker>
             <div class="card-body">
                 {{ form.csrf_token }}
                 <div class="mb-3">
                     {{ form.location_id.label(class='form-label') }}
-                    <div class="border rounded p-3">
+                    <input
+                        type="search"
+                        class="form-control"
+                        data-location-search
+                        autocomplete="off"
+                        placeholder="Search locations"
+                    >
+                    <div class="list-group mt-2" data-location-results></div>
+                    <div class="border rounded p-3 mt-3" data-selected-locations>
                         {% for location_id, location_name in form.location_id.choices %}
-                        <div class="py-2{% if not loop.last %} border-bottom{% endif %}">
-                            <div class="form-check">
-                                <input
-                                    class="form-check-input"
-                                    type="checkbox"
-                                    name="{{ form.location_id.name }}"
-                                    id="location-{{ location_id }}"
-                                    value="{{ location_id }}"
-                                    {% if location_id in (form.location_id.data or []) %}checked{% endif %}
-                                >
-                                <label class="form-check-label fw-semibold" for="location-{{ location_id }}">
-                                    {{ location_name }}
-                                </label>
-                            </div>
-                            {% if event_dates|length > 1 %}
-                            <div class="d-flex flex-wrap gap-2 mt-2 ms-4">
-                                {% for event_date in event_dates %}
-                                <div class="form-check form-check-inline mb-0">
-                                    <input
-                                        class="form-check-input"
-                                        type="checkbox"
-                                        name="open_dates_{{ location_id }}"
-                                        id="open-date-{{ location_id }}-{{ event_date.isoformat() }}"
-                                        value="{{ event_date.isoformat() }}"
-                                        checked
-                                    >
-                                    <label class="form-check-label small" for="open-date-{{ location_id }}-{{ event_date.isoformat() }}">
-                                        {{ event_date.strftime('%a %b') }} {{ event_date.day }}
-                                    </label>
+                            {% if location_id in selected_location_ids %}
+                            <div class="selected-location py-2{% if not loop.last %} border-bottom{% endif %}" data-selected-location="{{ location_id }}">
+                                <div class="d-flex justify-content-between gap-3">
+                                    <div class="fw-semibold">{{ location_name }}</div>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" data-remove-location="{{ location_id }}">Remove</button>
                                 </div>
-                                {% endfor %}
+                                <input type="hidden" name="{{ form.location_id.name }}" value="{{ location_id }}">
+                                {% if event_dates|length > 1 %}
+                                <div class="d-flex flex-wrap gap-2 mt-2">
+                                    {% set selected_dates = selected_open_dates_by_location_id.get(location_id, event_dates) %}
+                                    {% for event_date in event_dates %}
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input
+                                            class="form-check-input"
+                                            type="checkbox"
+                                            name="open_dates_{{ location_id }}"
+                                            id="open-date-{{ location_id }}-{{ event_date.isoformat() }}"
+                                            value="{{ event_date.isoformat() }}"
+                                            {% if event_date in selected_dates %}checked{% endif %}
+                                        >
+                                        <label class="form-check-label small" for="open-date-{{ location_id }}-{{ event_date.isoformat() }}">
+                                            {{ event_date.strftime('%a %b') }} {{ event_date.day }}
+                                        </label>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                {% endif %}
                             </div>
                             {% endif %}
-                        </div>
                         {% endfor %}
                     </div>
-                    <small class="form-text text-muted">Selected locations are open on every event day by default. Clear a day only when that location will be closed.</small>
+                    <small class="form-text text-muted">Added locations are open on every event day by default. Clear a day only when that location will be closed.</small>
                 </div>
                 {{ form.submit(class='btn btn-primary w-100') }}
             </div>
@@ -67,4 +71,176 @@
     </div>
 </div>
 </div>
+{% endblock %}
+{% block scripts %}
+    {{ super() }}
+    <script nonce="{{ csp_nonce }}">
+        document.addEventListener('DOMContentLoaded', function () {
+            const form = document.querySelector('[data-location-picker]');
+            if (!form) {
+                return;
+            }
+
+            const locations = {{ form.location_id.choices | map('list') | list | tojson }};
+            const eventDates = {{ event_date_options | tojson }};
+            const searchInput = form.querySelector('[data-location-search]');
+            const results = form.querySelector('[data-location-results]');
+            const selectedContainer = form.querySelector('[data-selected-locations]');
+            const selected = new Set(
+                Array.from(selectedContainer.querySelectorAll('[data-selected-location]'))
+                    .map((node) => String(node.dataset.selectedLocation))
+            );
+
+            function renderSelectedEmptyState() {
+                let emptyState = selectedContainer.querySelector('[data-empty-state]');
+                if (selected.size === 0) {
+                    if (!emptyState) {
+                        emptyState = document.createElement('div');
+                        emptyState.className = 'text-muted small';
+                        emptyState.dataset.emptyState = '1';
+                        emptyState.textContent = 'No locations selected yet.';
+                        selectedContainer.appendChild(emptyState);
+                    }
+                } else if (emptyState) {
+                    emptyState.remove();
+                }
+            }
+
+            function renderResults() {
+                const query = searchInput.value.trim().toLowerCase();
+                results.innerHTML = '';
+                if (!query) {
+                    const helper = document.createElement('div');
+                    helper.className = 'list-group-item text-muted small';
+                    helper.textContent = 'Type to search for a location.';
+                    results.appendChild(helper);
+                    return;
+                }
+
+                const matches = locations
+                    .filter(([id, name]) => !selected.has(String(id)) && String(name).toLowerCase().includes(query))
+                    .slice(0, 8);
+
+                if (matches.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'list-group-item text-muted small';
+                    empty.textContent = 'No matching available locations.';
+                    results.appendChild(empty);
+                    return;
+                }
+
+                matches.forEach(([id, name]) => {
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center';
+                    button.dataset.addLocation = String(id);
+                    button.textContent = String(name);
+
+                    const badge = document.createElement('span');
+                    badge.className = 'badge text-bg-light border text-dark';
+                    badge.textContent = 'Add';
+                    button.appendChild(badge);
+                    results.appendChild(button);
+                });
+            }
+
+            function addLocation(id, name) {
+                const locationId = String(id);
+                if (selected.has(locationId)) {
+                    return;
+                }
+                selected.add(locationId);
+
+                const wrapper = document.createElement('div');
+                wrapper.className = 'selected-location py-2 border-bottom';
+                wrapper.dataset.selectedLocation = locationId;
+
+                const header = document.createElement('div');
+                header.className = 'd-flex justify-content-between gap-3';
+
+                const title = document.createElement('div');
+                title.className = 'fw-semibold';
+                title.textContent = String(name);
+                header.appendChild(title);
+
+                const removeButton = document.createElement('button');
+                removeButton.type = 'button';
+                removeButton.className = 'btn btn-sm btn-outline-danger';
+                removeButton.dataset.removeLocation = locationId;
+                removeButton.textContent = 'Remove';
+                header.appendChild(removeButton);
+                wrapper.appendChild(header);
+
+                const hidden = document.createElement('input');
+                hidden.type = 'hidden';
+                hidden.name = {{ form.location_id.name | tojson }};
+                hidden.value = locationId;
+                wrapper.appendChild(hidden);
+
+                if (eventDates.length > 1) {
+                    const dateWrap = document.createElement('div');
+                    dateWrap.className = 'd-flex flex-wrap gap-2 mt-2';
+                    eventDates.forEach((dateOption) => {
+                        const checkId = `open-date-${locationId}-${dateOption.value}`;
+                        const checkWrap = document.createElement('div');
+                        checkWrap.className = 'form-check form-check-inline mb-0';
+
+                        const checkbox = document.createElement('input');
+                        checkbox.className = 'form-check-input';
+                        checkbox.type = 'checkbox';
+                        checkbox.name = `open_dates_${locationId}`;
+                        checkbox.id = checkId;
+                        checkbox.value = dateOption.value;
+                        checkbox.checked = true;
+                        checkWrap.appendChild(checkbox);
+
+                        const label = document.createElement('label');
+                        label.className = 'form-check-label small';
+                        label.htmlFor = checkId;
+                        label.textContent = dateOption.label;
+                        checkWrap.appendChild(label);
+                        dateWrap.appendChild(checkWrap);
+                    });
+                    wrapper.appendChild(dateWrap);
+                }
+
+                selectedContainer.appendChild(wrapper);
+                renderSelectedEmptyState();
+                renderResults();
+            }
+
+            results.addEventListener('click', function (event) {
+                const button = event.target.closest('[data-add-location]');
+                if (!button) {
+                    return;
+                }
+                const location = locations.find(([id]) => String(id) === String(button.dataset.addLocation));
+                if (!location) {
+                    return;
+                }
+                addLocation(location[0], location[1]);
+                searchInput.value = '';
+                searchInput.focus();
+                renderResults();
+            });
+
+            selectedContainer.addEventListener('click', function (event) {
+                const button = event.target.closest('[data-remove-location]');
+                if (!button) {
+                    return;
+                }
+                selected.delete(String(button.dataset.removeLocation));
+                const selectedNode = button.closest('[data-selected-location]');
+                if (selectedNode) {
+                    selectedNode.remove();
+                }
+                renderSelectedEmptyState();
+                renderResults();
+            });
+
+            searchInput.addEventListener('input', renderResults);
+            renderSelectedEmptyState();
+            renderResults();
+        });
+    </script>
 {% endblock %}

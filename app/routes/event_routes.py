@@ -818,10 +818,20 @@ def _build_event_day_summaries(event_obj: Event) -> list[SimpleNamespace]:
                 [],
             )
             sales_rows = sales_by_key.get((event_location.id, operating_date), [])
+            operating_day = next(
+                (
+                    day
+                    for day in (event_location.operating_days or [])
+                    if day.operating_date == operating_date
+                ),
+                None,
+            )
             location_entries.append(
                 SimpleNamespace(
+                    operating_day=operating_day,
                     event_location=event_location,
                     location=event_location.location,
+                    day_confirmed=bool(operating_day and operating_day.confirmed),
                     opening_status=_event_day_status(opening_submissions),
                     closing_status=_event_day_status(closing_submissions),
                     opening_submission_count=len(opening_submissions),
@@ -836,6 +846,36 @@ def _build_event_day_summaries(event_obj: Event) -> list[SimpleNamespace]:
             SimpleNamespace(date=operating_date, locations=location_entries)
         )
     return summaries
+
+
+def _set_operating_day_confirmation(
+    operating_day: EventLocationOperatingDay, confirmed: bool
+) -> None:
+    operating_day.confirmed = confirmed
+    if confirmed:
+        operating_day.confirmed_at = datetime.utcnow()
+        operating_day.confirmed_by_user_id = current_user.id
+    else:
+        operating_day.confirmed_at = None
+        operating_day.confirmed_by_user_id = None
+
+
+def _sync_event_location_confirmation_from_days(
+    event_location: EventLocation,
+) -> None:
+    operating_days = ensure_event_location_operating_days(event_location)
+    if not operating_days:
+        event_location.confirmed = False
+        return
+    event_location.confirmed = all(day.confirmed for day in operating_days)
+
+
+def _set_event_location_all_days_confirmed(
+    event_location: EventLocation, confirmed: bool
+) -> None:
+    for operating_day in ensure_event_location_operating_days(event_location):
+        _set_operating_day_confirmation(operating_day, confirmed)
+    _sync_event_location_confirmation_from_days(event_location)
 
 
 def _convert_report_value_to_base(value, base_unit, report_unit):
@@ -1570,6 +1610,7 @@ def view_event(event_id):
         event=ev,
         event_type_label=type_labels.get(ev.event_type, ev.event_type),
         opening_form=opening_form,
+        day_action_form=CSRFOnlyForm(),
         document_upload_form=EventDocumentUploadForm(),
         document_action_form=CSRFOnlyForm(),
         event_documents=event_documents,
@@ -1918,14 +1959,18 @@ def add_location(event_id):
         abort(404)
     form = EventLocationForm(event_id=event_id)
     event_dates = event_operating_dates(ev)
-    if not form.location_id.choices:
-        flash("All available locations have already been assigned to this event.")
-        return redirect(url_for("event.view_event", event_id=event_id))
-    if form.validate_on_submit():
-        selected_ids = form.location_id.data
-        valid_event_dates = set(event_dates)
+    event_date_options = [
+        {
+            "value": event_date.isoformat(),
+            "label": f"{event_date.strftime('%a %b')} {event_date.day}",
+        }
+        for event_date in event_dates
+    ]
+    valid_event_dates = set(event_dates)
+
+    def _posted_open_dates(location_ids: list[int]) -> dict[int, set[date_cls]]:
         open_dates_by_location_id: dict[int, set[date_cls]] = {}
-        for location_id in selected_ids:
+        for location_id in location_ids:
             selected_date_values: set[date_cls] = set()
             for raw_date in request.form.getlist(f"open_dates_{location_id}"):
                 try:
@@ -1937,6 +1982,24 @@ def add_location(event_id):
             open_dates_by_location_id[location_id] = (
                 selected_date_values or valid_event_dates
             )
+        return open_dates_by_location_id
+
+    selected_open_dates_by_location_id: dict[int, set[date_cls]] = {}
+    if request.method == "POST":
+        posted_location_ids: list[int] = []
+        for raw_location_id in request.form.getlist(form.location_id.name):
+            try:
+                posted_location_ids.append(int(raw_location_id))
+            except (TypeError, ValueError):
+                continue
+        selected_open_dates_by_location_id = _posted_open_dates(posted_location_ids)
+
+    if not form.location_id.choices:
+        flash("All available locations have already been assigned to this event.")
+        return redirect(url_for("event.view_event", event_id=event_id))
+    if form.validate_on_submit():
+        selected_ids = form.location_id.data
+        open_dates_by_location_id = _posted_open_dates(selected_ids)
         conflicts = _find_terminal_sales_event_location_conflicts(
             start_date=ev.start_date,
             end_date=ev.end_date,
@@ -1952,6 +2015,8 @@ def add_location(event_id):
                 form=form,
                 event=ev,
                 event_dates=event_dates,
+                event_date_options=event_date_options,
+                selected_open_dates_by_location_id=selected_open_dates_by_location_id,
                 terminal_sales_conflict_guidance=_TERMINAL_SALES_CONFLICT_GUIDANCE,
             )
         event_locations = []
@@ -1998,8 +2063,98 @@ def add_location(event_id):
         form=form,
         event=ev,
         event_dates=event_dates,
+        event_date_options=event_date_options,
+        selected_open_dates_by_location_id=selected_open_dates_by_location_id,
         terminal_sales_conflict_guidance=_TERMINAL_SALES_CONFLICT_GUIDANCE,
     )
+
+
+@event.route(
+    "/events/<int:event_id>/operating-days/<int:day_id>/confirm",
+    methods=["POST"],
+)
+@login_required
+def confirm_event_location_day(event_id, day_id):
+    operating_day = db.session.get(EventLocationOperatingDay, day_id)
+    if (
+        operating_day is None
+        or operating_day.event_location is None
+        or operating_day.event_location.event_id != event_id
+    ):
+        abort(404)
+
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Unable to confirm that event day. Please try again.", "warning")
+        return redirect(url_for("event.view_event", event_id=event_id))
+
+    event_location = operating_day.event_location
+    if event_location.event.closed:
+        flash(
+            "This event is closed and event-day confirmations cannot be changed.",
+            "warning",
+        )
+        return redirect(url_for("event.view_event", event_id=event_id))
+
+    _set_operating_day_confirmation(operating_day, True)
+    _sync_event_location_confirmation_from_days(event_location)
+    db.session.commit()
+    location_name = (
+        event_location.location.name if event_location.location else "Location"
+    )
+    log_activity(
+        "Confirmed event day %s for event location %s"
+        % (operating_day.operating_date, event_location.id)
+    )
+    flash(
+        f"{location_name} confirmed for {operating_day.operating_date}.",
+        "success",
+    )
+    return redirect(url_for("event.view_event", event_id=event_id))
+
+
+@event.route(
+    "/events/<int:event_id>/operating-days/<int:day_id>/undo-confirm",
+    methods=["POST"],
+)
+@login_required
+def undo_confirm_event_location_day(event_id, day_id):
+    operating_day = db.session.get(EventLocationOperatingDay, day_id)
+    if (
+        operating_day is None
+        or operating_day.event_location is None
+        or operating_day.event_location.event_id != event_id
+    ):
+        abort(404)
+
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Unable to reopen that event day. Please try again.", "warning")
+        return redirect(url_for("event.view_event", event_id=event_id))
+
+    event_location = operating_day.event_location
+    if event_location.event.closed:
+        flash(
+            "This event is closed and event-day confirmations cannot be changed.",
+            "warning",
+        )
+        return redirect(url_for("event.view_event", event_id=event_id))
+
+    _set_operating_day_confirmation(operating_day, False)
+    _sync_event_location_confirmation_from_days(event_location)
+    db.session.commit()
+    location_name = (
+        event_location.location.name if event_location.location else "Location"
+    )
+    log_activity(
+        "Reopened event day %s for event location %s"
+        % (operating_day.operating_date, event_location.id)
+    )
+    flash(
+        f"{location_name} reopened for {operating_day.operating_date}.",
+        "success",
+    )
+    return redirect(url_for("event.view_event", event_id=event_id))
 
 
 @event.route(
@@ -4966,7 +5121,7 @@ def confirm_location(event_id, el_id):
             summary_record.total_quantity = total_quantity
             summary_record.total_amount = total_amount
 
-        el.confirmed = True
+        _set_event_location_all_days_confirmed(el, True)
         db.session.commit()
         log_activity(
             f"Confirmed event location {el_id} for event {event_id}"
@@ -5353,7 +5508,7 @@ def undo_confirm_location(event_id, el_id):
         flash("This location has not been confirmed.", "warning")
         return redirect(url_for("event.view_event", event_id=event_id))
 
-    el.confirmed = False
+    _set_event_location_all_days_confirmed(el, False)
     db.session.commit()
 
     log_activity(
@@ -5805,7 +5960,7 @@ def count_sheet(event_id, location_id):
             sheet.transferred_in = trans_qty
             sheet.transferred_out = base_qty
             sheet.closing_count = total
-        el.confirmed = True
+        _set_event_location_all_days_confirmed(el, True)
         db.session.commit()
         log_activity(
             f"Updated count sheet for event {event_id} location {location_id}"
