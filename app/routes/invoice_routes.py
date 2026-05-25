@@ -51,6 +51,13 @@ class InvoiceFilterError(Exception):
         self.field = field
 
 
+def _invoice_line_quantity_value(value):
+    parsed = coerce_float(value, default=None)
+    if parsed is None:
+        raise InvoiceCreationError("Each invoice line needs a valid quantity.")
+    return parsed
+
+
 def _parse_invoice_override_flag(raw_value):
     """Return a normalized invoice tax override flag."""
 
@@ -88,6 +95,7 @@ def _parse_legacy_invoice_product_entries(raw_product_data):
                 "line_type": "catalog",
                 "product_name": product_name,
                 "quantity": quantity_value,
+                "unit_price": None,
                 "override_gst": _parse_invoice_override_flag(override_gst),
                 "override_pst": _parse_invoice_override_flag(override_pst),
             }
@@ -171,19 +179,26 @@ def _parse_json_invoice_product_entries(raw_product_data):
             )
             continue
 
-        entries.append(
-            {
-                "line_type": "catalog",
-                "product_name": product_name,
-                "quantity": quantity_value,
-                "override_gst": _parse_invoice_override_flag(
-                    raw_entry.get("override_gst")
-                ),
-                "override_pst": _parse_invoice_override_flag(
-                    raw_entry.get("override_pst")
-                ),
-            }
-        )
+        catalog_entry = {
+            "line_type": "catalog",
+            "product_name": product_name,
+            "quantity": quantity_value,
+            "override_gst": _parse_invoice_override_flag(
+                raw_entry.get("override_gst")
+            ),
+            "override_pst": _parse_invoice_override_flag(
+                raw_entry.get("override_pst")
+            ),
+        }
+        raw_unit_price = raw_entry.get("unit_price")
+        if raw_unit_price not in (None, ""):
+            unit_price = coerce_float(raw_unit_price, default=None)
+            if unit_price is None:
+                raise InvoiceCreationError("Each catalog line needs a valid price.")
+            catalog_entry["unit_price"] = unit_price
+        else:
+            catalog_entry["unit_price"] = None
+        entries.append(catalog_entry)
 
     return entries
 
@@ -197,6 +212,154 @@ def _parse_invoice_product_entries(raw_product_data):
     if raw_text.startswith("["):
         return _parse_json_invoice_product_entries(raw_text)
     return _parse_legacy_invoice_product_entries(raw_text)
+
+
+def _adjust_catalog_inventory(product, quantity, *, reverse=False):
+    if product is None:
+        return
+    direction = 1 if reverse else -1
+    product.quantity = (product.quantity or 0) + (direction * quantity)
+
+    for recipe_item in product.recipe_items:
+        item = recipe_item.item
+        if item is None:
+            continue
+        units_per_sale = recipe_item_base_units_per_sale(recipe_item)
+        if units_per_sale <= 0:
+            continue
+        item.quantity = (item.quantity or 0) + (
+            direction * units_per_sale * quantity
+        )
+
+
+def _reverse_invoice_inventory(invoice_record):
+    for invoice_product in list(invoice_record.products or []):
+        if invoice_product.is_custom_line:
+            continue
+        _adjust_catalog_inventory(
+            invoice_product.product,
+            float(invoice_product.quantity or 0.0),
+            reverse=True,
+        )
+
+
+def _delete_invoice_lines(invoice_record):
+    for invoice_product in list(invoice_record.products or []):
+        db.session.delete(invoice_product)
+    db.session.flush()
+
+
+def _build_invoice_lines_from_entries(
+    invoice_record,
+    customer,
+    parsed_entries,
+    *,
+    preserve_catalog_unit_prices=False,
+):
+    product_names = {
+        entry["product_name"]
+        for entry in parsed_entries
+        if entry.get("line_type") == "catalog"
+    }
+
+    products = (
+        Product.query.filter(Product.name.in_(product_names)).all()
+        if product_names
+        else []
+    )
+    product_lookup = {p.name: p for p in products}
+    created_line_count = 0
+    line_items_to_log = []
+
+    for entry in parsed_entries:
+        line_type = entry.get("line_type", "catalog")
+        product_name = entry["product_name"]
+        quantity = _invoice_line_quantity_value(entry["quantity"])
+        if line_type == "custom":
+            unit_price = float(entry["unit_price"])
+            additional_fee = float(entry.get("additional_fee", 0.0) or 0.0)
+            line_subtotal = (quantity * unit_price) + additional_fee
+
+            invoice_product = InvoiceProduct(
+                invoice_id=invoice_record.id,
+                product_id=None,
+                is_custom_line=True,
+                product_name=product_name,
+                quantity=quantity,
+                override_gst=None,
+                override_pst=None,
+                unit_price=unit_price,
+                line_subtotal=line_subtotal,
+                line_gst=float(entry.get("line_gst", 0.0) or 0.0),
+                line_pst=float(entry.get("line_pst", 0.0) or 0.0),
+            )
+            db.session.add(invoice_product)
+            created_line_count += 1
+            line_items_to_log.append(
+                {"product_name": product_name, "quantity": quantity}
+            )
+            continue
+
+        override_gst = entry["override_gst"]
+        override_pst = entry["override_pst"]
+        product = product_lookup.get(product_name)
+
+        if product:
+            if preserve_catalog_unit_prices and entry.get("unit_price") is not None:
+                unit_price = float(entry["unit_price"])
+            else:
+                invoice_price = product.invoice_sale_price
+                unit_price = (
+                    float(invoice_price)
+                    if invoice_price is not None
+                    else float(product.price)
+                )
+            line_subtotal = quantity * unit_price
+
+            override_gst = _parse_invoice_override_flag(override_gst)
+            override_pst = _parse_invoice_override_flag(override_pst)
+
+            apply_gst = (
+                override_gst
+                if override_gst is not None
+                else not customer.gst_exempt
+            )
+            apply_pst = (
+                override_pst
+                if override_pst is not None
+                else not customer.pst_exempt
+            )
+
+            line_gst = line_subtotal * 0.05 if apply_gst else 0
+            line_pst = line_subtotal * 0.07 if apply_pst else 0
+
+            invoice_product = InvoiceProduct(
+                invoice_id=invoice_record.id,
+                product_id=product.id,
+                is_custom_line=False,
+                product_name=product.name,
+                quantity=quantity,
+                override_gst=override_gst,
+                override_pst=override_pst,
+                unit_price=unit_price,
+                line_subtotal=line_subtotal,
+                line_gst=line_gst,
+                line_pst=line_pst,
+            )
+            db.session.add(invoice_product)
+            db.session.flush()
+            sync_invoice_product_recipe_snapshots(invoice_product, product=product)
+            created_line_count += 1
+            line_items_to_log.append({"product_id": product.id, "quantity": quantity})
+
+            _adjust_catalog_inventory(product, quantity)
+
+    if created_line_count == 0:
+        raise InvoiceCreationError(
+            "Add at least one valid invoice line before creating an invoice."
+        )
+
+    return line_items_to_log
 
 
 def _parse_invoice_filter_dates(start_date_str, end_date_str):
@@ -284,115 +447,15 @@ def _create_invoice_from_form(form):
     )
     db.session.add(invoice)
 
-    product_names = {
-        entry["product_name"]
-        for entry in parsed_entries
-        if entry.get("line_type") == "catalog"
-    }
-
-    products = (
-        Product.query.filter(Product.name.in_(product_names)).all()
-        if product_names
-        else []
-    )
-    product_lookup = {p.name: p for p in products}
-    created_line_count = 0
-    line_items_to_log = []
-
-    for entry in parsed_entries:
-        line_type = entry.get("line_type", "catalog")
-        product_name = entry["product_name"]
-        quantity = entry["quantity"]
-        if line_type == "custom":
-            unit_price = float(entry["unit_price"])
-            additional_fee = float(entry.get("additional_fee", 0.0) or 0.0)
-            line_subtotal = (quantity * unit_price) + additional_fee
-
-            invoice_product = InvoiceProduct(
-                invoice_id=invoice.id,
-                product_id=None,
-                is_custom_line=True,
-                product_name=product_name,
-                quantity=quantity,
-                override_gst=None,
-                override_pst=None,
-                unit_price=unit_price,
-                line_subtotal=line_subtotal,
-                line_gst=float(entry.get("line_gst", 0.0) or 0.0),
-                line_pst=float(entry.get("line_pst", 0.0) or 0.0),
-            )
-            db.session.add(invoice_product)
-            created_line_count += 1
-            line_items_to_log.append({"product_name": product_name, "quantity": quantity})
-            continue
-
-        override_gst = entry["override_gst"]
-        override_pst = entry["override_pst"]
-        product = product_lookup.get(product_name)
-
-        if product:
-            invoice_price = product.invoice_sale_price
-            unit_price = (
-                float(invoice_price)
-                if invoice_price is not None
-                else float(product.price)
-            )
-            line_subtotal = quantity * unit_price
-
-            override_gst = (
-                _parse_invoice_override_flag(override_gst)
-            )
-            override_pst = (
-                _parse_invoice_override_flag(override_pst)
-            )
-
-            apply_gst = (
-                override_gst
-                if override_gst is not None
-                else not customer.gst_exempt
-            )
-            apply_pst = (
-                override_pst
-                if override_pst is not None
-                else not customer.pst_exempt
-            )
-
-            line_gst = line_subtotal * 0.05 if apply_gst else 0
-            line_pst = line_subtotal * 0.07 if apply_pst else 0
-
-            invoice_product = InvoiceProduct(
-                invoice_id=invoice.id,
-                product_id=product.id,
-                is_custom_line=False,
-                product_name=product.name,
-                quantity=quantity,
-                override_gst=override_gst,
-                override_pst=override_pst,
-                unit_price=unit_price,
-                line_subtotal=line_subtotal,
-                line_gst=line_gst,
-                line_pst=line_pst,
-            )
-            db.session.add(invoice_product)
-            db.session.flush()
-            sync_invoice_product_recipe_snapshots(invoice_product, product=product)
-            created_line_count += 1
-            line_items_to_log.append({"product_id": product.id, "quantity": quantity})
-
-            product.quantity = (product.quantity or 0) - quantity
-
-            for recipe_item in product.recipe_items:
-                item = recipe_item.item
-                units_per_sale = recipe_item_base_units_per_sale(recipe_item)
-                if units_per_sale <= 0:
-                    continue
-                item.quantity = (item.quantity or 0) - (units_per_sale * quantity)
-
-    if created_line_count == 0:
-        db.session.rollback()
-        raise InvoiceCreationError(
-            "Add at least one valid invoice line before creating an invoice."
+    try:
+        line_items_to_log = _build_invoice_lines_from_entries(
+            invoice,
+            customer,
+            parsed_entries,
         )
+    except InvoiceCreationError:
+        db.session.rollback()
+        raise
 
     try:
         db.session.commit()
@@ -412,6 +475,81 @@ def _create_invoice_from_form(form):
 
     log_activity(f"Created invoice {invoice.id}")
     return invoice
+
+
+def _serialize_invoice_lines_for_edit(invoice_record):
+    lines = []
+    for invoice_product in invoice_record.products:
+        if invoice_product.is_custom_line or invoice_product.product is None:
+            additional_fee = invoice_product.line_subtotal - (
+                float(invoice_product.quantity or 0.0)
+                * float(invoice_product.unit_price or 0.0)
+            )
+            lines.append(
+                {
+                    "line_type": "custom",
+                    "product_name": invoice_product.product_name,
+                    "quantity": invoice_product.quantity,
+                    "unit_price": invoice_product.unit_price,
+                    "line_gst": invoice_product.line_gst,
+                    "line_pst": invoice_product.line_pst,
+                    "additional_fee": additional_fee,
+                }
+            )
+            continue
+
+        lines.append(
+            {
+                "line_type": "catalog",
+                "product_name": invoice_product.product.name,
+                "quantity": invoice_product.quantity,
+                "unit_price": invoice_product.unit_price,
+                "override_gst": invoice_product.line_gst > 0,
+                "override_pst": invoice_product.line_pst > 0,
+            }
+        )
+    return lines
+
+
+def _update_pending_invoice_from_form(invoice_record, form):
+    if invoice_record.invoice_status != Invoice.STATUS_PENDING:
+        raise InvoiceCreationError("Only pending invoices can be edited.")
+
+    customer = db.session.get(Customer, form.customer.data)
+    if customer is None:
+        abort(404)
+    parsed_entries = _parse_invoice_product_entries(form.products.data)
+    if not parsed_entries:
+        raise InvoiceCreationError(
+            "Add at least one valid invoice line before updating the invoice."
+        )
+
+    try:
+        _reverse_invoice_inventory(invoice_record)
+        _delete_invoice_lines(invoice_record)
+        invoice_record.customer_id = customer.id
+        _build_invoice_lines_from_entries(
+            invoice_record,
+            customer,
+            parsed_entries,
+            preserve_catalog_unit_prices=True,
+        )
+        db.session.commit()
+    except InvoiceCreationError:
+        db.session.rollback()
+        raise
+    except IntegrityError as exc:
+        db.session.rollback()
+        current_app.logger.exception(
+            "invoice_update_integrity_error",
+            extra={"invoice_id": invoice_record.id, "customer_id": customer.id},
+        )
+        raise InvoiceCreationError(
+            "Unable to update invoice right now. Please try again."
+        ) from exc
+
+    log_activity(f"Updated pending invoice {invoice_record.id}")
+    return invoice_record
 
 
 @invoice.route("/create_invoice", methods=["GET", "POST"])
@@ -437,6 +575,53 @@ def create_invoice():
         "invoices/create_invoice.html",
         form=form,
         customer_form=customer_form,
+    )
+
+
+@invoice.route("/edit_invoice/<invoice_id>", methods=["GET", "POST"])
+@login_required
+def edit_invoice(invoice_id):
+    """Edit a sales invoice while it is still pending."""
+    invoice_record = db.session.get(Invoice, invoice_id)
+    if invoice_record is None:
+        abort(404)
+    if invoice_record.invoice_status != Invoice.STATUS_PENDING:
+        flash("Only pending invoices can be edited.", "warning")
+        return redirect(url_for("invoice.view_invoice", invoice_id=invoice_id))
+
+    form = InvoiceForm()
+    customer_form = CustomerForm()
+    form.customer.choices = [
+        (c.id, f"{c.first_name} {c.last_name}") for c in Customer.query.all()
+    ]
+
+    if form.validate_on_submit():
+        try:
+            _update_pending_invoice_from_form(invoice_record, form)
+        except InvoiceCreationError as exc:
+            flash(str(exc), "danger")
+        else:
+            flash("Invoice updated successfully!", "success")
+            return redirect(url_for("invoice.view_invoice", invoice_id=invoice_id))
+    elif request.method == "GET":
+        form.customer.data = invoice_record.customer_id
+        form.products.data = json.dumps(
+            _serialize_invoice_lines_for_edit(invoice_record)
+        )
+
+    initial_invoice_lines = []
+    if form.products.data:
+        try:
+            initial_invoice_lines = _parse_invoice_product_entries(form.products.data)
+        except InvoiceCreationError:
+            initial_invoice_lines = _serialize_invoice_lines_for_edit(invoice_record)
+
+    return render_template(
+        "invoices/edit_invoice.html",
+        invoice=invoice_record,
+        form=form,
+        customer_form=customer_form,
+        initial_invoice_lines=initial_invoice_lines,
     )
 
 

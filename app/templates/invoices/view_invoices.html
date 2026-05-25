@@ -8,6 +8,7 @@
 
 {% block content %}
 {% set can_create_invoices = can_access_endpoint('invoice.create_invoice') %}
+{% set can_edit_invoices = can_access_endpoint('invoice.edit_invoice') %}
 {% set can_manage_invoice_status = can_access_endpoint('invoice.bulk_invoice_payment_status', 'POST') %}
 {% set can_delete_invoices = can_access_endpoint('invoice.delete_invoice', 'POST') %}
 {% set can_view_customer_invoice_report = can_access_endpoint('report.customer_invoice_report') %}
@@ -202,6 +203,9 @@
                 <td class="col-invoice-actions">
                     <div class="mobile-actions mobile-card-actions">
                     <a href="{{ url_for('invoice.view_invoice', invoice_id=invoice.id) }}" class="btn btn-primary btn-sm">View</a>
+                    {% if can_edit_invoices and invoice.invoice_status == 'pending' %}
+                    <a href="{{ url_for('invoice.edit_invoice', invoice_id=invoice.id) }}" class="btn btn-outline-secondary btn-sm">Edit</a>
+                    {% endif %}
                     {% set can_show_invoice_action_menu = (can_manage_invoice_status and (invoice.can_mark_delivered or invoice.can_mark_paid)) or can_delete_invoices %}
                     {% if can_show_invoice_action_menu %}
                     <div class="dropdown d-inline">
@@ -369,9 +373,11 @@
 <script nonce="{{ csp_nonce }}">
 $(document).ready(function(){
     const canManageInvoiceStatus = {{ can_manage_invoice_status|tojson }};
+    const canEditInvoices = {{ can_edit_invoices|tojson }};
     const canDeleteInvoices = {{ can_delete_invoices|tojson }};
     const deleteFormHTML = {{ delete_form.hidden_tag()|tojson }};
     const viewInvoiceUrlTemplate = {{ url_for('invoice.view_invoice', invoice_id=0)|tojson }};
+    const editInvoiceUrlTemplate = {{ url_for('invoice.edit_invoice', invoice_id=0)|tojson }};
     const deleteInvoiceUrlTemplate = {{ url_for('invoice.delete_invoice', invoice_id=0)|tojson }};
     const bulkInvoiceStatusUrl = {{ url_for('invoice.bulk_invoice_payment_status')|tojson }};
     const markDeliveredUrlTemplate = {{ url_for('invoice.mark_invoice_delivered', invoice_id=0)|tojson }};
@@ -432,6 +438,9 @@ $(document).ready(function(){
                             </form>
                         </li>` : '';
         const dividerAction = (deliveredAction || paidAction) && deleteAction ? '<li><hr class="dropdown-divider"></li>' : '';
+        const editButton = canEditInvoices && invoiceStatus === 'pending'
+            ? `<a href="${invoiceUrlFromTemplate(editInvoiceUrlTemplate, inv.id)}" class="btn btn-outline-secondary btn-sm">Edit</a>`
+            : '';
         const actionMenu = (deliveredAction || paidAction || deleteAction) ? `
                 <div class="dropdown d-inline">
                     <button
@@ -470,6 +479,7 @@ $(document).ready(function(){
             </td>
             <td class="col-invoice-actions">
                 <a href="${invoiceUrlFromTemplate(viewInvoiceUrlTemplate, inv.id)}" class="btn btn-primary mr-2">View</a>
+                ${editButton}
                 ${actionMenu}
             </td>
             </tr>`;

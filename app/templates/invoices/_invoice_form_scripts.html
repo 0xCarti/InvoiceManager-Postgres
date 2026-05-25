@@ -4,6 +4,7 @@ $(document).ready(function () {
     const createCustomerUrl = {{ url_for('customer.create_customer_modal')|tojson }};
     const searchProductsUrl = {{ url_for('product.search_products')|tojson }};
     const createInvoiceApiUrl = {{ url_for('invoice.create_invoice_api')|tojson }};
+    const initialInvoiceLines = {{ initial_invoice_lines|default([])|tojson }};
     const $invoiceForm = $('#invoiceForm');
     const $customerSelect = $('#customerSelect');
     const $productTableBody = $('#productTable tbody');
@@ -35,6 +36,15 @@ $(document).ready(function () {
 
     function formatCurrency(value) {
         return Number(value || 0).toFixed(2);
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     function syncCustomerSelection(customer) {
@@ -101,16 +111,27 @@ $(document).ready(function () {
         $row.find('.total').text(`$${formatCurrency(total)}`);
     }
 
-    function addCatalogRow(productName, productPrice) {
+    function addCatalogRow(productName, productPrice, options = {}) {
         const unitPrice = Number(productPrice || 0);
+        const quantity = options.quantity ?? 1;
+        const applyGST = (
+            typeof options.override_gst === 'boolean'
+                ? options.override_gst
+                : !currentTaxStatus.gst_exempt
+        );
+        const applyPST = (
+            typeof options.override_pst === 'boolean'
+                ? options.override_pst
+                : !currentTaxStatus.pst_exempt
+        );
         const catalogRow = `
 <tr class="product-row" data-line-kind="catalog">
     <td class="align-middle invoice-line-product" data-label="Product / Description">
-        <div class="fw-semibold catalog-product-name mobile-card-primary">${productName}</div>
+        <div class="fw-semibold catalog-product-name mobile-card-primary">${escapeHtml(productName)}</div>
         <div class="form-text mb-0">Saved product</div>
     </td>
     <td class="invoice-line-quantity" data-label="Quantity">
-        <input type="text" class="form-control quantity invoice-quantity-input" value="1" inputmode="text" data-numeric-input="1">
+        <input type="text" class="form-control quantity invoice-quantity-input" value="${escapeHtml(quantity)}" inputmode="text" data-numeric-input="1">
     </td>
     <td class="align-middle invoice-line-price" data-label="Price">
         <span class="catalog-price" data-price="${unitPrice}">$${formatCurrency(unitPrice)}</span>
@@ -119,10 +140,10 @@ $(document).ready(function () {
     <td class="invoice-line-charges" data-label="Tax / Fees">
         <div class="invoice-tax-toggle-list">
         <label class="form-check-label d-block mb-0">
-            <input type="checkbox" class="form-check-input override-gst"${!currentTaxStatus.gst_exempt ? ' checked' : ''}> GST
+            <input type="checkbox" class="form-check-input override-gst"${applyGST ? ' checked' : ''}> GST
         </label>
         <label class="form-check-label d-block mb-0">
-            <input type="checkbox" class="form-check-input override-pst"${!currentTaxStatus.pst_exempt ? ' checked' : ''}> PST
+            <input type="checkbox" class="form-check-input override-pst"${applyPST ? ' checked' : ''}> PST
         </label>
         </div>
     </td>
@@ -136,7 +157,13 @@ $(document).ready(function () {
         updateRowTotal(row);
     }
 
-    function addCustomRow() {
+    function addCustomRow(options = {}) {
+        const quantity = options.quantity ?? 1;
+        const productName = options.product_name ?? '';
+        const unitPrice = options.unit_price ?? '';
+        const lineGst = options.line_gst ?? '';
+        const linePst = options.line_pst ?? '';
+        const additionalFee = options.additional_fee ?? '';
         const customRow = `
 <tr class="product-row" data-line-kind="custom">
     <td class="invoice-line-product" data-label="Product / Description">
@@ -144,16 +171,17 @@ $(document).ready(function () {
             type="text"
             class="form-control custom-product-name invoice-custom-description"
             placeholder="Service repair - fixed compressor coil in unit 1"
+            value="${escapeHtml(productName)}"
         >
         <div class="form-text mb-0">Custom line only for this invoice.</div>
     </td>
     <td class="invoice-line-quantity" data-label="Quantity">
-        <input type="text" class="form-control quantity invoice-quantity-input" value="1" inputmode="text" data-numeric-input="1">
+        <input type="text" class="form-control quantity invoice-quantity-input" value="${escapeHtml(quantity)}" inputmode="text" data-numeric-input="1">
     </td>
     <td class="invoice-line-price" data-label="Price">
         <div class="input-group input-group-sm invoice-money-input">
             <span class="input-group-text">$</span>
-            <input type="text" class="form-control custom-unit-price" placeholder="0.00" inputmode="text" data-numeric-input="1">
+            <input type="text" class="form-control custom-unit-price" placeholder="0.00" value="${escapeHtml(unitPrice)}" inputmode="text" data-numeric-input="1">
         </div>
     </td>
     <td class="align-middle total invoice-line-total" data-label="Total">$0.00</td>
@@ -161,15 +189,15 @@ $(document).ready(function () {
         <div class="invoice-custom-charge-grid">
             <div class="input-group input-group-sm invoice-charge-input">
                 <span class="input-group-text">GST</span>
-                <input type="text" class="form-control custom-gst-amount" placeholder="0.00" inputmode="text" data-numeric-input="1">
+                <input type="text" class="form-control custom-gst-amount" placeholder="0.00" value="${escapeHtml(lineGst)}" inputmode="text" data-numeric-input="1">
             </div>
             <div class="input-group input-group-sm invoice-charge-input">
                 <span class="input-group-text">PST</span>
-                <input type="text" class="form-control custom-pst-amount" placeholder="0.00" inputmode="text" data-numeric-input="1">
+                <input type="text" class="form-control custom-pst-amount" placeholder="0.00" value="${escapeHtml(linePst)}" inputmode="text" data-numeric-input="1">
             </div>
             <div class="input-group input-group-sm invoice-charge-input">
                 <span class="input-group-text">Fee</span>
-                <input type="text" class="form-control custom-additional-fee" placeholder="0.00" inputmode="text" data-numeric-input="1">
+                <input type="text" class="form-control custom-additional-fee" placeholder="0.00" value="${escapeHtml(additionalFee)}" inputmode="text" data-numeric-input="1">
             </div>
         </div>
     </td>
@@ -180,7 +208,9 @@ $(document).ready(function () {
         if (window.NumericInput) {
             window.NumericInput.enableWithin(row.get(0));
         }
-        row.find('.custom-product-name').trigger('focus');
+        if (!options.product_name) {
+            row.find('.custom-product-name').trigger('focus');
+        }
         updateRowTotal(row);
     }
 
@@ -262,6 +292,7 @@ $(document).ready(function () {
                 line_type: 'catalog',
                 product_name: productName,
                 quantity: quantity,
+                unit_price: parseOptionalNumber($row.find('.catalog-price').data('price')),
                 override_gst: $row.find('.override-gst').is(':checked'),
                 override_pst: $row.find('.override-pst').is(':checked')
             });
@@ -344,6 +375,14 @@ $(document).ready(function () {
 
     $('#productTable').on('click', '.btn-danger', function () {
         $(this).closest('tr').remove();
+    });
+
+    initialInvoiceLines.forEach(function (line) {
+        if (line.line_type === 'custom') {
+            addCustomRow(line);
+            return;
+        }
+        addCatalogRow(line.product_name, line.unit_price, line);
     });
 
     $invoiceForm.on('submit', function (e) {

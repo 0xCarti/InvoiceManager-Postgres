@@ -522,6 +522,7 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "product.bulk_set_cost_from_recipe": requirement(any_of=("products.bulk_update",)),
     "product.delete_product": requirement(any_of=("products.delete",)),
     "invoice.create_invoice": requirement(any_of=("invoices.create",)),
+    "invoice.edit_invoice": requirement(any_of=("invoices.create",)),
     "invoice.delete_invoice": requirement(any_of=("invoices.delete",)),
     "invoice.mark_invoice_delivered": requirement(any_of=("invoices.manage_payment",)),
     "invoice.mark_invoice_paid": requirement(any_of=("invoices.manage_payment",)),

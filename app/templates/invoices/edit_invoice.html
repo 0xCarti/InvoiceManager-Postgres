@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Edit Invoice{% endblock %}
+
+{% block content %}
+{% set can_create_customers = can_access_endpoint('customer.create_customer_modal') %}
+<div class="container mt-5">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+        <div>
+            <h1 class="mb-1">Edit Invoice {{ invoice.id }}</h1>
+            <p class="text-muted mb-0">Pending invoices can be changed before they are marked delivered.</p>
+        </div>
+        <a class="btn btn-outline-secondary" href="{{ url_for('invoice.view_invoice', invoice_id=invoice.id) }}">Back to Invoice</a>
+    </div>
+    {% set invoice_form_submit_label = 'Update Invoice' %}
+    {% include "invoices/_invoice_form.html" %}
+</div>
+
+{% if can_create_customers %}
+<div class="modal fade" id="createInvoiceCustomerModal" tabindex="-1" aria-labelledby="createInvoiceCustomerModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="createInvoiceCustomerModalLabel">Create Customer</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                {% with form=customer_form %}
+                    {% include 'customers/customer_form.html' %}
+                {% endwith %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% set invoice_form_submit_mode = 'page' %}
+{% include "invoices/_invoice_form_scripts.html" %}
+{% endblock %}

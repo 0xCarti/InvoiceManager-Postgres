@@ -225,6 +225,110 @@ def test_sales_invoice_create_view_delete(client, app):
         assert db.session.get(Invoice, invoice_id) is None
 
 
+def test_pending_sales_invoice_can_be_edited(client, app):
+    email, cust_id, prod_name, prod_id = setup_sales(app)
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            "/create_invoice",
+            data={"customer": float(cust_id), "products": f"{prod_name}?2??"},
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+
+    with app.app_context():
+        invoice = Invoice.query.filter_by(customer_id=cust_id).first()
+        assert invoice is not None
+        invoice_id = invoice.id
+        product = Product.query.get(prod_id)
+        assert product.quantity == 3
+
+    edited_lines = json.dumps(
+        [
+            {
+                "line_type": "catalog",
+                "product_name": prod_name,
+                "quantity": 3,
+                "unit_price": 10.0,
+                "override_gst": True,
+                "override_pst": True,
+            }
+        ]
+    )
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            f"/edit_invoice/{invoice_id}",
+            data={"customer": float(cust_id), "products": edited_lines},
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+        assert b"Invoice updated successfully" in resp.data
+
+    with app.app_context():
+        invoice = db.session.get(Invoice, invoice_id)
+        assert invoice is not None
+        assert invoice.invoice_status == Invoice.STATUS_PENDING
+        assert len(invoice.products) == 1
+        assert invoice.products[0].quantity == pytest.approx(3)
+        assert invoice.total == pytest.approx(33.6)
+        product = Product.query.get(prod_id)
+        assert product.quantity == 2
+
+
+def test_delivered_sales_invoice_cannot_be_edited(client, app):
+    email, cust_id, prod_name, prod_id = setup_sales(app)
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            "/create_invoice",
+            data={"customer": float(cust_id), "products": f"{prod_name}?1??"},
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+
+    with app.app_context():
+        invoice = Invoice.query.filter_by(customer_id=cust_id).first()
+        assert invoice is not None
+        invoice.status = Invoice.STATUS_DELIVERED
+        db.session.commit()
+        invoice_id = invoice.id
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            f"/edit_invoice/{invoice_id}",
+            data={
+                "customer": float(cust_id),
+                "products": json.dumps(
+                    [
+                        {
+                            "line_type": "catalog",
+                            "product_name": prod_name,
+                            "quantity": 3,
+                            "unit_price": 10.0,
+                            "override_gst": True,
+                            "override_pst": True,
+                        }
+                    ]
+                ),
+            },
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+        assert b"Only pending invoices can be edited." in resp.data
+
+    with app.app_context():
+        invoice = db.session.get(Invoice, invoice_id)
+        assert invoice is not None
+        assert invoice.products[0].quantity == pytest.approx(1)
+        product = Product.query.get(prod_id)
+        assert product.quantity == 4
+
+
 def test_invoice_survives_product_deletion(client, app):
     email, cust_id, prod_name, prod_id = setup_sales(app)
 
