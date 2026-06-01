@@ -375,10 +375,18 @@ def test_sales_invoice_returns(client, app):
     with app.app_context():
         invoice = Invoice.query.filter_by(customer_id=cust_id).first()
         assert invoice is not None
+        invoice_id = invoice.id
         assert invoice.products[0].quantity == -2
         assert invoice.total == pytest.approx(-22.4)
         product = Product.query.get(prod_id)
         assert product.quantity == 7
+
+    with client:
+        login(client, email, "pass")
+        resp = client.get(f"/edit_invoice/{invoice_id}")
+        assert resp.status_code == 200
+        assert b'"override_gst": true' in resp.data
+        assert b'"override_pst": true' in resp.data
 
 
 def test_sales_invoice_respects_recipe_yield_quantity(client, app):

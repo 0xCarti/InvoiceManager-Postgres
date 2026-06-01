@@ -504,11 +504,26 @@ def _serialize_invoice_lines_for_edit(invoice_record):
                 "product_name": invoice_product.product.name,
                 "quantity": invoice_product.quantity,
                 "unit_price": invoice_product.unit_price,
-                "override_gst": invoice_product.line_gst > 0,
-                "override_pst": invoice_product.line_pst > 0,
+                "override_gst": _invoice_tax_checkbox_state(
+                    invoice_product, "line_gst", "override_gst"
+                ),
+                "override_pst": _invoice_tax_checkbox_state(
+                    invoice_product, "line_pst", "override_pst"
+                ),
             }
         )
     return lines
+
+
+def _invoice_amount_is_nonzero(value):
+    return abs(float(value or 0.0)) > 1e-9
+
+
+def _invoice_tax_checkbox_state(invoice_product, amount_attr, override_attr):
+    override_value = getattr(invoice_product, override_attr)
+    if override_value is not None:
+        return bool(override_value)
+    return _invoice_amount_is_nonzero(getattr(invoice_product, amount_attr))
 
 
 def _update_pending_invoice_from_form(invoice_record, form):
@@ -990,9 +1005,9 @@ def view_invoice(invoice_id):
             else invoice_product.product_name
         )
         tax_flags = ""
-        if invoice_product.line_gst > 0:
+        if _invoice_amount_is_nonzero(invoice_product.line_gst):
             tax_flags += "G"
-        if invoice_product.line_pst > 0:
+        if _invoice_amount_is_nonzero(invoice_product.line_pst):
             tax_flags += "P"
 
         invoice_lines.append((invoice_product, name, tax_flags))
