@@ -15,7 +15,9 @@ import sqlalchemy as sa
 revision = "fd7e8f9a0b1"
 down_revision = "fc6d7e8f9a0"
 branch_labels = None
-depends_on = None
+# This migration backfills count submissions, which are created on a
+# different branch that merges later in the graph.
+depends_on = "b2c3d4e5f6a7"
 
 
 def upgrade():
