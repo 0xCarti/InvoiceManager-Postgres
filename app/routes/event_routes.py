@@ -60,6 +60,7 @@ from app.models import (
     TerminalSalesResolutionState,
 )
 from app.services.location_count_submissions import (
+    aggregate_submission_rows_for_event_location_day,
     ensure_event_location_operating_days,
     event_operating_dates,
 )
@@ -120,6 +121,13 @@ _STAND_SHEET_FIELDS = (
     "spoiled",
     "closing_count",
 )
+
+_COUNT_SUBMISSION_FIELD_BY_TYPE = {
+    LocationCountSubmission.TYPE_OPENING: "opening_count",
+    LocationCountSubmission.TYPE_CLOSING: "closing_count",
+    LocationCountSubmission.TYPE_EATEN: "eaten",
+    LocationCountSubmission.TYPE_SPOILAGE: "spoiled",
+}
 
 _TERMINAL_SALES_CONFLICT_GUIDANCE = (
     "POS sales imports do not include timestamps, so one location can only be "
@@ -413,6 +421,28 @@ def _build_sheet_values(sheet, base_unit, conversions):
             if raw is not None
             else None
         )
+    return SimpleNamespace(**values)
+
+
+def _daily_submission_sheet_value_source(
+    sheet,
+    item_id: int,
+    daily_submission_totals_by_field: dict[str, dict[int, float]] | None,
+):
+    if not daily_submission_totals_by_field:
+        return sheet
+
+    values = {
+        field: getattr(sheet, field, None) if sheet else None
+        for field in _STAND_SHEET_FIELDS
+    }
+    has_daily_value = False
+    for field_name, totals_by_item_id in daily_submission_totals_by_field.items():
+        if item_id in totals_by_item_id:
+            values[field_name] = totals_by_item_id[item_id]
+            has_daily_value = True
+    if sheet is None and not has_daily_value:
+        return None
     return SimpleNamespace(**values)
 
 
@@ -5519,7 +5549,7 @@ def undo_confirm_location(event_id, el_id):
     return redirect(url_for("event.view_event", event_id=event_id))
 
 
-def _get_stand_items(location_id, event_id=None):
+def _get_stand_items(location_id, event_id=None, operating_date=None):
     location = db.session.get(Location, location_id)
     conversions = _conversion_mapping()
     stand_items = []
@@ -5531,13 +5561,28 @@ def _get_stand_items(location_id, event_id=None):
 
     sales_by_item = {}
     sheet_map = {}
+    daily_submission_totals_by_field: dict[str, dict[int, float]] = {}
     if event_id is not None:
         el = EventLocation.query.filter_by(
             event_id=event_id,
             location_id=location_id,
         ).first()
         if el:
+            if operating_date is not None:
+                daily_submission_totals_by_field = {
+                    field_name: aggregate_submission_rows_for_event_location_day(
+                        el.id,
+                        submission_type,
+                        operating_date,
+                    )
+                    for submission_type, field_name in (
+                        _COUNT_SUBMISSION_FIELD_BY_TYPE.items()
+                    )
+                }
             for sale in el.terminal_sales:
+                if operating_date is not None:
+                    if sale.sold_at is None or sale.sold_at.date() != operating_date:
+                        continue
                 for ri in sale.product.recipe_items:
                     if ri.item_id is None:
                         continue
@@ -5572,12 +5617,17 @@ def _get_stand_items(location_id, event_id=None):
             item = recipe_item.item
             recv_unit = next((u for u in item.units if u.receiving_default), None)
             trans_unit = next((u for u in item.units if u.transfer_default), None)
+            sheet = sheet_map.get(recipe_item.item_id)
             stand_items.append(
                 _build_stand_item_entry(
                     item=item,
                     expected=expected,
                     sales=sales,
-                    sheet=sheet_map.get(recipe_item.item_id),
+                    sheet=_daily_submission_sheet_value_source(
+                        sheet,
+                        recipe_item.item_id,
+                        daily_submission_totals_by_field,
+                    ),
                     recv_unit=recv_unit,
                     trans_unit=trans_unit,
                     conversions=conversions,
@@ -5596,12 +5646,17 @@ def _get_stand_items(location_id, event_id=None):
         item = record.item
         recv_unit = next((u for u in item.units if u.receiving_default), None)
         trans_unit = next((u for u in item.units if u.transfer_default), None)
+        sheet = sheet_map.get(record.item_id)
         stand_items.append(
             _build_stand_item_entry(
                 item=item,
                 expected=record.expected_count,
                 sales=sales_by_item.get(record.item_id, 0),
-                sheet=sheet_map.get(record.item_id),
+                sheet=_daily_submission_sheet_value_source(
+                    sheet,
+                    record.item_id,
+                    daily_submission_totals_by_field,
+                ),
                 recv_unit=recv_unit,
                 trans_unit=trans_unit,
                 conversions=conversions,
@@ -5752,13 +5807,30 @@ def stand_sheet(event_id, location_id):
     ).first()
     if el is None:
         abort(404)
+    requested_operating_date = (
+        request.values.get("operating_date") or ""
+    ).strip()
+    operating_date = _parse_date(requested_operating_date)
+    if requested_operating_date and operating_date is None:
+        abort(404)
+    if operating_date is not None:
+        operating_day = EventLocationOperatingDay.query.filter_by(
+            event_location_id=el.id,
+            operating_date=operating_date,
+        ).first()
+        if operating_day is None:
+            abort(404)
     if el.confirmed or ev.closed:
         flash(
             "This location is closed and the stand sheet cannot be modified."
         )
         return redirect(url_for("event.view_event", event_id=event_id))
 
-    location, stand_items = _get_stand_items(location_id, event_id)
+    location, stand_items = _get_stand_items(
+        location_id,
+        event_id,
+        operating_date=operating_date,
+    )
 
     if request.method == "POST":
         for entry in stand_items:
@@ -5825,6 +5897,7 @@ def stand_sheet(event_id, location_id):
         location=location,
         stand_items=stand_items,
         event_location=el,
+        operating_date=operating_date,
     )
 
 

@@ -53,6 +53,7 @@ def _setup_location_count_context(app):
             "location_id": location.id,
             "token": location.count_qr_token,
             "item_id": item.id,
+            "event_id": event.id,
             "event_location_id": event_location.id,
             "today": today,
         }
@@ -359,6 +360,62 @@ def test_manager_approval_uses_first_opening_day_last_closing_day_and_aggregates
         assert sheet is not None
         assert sheet.opening_count == 13.0
         assert sheet.closing_count == 5.0
+
+
+def test_event_day_stand_sheet_uses_requested_day_approved_opening(client, app):
+    context = _setup_location_count_context(app)
+    first_day = context["today"] - timedelta(days=1)
+    second_day = context["today"]
+
+    with app.app_context():
+        db.session.add_all(
+            [
+                EventLocationOperatingDay(
+                    event_location_id=context["event_location_id"],
+                    operating_date=first_day,
+                ),
+                EventLocationOperatingDay(
+                    event_location_id=context["event_location_id"],
+                    operating_date=second_day,
+                ),
+            ]
+        )
+        db.session.commit()
+
+        first_opening_id = _create_pending_submission(
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+            submission_type=LocationCountSubmission.TYPE_OPENING,
+            submission_date=first_day,
+            count_value=0.0,
+            submitted_name="Day One",
+        )
+        second_opening_id = _create_pending_submission(
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+            submission_type=LocationCountSubmission.TYPE_OPENING,
+            submission_date=second_day,
+            count_value=207.0,
+            submitted_name="Day Two",
+        )
+
+        for submission_id in (first_opening_id, second_opening_id):
+            submission = db.session.get(LocationCountSubmission, submission_id)
+            submission.status = LocationCountSubmission.STATUS_APPROVED
+            submission.approval_mode = LocationCountSubmission.APPROVAL_MODE_ADD
+        db.session.commit()
+
+    with client:
+        login(client, "admin@example.com", "adminpass")
+        response = client.get(
+            f"/events/{context['event_id']}/stand_sheet/{context['location_id']}"
+            f"?operating_date={second_day.isoformat()}"
+        )
+
+    assert response.status_code == 200
+    assert b'value="207.0000"' in response.data
 
 
 def test_manager_approval_can_overwrite_same_day_counts(client, app):

@@ -112,10 +112,13 @@
 <div class="container mt-4">
     <form method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        {% if operating_date %}
+        <input type="hidden" name="operating_date" value="{{ operating_date.isoformat() }}"/>
+        {% endif %}
         <div class="mb-3">
             <div>Location: {{ location.name }}</div>
             <div>Event: {{ event.name }}</div>
-            <div>Event Date/Time: {{ event.start_date }}</div>
+            <div>Event Date/Time: {{ operating_date or event.start_date }}</div>
         </div>
     <div class="table-responsive">
     <table class="table table-bordered table-sm stand-sheet-table" data-sticky-standsheet-header="1">

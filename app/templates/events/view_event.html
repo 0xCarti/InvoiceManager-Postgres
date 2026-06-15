@@ -312,7 +312,7 @@
                                             <a class="btn btn-sm btn-outline-primary" href="{{ url_for('event.add_terminal_sale', event_id=event.id, el_id=entry.event_location.id) }}">Sales</a>
                                             {% endif %}
                                             {% if can_view_stand_sheet %}
-                                            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.stand_sheet', event_id=event.id, location_id=entry.event_location.location_id) }}">Stand Sheet</a>
+                                            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.stand_sheet', event_id=event.id, location_id=entry.event_location.location_id, operating_date=day.date.isoformat()) }}">Stand Sheet</a>
                                             {% endif %}
                                             {% if event.event_type == 'inventory' and can_view_count_sheets %}
                                             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.count_sheet', event_id=event.id, location_id=entry.event_location.location_id) }}">Count Sheet</a>
