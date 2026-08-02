@@ -2,82 +2,463 @@
 
 {% block content %}
 <style>
+    .inventory-count-shell {
+        max-width: 58rem;
+    }
+
+    .inventory-count-item {
+        border: 1px solid #dee2e6;
+        border-radius: 0.5rem;
+        background: #fff;
+    }
+
+    .inventory-count-item + .inventory-count-item {
+        margin-top: 0.75rem;
+    }
+
+    .inventory-unit-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(7rem, 9rem) auto;
+        gap: 0.5rem;
+        align-items: end;
+    }
+
+    .inventory-add-row {
+        width: 2.25rem;
+        height: 2.25rem;
+        line-height: 1;
+        font-size: 1.25rem;
+    }
+
+    .inventory-draft-status {
+        min-height: 1.25rem;
+    }
+
     @media (max-width: 767.98px) {
-        .count-sheet-table thead {
-            display: none;
+        .inventory-count-shell {
+            padding-left: 0.85rem;
+            padding-right: 0.85rem;
         }
 
-        .count-sheet-table,
-        .count-sheet-table tbody,
-        .count-sheet-table tr,
-        .count-sheet-table td {
-            display: block;
-            width: 100%;
-        }
-
-        .count-sheet-table tr {
-            margin-bottom: 1rem;
-            border: 1px solid #dee2e6;
-            border-radius: 0.5rem;
-            overflow: hidden;
-            background: #fff;
-        }
-
-        .count-sheet-table td {
-            display: flex;
-            justify-content: space-between;
-            gap: 0.75rem;
-            white-space: normal;
-            padding: 0.65rem 0.75rem;
-            border-left: 0;
-            border-right: 0;
-        }
-
-        .count-sheet-table td::before {
-            content: attr(data-label);
-            font-weight: 600;
-            flex: 0 0 40%;
-            min-width: 40%;
+        .inventory-unit-row {
+            grid-template-columns: 1fr;
         }
     }
 </style>
-<div class="container mt-4">
-    <h2 class="h3 mb-3">Inventory Count Sheet - {{ location.name }}</h2>
-    <form method="post">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-        <div class="table-responsive">
-        <table class="table table-bordered table-sm align-middle count-sheet-table">
-            <thead>
-                <tr>
-                    <th>Item</th>
-                    <th>Receiving Quantity</th>
-                    <th>Transfer Quantity</th>
-                    <th>Base Quantity</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for entry in stand_items %}
-                <tr>
-                    <td class="text-break" data-label="Item">{{ entry.item.name }}</td>
-                    <td data-label="Receiving Quantity">
-                        <input type="text" class="form-control form-control-sm" inputmode="text" data-numeric-input="1" name="recv_{{ entry.item.id }}" value="{{ entry.sheet.opening_count if entry.sheet else '' }}">
-                        {% if entry.recv_unit %} {{ entry.recv_unit.name }} of {{ entry.recv_unit.factor }} {{ entry.item.base_unit }}{% endif %}
-                    </td>
-                    <td data-label="Transfer Quantity">
-                        <input type="text" class="form-control form-control-sm" inputmode="text" data-numeric-input="1" name="trans_{{ entry.item.id }}" value="{{ entry.sheet.transferred_in if entry.sheet else '' }}">
-                        {% if entry.trans_unit %} {{ entry.trans_unit.name }} of {{ entry.trans_unit.factor }} {{ entry.item.base_unit }}{% endif %}
-                    </td>
-                    <td data-label="Base Quantity">
-                        <input type="text" class="form-control form-control-sm" inputmode="text" data-numeric-input="1" name="base_{{ entry.item.id }}" value="{{ entry.sheet.transferred_out if entry.sheet else '' }}">
-                        {{ entry.item.base_unit }}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+
+<div class="container mt-4 mb-5 inventory-count-shell">
+    <div class="d-flex flex-column flex-md-row justify-content-between gap-3 mb-3">
+        <div>
+            <h2 class="h3 mb-1">Inventory Count Sheet</h2>
+            <div class="text-muted">
+                {{ event.name }} | {{ location.name }}
+                {% if operating_date %}| {{ operating_date.isoformat() }}{% endif %}
+            </div>
         </div>
-        <button type="submit" class="btn btn-primary">Save</button>
-        <button type="button" class="btn btn-secondary" data-action="print">Print</button>
+        <div class="d-flex gap-2 align-items-start">
+            <a class="btn btn-outline-secondary" href="{{ url_for('event.view_event', event_id=event.id) }}">Back to Event</a>
+            <button type="button" class="btn btn-outline-secondary" data-action="print">Print</button>
+        </div>
+    </div>
+
+    <div class="alert alert-info d-none" data-inventory-draft-prompt>
+        <div class="fw-semibold mb-1">Continue where you left off?</div>
+        <div class="small mb-3">Unsaved inventory counts were found on this device.</div>
+        <div class="d-flex flex-wrap gap-2">
+            <button type="button" class="btn btn-primary btn-sm" data-inventory-draft-resume="1">Resume</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-inventory-draft-discard="1">Start Fresh</button>
+        </div>
+    </div>
+
+    <div class="small text-muted inventory-draft-status d-none" data-inventory-draft-status aria-live="polite"></div>
+
+    <form
+        method="post"
+        data-inventory-count-form="1"
+        data-draft-key="invoice-manager-event-inventory-count:{{ event.id }}:{{ location.id }}:{{ operating_date.isoformat() if operating_date else event.start_date.isoformat() }}"
+    >
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        {% if operating_date %}
+        <input type="hidden" name="operating_date" value="{{ operating_date.isoformat() }}">
+        {% endif %}
+
+        <div class="mb-3">
+            <label for="submitted_name" class="form-label">Counter Name</label>
+            <input
+                type="text"
+                class="form-control"
+                id="submitted_name"
+                name="submitted_name"
+                value="{{ request.form.get('submitted_name', submitted_name or '') }}"
+                maxlength="120"
+                required
+                data-inventory-draft-field="1"
+            >
+        </div>
+
+        {% if items %}
+        <div class="mb-4">
+            {% for entry in items %}
+            <div class="inventory-count-item p-3">
+                <div class="d-flex justify-content-between gap-3 align-items-start mb-2">
+                    <div>
+                        <div class="fw-semibold">{{ entry.item.name }}</div>
+                        <div class="small text-muted">
+                            {{ entry.base_unit_label or entry.base_unit }}
+                            {% if entry.expected_count %}
+                            | current expected {{ '%.4f'|format(entry.expected_count) }}
+                            {% endif %}
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        class="btn btn-outline-secondary btn-sm inventory-add-row"
+                        data-inventory-add-row="{{ entry.item.id }}"
+                        aria-label="Add unit row for {{ entry.item.name }}"
+                        title="Add unit row"
+                    >+</button>
+                </div>
+                <div
+                    class="d-grid gap-2"
+                    data-inventory-item="{{ entry.item.id }}"
+                    data-next-row-index="1"
+                >
+                    <div class="inventory-unit-row" data-inventory-row="0">
+                        <div>
+                            <label class="form-label small mb-1" for="inventory_unit_{{ entry.item.id }}_0">Unit</label>
+                            <select
+                                class="form-select"
+                                id="inventory_unit_{{ entry.item.id }}_0"
+                                name="inventory_unit_{{ entry.item.id }}_0"
+                                data-inventory-draft-field="1"
+                            >
+                                {% for unit_option in entry.unit_options %}
+                                <option value="{{ unit_option.value }}">{{ unit_option.label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label small mb-1" for="inventory_qty_{{ entry.item.id }}_0">Qty</label>
+                            <input
+                                type="number"
+                                step="any"
+                                min="0"
+                                inputmode="text"
+                                enterkeyhint="next"
+                                autocomplete="off"
+                                data-inventory-count-entry="1"
+                                data-inventory-draft-field="1"
+                                data-numeric-input="1"
+                                class="form-control"
+                                id="inventory_qty_{{ entry.item.id }}_0"
+                                name="inventory_qty_{{ entry.item.id }}_0"
+                                value="{{ request.form.get('inventory_qty_' ~ entry.item.id ~ '_0', '') }}"
+                                placeholder="0"
+                            >
+                        </div>
+                        <button type="button" class="btn btn-outline-danger" data-inventory-remove-row="1" aria-label="Remove unit row" title="Remove unit row" disabled>&times;</button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="alert alert-danger">No inventory items are configured for this location yet.</div>
+        {% endif %}
+
+        <button type="submit" class="btn btn-primary btn-lg w-100" {% if not items %}disabled{% endif %}>
+            Submit For Review
+        </button>
     </form>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('DOMContentLoaded', function () {
+    const form = document.querySelector('[data-inventory-count-form="1"]');
+    if (!form) {
+        return;
+    }
+
+    const draftKey = form.dataset.draftKey || '';
+    const draftPrompt = document.querySelector('[data-inventory-draft-prompt]');
+    const resumeButton = document.querySelector('[data-inventory-draft-resume="1"]');
+    const discardButton = document.querySelector('[data-inventory-draft-discard="1"]');
+    const draftStatus = document.querySelector('[data-inventory-draft-status]');
+    let canUseLocalStorage = true;
+    let pendingDraft = null;
+
+    try {
+        const probeKey = draftKey + ':probe';
+        window.localStorage.setItem(probeKey, '1');
+        window.localStorage.removeItem(probeKey);
+    } catch (error) {
+        canUseLocalStorage = false;
+    }
+
+    function fields() {
+        return Array.from(document.querySelectorAll('[data-inventory-draft-field="1"]'));
+    }
+
+    function countInputs() {
+        return Array.from(document.querySelectorAll('[data-inventory-count-entry="1"]'));
+    }
+
+    function setDraftStatus(message) {
+        if (!draftStatus) {
+            return;
+        }
+        if (!message) {
+            draftStatus.textContent = '';
+            draftStatus.classList.add('d-none');
+            return;
+        }
+        draftStatus.textContent = message;
+        draftStatus.classList.remove('d-none');
+    }
+
+    function formatSavedTime(timestamp) {
+        const savedAt = Date.parse(timestamp || '');
+        if (!Number.isFinite(savedAt)) {
+            return '';
+        }
+        return new Date(savedAt).toLocaleTimeString([], {
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+    }
+
+    function focusInput(target) {
+        if (!target) {
+            return;
+        }
+        window.setTimeout(function () {
+            target.focus();
+            if (typeof target.select === 'function') {
+                target.select();
+            }
+        }, 0);
+    }
+
+    function updateRemoveButtons(container) {
+        const rows = Array.from(container.querySelectorAll('[data-inventory-row]'));
+        rows.forEach(function (row) {
+            const button = row.querySelector('[data-inventory-remove-row]');
+            if (button) {
+                button.disabled = rows.length <= 1;
+            }
+        });
+    }
+
+    function bindRow(row) {
+        if (!row || row.dataset.inventoryBound === '1') {
+            return;
+        }
+        row.dataset.inventoryBound = '1';
+        const removeButton = row.querySelector('[data-inventory-remove-row]');
+        if (removeButton) {
+            removeButton.addEventListener('click', function () {
+                const container = row.closest('[data-inventory-item]');
+                if (!container || container.querySelectorAll('[data-inventory-row]').length <= 1) {
+                    return;
+                }
+                row.remove();
+                updateRemoveButtons(container);
+                saveDraft();
+            });
+        }
+    }
+
+    function createRow(container, rowIndex) {
+        const firstRow = container.querySelector('[data-inventory-row]');
+        if (!firstRow) {
+            return null;
+        }
+        const row = firstRow.cloneNode(true);
+        row.dataset.inventoryRow = String(rowIndex);
+        row.dataset.inventoryBound = '';
+        row.querySelectorAll('label, select, input').forEach(function (element) {
+            if (element.tagName === 'LABEL') {
+                const currentFor = element.getAttribute('for') || '';
+                element.setAttribute('for', currentFor.replace(/_[^_]+$/, '_' + rowIndex));
+                return;
+            }
+            if (element.name) {
+                element.name = element.name.replace(/_[^_]+$/, '_' + rowIndex);
+            }
+            if (element.id) {
+                element.id = element.id.replace(/_[^_]+$/, '_' + rowIndex);
+            }
+            if (element.tagName === 'INPUT') {
+                element.value = '';
+            }
+            if (element.tagName === 'SELECT') {
+                element.selectedIndex = 0;
+            }
+        });
+        const removeButton = row.querySelector('[data-inventory-remove-row]');
+        if (removeButton) {
+            removeButton.disabled = false;
+        }
+        container.appendChild(row);
+        container.dataset.nextRowIndex = String(Math.max(Number(container.dataset.nextRowIndex || '1'), rowIndex + 1));
+        bindRow(row);
+        updateRemoveButtons(container);
+        return row;
+    }
+
+    function ensureRowForField(fieldName) {
+        const match = /^inventory_(?:qty|unit)_(\d+)_(.+)$/.exec(fieldName || '');
+        if (!match) {
+            return;
+        }
+        const container = document.querySelector('[data-inventory-item="' + match[1] + '"]');
+        if (!container || container.querySelector('[data-inventory-row="' + match[2] + '"]')) {
+            return;
+        }
+        createRow(container, Number(match[2]));
+    }
+
+    function collectDraftValues() {
+        const values = {};
+        fields().forEach(function (field) {
+            const value = (field.value || '').trim();
+            if (value) {
+                values[field.name] = value;
+            }
+        });
+        return values;
+    }
+
+    function saveDraft() {
+        if (!canUseLocalStorage || !draftKey) {
+            return;
+        }
+        const values = collectDraftValues();
+        if (Object.keys(values).length === 0) {
+            window.localStorage.removeItem(draftKey);
+            setDraftStatus('');
+            return;
+        }
+        const payload = {
+            version: 1,
+            values: values,
+            updatedAt: new Date().toISOString(),
+        };
+        try {
+            window.localStorage.setItem(draftKey, JSON.stringify(payload));
+            setDraftStatus('Saved on this device at ' + formatSavedTime(payload.updatedAt) + '.');
+        } catch (error) {
+            canUseLocalStorage = false;
+            setDraftStatus('');
+        }
+    }
+
+    function readDraft() {
+        if (!canUseLocalStorage || !draftKey) {
+            return null;
+        }
+        try {
+            return JSON.parse(window.localStorage.getItem(draftKey) || 'null');
+        } catch (error) {
+            window.localStorage.removeItem(draftKey);
+            return null;
+        }
+    }
+
+    function restoreDraft(draft) {
+        if (!draft || !draft.values) {
+            return;
+        }
+        Object.keys(draft.values).forEach(ensureRowForField);
+        fields().forEach(function (field) {
+            field.value = draft.values[field.name] || '';
+        });
+        if (draftPrompt) {
+            draftPrompt.classList.add('d-none');
+        }
+        setDraftStatus('Draft restored from ' + formatSavedTime(draft.updatedAt) + '.');
+        const firstEmpty = countInputs().find(function (input) {
+            return !(input.value || '').trim();
+        });
+        focusInput(firstEmpty || countInputs()[0]);
+    }
+
+    function bindFields() {
+        fields().forEach(function (field) {
+            if (field.dataset.inventoryDraftBound === '1') {
+                return;
+            }
+            field.dataset.inventoryDraftBound = '1';
+            field.addEventListener('change', saveDraft);
+            field.addEventListener('focusout', saveDraft);
+        });
+        countInputs().forEach(function (input) {
+            if (input.dataset.inventoryKeyBound === '1') {
+                return;
+            }
+            input.dataset.inventoryKeyBound = '1';
+            input.addEventListener('keydown', function (event) {
+                if (event.key !== 'Enter') {
+                    return;
+                }
+                event.preventDefault();
+                const inputs = countInputs();
+                const next = inputs[inputs.indexOf(input) + 1];
+                if (next) {
+                    focusInput(next);
+                }
+            });
+        });
+        document.querySelectorAll('[data-inventory-row]').forEach(bindRow);
+    }
+
+    bindFields();
+
+    document.querySelectorAll('[data-inventory-add-row]').forEach(function (button) {
+        button.addEventListener('click', function () {
+            const itemId = button.getAttribute('data-inventory-add-row');
+            const container = document.querySelector('[data-inventory-item="' + itemId + '"]');
+            if (!container) {
+                return;
+            }
+            const row = createRow(container, Number(container.dataset.nextRowIndex || '1'));
+            bindFields();
+            if (row) {
+                focusInput(row.querySelector('[data-inventory-count-entry="1"]'));
+            }
+            saveDraft();
+        });
+    });
+
+    if (resumeButton) {
+        resumeButton.addEventListener('click', function () {
+            restoreDraft(pendingDraft);
+        });
+    }
+    if (discardButton) {
+        discardButton.addEventListener('click', function () {
+            window.localStorage.removeItem(draftKey);
+            pendingDraft = null;
+            if (draftPrompt) {
+                draftPrompt.classList.add('d-none');
+            }
+            setDraftStatus('Saved draft removed from this device.');
+        });
+    }
+    form.addEventListener('submit', function () {
+        if (canUseLocalStorage && draftKey) {
+            window.localStorage.removeItem(draftKey);
+        }
+    });
+    window.addEventListener('pagehide', saveDraft);
+
+    pendingDraft = readDraft();
+    if (pendingDraft && pendingDraft.values && draftPrompt && Object.keys(pendingDraft.values).length) {
+        draftPrompt.classList.remove('d-none');
+    }
+});
+</script>
 {% endblock %}

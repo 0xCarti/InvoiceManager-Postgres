@@ -3,14 +3,19 @@ from werkzeug.security import generate_password_hash
 from app import db
 from app.models import (
     Event,
+    EventLocation,
     GLCode,
     Item,
     ItemUnit,
     Location,
+    LocationCountSubmission,
     LocationStandItem,
     Product,
     ProductRecipeItem,
     User,
+)
+from app.services.location_count_submissions import (
+    sync_event_location_counts_from_approved_submissions,
 )
 from tests.permission_helpers import grant_event_permissions
 from tests.utils import extract_csrf_token
@@ -60,6 +65,7 @@ def test_inventory_report_variance(client, app):
         grant_event_permissions(user)
         loc_id = loc.id
         item_id = item.id
+        unit_id = iu.id
 
     with client:
         login(client, "inv@example.com", "pass")
@@ -101,16 +107,25 @@ def test_inventory_report_variance(client, app):
             f"/events/{eid}/count_sheet/{loc_id}",
             data={
                 "csrf_token": count_sheet_token,
-                f"recv_{item_id}": 0,
-                f"trans_{item_id}": 4,
-                f"base_{item_id}": 0,
+                "submitted_name": "Inventory Counter",
+                f"inventory_unit_{item_id}_0": str(unit_id),
+                f"inventory_qty_{item_id}_0": 4,
             },
             follow_redirects=True,
         )
+        with app.app_context():
+            submission = LocationCountSubmission.query.one()
+            submission.status = LocationCountSubmission.STATUS_APPROVED
+            submission.approval_mode = LocationCountSubmission.APPROVAL_MODE_ADD
+            sync_event_location_counts_from_approved_submissions(
+                submission.event_location_id
+            )
+            db.session.commit()
         resp = client.get(f"/events/{eid}/inventory_report")
         assert resp.status_code == 200
         assert b"-1" in resp.data
         assert b"500000" in resp.data
+        assert b"Summary Source 18" in resp.data
 
 
 def test_inventory_close_updates_counts(client, app):
@@ -153,6 +168,7 @@ def test_inventory_close_updates_counts(client, app):
         grant_event_permissions(user)
         loc_id = loc.id
         item_id = item.id
+        trans_unit_id = trans_unit.id
 
     with client:
         login(client, "close@example.com", "pass")
@@ -196,21 +212,22 @@ def test_inventory_close_updates_counts(client, app):
             f"/events/{eid}/count_sheet/{loc_id}",
             data={
                 "csrf_token": count_sheet_token,
-                f"recv_{item_id}": 0,
-                f"trans_{item_id}": 7,
-                f"base_{item_id}": 0,
+                "submitted_name": "Inventory Counter",
+                f"inventory_unit_{item_id}_0": str(trans_unit_id),
+                f"inventory_qty_{item_id}_0": 7,
             },
             follow_redirects=True,
         )
-        confirm_page = client.get(
-            f"/events/{eid}/locations/{event_location_id}/confirm"
-        )
-        confirm_token = extract_csrf_token(confirm_page)
-        client.post(
-            f"/events/{eid}/locations/{event_location_id}/confirm",
-            data={"csrf_token": confirm_token},
-            follow_redirects=True,
-        )
+        with app.app_context():
+            submission = LocationCountSubmission.query.one()
+            submission.status = LocationCountSubmission.STATUS_APPROVED
+            submission.approval_mode = LocationCountSubmission.APPROVAL_MODE_ADD
+            sync_event_location_counts_from_approved_submissions(
+                submission.event_location_id
+            )
+            event_location = db.session.get(EventLocation, event_location_id)
+            event_location.confirmed = True
+            db.session.commit()
 
         close_page = client.get(f"/events/{eid}")
         close_token = extract_csrf_token(close_page)

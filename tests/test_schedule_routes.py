@@ -1,6 +1,6 @@
 import os
 import re
-from datetime import date, time
+from datetime import date, datetime, time, timedelta
 
 from werkzeug.security import generate_password_hash
 
@@ -1103,6 +1103,154 @@ def test_team_schedule_view_only_user_cannot_see_or_save_shift_controls(client, 
         assert response.status_code == 403
 
 
+def test_view_self_my_schedule_permission_shows_only_own_published_range(client, app):
+    worker_id = create_user(app, "basic-schedule-worker@example.com")
+    other_user_id = create_user(app, "basic-schedule-other@example.com")
+
+    with app.app_context():
+        worker = db.session.get(User, worker_id)
+        grant_permissions(
+            worker,
+            "schedules.view_self",
+            group_name="My Schedule Viewer",
+            description="Can view a basic personal schedule only.",
+        )
+
+        department = Department(name="Basic Schedule Dept", active=True)
+        location = Location(name="North Stand")
+        event = Event(
+            name="Spring Event",
+            start_date=date(2026, 4, 6),
+            end_date=date(2026, 4, 19),
+        )
+        db.session.add_all([department, location, event])
+        db.session.flush()
+        position = ShiftPosition(
+            department_id=department.id,
+            name="Cashier",
+            active=True,
+        )
+        db.session.add(position)
+        db.session.flush()
+        db.session.add(EventLocation(event_id=event.id, location_id=location.id))
+        db.session.add_all(
+            [
+                UserDepartmentMembership(
+                    user_id=worker_id,
+                    department_id=department.id,
+                    role="staff",
+                    is_primary=True,
+                ),
+                UserDepartmentMembership(
+                    user_id=other_user_id,
+                    department_id=department.id,
+                    role="staff",
+                    is_primary=True,
+                ),
+            ]
+        )
+        first_week = DepartmentScheduleWeek(
+            department_id=department.id,
+            week_start=date(2026, 4, 6),
+            is_published=True,
+            current_version=1,
+        )
+        second_week = DepartmentScheduleWeek(
+            department_id=department.id,
+            week_start=date(2026, 4, 13),
+            is_published=True,
+            current_version=1,
+        )
+        draft_week = DepartmentScheduleWeek(
+            department_id=department.id,
+            week_start=date(2026, 4, 20),
+            is_published=False,
+            current_version=0,
+        )
+        db.session.add_all([first_week, second_week, draft_week])
+        db.session.flush()
+        db.session.add_all(
+            [
+                Shift(
+                    schedule_week_id=first_week.id,
+                    position_id=position.id,
+                    assigned_user_id=worker_id,
+                    location_id=location.id,
+                    event_id=event.id,
+                    shift_date=date(2026, 4, 7),
+                    start_time=time(9, 0),
+                    end_time=time(17, 0),
+                    paid_hours=7.5,
+                    paid_hours_manual=True,
+                    assignment_mode=Shift.ASSIGNMENT_ASSIGNED,
+                    live_version=1,
+                ),
+                Shift(
+                    schedule_week_id=first_week.id,
+                    position_id=position.id,
+                    assigned_user_id=other_user_id,
+                    location_id=location.id,
+                    event_id=event.id,
+                    shift_date=date(2026, 4, 8),
+                    start_time=time(10, 0),
+                    end_time=time(15, 0),
+                    paid_hours=5.0,
+                    assignment_mode=Shift.ASSIGNMENT_ASSIGNED,
+                    live_version=1,
+                ),
+                Shift(
+                    schedule_week_id=second_week.id,
+                    position_id=position.id,
+                    assigned_user_id=worker_id,
+                    location_id=location.id,
+                    event_id=event.id,
+                    shift_date=date(2026, 4, 16),
+                    start_time=time(12, 0),
+                    end_time=time(18, 0),
+                    paid_hours=6.0,
+                    assignment_mode=Shift.ASSIGNMENT_ASSIGNED,
+                    live_version=1,
+                ),
+                Shift(
+                    schedule_week_id=draft_week.id,
+                    position_id=position.id,
+                    assigned_user_id=worker_id,
+                    location_id=location.id,
+                    event_id=event.id,
+                    shift_date=date(2026, 4, 21),
+                    start_time=time(9, 0),
+                    end_time=time(17, 0),
+                    paid_hours=8.0,
+                    assignment_mode=Shift.ASSIGNMENT_ASSIGNED,
+                ),
+            ]
+        )
+        db.session.commit()
+
+    with client:
+        login(client, "basic-schedule-worker@example.com", "pass")
+        response = client.get(
+            "/schedules/mine?start_date=2026-04-06&period=two_weeks"
+        )
+        team_response = client.get("/schedules")
+        availability_response = client.get("/schedules/availability")
+
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "My Schedule" in body
+    assert "Team Schedule" not in body
+    assert "2026-04-07" in body
+    assert "09:00 - 17:00" in body
+    assert "Break: 30 min" in body
+    assert "North Stand" in body
+    assert "Spring Event" in body
+    assert "2026-04-16" in body
+    assert "2026-04-08" not in body
+    assert "2026-04-21" not in body
+    assert team_response.status_code == 403
+    assert availability_response.status_code == 403
+
+
 def test_team_schedule_self_schedule_user_can_still_save_own_shift(client, app):
     scheduler_id = create_user(app, "self-scheduler@example.com")
 
@@ -1125,6 +1273,7 @@ def test_team_schedule_self_schedule_user_can_still_save_own_shift(client, app):
             active=True,
         )
         db.session.add(position)
+        db.session.flush()
         db.session.add_all(
             [
                 UserDepartmentMembership(
@@ -1297,6 +1446,7 @@ def test_schedule_templates_apply_only_user_hides_management_controls(client, ap
 def test_tradeboard_claim_only_user_hides_review_controls(client, app):
     claimant_id = create_user(app, "tradeboard-claim-only@example.com")
     other_user_id = create_user(app, "tradeboard-other@example.com")
+    week_start = date(2099, 4, 6)
 
     with app.app_context():
         claimant = db.session.get(User, claimant_id)
@@ -1322,7 +1472,7 @@ def test_tradeboard_claim_only_user_hides_review_controls(client, app):
 
         schedule_week = DepartmentScheduleWeek(
             department_id=department.id,
-            week_start=date(2026, 4, 6),
+            week_start=week_start,
             is_published=True,
             current_version=1,
         )
@@ -1354,7 +1504,7 @@ def test_tradeboard_claim_only_user_hides_review_controls(client, app):
         shift = Shift(
             schedule_week_id=schedule_week.id,
             position_id=position.id,
-            shift_date=date(2026, 4, 7),
+            shift_date=week_start + timedelta(days=1),
             start_time=time(9, 0),
             end_time=time(17, 0),
             paid_hours=8.0,
@@ -1377,7 +1527,7 @@ def test_tradeboard_claim_only_user_hides_review_controls(client, app):
     with client:
         login(client, "tradeboard-claim-only@example.com", "pass")
         response = client.get(
-            f"/schedules/tradeboard?department_id={department_id}&week_start=2026-04-06",
+            f"/schedules/tradeboard?department_id={department_id}&week_start={week_start.isoformat()}",
             follow_redirects=True,
         )
 
@@ -1394,6 +1544,7 @@ def test_tradeboard_claim_only_user_hides_review_controls(client, app):
 def test_tradeboard_approver_only_user_hides_claim_controls(client, app):
     approver_id = create_user(app, "tradeboard-approver@example.com")
     claimant_id = create_user(app, "tradeboard-pending-claimant@example.com")
+    week_start = date(2099, 4, 6)
 
     with app.app_context():
         approver = db.session.get(User, approver_id)
@@ -1419,7 +1570,7 @@ def test_tradeboard_approver_only_user_hides_claim_controls(client, app):
 
         schedule_week = DepartmentScheduleWeek(
             department_id=department.id,
-            week_start=date(2026, 4, 6),
+            week_start=week_start,
             is_published=True,
             current_version=1,
         )
@@ -1445,7 +1596,7 @@ def test_tradeboard_approver_only_user_hides_claim_controls(client, app):
         shift = Shift(
             schedule_week_id=schedule_week.id,
             position_id=position.id,
-            shift_date=date(2026, 4, 7),
+            shift_date=week_start + timedelta(days=1),
             start_time=time(10, 0),
             end_time=time(18, 0),
             paid_hours=8.0,
@@ -1468,7 +1619,7 @@ def test_tradeboard_approver_only_user_hides_claim_controls(client, app):
     with client:
         login(client, "tradeboard-approver@example.com", "pass")
         response = client.get(
-            f"/schedules/tradeboard?department_id={department_id}&week_start=2026-04-06",
+            f"/schedules/tradeboard?department_id={department_id}&week_start={week_start.isoformat()}",
             follow_redirects=True,
         )
 
@@ -1993,6 +2144,71 @@ def test_team_schedule_rejects_assigned_user_without_position_eligibility(client
 
     with app.app_context():
         assert Shift.query.filter(Shift.position_id == runner_id).count() == 0
+
+
+def test_team_schedule_save_shift_reports_missing_position_eligibility(client, app):
+    worker_id = create_user(app, "no-position-eligibility-worker@example.com")
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with app.app_context():
+        department = Department(name="Missing Eligibility Dept", active=True)
+        db.session.add(department)
+        db.session.flush()
+        position = ShiftPosition(
+            department_id=department.id,
+            name="Cashier",
+            active=True,
+        )
+        db.session.add(position)
+        db.session.add(
+            UserDepartmentMembership(
+                user_id=worker_id,
+                department_id=department.id,
+                role="staff",
+                is_primary=True,
+            )
+        )
+        db.session.commit()
+        department_id = department.id
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            f"/schedules?department_id={department_id}&week_start=2026-04-06",
+            data={
+                "action": "save_shift",
+                "department_id": str(department_id),
+                "week_start": "2026-04-06",
+                "shift-shift_id": "",
+                "shift-schedule_week_id": "",
+                "shift-shift_date": "2026-04-07",
+                "shift-assigned_user_id": str(worker_id),
+                "shift-position_id": "0",
+                "shift-assignment_mode": "assigned",
+                "shift-start_time": "09:00",
+                "shift-end_time": "17:00",
+                "shift-paid_hours": "",
+                "shift-location_id": "0",
+                "shift-event_id": "0",
+                "shift-notes": "",
+                "shift-color": "",
+                "shift-copy_count": "1",
+                "shift-repeat_weeks": "0",
+                "shift-target_days": ["1"],
+            },
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert (
+        b"Selected user has no active position eligibility in this department."
+        in response.data
+    )
+    assert b"window.bootstrap.Modal.getOrCreateInstance" in response.data
+
+    with app.app_context():
+        assert Shift.query.count() == 0
 
 
 def test_auto_assign_uses_default_availability_and_preferred_hours_cap(client, app):
@@ -2746,6 +2962,7 @@ def test_tradeboard_claim_and_approval_flow(client, app):
     claimant_id = create_user(app, "claimant@example.com")
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    week_start = date(2099, 6, 1)
 
     with app.app_context():
         claimant = db.session.get(User, claimant_id)
@@ -2786,7 +3003,7 @@ def test_tradeboard_claim_and_approval_flow(client, app):
         db.session.commit()
         week = DepartmentScheduleWeek(
             department_id=department.id,
-            week_start=date(2026, 4, 6),
+            week_start=week_start,
             is_published=True,
             current_version=1,
         )
@@ -2795,7 +3012,7 @@ def test_tradeboard_claim_and_approval_flow(client, app):
         shift = Shift(
             schedule_week_id=week.id,
             position_id=position.id,
-            shift_date=date(2026, 4, 8),
+            shift_date=week_start + timedelta(days=2),
             start_time=time(10, 0),
             end_time=time(16, 0),
             paid_hours=6.0,
@@ -2810,7 +3027,7 @@ def test_tradeboard_claim_and_approval_flow(client, app):
     with client:
         login(client, "claimant@example.com", "pass")
         response = client.post(
-            f"/schedules/tradeboard?department_id={department_id}&week_start=2026-04-06",
+            f"/schedules/tradeboard?department_id={department_id}&week_start={week_start.isoformat()}",
             data={"action": "claim_shift", "shift_id": str(shift_id)},
             follow_redirects=True,
         )
@@ -2827,7 +3044,7 @@ def test_tradeboard_claim_and_approval_flow(client, app):
     with client:
         login(client, admin_email, admin_pass)
         response = client.post(
-            f"/schedules/tradeboard?department_id={department_id}&week_start=2026-04-06",
+            f"/schedules/tradeboard?department_id={department_id}&week_start={week_start.isoformat()}",
             data={
                 "action": "review_claim",
                 "claim_id": str(claim_id),
@@ -2845,6 +3062,405 @@ def test_tradeboard_claim_and_approval_flow(client, app):
         assert claim.status == TradeboardClaim.STATUS_APPROVED
         assert shift.assigned_user_id == claimant_id
         assert shift.assignment_mode == Shift.ASSIGNMENT_ASSIGNED
+
+
+def test_my_schedule_post_tradeboard_claim_and_approve_transfers_shift(client, app):
+    poster_id = create_user(app, "tradeboard-poster@example.com")
+    claimant_id = create_user(app, "tradeboard-approved-claimant@example.com")
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    week_start = date(2099, 4, 6)
+    shift_date = week_start + timedelta(days=1)
+
+    with app.app_context():
+        poster = db.session.get(User, poster_id)
+        claimant = db.session.get(User, claimant_id)
+        grant_permissions(
+            poster,
+            "schedules.view_self",
+            "schedules.post_tradeboard",
+            group_name="Tradeboard Poster",
+            description="Can view and post own schedule shifts.",
+        )
+        grant_permissions(
+            claimant,
+            "schedules.view_tradeboard",
+            "schedules.claim_tradeboard",
+            group_name="Tradeboard Claimant Approval",
+            description="Can claim tradeboard shifts.",
+        )
+        department = Department(name="Tradeboard Post Ops", active=True)
+        db.session.add(department)
+        db.session.flush()
+        position = ShiftPosition(
+            department_id=department.id,
+            name="Tradeboard Runner",
+            active=True,
+        )
+        db.session.add(position)
+        db.session.flush()
+        db.session.add_all(
+            [
+                UserDepartmentMembership(
+                    user_id=poster_id,
+                    department_id=department.id,
+                    role=UserDepartmentMembership.ROLE_STAFF,
+                    is_primary=True,
+                ),
+                UserDepartmentMembership(
+                    user_id=claimant_id,
+                    department_id=department.id,
+                    role=UserDepartmentMembership.ROLE_STAFF,
+                    is_primary=True,
+                ),
+                UserPositionEligibility(
+                    user_id=poster_id,
+                    position_id=position.id,
+                    active=True,
+                ),
+                UserPositionEligibility(
+                    user_id=claimant_id,
+                    position_id=position.id,
+                    active=True,
+                ),
+            ]
+        )
+        schedule_week = DepartmentScheduleWeek(
+            department_id=department.id,
+            week_start=week_start,
+            is_published=True,
+            current_version=1,
+        )
+        db.session.add(schedule_week)
+        db.session.flush()
+        shift = Shift(
+            schedule_week_id=schedule_week.id,
+            position_id=position.id,
+            assigned_user_id=poster_id,
+            shift_date=shift_date,
+            start_time=time(9, 0),
+            end_time=time(17, 0),
+            paid_hours=8.0,
+            assignment_mode=Shift.ASSIGNMENT_ASSIGNED,
+            live_version=1,
+        )
+        db.session.add(shift)
+        db.session.commit()
+        department_id = department.id
+        shift_id = shift.id
+
+    with client:
+        login(client, "tradeboard-poster@example.com", "pass")
+        response = client.get(
+            f"/schedules/mine?start_date={week_start.isoformat()}&period=week"
+        )
+        assert response.status_code == 200
+        assert b"Post to Tradeboard" in response.data
+        response = client.post(
+            "/schedules/mine",
+            data={
+                "action": "post_tradeboard_shift",
+                "shift_id": str(shift_id),
+                "period": "week",
+                "start_date": week_start.isoformat(),
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Shift posted to the tradeboard." in response.data
+
+    with app.app_context():
+        shift = db.session.get(Shift, shift_id)
+        assert shift.assignment_mode == Shift.ASSIGNMENT_TRADEBOARD
+        assert shift.assigned_user_id == poster_id
+        assert shift.schedule_week.current_version == 2
+
+    with client:
+        login(client, "tradeboard-approved-claimant@example.com", "pass")
+        response = client.post(
+            f"/schedules/tradeboard?department_id={department_id}&week_start={week_start.isoformat()}",
+            data={"action": "claim_shift", "shift_id": str(shift_id)},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Shift claim submitted." in response.data
+
+    with app.app_context():
+        claim = TradeboardClaim.query.filter_by(
+            shift_id=shift_id,
+            user_id=claimant_id,
+        ).first()
+        assert claim is not None
+        claim_id = claim.id
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            f"/schedules/tradeboard?department_id={department_id}&week_start={week_start.isoformat()}",
+            data={
+                "action": "review_claim",
+                "claim_id": str(claim_id),
+                "claimreview-status": "approved",
+                "claimreview-manager_note": "Approved",
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Tradeboard claim updated." in response.data
+
+    with app.app_context():
+        shift = db.session.get(Shift, shift_id)
+        claim = db.session.get(TradeboardClaim, claim_id)
+        assert claim.status == TradeboardClaim.STATUS_APPROVED
+        assert shift.assigned_user_id == claimant_id
+        assert shift.assignment_mode == Shift.ASSIGNMENT_ASSIGNED
+
+
+def test_tradeboard_denial_and_own_claim_preserve_posted_assignment(client, app):
+    poster_id = create_user(app, "tradeboard-own-poster@example.com")
+    claimant_id = create_user(app, "tradeboard-denied-claimant@example.com")
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    week_start = date(2099, 5, 4)
+    shift_date = week_start + timedelta(days=2)
+
+    with app.app_context():
+        poster = db.session.get(User, poster_id)
+        claimant = db.session.get(User, claimant_id)
+        grant_permissions(
+            poster,
+            "schedules.view_tradeboard",
+            "schedules.claim_tradeboard",
+            group_name="Tradeboard Own Claim",
+            description="Can view and claim tradeboard shifts.",
+        )
+        grant_permissions(
+            claimant,
+            "schedules.view_tradeboard",
+            "schedules.claim_tradeboard",
+            group_name="Tradeboard Denied Claimant",
+            description="Can claim tradeboard shifts.",
+        )
+        department = Department(name="Tradeboard Denial Ops", active=True)
+        db.session.add(department)
+        db.session.flush()
+        position = ShiftPosition(
+            department_id=department.id,
+            name="Tradeboard Denial Runner",
+            active=True,
+        )
+        db.session.add(position)
+        db.session.flush()
+        db.session.add_all(
+            [
+                UserDepartmentMembership(
+                    user_id=poster_id,
+                    department_id=department.id,
+                    role=UserDepartmentMembership.ROLE_STAFF,
+                    is_primary=True,
+                ),
+                UserDepartmentMembership(
+                    user_id=claimant_id,
+                    department_id=department.id,
+                    role=UserDepartmentMembership.ROLE_STAFF,
+                    is_primary=True,
+                ),
+                UserPositionEligibility(
+                    user_id=poster_id,
+                    position_id=position.id,
+                    active=True,
+                ),
+                UserPositionEligibility(
+                    user_id=claimant_id,
+                    position_id=position.id,
+                    active=True,
+                ),
+            ]
+        )
+        schedule_week = DepartmentScheduleWeek(
+            department_id=department.id,
+            week_start=week_start,
+            is_published=True,
+            current_version=1,
+        )
+        db.session.add(schedule_week)
+        db.session.flush()
+        shift = Shift(
+            schedule_week_id=schedule_week.id,
+            position_id=position.id,
+            assigned_user_id=poster_id,
+            shift_date=shift_date,
+            start_time=time(10, 0),
+            end_time=time(18, 0),
+            paid_hours=8.0,
+            assignment_mode=Shift.ASSIGNMENT_TRADEBOARD,
+            live_version=1,
+        )
+        db.session.add(shift)
+        db.session.commit()
+        department_id = department.id
+        shift_id = shift.id
+
+    with client:
+        login(client, "tradeboard-own-poster@example.com", "pass")
+        response = client.post(
+            f"/schedules/tradeboard?department_id={department_id}&week_start={week_start.isoformat()}",
+            data={"action": "claim_shift", "shift_id": str(shift_id)},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"You cannot claim your own posted shift." in response.data
+
+    with app.app_context():
+        assert TradeboardClaim.query.filter_by(
+            shift_id=shift_id,
+            user_id=poster_id,
+        ).first() is None
+
+    with client:
+        login(client, "tradeboard-denied-claimant@example.com", "pass")
+        response = client.post(
+            f"/schedules/tradeboard?department_id={department_id}&week_start={week_start.isoformat()}",
+            data={"action": "claim_shift", "shift_id": str(shift_id)},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Shift claim submitted." in response.data
+
+    with app.app_context():
+        claim = TradeboardClaim.query.filter_by(
+            shift_id=shift_id,
+            user_id=claimant_id,
+        ).first()
+        assert claim is not None
+        claim_id = claim.id
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            f"/schedules/tradeboard?department_id={department_id}&week_start={week_start.isoformat()}",
+            data={
+                "action": "review_claim",
+                "claim_id": str(claim_id),
+                "claimreview-status": "rejected",
+                "claimreview-manager_note": "Denied",
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Tradeboard claim updated." in response.data
+
+    with app.app_context():
+        shift = db.session.get(Shift, shift_id)
+        claim = db.session.get(TradeboardClaim, claim_id)
+        assert claim.status == TradeboardClaim.STATUS_REJECTED
+        assert shift.assigned_user_id == poster_id
+        assert shift.assignment_mode == Shift.ASSIGNMENT_TRADEBOARD
+
+
+def test_tradeboard_started_posting_expires_and_rejects_pending_claim(
+    client,
+    app,
+    monkeypatch,
+):
+    poster_id = create_user(app, "tradeboard-expired-poster@example.com")
+    claimant_id = create_user(app, "tradeboard-expired-claimant@example.com")
+    week_start = date(2026, 4, 6)
+    shift_date = week_start + timedelta(days=1)
+    monkeypatch.setattr(
+        schedule_routes_module,
+        "_current_schedule_datetime",
+        lambda: datetime(2026, 4, 7, 9, 30),
+    )
+
+    with app.app_context():
+        claimant = db.session.get(User, claimant_id)
+        grant_permissions(
+            claimant,
+            "schedules.view_tradeboard",
+            "schedules.claim_tradeboard",
+            group_name="Tradeboard Expired Claimant",
+            description="Can claim tradeboard shifts.",
+        )
+        department = Department(name="Tradeboard Expiry Ops", active=True)
+        db.session.add(department)
+        db.session.flush()
+        position = ShiftPosition(
+            department_id=department.id,
+            name="Tradeboard Expiry Runner",
+            active=True,
+        )
+        db.session.add(position)
+        db.session.flush()
+        db.session.add_all(
+            [
+                UserDepartmentMembership(
+                    user_id=poster_id,
+                    department_id=department.id,
+                    role=UserDepartmentMembership.ROLE_STAFF,
+                    is_primary=True,
+                ),
+                UserDepartmentMembership(
+                    user_id=claimant_id,
+                    department_id=department.id,
+                    role=UserDepartmentMembership.ROLE_STAFF,
+                    is_primary=True,
+                ),
+                UserPositionEligibility(
+                    user_id=claimant_id,
+                    position_id=position.id,
+                    active=True,
+                ),
+            ]
+        )
+        schedule_week = DepartmentScheduleWeek(
+            department_id=department.id,
+            week_start=week_start,
+            is_published=True,
+            current_version=1,
+        )
+        db.session.add(schedule_week)
+        db.session.flush()
+        shift = Shift(
+            schedule_week_id=schedule_week.id,
+            position_id=position.id,
+            assigned_user_id=poster_id,
+            shift_date=shift_date,
+            start_time=time(9, 0),
+            end_time=time(17, 0),
+            paid_hours=8.0,
+            assignment_mode=Shift.ASSIGNMENT_TRADEBOARD,
+            live_version=1,
+        )
+        db.session.add(shift)
+        db.session.flush()
+        claim = TradeboardClaim(
+            shift_id=shift.id,
+            user_id=claimant_id,
+            status=TradeboardClaim.STATUS_PENDING,
+        )
+        db.session.add(claim)
+        db.session.commit()
+        department_id = department.id
+        shift_id = shift.id
+        claim_id = claim.id
+
+    with client:
+        login(client, "tradeboard-expired-claimant@example.com", "pass")
+        response = client.get(
+            f"/schedules/tradeboard?department_id={department_id}&week_start={week_start.isoformat()}",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"No published open or tradeboard shifts match this view." in response.data
+
+    with app.app_context():
+        shift = db.session.get(Shift, shift_id)
+        claim = db.session.get(TradeboardClaim, claim_id)
+        assert shift.assigned_user_id == poster_id
+        assert shift.assignment_mode == Shift.ASSIGNMENT_ASSIGNED
+        assert claim.status == TradeboardClaim.STATUS_REJECTED
 
 
 def test_schedule_templates_can_create_add_entries_and_apply_to_draft_schedule(

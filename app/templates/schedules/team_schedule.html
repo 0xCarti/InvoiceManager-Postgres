@@ -1038,5 +1038,16 @@
 {% endblock %}
 
 {% block scripts %}
+{% if shift_form and shift_form.errors %}
+<script nonce="{{ csp_nonce }}">
+document.addEventListener("DOMContentLoaded", function () {
+    var modalElement = document.getElementById("scheduleShiftModal");
+    if (!modalElement || !window.bootstrap) {
+        return;
+    }
+    window.bootstrap.Modal.getOrCreateInstance(modalElement).show();
+});
+</script>
+{% endif %}
 <script src="{{ url_for('static', filename='js/schedule_board.js', v='20260417b') }}" defer></script>
 {% endblock %}

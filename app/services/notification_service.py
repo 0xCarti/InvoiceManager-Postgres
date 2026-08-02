@@ -18,6 +18,10 @@ NOTIFICATION_CATEGORY_FIELDS: dict[str, tuple[str | None, str | None]] = {
         "notify_purchase_orders_email",
         "notify_purchase_orders_text",
     ),
+    "inventory": (
+        "notify_purchase_orders_email",
+        "notify_purchase_orders_text",
+    ),
     "events": ("notify_events_email", "notify_events_text"),
     "users": ("notify_users_email", "notify_users_text"),
     "messages": ("notify_messages_email", "notify_messages_text"),
@@ -110,6 +114,14 @@ NOTIFICATION_EVENT_DEFINITIONS: tuple[NotificationEventDefinition, ...] = (
         label="Purchase order reversed",
         description="When a received purchase order is reversed.",
         legacy_category="purchase_orders",
+    ),
+    NotificationEventDefinition(
+        key="inventory_expiry_alert",
+        group_key="inventory",
+        group_label="Inventory",
+        label="Inventory expiry alert",
+        description="When tracked inventory is expired or expiring soon.",
+        legacy_category="inventory",
     ),
     NotificationEventDefinition(
         key="event_created",

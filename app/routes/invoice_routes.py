@@ -3,6 +3,7 @@ from datetime import datetime
 
 from flask import (
     Blueprint,
+    Response,
     abort,
     current_app,
     flash,
@@ -14,6 +15,7 @@ from flask import (
 from flask_login import current_user, login_required
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
 
 from app import GST, db
 from app.forms import (
@@ -23,7 +25,13 @@ from app.forms import (
     InvoiceFilterForm,
     InvoiceForm,
 )
-from app.models import Customer, Invoice, InvoiceProduct, Product
+from app.models import Customer, Invoice, InvoiceProduct, Product, ProductSellableAmount
+from app.services.pdf import render_template_pdf
+from app.services.inventory_expiry import (
+    SOURCE_SALES_INVOICE,
+    consume_item_lots,
+    restore_lot_adjustments,
+)
 from app.utils.activity import log_activity
 from app.utils.filter_state import (
     filters_to_query_args,
@@ -34,6 +42,11 @@ from app.utils.numeric import coerce_float
 from app.utils.pagination import build_pagination_args, get_per_page
 from app.utils.recipe_history import sync_invoice_product_recipe_snapshots
 from app.utils.recipe_usage import recipe_item_base_units_per_sale
+from app.utils.sellable_amounts import (
+    choose_sellable_amount_for_price,
+    ensure_default_sellable_amount,
+    sellable_amount_snapshot,
+)
 from app.utils.text import normalize_request_text_filter
 
 invoice = Blueprint("invoice", __name__)
@@ -181,6 +194,8 @@ def _parse_json_invoice_product_entries(raw_product_data):
 
         catalog_entry = {
             "line_type": "catalog",
+            "product_id": raw_entry.get("product_id"),
+            "sellable_amount_id": raw_entry.get("sellable_amount_id"),
             "product_name": product_name,
             "quantity": quantity_value,
             "override_gst": _parse_invoice_override_flag(
@@ -236,9 +251,17 @@ def _reverse_invoice_inventory(invoice_record):
     for invoice_product in list(invoice_record.products or []):
         if invoice_product.is_custom_line:
             continue
+        restore_lot_adjustments(
+            source_type=SOURCE_SALES_INVOICE,
+            source_id=invoice_record.id,
+            source_line_id=invoice_product.id,
+        )
+        product_quantity = float(invoice_product.quantity or 0.0) * float(
+            invoice_product.sellable_quantity or 1.0
+        )
         _adjust_catalog_inventory(
             invoice_product.product,
-            float(invoice_product.quantity or 0.0),
+            product_quantity,
             reverse=True,
         )
 
@@ -263,7 +286,9 @@ def _build_invoice_lines_from_entries(
     }
 
     products = (
-        Product.query.filter(Product.name.in_(product_names)).all()
+        Product.query.options(selectinload(Product.sellable_amounts))
+        .filter(Product.name.in_(product_names))
+        .all()
         if product_names
         else []
     )
@@ -302,18 +327,47 @@ def _build_invoice_lines_from_entries(
 
         override_gst = entry["override_gst"]
         override_pst = entry["override_pst"]
-        product = product_lookup.get(product_name)
+        product = None
+        sellable_amount = None
+        sellable_amount_id = entry.get("sellable_amount_id")
+        product_id = entry.get("product_id")
+        if sellable_amount_id not in (None, ""):
+            try:
+                sellable_amount = db.session.get(
+                    ProductSellableAmount, int(sellable_amount_id)
+                )
+            except (TypeError, ValueError):
+                sellable_amount = None
+            if sellable_amount is not None:
+                product = sellable_amount.product
+        if product is None and product_id not in (None, ""):
+            try:
+                product = db.session.get(Product, int(product_id))
+            except (TypeError, ValueError):
+                product = None
+        if product is None:
+            product = product_lookup.get(product_name)
 
         if product:
+            if sellable_amount is None:
+                sellable_amount = choose_sellable_amount_for_price(
+                    product, entry.get("unit_price")
+                )
+            if sellable_amount is None:
+                sellable_amount = ensure_default_sellable_amount(
+                    product,
+                    price=entry.get("unit_price")
+                    if entry.get("unit_price") is not None
+                    else product.invoice_sale_price or product.price,
+                )
+            amount_snapshot = sellable_amount_snapshot(sellable_amount)
             if preserve_catalog_unit_prices and entry.get("unit_price") is not None:
                 unit_price = float(entry["unit_price"])
             else:
-                invoice_price = product.invoice_sale_price
-                unit_price = (
-                    float(invoice_price)
-                    if invoice_price is not None
-                    else float(product.price)
-                )
+                unit_price = float(amount_snapshot["unit_price"])
+            sellable_quantity = coerce_float(entry.get("sellable_quantity"))
+            if sellable_quantity is None:
+                sellable_quantity = float(amount_snapshot["sellable_quantity"] or 1.0)
             line_subtotal = quantity * unit_price
 
             override_gst = _parse_invoice_override_flag(override_gst)
@@ -336,6 +390,9 @@ def _build_invoice_lines_from_entries(
             invoice_product = InvoiceProduct(
                 invoice_id=invoice_record.id,
                 product_id=product.id,
+                sellable_amount_id=amount_snapshot["sellable_amount_id"],
+                sellable_amount_name=amount_snapshot["sellable_amount_name"],
+                sellable_quantity=sellable_quantity,
                 is_custom_line=False,
                 product_name=product.name,
                 quantity=quantity,
@@ -350,9 +407,32 @@ def _build_invoice_lines_from_entries(
             db.session.flush()
             sync_invoice_product_recipe_snapshots(invoice_product, product=product)
             created_line_count += 1
-            line_items_to_log.append({"product_id": product.id, "quantity": quantity})
+            product_quantity = quantity * sellable_quantity
+            line_items_to_log.append(
+                {
+                    "product_id": product.id,
+                    "sellable_amount_id": amount_snapshot["sellable_amount_id"],
+                    "quantity": quantity,
+                    "product_quantity": product_quantity,
+                }
+            )
 
-            _adjust_catalog_inventory(product, quantity)
+            _adjust_catalog_inventory(product, product_quantity)
+            if product_quantity > 0:
+                for recipe_item in product.recipe_items:
+                    if recipe_item.item_id is None:
+                        continue
+                    units_per_sale = recipe_item_base_units_per_sale(recipe_item)
+                    consumed_quantity = units_per_sale * product_quantity
+                    if consumed_quantity <= 0:
+                        continue
+                    consume_item_lots(
+                        item_id=recipe_item.item_id,
+                        quantity=consumed_quantity,
+                        source_type=SOURCE_SALES_INVOICE,
+                        source_id=invoice_record.id,
+                        source_line_id=invoice_product.id,
+                    )
 
     if created_line_count == 0:
         raise InvoiceCreationError(
@@ -501,6 +581,10 @@ def _serialize_invoice_lines_for_edit(invoice_record):
         lines.append(
             {
                 "line_type": "catalog",
+                "product_id": invoice_product.product_id,
+                "sellable_amount_id": invoice_product.sellable_amount_id,
+                "sellable_amount_name": invoice_product.sellable_amount_name,
+                "sellable_quantity": invoice_product.sellable_quantity,
                 "product_name": invoice_product.product.name,
                 "quantity": invoice_product.quantity,
                 "unit_price": invoice_product.unit_price,
@@ -524,6 +608,47 @@ def _invoice_tax_checkbox_state(invoice_product, amount_attr, override_attr):
     if override_value is not None:
         return bool(override_value)
     return _invoice_amount_is_nonzero(getattr(invoice_product, amount_attr))
+
+
+def _build_invoice_display_context(invoice_record):
+    subtotal = 0
+    gst_total = 0
+    pst_total = 0
+
+    invoice_lines = []
+    for invoice_product in invoice_record.products:
+        # Use stored values so historical invoice PDFs do not drift if product
+        # pricing or tax settings change later.
+        line_total = invoice_product.line_subtotal
+        subtotal += line_total
+        gst_total += invoice_product.line_gst
+        pst_total += invoice_product.line_pst
+        name = (
+            invoice_product.product.name
+            if invoice_product.product
+            else invoice_product.product_name
+        )
+        amount_name = (invoice_product.sellable_amount_name or "").strip()
+        if amount_name and amount_name.lower() not in {"each", name.lower()}:
+            name = f"{name} - {amount_name}"
+        tax_flags = ""
+        if _invoice_amount_is_nonzero(invoice_product.line_gst):
+            tax_flags += "G"
+        if _invoice_amount_is_nonzero(invoice_product.line_pst):
+            tax_flags += "P"
+
+        invoice_lines.append((invoice_product, name, tax_flags))
+
+    return {
+        "invoice": invoice_record,
+        "invoice_lines": invoice_lines,
+        "subtotal": subtotal,
+        "gst": gst_total,
+        "pst": pst_total,
+        "total": subtotal + gst_total + pst_total,
+        "GST": GST,
+        "retail_pop_price": current_app.config.get("RETAIL_POP_PRICE", "0.00"),
+    }
 
 
 def _update_pending_invoice_from_form(invoice_record, form):
@@ -714,6 +839,23 @@ def _set_invoice_status(invoice_id, *, target_status):
     )
 
 
+def _reverse_invoice_status(invoice_id, *, current_status, target_status, label):
+    invoice_record = db.session.get(Invoice, invoice_id)
+    if invoice_record is None:
+        abort(404)
+    if invoice_record.invoice_status != current_status:
+        flash(
+            f"Invoice {invoice_record.id} cannot {label.lower()} from its current status.",
+            "danger",
+        )
+        return redirect(
+            request.referrer
+            or url_for("invoice.view_invoice", invoice_id=invoice_record.id)
+        )
+
+    return _set_invoice_status(invoice_id, target_status=target_status)
+
+
 def _normalize_invoice_ids(raw_invoice_ids):
     if raw_invoice_ids is None:
         return []
@@ -858,6 +1000,30 @@ def mark_invoice_unpaid(invoice_id):
     return _set_invoice_status(invoice_id, target_status=Invoice.STATUS_DELIVERED)
 
 
+@invoice.route("/invoice/<invoice_id>/reverse-payment", methods=["POST"])
+@login_required
+def reverse_invoice_payment(invoice_id):
+    """Reverse payment on a paid invoice, returning it to delivered."""
+    return _reverse_invoice_status(
+        invoice_id,
+        current_status=Invoice.STATUS_PAID,
+        target_status=Invoice.STATUS_DELIVERED,
+        label="reverse payment",
+    )
+
+
+@invoice.route("/invoice/<invoice_id>/reverse-delivery", methods=["POST"])
+@login_required
+def reverse_invoice_delivery(invoice_id):
+    """Reverse delivery on a delivered invoice, returning it to pending."""
+    return _reverse_invoice_status(
+        invoice_id,
+        current_status=Invoice.STATUS_DELIVERED,
+        target_status=Invoice.STATUS_PENDING,
+        label="reverse delivery",
+    )
+
+
 @invoice.route("/invoices/bulk-payment-status", methods=["POST"])
 @login_required
 def bulk_invoice_payment_status():
@@ -988,44 +1154,82 @@ def view_invoice(invoice_id):
     if invoice is None:
         abort(404)
 
-    subtotal = 0
-    gst_total = 0
-    pst_total = 0
-
-    invoice_lines = []
-    for invoice_product in invoice.products:
-        # Use stored values instead of recalculating from current product price
-        line_total = invoice_product.line_subtotal
-        subtotal += line_total
-        gst_total += invoice_product.line_gst
-        pst_total += invoice_product.line_pst
-        name = (
-            invoice_product.product.name
-            if invoice_product.product
-            else invoice_product.product_name
-        )
-        tax_flags = ""
-        if _invoice_amount_is_nonzero(invoice_product.line_gst):
-            tax_flags += "G"
-        if _invoice_amount_is_nonzero(invoice_product.line_pst):
-            tax_flags += "P"
-
-        invoice_lines.append((invoice_product, name, tax_flags))
-
-    total = subtotal + gst_total + pst_total
-
+    invoice_context = _build_invoice_display_context(invoice)
+    invoice_context["delete_form"] = DeleteForm()
     return render_template(
         "invoices/view_invoice.html",
-        invoice=invoice,
-        invoice_lines=invoice_lines,
-        subtotal=subtotal,
-        gst=gst_total,
-        pst=pst_total,
-        total=total,
-        GST=GST,
-        retail_pop_price=current_app.config.get("RETAIL_POP_PRICE", "0.00"),
-        delete_form=DeleteForm(),
+        **invoice_context,
     )
+
+
+@invoice.route("/invoice/<invoice_id>/print", methods=["GET"])
+@login_required
+def print_invoice(invoice_id):
+    """Render a print-friendly invoice using the PDF invoice layout."""
+    invoice = db.session.get(Invoice, invoice_id)
+    if invoice is None:
+        abort(404)
+
+    invoice_context = _build_invoice_display_context(invoice)
+    invoice_context["print_view"] = True
+    return render_template("invoices/invoice_pdf.html", **invoice_context)
+
+
+@invoice.route("/invoices/download-pdf", methods=["POST"])
+@login_required
+def download_invoices_pdf():
+    """Download one or more selected sales invoices as a single PDF."""
+    invoice_ids = _normalize_invoice_ids(
+        request.form.getlist("invoice_ids") or request.form.get("invoice_ids")
+    )
+    if not invoice_ids:
+        flash("Select at least one invoice to download.", "warning")
+        return redirect(request.referrer or url_for("invoice.view_invoices"))
+
+    selected_id_set = set(invoice_ids)
+    invoice_records = (
+        Invoice.query.options(
+            selectinload(Invoice.customer),
+            selectinload(Invoice.products).selectinload(InvoiceProduct.product),
+        )
+        .filter(Invoice.id.in_(selected_id_set))
+        .all()
+    )
+    invoices_by_id = {
+        invoice_record.id: invoice_record for invoice_record in invoice_records
+    }
+    ordered_invoices = [
+        invoices_by_id[invoice_id]
+        for invoice_id in invoice_ids
+        if invoice_id in invoices_by_id
+    ]
+
+    if not ordered_invoices:
+        flash("The selected invoices could not be found.", "danger")
+        return redirect(request.referrer or url_for("invoice.view_invoices"))
+
+    missing_invoice_ids = sorted(selected_id_set - set(invoices_by_id))
+    if missing_invoice_ids:
+        flash(
+            "Some selected invoices were not found: "
+            + ", ".join(missing_invoice_ids),
+            "warning",
+        )
+
+    pages = [
+        ("invoices/invoice_pdf.html", _build_invoice_display_context(invoice_record))
+        for invoice_record in ordered_invoices
+    ]
+    pdf_bytes = render_template_pdf(pages, base_url=request.url_root)
+
+    filename = (
+        f"sales-invoices-{datetime.now().strftime('%Y%m%d-%H%M%S')}.pdf"
+        if len(ordered_invoices) > 1
+        else f"sales-invoice-{ordered_invoices[0].id}.pdf"
+    )
+    response = Response(pdf_bytes, mimetype="application/pdf")
+    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+    return response
 
 
 @invoice.route("/get_customer_tax_status/<int:customer_id>")

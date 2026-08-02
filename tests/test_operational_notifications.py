@@ -66,6 +66,16 @@ def _create_transfer_setup():
         notify_transfers_email=True,
         phone_number="2045551001",
     )
+    actor = db.session.get(User, actor_id)
+    assert actor is not None
+    grant_permissions(
+        actor,
+        "transfers.view",
+        "transfers.create",
+        "transfers.complete",
+        group_name="Operational Transfer Actor",
+        description="Test permissions for transfer notification workflows.",
+    )
     from_location = Location(name="Warehouse")
     to_location = Location(name="Arena")
     item = Item(name="Cases", base_unit="each")
@@ -102,6 +112,20 @@ def _create_purchase_setup():
         notify_purchase_orders_email=True,
         notify_purchase_orders_text=True,
         phone_number="2045551002",
+    )
+    actor = db.session.get(User, actor_id)
+    assert actor is not None
+    grant_permissions(
+        actor,
+        "purchase_orders.view",
+        "purchase_orders.create",
+        "purchase_orders.edit",
+        "purchase_orders.mark_ordered",
+        "purchase_invoices.view",
+        "purchase_invoices.receive",
+        "purchase_invoices.reverse",
+        group_name="Operational Purchase Actor",
+        description="Test permissions for purchase notification workflows.",
     )
     vendor = Vendor(first_name="Prairie", last_name="Foods")
     item = Item(name="Limes", base_unit="each")
@@ -399,6 +423,22 @@ def test_event_and_location_notifications_cover_changes(
             phone_number="2045551003",
         )
         actor = db.session.get(User, actor_id)
+        assert actor is not None
+        grant_permissions(
+            actor,
+            "locations.view",
+            "locations.create",
+            "locations.edit",
+            "locations.delete",
+            "events.view",
+            "events.create",
+            "events.edit",
+            "events.manage_locations",
+            "events.close",
+            "events.reports",
+            group_name="Operational Event Location Actor",
+            description="Test permissions for event and location notifications.",
+        )
         actor_email = actor.email
 
     with client:

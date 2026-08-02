@@ -53,7 +53,7 @@
                 showSelectedOnly ? "true" : "false"
             );
             selectedOnlyToggleButton.textContent = showSelectedOnly
-                ? "Show All Products"
+                ? "Show All Amounts"
                 : "Show Selected Only";
         }
 
@@ -142,20 +142,21 @@
                 })
                     .then(function (response) {
                         if (!response.ok) {
-                            throw new Error("Unable to load menu products");
+                            throw new Error("Unable to load menu sellable amounts");
                         }
                         return response.json();
                     })
                     .then(function (data) {
-                        if (!data || !Array.isArray(data.product_ids)) {
+                        var selectedIds = data.sellable_amount_ids || data.product_ids;
+                        if (!data || !Array.isArray(selectedIds)) {
                             throw new Error("Unexpected response from server");
                         }
-                        setSelectedProducts(data.product_ids);
-                        toggleStatus(statusEl, "Copied products from " + (data.name || "selected menu") + ".", false);
+                        setSelectedProducts(selectedIds);
+                        toggleStatus(statusEl, "Copied sellable amounts from " + (data.name || "selected menu") + ".", false);
                     })
                     .catch(function (error) {
                         console.error(error);
-                        toggleStatus(statusEl, error.message || "Unable to copy products.", true);
+                        toggleStatus(statusEl, error.message || "Unable to copy sellable amounts.", true);
                     })
                     .finally(function () {
                         copyButton.disabled = false;
@@ -582,28 +583,38 @@
                             throw new Error("Unexpected response from server.");
                         }
                         var product = data.product;
-                        var existing = null;
                         if (productSelect) {
-                            Array.prototype.forEach.call(
-                                productSelect.options,
-                                function (option) {
-                                    if (option.value === String(product.id)) {
-                                        existing = option;
+                            var amounts = Array.isArray(product.sellable_amounts) && product.sellable_amounts.length
+                                ? product.sellable_amounts
+                                : [{ id: product.id, display_name: product.name, price: product.price, product_id: product.id }];
+                            amounts.forEach(function (amount) {
+                                var existing = null;
+                                Array.prototype.forEach.call(
+                                    productSelect.options,
+                                    function (option) {
+                                        if (option.value === String(amount.id)) {
+                                            existing = option;
+                                        }
                                     }
-                                }
-                            );
-                            if (!existing) {
-                                var newOption = new Option(
-                                    product.name,
-                                    product.id,
-                                    true,
-                                    true
                                 );
-                                productSelect.appendChild(newOption);
-                                sortProductOptions();
-                            } else {
-                                existing.selected = true;
-                            }
+                                if (!existing) {
+                                    var label = amount.display_name || product.name;
+                                    if (amount.price !== undefined && amount.price !== null) {
+                                        label += " - $" + Number(amount.price || 0).toFixed(2);
+                                    }
+                                    existing = new Option(
+                                        label,
+                                        amount.id,
+                                        true,
+                                        true
+                                    );
+                                    existing.dataset.productId = String(amount.product_id || product.id);
+                                    productSelect.appendChild(existing);
+                                } else {
+                                    existing.selected = true;
+                                }
+                            });
+                            sortProductOptions();
                             applyProductFilter();
                         }
                         showQuickProductFeedback(

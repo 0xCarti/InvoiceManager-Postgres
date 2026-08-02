@@ -7,6 +7,7 @@
 {% block content %}
 {% set can_manage_invoice_status = can_access_endpoint('invoice.mark_invoice_delivered', 'POST') %}
 {% set can_edit_invoice = can_access_endpoint('invoice.edit_invoice') %}
+{% set can_print_invoice = can_access_endpoint('invoice.print_invoice') %}
 <div class="container mt-5">
     <div class="row justify-content-center">
         <div class="col-md-6">
@@ -17,6 +18,9 @@
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
         <h1 class="mb-0">Invoice - {{ invoice.customer.first_name }} {{ invoice.customer.last_name }}</h1>
         <div class="d-flex flex-wrap gap-2">
+            {% if can_print_invoice %}
+            <a class="btn btn-outline-primary btn-sm" href="{{ url_for('invoice.print_invoice', invoice_id=invoice.id) }}" target="_blank" rel="noopener">Print Invoice</a>
+            {% endif %}
             {% if can_edit_invoice and invoice.invoice_status == 'pending' %}
             <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('invoice.edit_invoice', invoice_id=invoice.id) }}">Edit</a>
             {% endif %}
@@ -31,6 +35,18 @@
             <form action="{{ url_for('invoice.mark_invoice_paid', invoice_id=invoice.id) }}" method="post">
                 {{ delete_form.hidden_tag() }}
                 <button type="submit" class="btn btn-primary btn-sm">Mark Paid</button>
+            </form>
+            {% endif %}
+            {% if invoice.can_reverse_payment %}
+            <form action="{{ url_for('invoice.reverse_invoice_payment', invoice_id=invoice.id) }}" method="post">
+                {{ delete_form.hidden_tag() }}
+                <button type="submit" class="btn btn-outline-warning btn-sm">Reverse Payment</button>
+            </form>
+            {% endif %}
+            {% if invoice.can_reverse_delivery %}
+            <form action="{{ url_for('invoice.reverse_invoice_delivery', invoice_id=invoice.id) }}" method="post">
+                {{ delete_form.hidden_tag() }}
+                <button type="submit" class="btn btn-outline-warning btn-sm">Reverse Delivery</button>
             </form>
             {% endif %}
             {% endif %}

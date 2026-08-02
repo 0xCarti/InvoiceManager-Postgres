@@ -2,7 +2,7 @@ import pytest
 
 from app import db, create_admin_user
 from werkzeug.security import generate_password_hash
-from app.models import ActivityLog, GLCode, Product, User
+from app.models import ActivityLog, GLCode, Product, ProductSellableAmount, User
 from app.utils.activity import flush_activity_logs
 from tests.utils import login
 
@@ -121,7 +121,7 @@ def test_bulk_update_products_name_conflict(client, app):
         assert target.name == 'Target'
 
 
-def test_product_create_and_list_surfaces_show_both_price_labels(client, app):
+def test_product_create_and_list_surfaces_sellable_amounts(client, app):
     with app.app_context():
         product = Product(
             name='Dual Price Product',
@@ -130,6 +130,26 @@ def test_product_create_and_list_surfaces_show_both_price_labels(client, app):
             cost=5.0,
         )
         db.session.add(product)
+        db.session.flush()
+        db.session.add_all(
+            [
+                ProductSellableAmount(
+                    product=product,
+                    name="Each",
+                    quantity=1.0,
+                    price=12.34,
+                    is_default=True,
+                    position=0,
+                ),
+                ProductSellableAmount(
+                    product=product,
+                    name="Pack",
+                    quantity=6.0,
+                    price=15.67,
+                    position=1,
+                ),
+            ]
+        )
         db.session.commit()
 
     login_admin(client, app)
@@ -137,16 +157,21 @@ def test_product_create_and_list_surfaces_show_both_price_labels(client, app):
     list_response = client.get('/products')
     assert list_response.status_code == 200
     page = list_response.get_data(as_text=True)
-    assert 'Terminal/Event Sell Price' in page
-    assert 'Sales Invoice Price (3rd-party customer)' in page
+    assert 'Sellable Amounts' in page
+    assert 'Terminal/Event Sell Price' not in page
+    assert 'Sales Invoice Price (3rd-party customer)' not in page
+    assert 'Each' in page
+    assert 'Pack' in page
     assert '12.34' in page
     assert '15.67' in page
 
     create_response = client.get('/products/create')
     assert create_response.status_code == 200
     create_page = create_response.get_data(as_text=True)
-    assert 'Terminal/Event Sell Price' in create_page
-    assert 'Sales Invoice Price (3rd-party customer)' in create_page
+    assert 'Sellable Amounts' in create_page
+    assert 'Product Qty' in create_page
+    assert 'Terminal/Event Sell Price' not in create_page
+    assert 'Sales Invoice Price (3rd-party customer)' not in create_page
 
 
 def test_search_products_requires_login_and_ignores_blank_query(client, app):

@@ -624,7 +624,14 @@ def iter_pos_excel_rows(filepath: str, extension: str) -> Iterable[List[object]]
     """Yield rows from an IdealPOS export based on the file extension."""
 
     ext = extension.lower()
-    if ext == ".xls":
+    def _looks_like_xlsx_file(file_path: str) -> bool:
+        try:
+            with open(file_path, "rb") as uploaded_file:
+                return uploaded_file.read(4).startswith(b"PK")
+        except OSError:
+            return False
+
+    if ext == ".xls" and not _looks_like_xlsx_file(filepath):
         try:
             import xlrd  # type: ignore
         except ModuleNotFoundError:
@@ -651,14 +658,21 @@ def iter_pos_excel_rows(filepath: str, extension: str) -> Iterable[List[object]]
                 book.release_resources()
             except AttributeError:
                 pass
-    elif ext == ".xlsx":
+    elif ext in {".xls", ".xlsx"}:
         try:
             from openpyxl import load_workbook
         except ImportError as exc:  # pragma: no cover - environment
             raise RuntimeError("xlsx_missing") from exc
+        uploaded_file = None
         try:
-            workbook = load_workbook(filepath, read_only=True, data_only=True)
+            workbook_source = filepath
+            if ext == ".xls":
+                uploaded_file = open(filepath, "rb")
+                workbook_source = uploaded_file
+            workbook = load_workbook(workbook_source, read_only=True, data_only=True)
         except Exception as exc:
+            if uploaded_file is not None:
+                uploaded_file.close()
             raise RuntimeError("xlsx_error") from exc
         try:
             sheet = workbook.active
@@ -666,6 +680,8 @@ def iter_pos_excel_rows(filepath: str, extension: str) -> Iterable[List[object]]
                 yield list(row)
         finally:
             workbook.close()
+            if uploaded_file is not None:
+                uploaded_file.close()
     else:  # pragma: no cover - guarded by validators
         raise RuntimeError("unsupported_extension")
 

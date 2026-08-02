@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from app.models import PosSalesImport
 from app.services import pos_sales_polling
 from app.services.pos_sales_polling import PollAttachment, PollMessage
+from tests.utils import build_terminal_sales_workbook_bytes
 
 
 class _StubProvider:
@@ -23,8 +24,7 @@ class _StubProvider:
 
 
 def test_poll_once_ingests_and_deduplicates(app, monkeypatch, tmp_path):
-    spreadsheet = Path(__file__).resolve().parents[1] / "game_sales.xls"
-    content = spreadsheet.read_bytes()
+    content = build_terminal_sales_workbook_bytes()
 
     message = PollMessage(
         message_id="<poll-test-message>",
@@ -88,8 +88,7 @@ def test_poll_once_rejects_messages_when_sender_allowlist_missing(app, monkeypat
 
 
 def test_poll_once_allows_exact_sender_or_domain_match(app, monkeypatch, tmp_path):
-    spreadsheet = Path(__file__).resolve().parents[1] / "game_sales.xls"
-    content = spreadsheet.read_bytes()
+    content = build_terminal_sales_workbook_bytes()
 
     provider = _StubProvider(
         [

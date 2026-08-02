@@ -22,19 +22,24 @@
     </div>
 
     <div class="row g-3 mb-4">
-        <div class="col-md-6 col-xl-2">
+        <div class="col-md-12 col-xl-4">
             <div class="card h-100">
                 <div class="card-body">
-                    <div class="small text-muted">Terminal Price</div>
-                    <div class="h5 mb-0">{{ '%.2f'|format(product.price or 0) }}</div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6 col-xl-2">
-            <div class="card h-100">
-                <div class="card-body">
-                    <div class="small text-muted">Invoice Price</div>
-                    <div class="h5 mb-0">{{ '%.2f'|format(product.invoice_sale_price if product.invoice_sale_price is not none else product.price or 0) }}</div>
+                    <div class="small text-muted">Sellable Amounts</div>
+                    {% if product.active_sellable_amounts %}
+                    <ul class="mb-0 ps-3">
+                        {% for amount in product.active_sellable_amounts %}
+                        <li>
+                            {{ amount.name or 'Each' }}
+                            {% if amount.quantity != 1 %}({{ '{:g}'.format(amount.quantity) }}x){% endif %}
+                            - {{ '%.2f'|format(amount.price_float) }}
+                            {% if amount.is_default %}<span class="text-muted">(default)</span>{% endif %}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% else %}
+                    <div class="h5 mb-0 text-muted">None</div>
+                    {% endif %}
                 </div>
             </div>
         </div>

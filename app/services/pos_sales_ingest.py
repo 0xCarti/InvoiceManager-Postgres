@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 from pathlib import Path
 
 from flask import current_app
+from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError
 
 from app.models import (
@@ -34,6 +35,7 @@ from app.utils.pos_import import (
     parse_terminal_sales_number,
     terminal_sales_cell_is_blank,
 )
+from app.utils.sellable_amounts import choose_sellable_amount_for_price
 from app.utils.timezone import get_default_timezone
 
 
@@ -244,9 +246,11 @@ def stage_pos_sales_import(
         for location in Location.query.all()
         if location.name
     }
+    products = Product.query.options(selectinload(Product.sellable_amounts)).all()
+    product_objects_by_id = {product.id: product for product in products}
     exact_product_by_name = {
         (product.name or "").strip().casefold(): product.id
-        for product in Product.query.all()
+        for product in products
         if product.name
     }
     location_by_name = {
@@ -256,7 +260,7 @@ def stage_pos_sales_import(
     }
     product_by_name = {
         normalize_pos_alias(product.name or ""): product.id
-        for product in Product.query.all()
+        for product in products
         if product.name
     }
 
@@ -323,6 +327,13 @@ def stage_pos_sales_import(
             computed_unit_price = float(line_total)
         if abs(quantity) > 1e-9 and abs(computed_unit_price) < 1e-9:
             computed_unit_price = float(line_total) / float(quantity)
+        sellable_amount_id = None
+        if product_id is not None:
+            sellable_amount = choose_sellable_amount_for_price(
+                product_objects_by_id.get(product_id), computed_unit_price
+            )
+            if sellable_amount is not None:
+                sellable_amount_id = sellable_amount.id
 
         row_record = PosSalesImportRow(
             sales_import=pos_import,
@@ -331,6 +342,7 @@ def stage_pos_sales_import(
             source_product_code=entry.get("source_product_code"),
             normalized_product_name=normalized_product,
             product_id=product_id,
+            sellable_amount_id=sellable_amount_id,
             quantity=quantity,
             net_inc=net_inc,
             discount_raw=None if discount_raw is None else str(discount_raw),
@@ -342,6 +354,16 @@ def stage_pos_sales_import(
         )
         db.session.add(row_record)
         row_index_by_location[location_name] += 1
+
+
+def _auto_approve_sales_import_if_enabled(sales_import: PosSalesImport) -> None:
+    if not Setting.get_pos_sales_auto_approve_clean_imports():
+        return
+
+    # Imported lazily to keep webhook/polling imports from creating a module cycle.
+    from app.routes.auth_routes import _auto_approve_sales_import_if_ready
+
+    _auto_approve_sales_import_if_ready(sales_import.id)
 
 
 def ingest_pos_sales_attachment(
@@ -401,6 +423,7 @@ def ingest_pos_sales_attachment(
     try:
         stage_pos_sales_import(sales_import, str(persisted_path), extension)
         db.session.commit()
+        _auto_approve_sales_import_if_enabled(sales_import)
         log_activity(
             f"Received POS sales import {sales_import.id} via {source_provider}"
         )

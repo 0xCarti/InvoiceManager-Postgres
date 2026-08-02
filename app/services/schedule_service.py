@@ -204,6 +204,7 @@ def get_visible_departments(
             "schedules.publish",
             "schedules.view_seen_status",
             "schedules.view_labor",
+            "schedules.self_schedule",
         )
     ]
 
@@ -704,7 +705,7 @@ def notify_schedule_posted(
         line = shift_display_line(shift)
         if shift.assigned_user_id and shift.assigned_user:
             assigned_lines[shift.assigned_user_id].append(line)
-        elif shift.assignment_mode in {Shift.ASSIGNMENT_OPEN, Shift.ASSIGNMENT_TRADEBOARD}:
+        if shift.assignment_mode in {Shift.ASSIGNMENT_OPEN, Shift.ASSIGNMENT_TRADEBOARD}:
             for user in eligible_by_position.get(shift.position_id, []):
                 tradeboard_lines[user.id].append(line)
 
@@ -777,7 +778,7 @@ def notify_schedule_changes(
             assigned_change_lines[shift.assigned_user_id].append(
                 f"Updated: {line}"
             )
-        elif shift.assignment_mode in {Shift.ASSIGNMENT_OPEN, Shift.ASSIGNMENT_TRADEBOARD}:
+        if shift.assignment_mode in {Shift.ASSIGNMENT_OPEN, Shift.ASSIGNMENT_TRADEBOARD}:
             for user in eligible_by_position.get(shift.position_id, []):
                 tradeboard_change_lines[user.id].append(f"Updated: {line}")
 

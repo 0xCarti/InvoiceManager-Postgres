@@ -17,6 +17,7 @@ from wtforms import (
     DecimalField as WTFormsDecimalField,
     FieldList,
     FileField,
+    Form,
     FormField,
     HiddenField,
     IntegerField,
@@ -44,6 +45,7 @@ from app import db
 from app.models import (
     BoardTemplate,
     BoardTemplateBlock,
+    Customer,
     Department,
     EquipmentAsset,
     EquipmentCategory,
@@ -62,6 +64,7 @@ from app.models import (
     Playlist,
     PlaylistItem,
     Product,
+    ProductSellableAmount,
     PurchaseInvoice,
     PurchaseOrder,
     ScheduleTemplate,
@@ -312,13 +315,80 @@ def load_unit_choices():
     return [(u.id, u.name) for u in ItemUnit.query.all()]
 
 
-def load_product_choices():
-    """Return a list of product choices, cached per request."""
-    if "product_choices" not in g:
-        g.product_choices = [
-            (p.id, p.name) for p in Product.query.order_by(Product.name).all()
+def load_product_choices(*, include_archived: bool = False):
+    """Return product choices, defaulting to active products for operations."""
+    cache_key = "product_choices_all" if include_archived else "product_choices_active"
+    if cache_key not in g:
+        query = Product.query
+        if not include_archived:
+            query = query.filter(Product.archived.is_(False))
+        products = query.order_by(Product.name).all()
+        setattr(
+            g,
+            cache_key,
+            [
+                (
+                    p.id,
+                    f"{p.name} (archived)" if p.archived else p.name,
+                )
+                for p in products
+            ],
+        )
+    return getattr(g, cache_key)
+
+
+def load_sellable_amount_choices(*, include_archived: bool = False):
+    """Return active sellable amount choices grouped by product label."""
+    cache_key = (
+        "sellable_amount_choices_all"
+        if include_archived
+        else "sellable_amount_choices_active"
+    )
+    if cache_key not in g:
+        query = ProductSellableAmount.query.join(Product)
+        if not include_archived:
+            query = query.filter(
+                Product.archived.is_(False),
+                ProductSellableAmount.active.is_(True),
+            )
+        amounts = (
+            query.order_by(
+                Product.name,
+                ProductSellableAmount.position,
+                ProductSellableAmount.id,
+            )
+            .all()
+        )
+        setattr(
+            g,
+            cache_key,
+            [
+                (
+                    amount.id,
+                    f"{amount.display_name} - ${amount.price_float:.2f}",
+                )
+                for amount in amounts
+            ],
+        )
+    return getattr(g, cache_key)
+
+
+def load_customer_choices(*, include_all: bool = False):
+    """Return customer choices for reports, cached per request."""
+    if "customer_choices" not in g:
+        g.customer_choices = [
+            (
+                customer.id,
+                f"{customer.first_name} {customer.last_name}".strip(),
+            )
+            for customer in Customer.query.order_by(
+                Customer.last_name, Customer.first_name
+            ).all()
         ]
-    return g.product_choices
+    choices = list(g.customer_choices)
+    if include_all:
+        return [(-1, "All Customers")] + choices
+    return choices
 
 
 def load_event_choices():
@@ -351,6 +421,7 @@ def load_location_menu_product_choices(location_id: int | None):
         for product in sorted(
             location.current_menu.products, key=lambda product: (product.name.lower(), product.id)
         )
+        if not product.archived
     ] or load_product_choices()
 
 
@@ -966,6 +1037,7 @@ class BulkItemUpdateForm(FlaskForm):
 
 
 class ItemUnitForm(FlaskForm):
+    unit_id = HiddenField(validators=[Optional()])
     name = StringField("Unit Name", validators=[DataRequired()])
     factor = DecimalField("Factor", validators=[InputRequired()])
     receiving_default = BooleanField("Receiving Default")
@@ -988,6 +1060,26 @@ class ItemForm(FlaskForm):
     purchase_gl_code = SelectField(
         "Purchase GL Code", coerce=int, validators=[Optional()]
     )
+    expiry_tracking_mode = SelectField(
+        "Expiry Tracking",
+        choices=[
+            (Item.EXPIRY_TRACKING_NONE, "No expiry tracking"),
+            (Item.EXPIRY_TRACKING_RECEIVED_DATE, "Track received date only"),
+            (Item.EXPIRY_TRACKING_SHELF_LIFE, "Use default shelf life"),
+            (Item.EXPIRY_TRACKING_EXACT, "Exact expiry required"),
+        ],
+        validators=[DataRequired()],
+        default=Item.EXPIRY_TRACKING_NONE,
+    )
+    expiry_shelf_life_days = IntegerField(
+        "Default Shelf Life Days",
+        validators=[Optional(), NumberRange(min=1)],
+    )
+    expiry_warning_days = IntegerField(
+        "Expiry Warning Days",
+        validators=[DataRequired(), NumberRange(min=1)],
+        default=14,
+    )
     barcodes = FieldList(FormField(ItemBarcodeForm), min_entries=1)
     units = FieldList(FormField(ItemUnitForm), min_entries=1)
     submit = SubmitField("Submit")
@@ -1002,10 +1094,11 @@ class ItemForm(FlaskForm):
             )
             for g in codes
         ]
-        purchase_codes = [
+        purchase_codes = [(0, "Unassigned")]
+        purchase_codes.extend(
             (g.id, f"{g.code} - {g.description}" if g.description else g.code)
             for g in codes
-        ]
+        )
         self.gl_code_id.choices = purchase_codes
         self.purchase_gl_code.choices = purchase_codes
 
@@ -1013,10 +1106,11 @@ class ItemForm(FlaskForm):
         if field.data and not str(field.data).startswith(("5", "6")):
             raise ValidationError("Item GL codes must start with 5 or 6")
         codes = self._fetch_purchase_gl_codes()
-        purchase_codes = [
+        purchase_codes = [(0, "Unassigned")]
+        purchase_codes.extend(
             (g.id, f"{g.code} - {g.description}" if g.description else g.code)
             for g in codes
-        ]
+        )
         self.gl_code_id.choices = purchase_codes
 
     @staticmethod
@@ -1033,6 +1127,12 @@ class ItemForm(FlaskForm):
 class MenuForm(FlaskForm):
     name = StringField("Menu Name", validators=[DataRequired(), Length(max=100)])
     description = TextAreaField("Description", validators=[Optional()])
+    sellable_amount_ids = SelectMultipleField(
+        "Sellable Amounts",
+        coerce=int,
+        validators=[Optional()],
+        validate_choice=False,
+    )
     product_ids = SelectMultipleField(
         "Products", coerce=int, validators=[Optional()], validate_choice=False
     )
@@ -1048,6 +1148,7 @@ class MenuForm(FlaskForm):
     def __init__(self, *args, **kwargs):
         self.obj_id = kwargs.pop("obj_id", None)
         super().__init__(*args, **kwargs)
+        self.sellable_amount_ids.choices = load_sellable_amount_choices()
         self.product_ids.choices = load_product_choices()
 
 
@@ -2763,18 +2864,39 @@ class EquipmentMaintenanceUpdateForm(FlaskForm):
         return True
 
 
+class ProductSellableAmountEntryForm(Form):
+    amount_id = HiddenField(validators=[Optional()])
+    name = StringField("Sellable Amount", validators=[Optional(), Length(max=100)])
+    quantity = DecimalField(
+        "Product Quantity",
+        validators=[Optional(), NumberRange(min=0.0001)],
+        places=None,
+    )
+    price = DecimalField(
+        "Price",
+        validators=[Optional(), NumberRange(min=0)],
+        places=2,
+    )
+    active = BooleanField("Active", default=True)
+    is_default = BooleanField("Default")
+
+
 class ProductForm(FlaskForm):
     name = StringField("Name", validators=[DataRequired()])
+    archived = BooleanField("Archived")
     gl_code = SelectField("GL Code", validators=[Optional()])
     price = DecimalField(
-        "Terminal/Event Sell Price",
-        validators=[InputRequired(), NumberRange(min=0)],
+        "Legacy Price",
+        validators=[Optional(), NumberRange(min=0)],
         places=2,
     )
     invoice_sale_price = DecimalField(
-        "Sales Invoice Price (3rd-party customer)",
+        "Legacy Invoice Price",
         validators=[Optional(), NumberRange(min=0)],
         places=2,
+    )
+    sellable_amounts = FieldList(
+        FormField(ProductSellableAmountEntryForm), min_entries=1
     )
     cost = DecimalField(
         "Cost", validators=[Optional(), NumberRange(min=0)], default=0.0
@@ -2813,6 +2935,32 @@ class ProductForm(FlaskForm):
                 "Cost is required unless auto-update cost is enabled."
             )
             return False
+        has_sellable_amount = False
+        for amount_form in self.sellable_amounts:
+            amount_fields = amount_form.form
+            name = (amount_fields.name.data or "").strip()
+            quantity = amount_fields.quantity.data
+            price = amount_fields.price.data
+            amount_id = (amount_fields.amount_id.data or "").strip()
+            active = bool(amount_fields.active.data)
+            has_any_value = bool(name or amount_id or quantity is not None or price is not None)
+            if not has_any_value:
+                continue
+            if not active and not amount_id:
+                continue
+            if quantity is None:
+                amount_fields.quantity.errors.append("Enter a quantity.")
+                valid = False
+            if price is None:
+                amount_fields.price.errors.append("Enter a price.")
+                valid = False
+            if active and quantity is not None and price is not None:
+                has_sellable_amount = True
+        if not has_sellable_amount and self.price.data is None:
+            self.sellable_amounts.errors.append(
+                "Add at least one active sellable amount."
+            )
+            return False
         return valid
 
 
@@ -2824,7 +2972,9 @@ class BulkProductUpdateForm(FlaskForm):
     name = StringField("Name", validators=[Optional(), Length(max=100)])
     apply_price = BooleanField("Apply")
     price = DecimalField(
-        "Price", validators=[Optional(), NumberRange(min=0)], places=None
+        "Default Sellable Price",
+        validators=[Optional(), NumberRange(min=0)],
+        places=None,
     )
     apply_cost = BooleanField("Apply")
     cost = DecimalField(
@@ -2984,14 +3134,17 @@ class QuickProductForm(FlaskForm):
 
     name = StringField("Product Name", validators=[DataRequired(), Length(max=100)])
     price = DecimalField(
-        "Terminal/Event Sell Price",
-        validators=[InputRequired(), NumberRange(min=0)],
+        "Legacy Price",
+        validators=[Optional(), NumberRange(min=0)],
         places=2,
     )
     invoice_sale_price = DecimalField(
-        "Sales Invoice Price (3rd-party customer)",
+        "Legacy Invoice Price",
         validators=[Optional(), NumberRange(min=0)],
         places=2,
+    )
+    sellable_amounts = FieldList(
+        FormField(ProductSellableAmountEntryForm), min_entries=1
     )
     cost = DecimalField(
         "Cost", validators=[Optional(), NumberRange(min=0)], default=0.0
@@ -3035,6 +3188,32 @@ class QuickProductForm(FlaskForm):
             item_form.item.choices = items
             item_form.unit.choices = units
 
+    def validate(self, extra_validators=None):
+        valid = super().validate(extra_validators=extra_validators)
+        has_sellable_amount = False
+        for amount_form in self.sellable_amounts:
+            amount_fields = amount_form.form
+            name = (amount_fields.name.data or "").strip()
+            quantity = amount_fields.quantity.data
+            price = amount_fields.price.data
+            has_any_value = bool(name or quantity is not None or price is not None)
+            if not has_any_value:
+                continue
+            if quantity is None:
+                amount_fields.quantity.errors.append("Enter a quantity.")
+                valid = False
+            if price is None:
+                amount_fields.price.errors.append("Enter a price.")
+                valid = False
+            if quantity is not None and price is not None:
+                has_sellable_amount = True
+        if not has_sellable_amount and self.price.data is None:
+            self.sellable_amounts.errors.append(
+                "Add at least one sellable amount."
+            )
+            return False
+        return valid
+
 
 class InvoiceForm(FlaskForm):
     customer = SelectField(
@@ -3055,6 +3234,7 @@ class BulkInvoicePaymentForm(FlaskForm):
         choices=[
             ("delivered", "Delivered"),
             ("paid", "Paid"),
+            ("pending", "Pending"),
         ],
         validators=[DataRequired(message="Select a valid invoice status.")],
         validate_choice=False,
@@ -3076,7 +3256,7 @@ class BulkInvoicePaymentForm(FlaskForm):
             return False
 
         payment_status = str(self.payment_status.data or "").strip().lower()
-        if payment_status not in {"delivered", "paid"}:
+        if payment_status not in {"pending", "delivered", "paid"}:
             self.payment_status.errors.append("Select a valid invoice status.")
             return False
 
@@ -3260,6 +3440,12 @@ class ProductSalesReportForm(FlaskForm):
         default="all",
         validators=[Optional()],
     )
+    customers = SelectMultipleField(
+        "Customer(s)",
+        coerce=int,
+        validators=[Optional()],
+        render_kw={"size": 10},
+    )
     products = SelectMultipleField(
         "Products",
         coerce=int,
@@ -3276,7 +3462,8 @@ class ProductSalesReportForm(FlaskForm):
 
     def __init__(self, *args, **kwargs):
         super(ProductSalesReportForm, self).__init__(*args, **kwargs)
-        self.products.choices = load_product_choices()
+        self.customers.choices = load_customer_choices(include_all=True)
+        self.products.choices = load_product_choices(include_archived=True)
         self.gl_codes.choices = load_sales_gl_code_choices(include_unassigned=True)
 
 
@@ -3523,6 +3710,11 @@ class InvoiceItemReceiveForm(FlaskForm):
         coerce=int,
         validators=[Optional()],
         validate_choice=False,
+    )
+    expiry_date = FlexibleDateField(
+        "Expiry Date",
+        validators=[Optional()],
+        render_kw={"data-flatpickr": "1", "autocomplete": "off"},
     )
 
 
@@ -3800,6 +3992,10 @@ class SettingsForm(FlaskForm):
         validators=[Optional(), NumberRange(min=0)],
         places=2,
     )
+    food_cost_tax_rate = IntegerField(
+        "Food Cost Tax %",
+        validators=[InputRequired(), NumberRange(min=0)],
+    )
     default_timezone = SelectField("Default Timezone")
     auto_backup_enabled = BooleanField("Enable Automatic Backups")
     auto_backup_interval_value = IntegerField(
@@ -3827,6 +4023,9 @@ class SettingsForm(FlaskForm):
             ("day", "Day"),
             ("week", "Week"),
         ],
+    )
+    pos_sales_auto_approve_clean_imports = BooleanField(
+        "Automatically approve sales files that do not need review"
     )
     max_backups = IntegerField(
         "Max Stored Backups",
@@ -4308,7 +4507,7 @@ class ShiftForm(FlaskForm):
     position_id = SelectField(
         "Position",
         coerce=int,
-        validators=[DataRequired()],
+        validators=[Optional()],
         validate_choice=False,
     )
     assignment_mode = SelectField(

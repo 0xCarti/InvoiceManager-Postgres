@@ -336,7 +336,7 @@
 @media (min-width: 768px) {
     .table-responsive td .mobile-actions,
     .table-responsive th .mobile-actions {
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
         justify-content: flex-end;
     }
 

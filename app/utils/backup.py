@@ -229,89 +229,92 @@ def validate_backup_file_compatibility(
     )
 
     backup_engine = create_engine(f"sqlite+pysqlite:///{file_path}")
-    with backup_engine.connect() as conn:
-        inspector = inspect(conn)
-        existing_tables = set(inspector.get_table_names())
-        setting_columns = (
-            {column["name"] for column in inspector.get_columns("setting")}
-            if "setting" in existing_tables
-            else set()
-        )
-        required_tables = set(
-            current_app.config.get(
-                "RESTORE_REQUIRED_TABLES",
-                ["setting", "user", "invoice", "transfer"],
+    try:
+        with backup_engine.connect() as conn:
+            inspector = inspect(conn)
+            existing_tables = set(inspector.get_table_names())
+            setting_columns = (
+                {column["name"] for column in inspector.get_columns("setting")}
+                if "setting" in existing_tables
+                else set()
             )
-        )
-        missing_tables = sorted(required_tables - existing_tables)
-        if missing_tables:
-            issues.append(f"Missing required tables: {', '.join(missing_tables)}.")
-        if "setting" not in existing_tables:
-            warnings.append("Missing setting table.")
-
-        if "setting" in existing_tables:
-            marker_query = db.text(
-                "SELECT value FROM setting WHERE name = :name LIMIT 1"
-            )
-            if {"name", "value"}.issubset(setting_columns):
-                marker = conn.execute(
-                    marker_query,
-                    {"name": "APP_SCHEMA_VERSION"},
-                ).mappings().first()
-                marker_value = "" if marker is None else (marker.get("value") or "")
-                if not marker_value.strip():
-                    warnings.append(
-                        "Backup is missing APP_SCHEMA_VERSION marker in settings."
-                    )
-                elif marker_value.strip() != BACKUP_SCHEMA_VERSION:
-                    warnings.append(
-                        "Backup APP_SCHEMA_VERSION "
-                        f"{marker_value.strip()} does not match expected {BACKUP_SCHEMA_VERSION}."
-                    )
-            else:
-                warnings.append(
-                    "Backup setting table is missing expected name/value columns."
+            required_tables = set(
+                current_app.config.get(
+                    "RESTORE_REQUIRED_TABLES",
+                    ["setting", "user", "invoice", "transfer"],
                 )
-        else:
-            warnings.append("Backup is missing APP_SCHEMA_VERSION marker in settings.")
-
-        required_feature_flags = current_app.config.get(
-            "RESTORE_REQUIRED_FEATURE_FLAGS", []
-        )
-        if "setting" in existing_tables and "name" in setting_columns:
-            existing_settings = {
-                row["name"]
-                for row in conn.execute(db.text("SELECT name FROM setting")).mappings()
-            }
-        else:
-            existing_settings = set()
-        missing_feature_flags = sorted(
-            {
-                setting_name
-                for setting_name in required_feature_flags
-                if setting_name and setting_name not in existing_settings
-            }
-        )
-        if missing_feature_flags:
-            warnings.append(
-                "Missing required feature-flag settings: "
-                + ", ".join(missing_feature_flags)
-                + "."
             )
+            missing_tables = sorted(required_tables - existing_tables)
+            if missing_tables:
+                issues.append(f"Missing required tables: {', '.join(missing_tables)}.")
+            if "setting" not in existing_tables:
+                warnings.append("Missing setting table.")
 
-        fk_findings = _collect_foreign_key_orphan_findings(inspector, conn)
-        if fk_findings:
-            if strict_mode:
-                issues.extend(fk_findings)
+            if "setting" in existing_tables:
+                marker_query = db.text(
+                    "SELECT value FROM setting WHERE name = :name LIMIT 1"
+                )
+                if {"name", "value"}.issubset(setting_columns):
+                    marker = conn.execute(
+                        marker_query,
+                        {"name": "APP_SCHEMA_VERSION"},
+                    ).mappings().first()
+                    marker_value = "" if marker is None else (marker.get("value") or "")
+                    if not marker_value.strip():
+                        warnings.append(
+                            "Backup is missing APP_SCHEMA_VERSION marker in settings."
+                        )
+                    elif marker_value.strip() != BACKUP_SCHEMA_VERSION:
+                        warnings.append(
+                            "Backup APP_SCHEMA_VERSION "
+                            f"{marker_value.strip()} does not match expected {BACKUP_SCHEMA_VERSION}."
+                        )
+                else:
+                    warnings.append(
+                        "Backup setting table is missing expected name/value columns."
+                    )
             else:
-                warnings.extend(fk_findings)
+                warnings.append("Backup is missing APP_SCHEMA_VERSION marker in settings.")
 
-        model_constraint_findings = _collect_model_constraint_findings(conn)
-        if model_constraint_findings:
-            if strict_mode:
-                issues.extend(model_constraint_findings)
+            required_feature_flags = current_app.config.get(
+                "RESTORE_REQUIRED_FEATURE_FLAGS", []
+            )
+            if "setting" in existing_tables and "name" in setting_columns:
+                existing_settings = {
+                    row["name"]
+                    for row in conn.execute(db.text("SELECT name FROM setting")).mappings()
+                }
             else:
-                warnings.extend(model_constraint_findings)
+                existing_settings = set()
+            missing_feature_flags = sorted(
+                {
+                    setting_name
+                    for setting_name in required_feature_flags
+                    if setting_name and setting_name not in existing_settings
+                }
+            )
+            if missing_feature_flags:
+                warnings.append(
+                    "Missing required feature-flag settings: "
+                    + ", ".join(missing_feature_flags)
+                    + "."
+                )
+
+            fk_findings = _collect_foreign_key_orphan_findings(inspector, conn)
+            if fk_findings:
+                if strict_mode:
+                    issues.extend(fk_findings)
+                else:
+                    warnings.extend(fk_findings)
+
+            model_constraint_findings = _collect_model_constraint_findings(conn)
+            if model_constraint_findings:
+                if strict_mode:
+                    issues.extend(model_constraint_findings)
+                else:
+                    warnings.extend(model_constraint_findings)
+    finally:
+        backup_engine.dispose()
 
     warnings.extend(_collect_missing_expected_endpoints())
 
@@ -632,8 +635,8 @@ def create_backup(*, initiated_by_system: bool = False):
 
     db.session.commit()
     db.engine.dispose()
+    backup_engine = create_engine(f"sqlite+pysqlite:///{temp_path}")
     try:
-        backup_engine = create_engine(f"sqlite+pysqlite:///{temp_path}")
         backup_metadata = MetaData()
 
         with backup_engine.begin() as backup_conn:
@@ -646,8 +649,10 @@ def create_backup(*, initiated_by_system: bool = False):
                 if rows:
                     backup_conn.execute(table_copy.insert(), [dict(row) for row in rows])
 
+        backup_engine.dispose()
         os.replace(temp_path, backup_path)
     except Exception:
+        backup_engine.dispose()
         with suppress(OSError):
             os.remove(temp_path)
         raise

@@ -42,12 +42,9 @@ from app.models import (
     Setting,
     Vendor,
 )
+from app.services.purchase_invoice_reports import invoice_gl_code_rows
 from app.utils.activity import log_activity
 from app.utils.numeric import coerce_float
-from app.routes.report_routes import (
-    _invoice_gl_code_rows,
-    invoice_gl_code_report,
-)
 from app.utils.forecasting import DemandForecastingHelper
 from app.utils.pagination import build_pagination_args, get_per_page
 from app.utils.text import build_text_match_predicate
@@ -73,6 +70,10 @@ from app.services.purchase_imports import (
     update_or_create_vendor_alias,
 )
 from app.services.notification_service import notify_users_for_event
+from app.services.inventory_expiry import (
+    create_received_lot,
+    resolve_received_expiry_date,
+)
 
 import datetime
 import json
@@ -490,6 +491,14 @@ def _collect_receive_invoice_item_entries(form_data):
         line_location_id = (
             form_data.get(f"items-{index}-location_id", type=int) or None
         )
+        expiry_date_raw = (form_data.get(f"items-{index}-expiry_date") or "").strip()
+        expiry_date = None
+        if expiry_date_raw:
+            try:
+                expiry_date = datetime.date.fromisoformat(expiry_date_raw)
+            except ValueError:
+                has_incomplete_rows = True
+                continue
 
         has_row_data = bool(
             item_id
@@ -500,6 +509,7 @@ def _collect_receive_invoice_item_entries(form_data):
             or container_deposit_raw is not None
             or gl_code_id is not None
             or line_location_id is not None
+            or expiry_date_raw
         )
         if not has_row_data:
             continue
@@ -530,6 +540,7 @@ def _collect_receive_invoice_item_entries(form_data):
                 "fallback": fallback_counter,
                 "gl_code_id": gl_code_id,
                 "location_id": line_location_id,
+                "expiry_date": expiry_date,
             }
         )
         fallback_counter += 1
@@ -1906,6 +1917,13 @@ def receive_invoice(po_id):
                 form.items[index].container_deposit.data = item_data.get(
                     "container_deposit"
                 )
+            if item_data.get("expiry_date"):
+                try:
+                    form.items[index].expiry_date.data = datetime.date.fromisoformat(
+                        item_data["expiry_date"]
+                    )
+                except ValueError:
+                    pass
             form.items[index].position.data = item_data.get("position")
             gl_code_value = item_data.get("gl_code_id")
             form.items[index].gl_code.data = gl_code_value or 0
@@ -1951,6 +1969,35 @@ def receive_invoice(po_id):
                 department_defaults=department_defaults,
             )
 
+        item_lookup = {
+            item_obj.id: item_obj
+            for item_obj in Item.query.filter(
+                Item.id.in_([entry["item_id"] for entry in item_entries])
+            ).all()
+        }
+        missing_expiry_items = []
+        for entry in item_entries:
+            item_obj = item_lookup.get(entry["item_id"])
+            if (
+                item_obj
+                and item_obj.expiry_tracking_mode == Item.EXPIRY_TRACKING_EXACT
+                and entry.get("expiry_date") is None
+            ):
+                missing_expiry_items.append(item_obj.name)
+        if missing_expiry_items:
+            flash(
+                "Expiry date is required for: "
+                + ", ".join(sorted(set(missing_expiry_items))),
+                "error",
+            )
+            return render_template(
+                "purchase_orders/receive_invoice.html",
+                form=form,
+                po=po,
+                gl_code_choices=gl_code_choices,
+                department_defaults=department_defaults,
+            )
+
         location_obj = db.session.get(Location, form.location_id.data)
         if not PurchaseOrderItemArchive.query.filter_by(
             purchase_order_id=po.id
@@ -1987,6 +2034,7 @@ def receive_invoice(po_id):
         starting_item_costs = {}
         starting_item_quantities = {}
         aggregated_inventory_updates = {}
+        expiry_attention_lines = []
         for entry in item_entries:
             item_id = entry["item_id"]
             if item_id in starting_item_costs:
@@ -2003,7 +2051,9 @@ def receive_invoice(po_id):
             )
 
         for order_index, entry in enumerate(item_entries):
-            item_obj = db.session.get(Item, entry["item_id"])
+            item_obj = item_lookup.get(entry["item_id"]) or db.session.get(
+                Item, entry["item_id"]
+            )
             unit_obj = (
                 db.session.get(ItemUnit, entry["unit_id"]) if entry["unit_id"] else None
             )
@@ -2029,23 +2079,23 @@ def receive_invoice(po_id):
                 inventory_update["cost_total"] += cost_per_unit * new_qty
                 inventory_update["last_cost_per_unit"] = cost_per_unit
 
-            db.session.add(
-                PurchaseInvoiceItem(
-                    invoice_id=invoice.id,
-                    item_id=item_obj.id if item_obj else None,
-                    unit_id=unit_obj.id if unit_obj else None,
-                    item_name=item_obj.name if item_obj else "",
-                    unit_name=unit_obj.name if unit_obj else None,
-                    vendor_sku=entry["vendor_sku"],
-                    quantity=quantity,
-                    cost=cost,
-                    container_deposit=container_deposit,
-                    prev_cost=prev_cost,
-                    position=order_index,
-                    purchase_gl_code_id=entry["gl_code_id"],
-                    location_id=entry["location_id"],
-                )
+            invoice_item = PurchaseInvoiceItem(
+                invoice_id=invoice.id,
+                item_id=item_obj.id if item_obj else None,
+                unit_id=unit_obj.id if unit_obj else None,
+                item_name=item_obj.name if item_obj else "",
+                unit_name=unit_obj.name if unit_obj else None,
+                vendor_sku=entry["vendor_sku"],
+                quantity=quantity,
+                cost=cost,
+                container_deposit=container_deposit,
+                prev_cost=prev_cost,
+                position=order_index,
+                purchase_gl_code_id=entry["gl_code_id"],
+                location_id=entry["location_id"],
             )
+            db.session.add(invoice_item)
+            db.session.flush()
             _sync_vendor_alias_for_purchase_entry(
                 vendor=vendor_record,
                 entry=entry,
@@ -2061,16 +2111,41 @@ def receive_invoice(po_id):
                     record = LocationStandItem(
                         location_id=line_location_id,
                         item_id=item_obj.id,
+                        active=True,
                         expected_count=0,
                         purchase_gl_code_id=item_obj.purchase_gl_code_id,
                     )
                     db.session.add(record)
-                elif (
-                    record.purchase_gl_code_id is None
-                    and item_obj.purchase_gl_code_id is not None
-                ):
-                    record.purchase_gl_code_id = item_obj.purchase_gl_code_id
+                else:
+                    record.active = True
+                    if (
+                        record.purchase_gl_code_id is None
+                        and item_obj.purchase_gl_code_id is not None
+                    ):
+                        record.purchase_gl_code_id = item_obj.purchase_gl_code_id
                 record.expected_count += quantity * factor
+                lot_expiry_date = resolve_received_expiry_date(
+                    item_obj,
+                    invoice.received_date,
+                    entry.get("expiry_date"),
+                )
+                lot = create_received_lot(
+                    item=item_obj,
+                    location_id=line_location_id,
+                    quantity=quantity * factor,
+                    received_date=invoice.received_date,
+                    expiry_date=lot_expiry_date,
+                    purchase_invoice_id=invoice.id,
+                    purchase_invoice_item_id=invoice_item.id,
+                )
+                if lot and lot.expiry_date:
+                    warning_days = int(item_obj.expiry_warning_days or 14)
+                    if lot.expiry_date <= datetime.date.today() + datetime.timedelta(
+                        days=warning_days
+                    ):
+                        expiry_attention_lines.append(
+                            f"{item_obj.name} ({lot.expiry_date.isoformat()})"
+                        )
 
                 if entry.get("deposit_provided"):
                     base_deposit = (
@@ -2116,6 +2191,19 @@ def receive_invoice(po_id):
             ),
             sms_body=f"PO received: #{po.id} {po.vendor_name}",
         )
+        if expiry_attention_lines:
+            notify_users_for_event(
+                event_key="inventory_expiry_alert",
+                subject=f"Inventory expiry attention: PO #{po.id}",
+                body=(
+                    "The received invoice includes tracked inventory that is "
+                    "expired or expiring soon: "
+                    + ", ".join(expiry_attention_lines[:10])
+                    + ("." if len(expiry_attention_lines) <= 10 else ", and more.")
+                ),
+                sms_body=f"Expiry alert: PO #{po.id} has expiring inventory",
+                exclude_user_ids={current_user.id},
+            )
         flash("Invoice received successfully!", "success")
         return redirect(url_for("purchase.view_purchase_invoices"))
 
@@ -2380,7 +2468,7 @@ def legacy_purchase_invoice_report(invoice_id: int):
     if invoice is None:
         abort(404)
 
-    rows, totals = _invoice_gl_code_rows(invoice)
+    rows, totals = invoice_gl_code_rows(invoice)
     report_data = {row["code"]: row for row in rows}
 
     return render_template(
@@ -2449,6 +2537,11 @@ def reverse_purchase_invoice(invoice_id):
                 "position": inv_item.position,
                 "gl_code_id": inv_item.purchase_gl_code_id,
                 "location_id": inv_item.location_id,
+                "expiry_date": (
+                    inv_item.expiry_lots[0].expiry_date.isoformat()
+                    if inv_item.expiry_lots and inv_item.expiry_lots[0].expiry_date
+                    else None
+                ),
             }
             for inv_item in invoice.items
         ],
@@ -2494,15 +2587,18 @@ def reverse_purchase_invoice(invoice_id):
             record = LocationStandItem(
                 location_id=line_location_id,
                 item_id=itm.id,
+                active=True,
                 expected_count=0,
                 purchase_gl_code_id=itm.purchase_gl_code_id,
             )
             db.session.add(record)
-        elif (
-            record.purchase_gl_code_id is None
-            and itm.purchase_gl_code_id is not None
-        ):
-            record.purchase_gl_code_id = itm.purchase_gl_code_id
+        else:
+            record.active = True
+            if (
+                record.purchase_gl_code_id is None
+                and itm.purchase_gl_code_id is not None
+            ):
+                record.purchase_gl_code_id = itm.purchase_gl_code_id
         new_count = record.expected_count - removed_qty
         record.expected_count = new_count
 

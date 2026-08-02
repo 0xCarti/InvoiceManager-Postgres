@@ -9,12 +9,35 @@ from app import db
 from app.models import Location, LocationStandItem, Menu, MenuAssignment
 
 
+def _active_products(products: Iterable["Product"]) -> list["Product"]:
+    return [product for product in products if not getattr(product, "archived", False)]
+
+
 def _collect_menu_items(menu: Optional[Menu]) -> dict[int, dict[str, object]]:
     """Return authoritative recipe item metadata for a menu."""
 
     if menu is None:
         return {}
-    return _collect_product_items(menu.products)
+    return _collect_product_items(_menu_products(menu))
+
+
+def _menu_products(menu: Menu) -> list["Product"]:
+    amounts = getattr(menu, "active_sellable_amounts", None) or []
+    if amounts:
+        products: list["Product"] = []
+        seen_ids: set[int] = set()
+        for amount in amounts:
+            product = amount.product
+            if (
+                product is None
+                or getattr(product, "archived", False)
+                or product.id in seen_ids
+            ):
+                continue
+            products.append(product)
+            seen_ids.add(product.id)
+        return products
+    return _active_products(menu.products)
 
 
 def _collect_product_items(
@@ -51,8 +74,8 @@ def get_authoritative_location_products(location: Location | None) -> list["Prod
     if location is None:
         return []
     if location.current_menu is not None:
-        return list(location.current_menu.products)
-    return list(location.products)
+        return _menu_products(location.current_menu)
+    return _active_products(location.products)
 
 
 def get_countable_recipe_item_ids(products: Iterable["Product"]) -> set[int]:
@@ -77,7 +100,7 @@ def get_location_drift_recipe_item_ids(location: Location | None) -> set[int]:
     if location is None or location.current_menu is None:
         return set()
 
-    menu_product_ids = {product.id for product in location.current_menu.products}
+    menu_product_ids = {product.id for product in _menu_products(location.current_menu)}
     drift_products = [
         product for product in location.products if product.id not in menu_product_ids
     ]
@@ -128,12 +151,16 @@ def sync_location_stand_items(
                 location=location,
                 item_id=item_id,
                 countable=bool(metadata.get("countable")),
+                active=True,
+                recipe_backed=True,
                 expected_count=0,
                 purchase_gl_code_id=metadata.get("purchase_gl_code_id"),
             )
             db.session.add(record)
             existing_records[item_id] = record
             continue
+        record.active = True
+        record.recipe_backed = True
         if (
             record.purchase_gl_code_id is None
             and metadata.get("purchase_gl_code_id") is not None
@@ -152,17 +179,24 @@ def apply_menu_products(
     """Synchronise a location's products and stand sheet with the given menu or products."""
 
     if menu is not None:
-        desired_products = list(menu.products)
+        desired_products = _menu_products(menu)
     elif products is not None:
-        desired_products = list(products)
+        desired_products = _active_products(products)
     else:
         desired_products = []
+
+    if location.products:
+        sync_location_stand_items(
+            location,
+            products=_active_products(location.products),
+            remove_missing=False,
+        )
 
     location.products = desired_products
     sync_location_stand_items(
         location,
         products=desired_products,
-        remove_missing=True,
+        remove_missing=False,
     )
 
     location.current_menu = menu

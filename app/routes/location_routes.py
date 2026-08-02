@@ -1,4 +1,4 @@
-from datetime import date as date_cls, datetime
+from datetime import date as date_cls, datetime, timedelta
 
 from flask import (
     Blueprint,
@@ -33,6 +33,7 @@ from app.models import (
     EventLocationOperatingDay,
     GLCode,
     Item,
+    ItemBarcode,
     LocationCountSubmission,
     LocationCountSubmissionRow,
     Location,
@@ -50,13 +51,16 @@ from app.services.location_count_labels import (
     render_location_transfer_sign_pdf,
 )
 from app.services.location_count_submissions import (
+    build_inventory_count_item_entry,
     build_location_count_item_entries,
+    build_location_inventory_count_item_entries,
     build_submission_row_entries,
     choose_auto_matched_event_location,
     event_operating_day_for_submission,
     expected_opening_counts_for_event_day,
     list_event_location_candidates,
     opening_submission_exists,
+    parse_inventory_count_submission_rows,
     parse_submission_count_value,
     sync_event_location_counts_from_approved_submissions,
 )
@@ -82,6 +86,7 @@ from app.utils.units import (
     get_unit_label,
 )
 from app.utils.text import (
+    build_text_match_predicate,
     normalize_name_for_sorting,
     normalize_request_text_filter,
     normalize_text_match_mode,
@@ -90,6 +95,11 @@ from app.utils.email import SMTPConfigurationError, send_email
 from app.utils.timezone import default_timezone_date
 
 location = Blueprint("locations", __name__)
+
+_RECENT_PUBLIC_SUBMISSION_DUPLICATE_WINDOW = timedelta(minutes=5)
+_PUBLIC_INVENTORY_ITEM_SEARCH_MIN_LENGTH = 2
+_PUBLIC_INVENTORY_ITEM_SEARCH_LIMIT = 12
+_PUBLIC_INVENTORY_ITEM_LOOKUP_LIMIT = 50
 
 
 def _notify_location_activity(
@@ -121,14 +131,17 @@ def _build_location_stand_sheet_items(location: Location):
     conversions.update(configured)
 
     stand_records = LocationStandItem.query.filter_by(
-        location_id=location.id
+        location_id=location.id,
+        active=True,
     ).all()
     stand_by_item_id = {record.item_id: record for record in stand_records}
+    authoritative_products = get_authoritative_location_products(location)
+    current_recipe_item_ids = get_recipe_item_ids(authoritative_products)
     drift_item_ids = get_location_drift_recipe_item_ids(location)
 
     stand_items = []
     seen = set()
-    for product_obj in get_authoritative_location_products(location):
+    for product_obj in authoritative_products:
         for recipe_item in product_obj.recipe_items:
             if recipe_item.item_id in seen or recipe_item.item is None:
                 continue
@@ -157,6 +170,8 @@ def _build_location_stand_sheet_items(location: Location):
         if record.item_id in seen or not record.countable:
             continue
         if record.item_id in drift_item_ids:
+            continue
+        if record.recipe_backed and record.item_id not in current_recipe_item_ids:
             continue
         item_obj = record.item
         if item_obj is None:
@@ -258,6 +273,13 @@ def _open_event_candidates_for_location(
         if candidate.event is not None
         and not candidate.event.closed
         and candidate.event.start_date <= submission_date <= candidate.event.end_date
+        and (
+            not candidate.operating_days
+            or any(
+                day.operating_date == submission_date
+                for day in candidate.operating_days
+            )
+        )
     ]
 
 
@@ -267,6 +289,7 @@ def _submission_type_label(submission_type: str) -> str:
         LocationCountSubmission.TYPE_CLOSING: "Closing Count",
         LocationCountSubmission.TYPE_EATEN: "Eaten Items",
         LocationCountSubmission.TYPE_SPOILAGE: "Spoilage Items",
+        LocationCountSubmission.TYPE_INVENTORY: "Inventory Count",
     }
     return labels.get(submission_type, submission_type.replace("_", " ").title())
 
@@ -277,6 +300,7 @@ def _submission_detail_heading(submission_type: str) -> str:
         LocationCountSubmission.TYPE_CLOSING: "Closing count",
         LocationCountSubmission.TYPE_EATEN: "Eaten item",
         LocationCountSubmission.TYPE_SPOILAGE: "Spoilage item",
+        LocationCountSubmission.TYPE_INVENTORY: "Inventory count",
     }
     return headings.get(submission_type, submission_type.replace("_", " "))
 
@@ -287,11 +311,94 @@ def _submission_sentence_label(submission_type: str) -> str:
         LocationCountSubmission.TYPE_CLOSING: "Closing count",
         LocationCountSubmission.TYPE_EATEN: "Eaten items",
         LocationCountSubmission.TYPE_SPOILAGE: "Spoilage items",
+        LocationCountSubmission.TYPE_INVENTORY: "Inventory count",
     }
     return labels.get(submission_type, submission_type.replace("_", " "))
 
 
-def _public_submission_links(token: str, active_key: str) -> list[dict[str, object]]:
+def _normalize_submission_identity(value: str | None) -> str:
+    return " ".join((value or "").strip().casefold().split())
+
+
+def _submission_rows_match(
+    submission: LocationCountSubmission,
+    requested_rows: list[dict],
+) -> bool:
+    existing_rows = sorted(
+        submission.rows or [],
+        key=lambda row: row.parse_index,
+    )
+    if len(existing_rows) != len(requested_rows):
+        return False
+
+    for existing_row, requested_row in zip(existing_rows, requested_rows):
+        existing_value = (
+            existing_row.submitted_count_value
+            if existing_row.submitted_count_value is not None
+            else existing_row.count_value
+        )
+        if existing_row.parse_index != requested_row["parse_index"]:
+            return False
+        if existing_row.item_id != requested_row["item_id"]:
+            return False
+        if abs(float(existing_value or 0.0) - float(requested_row["count_value"])) > 0.0001:
+            return False
+    return True
+
+
+def _find_recent_duplicate_public_submission(
+    *,
+    source_location_id: int,
+    event_location_id: int | None,
+    event_operating_day_id: int | None,
+    submission_type: str,
+    submitted_name: str,
+    submission_date: date_cls,
+    requested_rows: list[dict],
+) -> LocationCountSubmission | None:
+    cutoff = datetime.utcnow() - _RECENT_PUBLIC_SUBMISSION_DUPLICATE_WINDOW
+    query = (
+        LocationCountSubmission.query.options(
+            selectinload(LocationCountSubmission.rows)
+        )
+        .filter(
+            LocationCountSubmission.source_location_id == source_location_id,
+            LocationCountSubmission.submission_type == submission_type,
+            LocationCountSubmission.submission_date == submission_date,
+            LocationCountSubmission.submitted_at >= cutoff,
+        )
+        .order_by(LocationCountSubmission.submitted_at.desc())
+    )
+
+    if event_location_id is None:
+        query = query.filter(LocationCountSubmission.event_location_id.is_(None))
+    else:
+        query = query.filter(
+            LocationCountSubmission.event_location_id == event_location_id
+        )
+
+    if event_operating_day_id is None:
+        query = query.filter(LocationCountSubmission.event_operating_day_id.is_(None))
+    else:
+        query = query.filter(
+            LocationCountSubmission.event_operating_day_id == event_operating_day_id
+        )
+
+    normalized_name = _normalize_submission_identity(submitted_name)
+    for submission in query.limit(10).all():
+        if _normalize_submission_identity(submission.submitted_name) != normalized_name:
+            continue
+        if _submission_rows_match(submission, requested_rows):
+            return submission
+    return None
+
+
+def _public_submission_links(
+    token: str,
+    active_key: str,
+    *,
+    inventory_url: str | None = None,
+) -> list[dict[str, object]]:
     links = [
         {
             "key": "counts",
@@ -309,6 +416,14 @@ def _public_submission_links(token: str, active_key: str) -> list[dict[str, obje
             "url": url_for("locations.scan_spoilage_submission", token=token),
         },
     ]
+    if inventory_url:
+        links.append(
+            {
+                "key": "inventory",
+                "label": "Inventory",
+                "url": inventory_url,
+            }
+        )
     for link in links:
         link["active"] = link["key"] == active_key
     return links
@@ -353,6 +468,17 @@ def _public_submission_page_config(
             "submission_type_help_text": "",
             "selected_type": LocationCountSubmission.TYPE_SPOILAGE,
         }
+    if fixed_submission_type == LocationCountSubmission.TYPE_INVENTORY:
+        return {
+            "active_link_key": "inventory",
+            "page_title": "Submit Inventory Count",
+            "page_description": "Submit inventory counts for manager review.",
+            "submit_button_label": "Send Inventory Count For Review",
+            "show_submission_type_select": False,
+            "submission_type_options": [],
+            "submission_type_help_text": "",
+            "selected_type": LocationCountSubmission.TYPE_INVENTORY,
+        }
     return {
         "active_link_key": "counts",
         "page_title": "Submit Counts",
@@ -371,10 +497,231 @@ def _public_submission_page_config(
     }
 
 
+def _public_inventory_submission_url(
+    token: str,
+    event_location: EventLocation | None,
+    submission_date: date_cls,
+) -> str | None:
+    event_obj = event_location.event if event_location is not None else None
+    if (
+        event_location is None
+        or event_obj is None
+        or event_obj.closed
+        or event_obj.event_type != "inventory"
+    ):
+        return None
+    if not (event_obj.start_date <= submission_date <= event_obj.end_date):
+        return None
+    operating_days = event_location.operating_days or []
+    if operating_days and not any(
+        day.operating_date == submission_date for day in operating_days
+    ):
+        return None
+    return url_for(
+        "locations.scan_inventory_submission",
+        token=token,
+        event_id=event_obj.id,
+        operating_date=submission_date.isoformat(),
+    )
+
+
+def _public_inventory_item_search_url(
+    token: str,
+    event_location: EventLocation | None,
+    submission_date: date_cls,
+) -> str | None:
+    event_obj = event_location.event if event_location is not None else None
+    if (
+        event_location is None
+        or event_obj is None
+        or event_obj.closed
+        or event_obj.event_type != "inventory"
+    ):
+        return None
+    if not (event_obj.start_date <= submission_date <= event_obj.end_date):
+        return None
+    operating_days = event_location.operating_days or []
+    if operating_days and not any(
+        day.operating_date == submission_date for day in operating_days
+    ):
+        return None
+    return url_for(
+        "locations.scan_inventory_item_search",
+        token=token,
+        event_id=event_obj.id,
+        operating_date=submission_date.isoformat(),
+    )
+
+
+def _resolve_public_inventory_event_location(
+    location_obj: Location,
+    event_id: int,
+    submission_date: date_cls,
+) -> tuple[EventLocation | None, EventLocationOperatingDay | None, str | None]:
+    event_obj = db.session.get(Event, event_id)
+    if event_obj is None or event_obj.event_type != "inventory":
+        abort(404)
+    if event_obj.closed:
+        return None, None, "This inventory event is closed."
+    event_location = (
+        EventLocation.query.options(
+            selectinload(EventLocation.event),
+            selectinload(EventLocation.location),
+            selectinload(EventLocation.operating_days),
+        )
+        .filter_by(event_id=event_obj.id, location_id=location_obj.id)
+        .first()
+    )
+    if event_location is None:
+        abort(404)
+    if not (event_obj.start_date <= submission_date <= event_obj.end_date):
+        return (
+            event_location,
+            None,
+            "Choose an inventory date within the inventory event.",
+        )
+
+    operating_day = event_operating_day_for_submission(
+        event_location,
+        submission_date,
+        create_if_missing=True,
+    )
+    if operating_day is None:
+        return (
+            event_location,
+            None,
+            f"{location_obj.name} is not open for inventory counting on {submission_date}.",
+        )
+    return event_location, operating_day, None
+
+
+def _inventory_item_id_from_field_name(field_name: str) -> int | None:
+    for prefix in ("inventory_qty_", "inventory_unit_"):
+        if not field_name.startswith(prefix):
+            continue
+        remainder = field_name[len(prefix):]
+        item_id_text = remainder.split("_", 1)[0]
+        try:
+            return int(item_id_text)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _posted_inventory_item_ids(form_data) -> set[int]:
+    item_ids: set[int] = set()
+    for field_name in form_data.keys():
+        item_id = _inventory_item_id_from_field_name(field_name)
+        if item_id is not None:
+            item_ids.add(item_id)
+    return item_ids
+
+
+def _extend_inventory_entries_with_posted_items(
+    item_entries: list[dict],
+    form_data,
+) -> list[dict]:
+    existing_item_ids = {entry["item"].id for entry in item_entries}
+    extra_item_ids = sorted(_posted_inventory_item_ids(form_data) - existing_item_ids)
+    if not extra_item_ids:
+        return item_entries
+
+    extra_items = (
+        Item.query.options(
+            selectinload(Item.units),
+            selectinload(Item.barcode_aliases),
+        )
+        .filter(Item.archived.is_(False), Item.id.in_(extra_item_ids))
+        .order_by(Item.name.asc())
+        .all()
+    )
+    return item_entries + [
+        build_inventory_count_item_entry(item) for item in extra_items
+    ]
+
+
+def _inventory_item_search_text(item: Item, base_unit_label: str | None) -> str:
+    parts = [
+        item.name or "",
+        item.upc or "",
+        item.base_unit or "",
+        base_unit_label or "",
+    ]
+    parts.extend(item.barcode_values)
+    return " ".join(part for part in parts if part).casefold()
+
+
+def _public_inventory_item_payload(item: Item) -> dict:
+    entry = build_inventory_count_item_entry(item)
+    base_unit_label = entry.get("base_unit_label") or entry.get("base_unit")
+    return {
+        "id": item.id,
+        "name": item.name,
+        "upc": item.upc or "",
+        "base_unit": item.base_unit or "",
+        "base_unit_label": base_unit_label or "",
+        "unit_options": entry["unit_options"],
+        "search_text": _inventory_item_search_text(item, base_unit_label),
+    }
+
+
+def _parse_public_inventory_item_ids(raw_value: str | None) -> list[int]:
+    item_ids: list[int] = []
+    for value in (raw_value or "").split(","):
+        value = value.strip()
+        if not value:
+            continue
+        try:
+            item_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if item_id > 0 and item_id not in item_ids:
+            item_ids.append(item_id)
+        if len(item_ids) >= _PUBLIC_INVENTORY_ITEM_LOOKUP_LIMIT:
+            break
+    return item_ids
+
+
+def _query_public_inventory_items(
+    *,
+    search_term: str,
+    item_ids: list[int],
+) -> list[Item]:
+    query = Item.query.options(
+        selectinload(Item.units),
+        selectinload(Item.barcode_aliases),
+    ).filter(Item.archived.is_(False))
+
+    if item_ids:
+        return (
+            query.filter(Item.id.in_(item_ids))
+            .order_by(Item.name.asc())
+            .limit(_PUBLIC_INVENTORY_ITEM_LOOKUP_LIMIT)
+            .all()
+        )
+
+    if len(search_term) < _PUBLIC_INVENTORY_ITEM_SEARCH_MIN_LENGTH:
+        return []
+
+    return (
+        query.filter(
+            or_(
+                build_text_match_predicate(Item.name, search_term, "contains"),
+                Item.upc == search_term,
+                Item.barcode_aliases.any(ItemBarcode.code == search_term),
+            )
+        )
+        .order_by(Item.name.asc())
+        .limit(_PUBLIC_INVENTORY_ITEM_SEARCH_LIMIT)
+        .all()
+    )
+
+
 def _handle_public_location_submission(
     token: str,
     *,
     fixed_submission_type: str | None = None,
+    forced_inventory_event_id: int | None = None,
 ):
     """Render and handle public mobile entry for counts and waste."""
 
@@ -387,14 +734,44 @@ def _handle_public_location_submission(
         .first_or_404()
     )
     submission_date = _current_count_submission_date()
-    matched_event_location = choose_auto_matched_event_location(
-        location_obj.id, submission_date
-    )
-    matched_event_operating_day = event_operating_day_for_submission(
-        matched_event_location,
-        submission_date,
-        create_if_missing=True,
-    )
+    if forced_inventory_event_id is not None:
+        raw_operating_date = (request.values.get("operating_date") or "").strip()
+        if raw_operating_date:
+            try:
+                submission_date = date_cls.fromisoformat(raw_operating_date)
+            except ValueError:
+                flash("Choose a valid inventory count date.", "warning")
+                return redirect(
+                    url_for(
+                        "locations.scan_count_submission",
+                        token=location_obj.count_qr_token,
+                    )
+                )
+        matched_event_location, matched_event_operating_day, inventory_error = (
+            _resolve_public_inventory_event_location(
+                location_obj,
+                forced_inventory_event_id,
+                submission_date,
+            )
+        )
+        if inventory_error:
+            flash(inventory_error, "warning")
+            return redirect(
+                url_for(
+                    "locations.scan_count_submission",
+                    token=location_obj.count_qr_token,
+                )
+            )
+        fixed_submission_type = LocationCountSubmission.TYPE_INVENTORY
+    else:
+        matched_event_location = choose_auto_matched_event_location(
+            location_obj.id, submission_date
+        )
+        matched_event_operating_day = event_operating_day_for_submission(
+            matched_event_location,
+            submission_date,
+            create_if_missing=True,
+        )
     open_event_candidates = _open_event_candidates_for_location(
         location_obj.id, submission_date
     )
@@ -405,14 +782,41 @@ def _handle_public_location_submission(
             matched_event_location.id if matched_event_location is not None else None
         ),
     )
-    items = build_location_count_item_entries(location_obj)
+    effective_fixed_submission_type = fixed_submission_type
+    if (
+        effective_fixed_submission_type is None
+        and matched_event_location is not None
+        and matched_event_location.event is not None
+        and matched_event_location.event.event_type == "inventory"
+    ):
+        effective_fixed_submission_type = LocationCountSubmission.TYPE_INVENTORY
     page_config = _public_submission_page_config(
-        fixed_submission_type=fixed_submission_type,
+        fixed_submission_type=effective_fixed_submission_type,
         opening_exists=opening_exists,
     )
+    inventory_link_url = None
+    if matched_event_location is not None:
+        inventory_link_url = _public_inventory_submission_url(
+            location_obj.count_qr_token,
+            matched_event_location,
+            submission_date,
+        )
+    if inventory_link_url is None:
+        inventory_candidates = [
+            candidate
+            for candidate in open_event_candidates
+            if candidate.event is not None
+            and candidate.event.event_type == "inventory"
+        ]
+        if len(inventory_candidates) == 1:
+            inventory_link_url = _public_inventory_submission_url(
+                location_obj.count_qr_token,
+                inventory_candidates[0],
+                submission_date,
+            )
     allowed_types = (
-        {fixed_submission_type}
-        if fixed_submission_type is not None
+        {effective_fixed_submission_type}
+        if effective_fixed_submission_type is not None
         else set(LocationCountSubmission.COUNT_TYPES)
     )
     selected_type = (
@@ -426,9 +830,50 @@ def _handle_public_location_submission(
     )
     if selected_type not in allowed_types:
         selected_type = page_config["selected_type"]
+    if selected_type == LocationCountSubmission.TYPE_INVENTORY:
+        items = build_location_inventory_count_item_entries(location_obj)
+        if request.method == "POST":
+            items = _extend_inventory_entries_with_posted_items(
+                items,
+                request.form,
+            )
+    else:
+        items = build_location_count_item_entries(location_obj)
+    inventory_item_search_url = (
+        _public_inventory_item_search_url(
+            location_obj.count_qr_token,
+            matched_event_location,
+            submission_date,
+        )
+        if selected_type == LocationCountSubmission.TYPE_INVENTORY
+        else None
+    )
     clear_saved_draft_type = (request.args.get("clear_draft") or "").strip().lower()
     if clear_saved_draft_type not in LocationCountSubmission.ALL_TYPES:
         clear_saved_draft_type = ""
+
+    def redirect_to_current_submission(clear_draft_type: str):
+        if forced_inventory_event_id is not None:
+            return redirect(
+                url_for(
+                    "locations.scan_inventory_submission",
+                    token=location_obj.count_qr_token,
+                    event_id=forced_inventory_event_id,
+                    operating_date=submission_date.isoformat(),
+                    clear_draft=clear_draft_type,
+                )
+            )
+        redirect_endpoint = {
+            LocationCountSubmission.TYPE_EATEN: "locations.scan_eaten_submission",
+            LocationCountSubmission.TYPE_SPOILAGE: "locations.scan_spoilage_submission",
+        }.get(selected_type, "locations.scan_count_submission")
+        return redirect(
+            url_for(
+                redirect_endpoint,
+                token=location_obj.count_qr_token,
+                clear_draft=clear_draft_type,
+            )
+        )
 
     if request.method == "POST":
         submitted_name = (request.form.get("submitted_name") or "").strip()
@@ -445,61 +890,96 @@ def _handle_public_location_submission(
         elif not items:
             flash("No countable items are configured for this location.", "danger")
         else:
-            submission = LocationCountSubmission(
-                source_location_id=location_obj.id,
-                location_id=location_obj.id,
-                event_location_id=(
-                    matched_event_location.id if matched_event_location is not None else None
-                ),
-                event_operating_day_id=(
+            if selected_type == LocationCountSubmission.TYPE_INVENTORY:
+                requested_rows = parse_inventory_count_submission_rows(
+                    request.form,
+                    items,
+                )
+                if not requested_rows:
+                    flash("Enter at least one inventory count before submitting.", "danger")
+                    requested_rows = None
+            else:
+                requested_rows = []
+                for entry in items:
+                    item_id = entry["item"].id
+                    count_value = parse_submission_count_value(
+                        request.form.get(f"count_{item_id}"),
+                        base_unit=entry.get("base_unit"),
+                        report_unit=entry.get("report_unit"),
+                    )
+                    requested_rows.append(
+                        {
+                            "item_id": item_id,
+                            "count_value": count_value,
+                            "submitted_count_value": count_value,
+                            "unit_breakdown": None,
+                        }
+                    )
+
+            if requested_rows:
+                for index, row_data in enumerate(requested_rows):
+                    row_data["parse_index"] = index
+
+                event_location_id = (
+                    matched_event_location.id
+                    if matched_event_location is not None
+                    else None
+                )
+                event_operating_day_id = (
                     matched_event_operating_day.id
                     if matched_event_operating_day is not None
                     else None
-                ),
-                submission_type=selected_type,
-                submitted_name=submitted_name,
-                submission_date=submission_date,
-                status=LocationCountSubmission.STATUS_PENDING,
-            )
-            db.session.add(submission)
-            db.session.flush()
-
-            for index, entry in enumerate(items):
-                item_id = entry["item"].id
-                count_value = parse_submission_count_value(
-                    request.form.get(f"count_{item_id}"),
-                    base_unit=entry.get("base_unit"),
-                    report_unit=entry.get("report_unit"),
                 )
-                db.session.add(
-                    LocationCountSubmissionRow(
-                        submission_id=submission.id,
-                        item_id=item_id,
-                        count_value=count_value,
-                        submitted_count_value=count_value,
-                        parse_index=index,
+                duplicate_submission = _find_recent_duplicate_public_submission(
+                    source_location_id=location_obj.id,
+                    event_location_id=event_location_id,
+                    event_operating_day_id=event_operating_day_id,
+                    submission_type=selected_type,
+                    submitted_name=submitted_name,
+                    submission_date=submission_date,
+                    requested_rows=requested_rows,
+                )
+                if duplicate_submission is not None:
+                    flash(
+                        f"{_submission_sentence_label(selected_type)} already submitted for manager review.",
+                        "info",
                     )
-                )
+                    return redirect_to_current_submission(selected_type)
 
-            db.session.commit()
-            log_activity(
-                f"Submitted {selected_type} location sheet {submission.id} for location {location_obj.id}"
-            )
-            flash(
-                f"{_submission_sentence_label(selected_type)} submitted for manager review.",
-                "success",
-            )
-            redirect_endpoint = {
-                LocationCountSubmission.TYPE_EATEN: "locations.scan_eaten_submission",
-                LocationCountSubmission.TYPE_SPOILAGE: "locations.scan_spoilage_submission",
-            }.get(selected_type, "locations.scan_count_submission")
-            return redirect(
-                url_for(
-                    redirect_endpoint,
-                    token=location_obj.count_qr_token,
-                    clear_draft=selected_type,
+                submission = LocationCountSubmission(
+                    source_location_id=location_obj.id,
+                    location_id=location_obj.id,
+                    event_location_id=event_location_id,
+                    event_operating_day_id=event_operating_day_id,
+                    submission_type=selected_type,
+                    submitted_name=submitted_name,
+                    submission_date=submission_date,
+                    status=LocationCountSubmission.STATUS_PENDING,
                 )
-            )
+                db.session.add(submission)
+                db.session.flush()
+
+                for index, row_data in enumerate(requested_rows):
+                    db.session.add(
+                        LocationCountSubmissionRow(
+                            submission_id=submission.id,
+                            item_id=row_data["item_id"],
+                            count_value=row_data["count_value"],
+                            submitted_count_value=row_data["submitted_count_value"],
+                            unit_breakdown=row_data.get("unit_breakdown"),
+                            parse_index=row_data["parse_index"],
+                        )
+                    )
+
+                db.session.commit()
+                log_activity(
+                    f"Submitted {selected_type} location sheet {submission.id} for location {location_obj.id}"
+                )
+                flash(
+                    f"{_submission_sentence_label(selected_type)} submitted for manager review.",
+                    "success",
+                )
+                return redirect_to_current_submission(selected_type)
 
     return render_template(
         "locations/public_count_submission.html",
@@ -518,9 +998,11 @@ def _handle_public_location_submission(
         show_submission_type_select=page_config["show_submission_type_select"],
         submission_type_options=page_config["submission_type_options"],
         submission_type_help_text=page_config["submission_type_help_text"],
+        inventory_item_search_url=inventory_item_search_url,
         public_submission_links=_public_submission_links(
             location_obj.count_qr_token,
             page_config["active_link_key"],
+            inventory_url=inventory_link_url,
         ),
     )
 
@@ -780,7 +1262,10 @@ def copy_location_items(source_id: int):
     source_products = list(source.products)
     source_stand_items = {
         record.item_id: record
-        for record in LocationStandItem.query.filter_by(location_id=source.id).all()
+        for record in LocationStandItem.query.filter_by(
+            location_id=source.id,
+            active=True,
+        ).all()
     }
 
     processed_targets = []
@@ -792,12 +1277,31 @@ def copy_location_items(source_id: int):
         if source.current_menu is not None:
             set_location_menu(target, source.current_menu)
             db.session.flush()
+            target_records = {record.item_id: record for record in list(target.stand_items)}
             for record in list(target.stand_items):
                 source_record = source_stand_items.get(record.item_id)
-                if source_record is not None:
-                    record.expected_count = source_record.expected_count
-                    record.purchase_gl_code_id = source_record.purchase_gl_code_id
-                    record.countable = source_record.countable
+                if source_record is None:
+                    db.session.delete(record)
+                    target_records.pop(record.item_id, None)
+                    continue
+                record.active = True
+                record.recipe_backed = source_record.recipe_backed
+                record.expected_count = source_record.expected_count
+                record.purchase_gl_code_id = source_record.purchase_gl_code_id
+                record.countable = source_record.countable
+            for item_id, source_record in source_stand_items.items():
+                if item_id in target_records:
+                    continue
+                target_record = LocationStandItem(
+                    location=target,
+                    item_id=item_id,
+                    active=True,
+                    recipe_backed=source_record.recipe_backed,
+                    countable=source_record.countable,
+                    expected_count=source_record.expected_count,
+                    purchase_gl_code_id=source_record.purchase_gl_code_id,
+                )
+                db.session.add(target_record)
         else:
             set_location_menu(target, None)
             db.session.flush()
@@ -813,6 +1317,8 @@ def copy_location_items(source_id: int):
                     target_record = LocationStandItem(
                         location=target,
                         item_id=item_id,
+                        active=True,
+                        recipe_backed=source_record.recipe_backed,
                         countable=source_record.countable,
                         expected_count=0,
                         purchase_gl_code_id=source_record.purchase_gl_code_id,
@@ -822,6 +1328,8 @@ def copy_location_items(source_id: int):
                 target_record.expected_count = source_record.expected_count
                 target_record.purchase_gl_code_id = source_record.purchase_gl_code_id
                 target_record.countable = source_record.countable
+                target_record.active = True
+                target_record.recipe_backed = source_record.recipe_backed
 
         processed_targets.append(str(tid))
 
@@ -1024,6 +1532,78 @@ def scan_spoilage_submission(token: str):
     return _handle_public_location_submission(
         token,
         fixed_submission_type=LocationCountSubmission.TYPE_SPOILAGE,
+    )
+
+
+@location.route(
+    "/locations/scan/<token>/inventory/<int:event_id>",
+    methods=["GET", "POST"],
+)
+def scan_inventory_submission(token: str, event_id: int):
+    """Public mobile entry page for a specific inventory event."""
+
+    return _handle_public_location_submission(
+        token,
+        fixed_submission_type=LocationCountSubmission.TYPE_INVENTORY,
+        forced_inventory_event_id=event_id,
+    )
+
+
+@location.route(
+    "/locations/scan/<token>/inventory/<int:event_id>/items/search",
+    methods=["GET"],
+)
+def scan_inventory_item_search(token: str, event_id: int):
+    """Return capped item-master matches for a public inventory count."""
+
+    normalized_token = (token or "").strip()
+    location_obj = (
+        Location.query.filter(
+            Location.count_qr_token == normalized_token,
+            Location.archived.is_(False),
+        )
+        .first_or_404()
+    )
+    raw_operating_date = (request.args.get("operating_date") or "").strip()
+    try:
+        submission_date = (
+            date_cls.fromisoformat(raw_operating_date)
+            if raw_operating_date
+            else _current_count_submission_date()
+        )
+    except ValueError:
+        return jsonify({"items": [], "message": "Choose a valid inventory count date."}), 400
+
+    _, _, inventory_error = _resolve_public_inventory_event_location(
+        location_obj,
+        event_id,
+        submission_date,
+    )
+    if inventory_error:
+        return jsonify({"items": [], "message": inventory_error}), 400
+
+    search_term = normalize_request_text_filter(
+        request.args.get("q") or request.args.get("term")
+    )
+    item_ids = _parse_public_inventory_item_ids(request.args.get("ids"))
+    items = _query_public_inventory_items(
+        search_term=search_term,
+        item_ids=item_ids,
+    )
+    message = ""
+    if not item_ids and len(search_term) < _PUBLIC_INVENTORY_ITEM_SEARCH_MIN_LENGTH:
+        message = (
+            f"Type at least {_PUBLIC_INVENTORY_ITEM_SEARCH_MIN_LENGTH} characters "
+            "to search item master."
+        )
+
+    return jsonify(
+        {
+            "items": [_public_inventory_item_payload(item) for item in items],
+            "limit": _PUBLIC_INVENTORY_ITEM_SEARCH_LIMIT,
+            "min_query_length": _PUBLIC_INVENTORY_ITEM_SEARCH_MIN_LENGTH,
+            "message": message,
+        }
     )
 
 
@@ -1324,12 +1904,31 @@ def count_submission_detail(submission_id: int):
                 errors.append(
                     "The mapped event location is not marked open on this submission date."
                 )
+            if (
+                submission_type == LocationCountSubmission.TYPE_INVENTORY
+                and mapped_event_location is not None
+                and mapped_event_location.event is not None
+                and mapped_event_location.event.event_type != "inventory"
+            ):
+                errors.append(
+                    "Inventory count submissions must be mapped to an inventory event."
+                )
 
             metadata_by_item_id: dict[int, dict] = {}
             if mapped_location is not None:
+                if submission_type == LocationCountSubmission.TYPE_INVENTORY:
+                    metadata_entries = build_location_inventory_count_item_entries(
+                        mapped_location
+                    )
+                    for entry in metadata_entries:
+                        entry["report_unit"] = entry.get("base_unit")
+                        entry["report_unit_label"] = entry.get("base_unit_label")
+                else:
+                    metadata_entries = build_location_count_item_entries(
+                        mapped_location
+                    )
                 metadata_by_item_id = {
-                    entry["item"].id: entry
-                    for entry in build_location_count_item_entries(mapped_location)
+                    entry["item"].id: entry for entry in metadata_entries
                 }
             expected_by_item_id: dict[int, float] = {}
             if (
@@ -1400,11 +1999,27 @@ def count_submission_detail(submission_id: int):
                         sync_event_location_counts_from_approved_submissions(
                             submission.event_location_id
                         )
+                        if (
+                            submission.submission_type
+                            == LocationCountSubmission.TYPE_INVENTORY
+                            and mapped_event_location is not None
+                        ):
+                            mapped_event_location.confirmed = True
+                            if event_operating_day is not None:
+                                event_operating_day.confirmed = True
+                                event_operating_day.confirmed_at = datetime.utcnow()
+                                event_operating_day.confirmed_by_user_id = current_user.id
                         db.session.commit()
                         log_activity(f"Approved count submission {submission.id}")
+                        target_sheet_label = (
+                            "count sheet"
+                            if submission.submission_type
+                            == LocationCountSubmission.TYPE_INVENTORY
+                            else "stand sheet"
+                        )
                         flash(
                             f"{_submission_sentence_label(submission.submission_type)} "
-                            "approved and applied to the stand sheet "
+                            f"approved and applied to the {target_sheet_label} "
                             f"using {approval_mode} mode.",
                             "success",
                         )
@@ -1657,12 +2272,17 @@ def location_items(location_id):
     page = request.args.get("page", 1, type=int)
     per_page = get_per_page()
 
+    active_item_ids = {
+        record.item_id
+        for record in location_obj.stand_items
+        if bool(record.active)
+    }
     available_choices = [
         (item.id, item.name)
         for item in Item.query.filter_by(archived=False)
         .order_by(Item.name)
         .all()
-        if item.id not in existing_items
+        if item.id not in active_item_ids
     ]
     add_form.item_id.choices = available_choices
 
@@ -1674,6 +2294,7 @@ def location_items(location_id):
             selectinload(LocationStandItem.purchase_gl_code),
         )
         .filter(LocationStandItem.location_id == location_id)
+        .filter(LocationStandItem.active.is_(True))
         .order_by(Item.name)
     )
 
@@ -1718,7 +2339,7 @@ def location_items(location_id):
         record.is_recipe_backed = record.item_id in protected_item_ids
     total_expected = (
         db.session.query(db.func.sum(LocationStandItem.expected_count))
-        .filter_by(location_id=location_id)
+        .filter_by(location_id=location_id, active=True)
         .scalar()
         or 0
     )
@@ -1754,15 +2375,17 @@ def add_location_item(location_id: int):
     page = request.form.get("page")
     per_page = request.form.get("per_page")
 
-    existing_item_ids = {
-        record.item_id for record in location_obj.stand_items
+    active_item_ids = {
+        record.item_id
+        for record in location_obj.stand_items
+        if bool(record.active)
     }
     available_choices = [
         (item.id, item.name)
         for item in Item.query.filter_by(archived=False)
         .order_by(Item.name)
         .all()
-        if item.id not in existing_item_ids
+        if item.id not in active_item_ids
     ]
     add_form.item_id.choices = available_choices
 
@@ -1775,7 +2398,7 @@ def add_location_item(location_id: int):
         return _location_items_redirect(location_id, page, per_page)
 
     item_id = add_form.item_id.data
-    if item_id in existing_item_ids:
+    if item_id in active_item_ids:
         flash("This item is already tracked at the location.", "info")
         return _location_items_redirect(location_id, page, per_page)
 
@@ -1786,14 +2409,29 @@ def add_location_item(location_id: int):
 
     expected = add_form.expected_count.data or 0
     item_name = item.name
-    new_record = LocationStandItem(
+    existing_record = LocationStandItem.query.filter_by(
         location_id=location_id,
         item_id=item_id,
-        countable=True,
-        expected_count=float(expected),
-        purchase_gl_code_id=item.purchase_gl_code_id,
-    )
-    db.session.add(new_record)
+    ).first()
+    if existing_record is None:
+        existing_record = LocationStandItem(
+            location_id=location_id,
+            item_id=item_id,
+            countable=True,
+            active=True,
+            expected_count=float(expected),
+            purchase_gl_code_id=item.purchase_gl_code_id,
+        )
+        db.session.add(existing_record)
+    else:
+        existing_record.active = True
+        existing_record.countable = True
+        existing_record.expected_count = float(expected)
+        if (
+            existing_record.purchase_gl_code_id is None
+            and item.purchase_gl_code_id is not None
+        ):
+            existing_record.purchase_gl_code_id = item.purchase_gl_code_id
     db.session.commit()
     log_activity(
         f"Added item {item_name} to location {location_obj.name}"
@@ -1841,7 +2479,10 @@ def delete_location_item(location_id: int, item_id: int):
         return _location_items_redirect(location_id, page, per_page)
 
     item_name = record.item.name
-    db.session.delete(record)
+    if record.recipe_backed:
+        record.active = False
+    else:
+        db.session.delete(record)
     db.session.commit()
     log_activity(
         f"Removed item {item_name} from location {location_obj.name}"

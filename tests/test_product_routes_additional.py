@@ -8,6 +8,9 @@ from app.models import (
     ItemUnit,
     Location,
     Menu,
+    PosSalesImport,
+    PosSalesImportLocation,
+    PosSalesImportRow,
     Product,
     ProductRecipeItem,
     TerminalSaleProductAlias,
@@ -175,6 +178,109 @@ def test_additional_product_routes(client, app):
         assert client.get("/products/999/recipe").status_code == 404
 
 
+def test_delete_product_with_pos_import_rows_archives_product(client, app):
+    email, _, _ = setup_data(app)
+    with app.app_context():
+        product = Product(name="POS Linked Product", price=4.0, cost=1.0)
+        sales_import = PosSalesImport(
+            source_provider="test",
+            message_id="pos-linked-delete",
+            attachment_filename="sales.csv",
+            attachment_sha256="abc123",
+        )
+        db.session.add_all([product, sales_import])
+        db.session.flush()
+        import_location = PosSalesImportLocation(
+            import_id=sales_import.id,
+            source_location_name="Main",
+            normalized_location_name="main",
+            parse_index=0,
+        )
+        db.session.add(import_location)
+        db.session.flush()
+        db.session.add(
+            PosSalesImportRow(
+                import_id=sales_import.id,
+                location_import_id=import_location.id,
+                source_product_name="POS Linked Product",
+                normalized_product_name="pos linked product",
+                product_id=product.id,
+                quantity=1,
+                parse_index=0,
+            )
+        )
+        db.session.commit()
+        product_id = product.id
+
+    with client:
+        login(client, email, "pass")
+        response = client.post(
+            f"/products/{product_id}/delete", follow_redirects=True
+        )
+
+    assert response.status_code == 200
+    assert b"Product was archived because it is used by" in response.data
+    assert b"POS sales import row" in response.data
+
+    with app.app_context():
+        product = db.session.get(Product, product_id)
+        assert product is not None
+        assert product.archived is True
+
+
+def test_search_products_excludes_archived_products(client, app):
+    email, _, _ = setup_data(app)
+    with app.app_context():
+        active = Product(name="Searchable Active Product", price=4.0, cost=1.0)
+        archived = Product(
+            name="Searchable Archived Product",
+            price=4.0,
+            cost=1.0,
+            archived=True,
+        )
+        db.session.add_all([active, archived])
+        db.session.commit()
+
+    with client:
+        login(client, email, "pass")
+        response = client.get("/search_products?query=Searchable")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    names = {entry["name"] for entry in payload}
+    assert "Searchable Active Product" in names
+    assert "Searchable Archived Product" not in names
+
+
+def test_bulk_archive_products_archives_selected_products(client, app):
+    email, _, _ = setup_data(app)
+    with app.app_context():
+        first = Product(name="Bulk Archive First", price=4.0, cost=1.0)
+        second = Product(name="Bulk Archive Second", price=5.0, cost=2.0)
+        untouched = Product(name="Bulk Archive Untouched", price=6.0, cost=3.0)
+        db.session.add_all([first, second, untouched])
+        db.session.commit()
+        first_id = first.id
+        second_id = second.id
+        untouched_id = untouched.id
+
+    with client:
+        login(client, email, "pass")
+        response = client.post(
+            "/products/bulk_archive",
+            data={"product_ids": [str(first_id), str(second_id)]},
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"Archived 2 products" in response.data
+
+    with app.app_context():
+        assert db.session.get(Product, first_id).archived is True
+        assert db.session.get(Product, second_id).archived is True
+        assert db.session.get(Product, untouched_id).archived is False
+
+
 def test_view_products_sales_gl_code_filter(client, app):
     email, item_id, unit_id = setup_data(app)
     with app.app_context():
@@ -333,3 +439,40 @@ def test_bulk_set_cost_from_recipe(client, app):
     with app.app_context():
         updated = db.session.get(Product, product_id)
         assert updated.cost == pytest.approx(1.0)
+
+
+def test_bulk_set_cost_from_recipe_requires_selected_products(client, app):
+    email, item_id, unit_id = setup_data(app)
+    with app.app_context():
+        product = Product(
+            name="BulkCostNoSelection",
+            price=5,
+            cost=7,
+            recipe_yield_quantity=3,
+        )
+        db.session.add(product)
+        db.session.commit()
+        db.session.add(
+            ProductRecipeItem(
+                product_id=product.id,
+                item_id=item_id,
+                unit_id=unit_id,
+                quantity=3,
+            )
+        )
+        db.session.commit()
+        product_id = product.id
+
+    with client:
+        login(client, email, "pass")
+        resp = client.post(
+            "/products/bulk_set_cost_from_recipe",
+            data={},
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+        assert b"No products selected for recipe cost update." in resp.data
+
+    with app.app_context():
+        updated = db.session.get(Product, product_id)
+        assert updated.cost == pytest.approx(7.0)

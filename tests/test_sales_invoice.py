@@ -17,6 +17,7 @@ from app.models import (
     ItemUnit,
     Product,
     ProductRecipeItem,
+    ProductSellableAmount,
     User,
 )
 from app.routes.report_routes import _invoice_product_matches_catalog_product
@@ -958,6 +959,60 @@ def test_invoice_status_endpoints_enforce_pending_delivered_paid_flow(client, ap
         assert reopened_invoice.is_paid is False
         assert reopened_invoice.paid_at is None
 
+    with client:
+        login(client, email, "pass")
+        reverse_delivery_resp = client.post(
+            f"/invoice/{invoice_id}/reverse-delivery", follow_redirects=True
+        )
+        assert reverse_delivery_resp.status_code == 200
+
+    with app.app_context():
+        pending_invoice = db.session.get(Invoice, invoice_id)
+        assert pending_invoice is not None
+        assert pending_invoice.status == Invoice.STATUS_PENDING
+        assert pending_invoice.delivered_at is None
+        assert pending_invoice.is_paid is False
+        assert pending_invoice.paid_at is None
+
+
+def test_reverse_payment_route_only_reopens_paid_invoices(client, app):
+    email, cust_id, prod_name, _ = setup_sales(app)
+
+    with client:
+        login(client, email, "pass")
+        create_resp = client.post(
+            "/create_invoice",
+            data={"customer": float(cust_id), "products": f"{prod_name}?1??"},
+            follow_redirects=True,
+        )
+        assert create_resp.status_code == 200
+
+    with app.app_context():
+        invoice = Invoice.query.filter_by(customer_id=cust_id).first()
+        invoice_id = invoice.id
+
+    with client:
+        login(client, email, "pass")
+        invalid_reverse_resp = client.post(
+            f"/invoice/{invoice_id}/reverse-payment", follow_redirects=True
+        )
+        assert invalid_reverse_resp.status_code == 200
+        assert b"cannot reverse payment from its current status" in invalid_reverse_resp.data
+        client.post(f"/invoice/{invoice_id}/mark-delivered", follow_redirects=True)
+        client.post(f"/invoice/{invoice_id}/mark-paid", follow_redirects=True)
+        reverse_payment_resp = client.post(
+            f"/invoice/{invoice_id}/reverse-payment", follow_redirects=True
+        )
+        assert reverse_payment_resp.status_code == 200
+
+    with app.app_context():
+        reversed_invoice = db.session.get(Invoice, invoice_id)
+        assert reversed_invoice is not None
+        assert reversed_invoice.status == Invoice.STATUS_DELIVERED
+        assert reversed_invoice.delivered_at is not None
+        assert reversed_invoice.is_paid is False
+        assert reversed_invoice.paid_at is None
+
 
 def test_view_invoices_shows_invoice_status_text(client, app):
     email, cust_id, prod_name, _ = setup_sales(app)
@@ -1002,12 +1057,142 @@ def test_view_invoices_shows_invoice_status_text(client, app):
         assert re.search(r">\s*Paid\s*<", paid_html)
 
 
-def test_sales_invoice_uses_invoice_sale_price_for_line_snapshot(client, app):
+def test_view_invoices_includes_selected_invoice_pdf_download_controls(client, app):
+    email, cust_id, prod_name, _ = setup_sales(app)
+    create_sales_invoices(client, email, cust_id, prod_name, count=1)
+
+    with client:
+        login(client, email, "pass")
+        response = client.get("/view_invoices", follow_redirects=True)
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'id="bulkInvoicePdfForm"' in html
+    assert 'action="/invoices/download-pdf"' in html
+    assert 'id="bulkInvoicePdfBtn"' in html
+    assert "Download Selected PDF" in html
+
+
+def test_print_sales_invoice_uses_pdf_invoice_layout(client, app):
+    email, cust_id, prod_name, _ = setup_sales(app)
+
+    with client:
+        login(client, email, "pass")
+        create_resp = client.post(
+            "/create_invoice",
+            data={"customer": float(cust_id), "products": f"{prod_name}?1??"},
+            follow_redirects=True,
+        )
+        assert create_resp.status_code == 200
+
+    with app.app_context():
+        invoice_record = Invoice.query.filter_by(customer_id=cust_id).first()
+        assert invoice_record is not None
+        invoice_id = invoice_record.id
+
+    with client:
+        login(client, email, "pass")
+        view_response = client.get(f"/view_invoice/{invoice_id}")
+        assert view_response.status_code == 200
+        view_html = view_response.get_data(as_text=True)
+        assert f'href="/invoice/{invoice_id}/print"' in view_html
+        assert "Print Invoice" in view_html
+
+        print_response = client.get(f"/invoice/{invoice_id}/print")
+        assert print_response.status_code == 200
+        print_html = print_response.get_data(as_text=True)
+        assert "<title>Invoice " in print_html
+        assert "Sales Invoice" in print_html
+        assert "print-view" in print_html
+        assert "Back to Invoice" in print_html
+        assert "window.print()" in print_html
+        assert prod_name in print_html
+
+
+def test_download_selected_sales_invoices_pdf(client, app, monkeypatch):
+    email, cust_id, prod_name, _ = setup_sales(app)
+    create_sales_invoices(client, email, cust_id, prod_name, count=3)
+
+    with app.app_context():
+        invoices = (
+            Invoice.query.filter_by(customer_id=cust_id)
+            .order_by(Invoice.date_created.asc())
+            .all()
+        )
+        selected_invoice_ids = [invoices[1].id, invoices[0].id]
+        skipped_invoice_id = invoices[2].id
+
+    rendered = {}
+
+    def fake_render_template_pdf(pages, *, base_url=None):
+        rendered["pages"] = pages
+        rendered["base_url"] = base_url
+        return b"%PDF-selected-invoices"
+
+    monkeypatch.setattr(
+        "app.routes.invoice_routes.render_template_pdf",
+        fake_render_template_pdf,
+    )
+
+    with client:
+        login(client, email, "pass")
+        response = client.post(
+            "/invoices/download-pdf",
+            data={"invoice_ids": ",".join(selected_invoice_ids)},
+        )
+
+    assert response.status_code == 200
+    assert response.mimetype == "application/pdf"
+    assert response.data == b"%PDF-selected-invoices"
+    assert "attachment; filename=sales-invoices-" in response.headers[
+        "Content-Disposition"
+    ]
+
+    assert rendered["base_url"] is not None
+    assert [page[0] for page in rendered["pages"]] == [
+        "invoices/invoice_pdf.html",
+        "invoices/invoice_pdf.html",
+    ]
+    rendered_invoice_ids = [
+        page_context["invoice"].id for _, page_context in rendered["pages"]
+    ]
+    assert rendered_invoice_ids == selected_invoice_ids
+    assert skipped_invoice_id not in rendered_invoice_ids
+    assert all(page_context["total"] > 0 for _, page_context in rendered["pages"])
+
+
+def test_download_selected_sales_invoices_pdf_requires_selection(client, app):
+    email, cust_id, prod_name, _ = setup_sales(app)
+    create_sales_invoices(client, email, cust_id, prod_name, count=1)
+
+    with client:
+        login(client, email, "pass")
+        response = client.post(
+            "/invoices/download-pdf",
+            data={"invoice_ids": ""},
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"Select at least one invoice to download." in response.data
+
+
+def test_sales_invoice_uses_sellable_amount_price_for_line_snapshot(client, app):
     email, cust_id, prod_name, prod_id = setup_sales(app)
 
     with app.app_context():
         product = db.session.get(Product, prod_id)
-        product.invoice_sale_price = 12.5
+        product.invoice_sale_price = 99.0
+        product.price = 10.0
+        db.session.add(
+            ProductSellableAmount(
+                product=product,
+                name="Each",
+                quantity=1.0,
+                price=12.5,
+                is_default=True,
+            )
+        )
         db.session.commit()
 
     with client:
@@ -1023,13 +1208,17 @@ def test_sales_invoice_uses_invoice_sale_price_for_line_snapshot(client, app):
         invoice = Invoice.query.filter_by(customer_id=cust_id).first()
         assert invoice is not None
         invoice_line = invoice.products[0]
+        assert invoice_line.sellable_amount_name == "Each"
+        assert invoice_line.sellable_quantity == pytest.approx(1.0)
         assert invoice_line.unit_price == pytest.approx(12.5)
         assert invoice_line.line_subtotal == pytest.approx(25.0)
         assert invoice.total == pytest.approx(28.0)
 
         product = db.session.get(Product, prod_id)
-        product.invoice_sale_price = 50.0
-        product.price = 99.0
+        amount = product.default_sellable_amount
+        amount.price = 50.0
+        product.invoice_sale_price = 60.0
+        product.price = 70.0
         db.session.commit()
 
         refreshed_line = db.session.get(type(invoice_line), invoice_line.id)
@@ -1198,6 +1387,39 @@ def test_bulk_invoice_payment_status_updates_selected_invoices(client, app):
         assert all(invoice.delivered_at is not None for invoice in unpaid_invoices)
         assert all(invoice.is_paid is False for invoice in unpaid_invoices)
         assert all(invoice.paid_at is None for invoice in unpaid_invoices)
+
+    with client:
+        login(client, email, "pass")
+        reverse_delivery_response = client.post(
+            "/invoices/bulk-payment-status",
+            json={"invoice_ids": target_invoice_ids, "status": "pending"},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert reverse_delivery_response.status_code == 200
+        reverse_delivery_payload = reverse_delivery_response.get_json()
+        assert reverse_delivery_payload["success"] is True
+        assert reverse_delivery_payload["count"] == 2
+        assert reverse_delivery_payload["status"] == "pending"
+        assert all(
+            updated["status"] == "pending"
+            for updated in reverse_delivery_payload["updated"]
+        )
+        assert all(
+            updated["status_label"] == "Pending"
+            for updated in reverse_delivery_payload["updated"]
+        )
+        assert all(
+            updated["delivered_at"] is None
+            for updated in reverse_delivery_payload["updated"]
+        )
+
+    with app.app_context():
+        pending_invoices = Invoice.query.filter(Invoice.id.in_(target_invoice_ids)).all()
+        assert len(pending_invoices) == 2
+        assert all(invoice.status == Invoice.STATUS_PENDING for invoice in pending_invoices)
+        assert all(invoice.delivered_at is None for invoice in pending_invoices)
+        assert all(invoice.is_paid is False for invoice in pending_invoices)
+        assert all(invoice.paid_at is None for invoice in pending_invoices)
 
 
 def test_bulk_invoice_payment_status_rejects_paid_transition_for_pending_invoices(

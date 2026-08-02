@@ -10,14 +10,16 @@
 {% set can_create_invoices = can_access_endpoint('invoice.create_invoice') %}
 {% set can_edit_invoices = can_access_endpoint('invoice.edit_invoice') %}
 {% set can_manage_invoice_status = can_access_endpoint('invoice.bulk_invoice_payment_status', 'POST') %}
+{% set can_download_invoice_pdf = can_access_endpoint('invoice.download_invoices_pdf', 'POST') %}
 {% set can_delete_invoices = can_access_endpoint('invoice.delete_invoice', 'POST') %}
 {% set can_view_customer_invoice_report = can_access_endpoint('report.customer_invoice_report') %}
 {% set can_view_inventory_variance_report = can_access_endpoint('report.inventory_variance_report') %}
 {% set can_view_product_sales_report = can_access_endpoint('report.product_sales_report') %}
+{% set can_view_products_sold_report = can_access_endpoint('report.products_sold_report') %}
 {% set can_view_product_stock_usage_report = can_access_endpoint('report.product_stock_usage_report') %}
 {% set can_view_department_sales_forecast = can_access_endpoint('report.department_sales_forecast') %}
 {% set can_create_customers = can_access_endpoint('customer.create_customer_modal') %}
-{% set has_invoice_reports = can_view_customer_invoice_report or can_view_inventory_variance_report or can_view_product_sales_report or can_view_product_stock_usage_report or can_view_department_sales_forecast %}
+{% set has_invoice_reports = can_view_customer_invoice_report or can_view_inventory_variance_report or can_view_product_sales_report or can_view_products_sold_report or can_view_product_stock_usage_report or can_view_department_sales_forecast %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-toolbar,
@@ -92,6 +94,18 @@
 
         <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#filterModal">Filter</button>
 
+        {% if can_download_invoice_pdf %}
+        <button
+            type="submit"
+            class="btn btn-outline-primary"
+            id="bulkInvoicePdfBtn"
+            form="bulkInvoicePdfForm"
+            disabled
+        >
+            Download Selected PDF
+        </button>
+        {% endif %}
+
         {% if can_manage_invoice_status %}
         <div class="dropdown">
             <button
@@ -107,12 +121,18 @@
             <ul class="dropdown-menu" aria-labelledby="bulkInvoiceActionBtn">
                 <li>
                     <button type="button" class="dropdown-item js-bulk-invoice-action" data-action="delivered">
-                        Mark selected as Delivered
+                        Mark selected Delivered / Reverse Payment
                     </button>
                 </li>
                 <li>
                     <button type="button" class="dropdown-item js-bulk-invoice-action" data-action="paid">
                         Mark selected as Paid
+                    </button>
+                </li>
+                <li><hr class="dropdown-divider"></li>
+                <li>
+                    <button type="button" class="dropdown-item js-bulk-invoice-action" data-action="pending">
+                        Reverse selected Delivery
                     </button>
                 </li>
             </ul>
@@ -147,6 +167,9 @@
                 {% if can_view_product_sales_report %}
                 <li><a class="dropdown-item" href="{{ url_for('report.product_sales_report') }}">Revenue Report</a></li>
                 {% endif %}
+                {% if can_view_products_sold_report %}
+                <li><a class="dropdown-item" href="{{ url_for('report.products_sold_report') }}">Products Sold Report</a></li>
+                {% endif %}
                 {% if can_view_product_stock_usage_report %}
                 <li><a class="dropdown-item" href="{{ url_for('report.product_stock_usage_report') }}">Stock Usage Report</a></li>
                 {% endif %}
@@ -163,6 +186,12 @@
         {{ delete_form.hidden_tag() }}
         <input type="hidden" id="selectedInvoiceIdsInput" name="invoice_ids" value="">
         <input type="hidden" id="bulkInvoiceActionInput" name="status" value="">
+    </form>
+    {% endif %}
+    {% if can_download_invoice_pdf %}
+    <form id="bulkInvoicePdfForm" action="{{ url_for('invoice.download_invoices_pdf') }}" method="post">
+        {{ delete_form.hidden_tag() }}
+        <input type="hidden" id="selectedInvoicePdfIdsInput" name="invoice_ids" value="">
     </form>
     {% endif %}
     <div class="table-responsive mobile-table-wrap">
@@ -206,7 +235,7 @@
                     {% if can_edit_invoices and invoice.invoice_status == 'pending' %}
                     <a href="{{ url_for('invoice.edit_invoice', invoice_id=invoice.id) }}" class="btn btn-outline-secondary btn-sm">Edit</a>
                     {% endif %}
-                    {% set can_show_invoice_action_menu = (can_manage_invoice_status and (invoice.can_mark_delivered or invoice.can_mark_paid)) or can_delete_invoices %}
+                    {% set can_show_invoice_action_menu = (can_manage_invoice_status and (invoice.can_mark_delivered or invoice.can_mark_paid or invoice.can_reverse_payment or invoice.can_reverse_delivery)) or can_delete_invoices %}
                     {% if can_show_invoice_action_menu %}
                     <div class="dropdown d-inline">
                         <button
@@ -237,7 +266,23 @@
                                 </form>
                             </li>
                             {% endif %}
-                            {% if invoice.can_mark_delivered or invoice.can_mark_paid %}
+                            {% if invoice.can_reverse_payment %}
+                            <li>
+                                <form action="{{ url_for('invoice.reverse_invoice_payment', invoice_id=invoice.id) }}" method="post">
+                                    {{ delete_form.hidden_tag() }}
+                                    <button type="submit" class="dropdown-item">Reverse Payment</button>
+                                </form>
+                            </li>
+                            {% endif %}
+                            {% if invoice.can_reverse_delivery %}
+                            <li>
+                                <form action="{{ url_for('invoice.reverse_invoice_delivery', invoice_id=invoice.id) }}" method="post">
+                                    {{ delete_form.hidden_tag() }}
+                                    <button type="submit" class="dropdown-item">Reverse Delivery</button>
+                                </form>
+                            </li>
+                            {% endif %}
+                            {% if invoice.can_mark_delivered or invoice.can_mark_paid or invoice.can_reverse_payment or invoice.can_reverse_delivery %}
                             <li><hr class="dropdown-divider"></li>
                             {% endif %}
                             {% endif %}
@@ -375,6 +420,7 @@ $(document).ready(function(){
     const canManageInvoiceStatus = {{ can_manage_invoice_status|tojson }};
     const canEditInvoices = {{ can_edit_invoices|tojson }};
     const canDeleteInvoices = {{ can_delete_invoices|tojson }};
+    const canDownloadInvoicePdf = {{ can_download_invoice_pdf|tojson }};
     const deleteFormHTML = {{ delete_form.hidden_tag()|tojson }};
     const viewInvoiceUrlTemplate = {{ url_for('invoice.view_invoice', invoice_id=0)|tojson }};
     const editInvoiceUrlTemplate = {{ url_for('invoice.edit_invoice', invoice_id=0)|tojson }};
@@ -382,12 +428,17 @@ $(document).ready(function(){
     const bulkInvoiceStatusUrl = {{ url_for('invoice.bulk_invoice_payment_status')|tojson }};
     const markDeliveredUrlTemplate = {{ url_for('invoice.mark_invoice_delivered', invoice_id=0)|tojson }};
     const markPaidUrlTemplate = {{ url_for('invoice.mark_invoice_paid', invoice_id=0)|tojson }};
+    const reversePaymentUrlTemplate = {{ url_for('invoice.reverse_invoice_payment', invoice_id=0)|tojson }};
+    const reverseDeliveryUrlTemplate = {{ url_for('invoice.reverse_invoice_delivery', invoice_id=0)|tojson }};
     const $invoiceTable = $('#invoiceTable');
     const $bulkInvoiceActionBtn = $('#bulkInvoiceActionBtn');
+    const $bulkInvoicePdfBtn = $('#bulkInvoicePdfBtn');
     const $selectAllInvoices = $('#select-all-invoices');
     const $selectedInvoiceIdsInput = $('#selectedInvoiceIdsInput');
+    const $selectedInvoicePdfIdsInput = $('#selectedInvoicePdfIdsInput');
     const $bulkInvoiceActionInput = $('#bulkInvoiceActionInput');
     const bulkActionFormEl = document.getElementById('bulkInvoiceActionForm');
+    const bulkPdfFormEl = document.getElementById('bulkInvoicePdfForm');
 
     function invoiceUrlFromTemplate(urlTemplate, invoiceId) {
         const encodedInvoiceId = encodeURIComponent(invoiceId);
@@ -411,6 +462,8 @@ $(document).ready(function(){
                     : 'text-bg-warning';
         const showMarkDelivered = invoiceStatus === 'pending';
         const showMarkPaid = invoiceStatus === 'delivered';
+        const showReversePayment = invoiceStatus === 'paid';
+        const showReverseDelivery = invoiceStatus === 'delivered';
         const deliveredAction = canManageInvoiceStatus && showMarkDelivered ? `
                         <li>
                             <form action="${invoiceUrlFromTemplate(markDeliveredUrlTemplate, inv.id)}" method="post">
@@ -425,6 +478,20 @@ $(document).ready(function(){
                                 <button type="submit" class="dropdown-item">Mark Paid</button>
                             </form>
                         </li>` : '';
+        const reversePaymentAction = canManageInvoiceStatus && showReversePayment ? `
+                        <li>
+                            <form action="${invoiceUrlFromTemplate(reversePaymentUrlTemplate, inv.id)}" method="post">
+                                ${deleteFormHTML}
+                                <button type="submit" class="dropdown-item">Reverse Payment</button>
+                            </form>
+                        </li>` : '';
+        const reverseDeliveryAction = canManageInvoiceStatus && showReverseDelivery ? `
+                        <li>
+                            <form action="${invoiceUrlFromTemplate(reverseDeliveryUrlTemplate, inv.id)}" method="post">
+                                ${deleteFormHTML}
+                                <button type="submit" class="dropdown-item">Reverse Delivery</button>
+                            </form>
+                        </li>` : '';
         const deleteAction = canDeleteInvoices ? `
                         <li>
                             <form
@@ -437,11 +504,12 @@ $(document).ready(function(){
                                 <button type="submit" class="dropdown-item text-danger">Delete</button>
                             </form>
                         </li>` : '';
-        const dividerAction = (deliveredAction || paidAction) && deleteAction ? '<li><hr class="dropdown-divider"></li>' : '';
+        const statusAction = deliveredAction || paidAction || reversePaymentAction || reverseDeliveryAction;
+        const dividerAction = statusAction && deleteAction ? '<li><hr class="dropdown-divider"></li>' : '';
         const editButton = canEditInvoices && invoiceStatus === 'pending'
             ? `<a href="${invoiceUrlFromTemplate(editInvoiceUrlTemplate, inv.id)}" class="btn btn-outline-secondary btn-sm">Edit</a>`
             : '';
-        const actionMenu = (deliveredAction || paidAction || deleteAction) ? `
+        const actionMenu = (statusAction || deleteAction) ? `
                 <div class="dropdown d-inline">
                     <button
                         class="btn btn-outline-secondary dropdown-toggle"
@@ -456,6 +524,8 @@ $(document).ready(function(){
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="invoice-actions-${inv.id}">
                         ${deliveredAction}
                         ${paidAction}
+                        ${reversePaymentAction}
+                        ${reverseDeliveryAction}
                         ${dividerAction}
                         ${deleteAction}
                     </ul>
@@ -507,7 +577,9 @@ $(document).ready(function(){
         const hasSelection = selectedCount > 0;
 
         $bulkInvoiceActionBtn.prop('disabled', !hasSelection);
+        $bulkInvoicePdfBtn.prop('disabled', !hasSelection);
         $selectedInvoiceIdsInput.val(selectedInvoiceIds.join(','));
+        $selectedInvoicePdfIdsInput.val(selectedInvoiceIds.join(','));
 
         if (!totalCheckboxes) {
             $selectAllInvoices.prop({
@@ -527,8 +599,11 @@ $(document).ready(function(){
             return;
         }
 
-        const isMarkPaid = action === 'paid';
-        const actionVerb = isMarkPaid ? 'mark as paid' : 'mark as delivered';
+        const actionVerb = action === 'paid'
+            ? 'mark as paid'
+            : action === 'pending'
+                ? 'reverse delivery for'
+                : 'mark as delivered / reverse payment for';
         if (!window.confirm(`Are you sure you want to ${actionVerb} ${selectedInvoiceIds.length} selected invoice(s)?`)) {
             return;
         }
@@ -582,6 +657,18 @@ $(document).ready(function(){
         const action = $(this).data('action');
         runBulkInvoiceAction(action);
     });
+
+    if (canDownloadInvoicePdf && bulkPdfFormEl) {
+        bulkPdfFormEl.addEventListener('submit', function (e) {
+            const selectedInvoiceIds = getSelectedInvoiceIds();
+            if (!selectedInvoiceIds.length) {
+                e.preventDefault();
+                window.alert('Select at least one invoice to download.');
+                return;
+            }
+            $selectedInvoicePdfIdsInput.val(selectedInvoiceIds.join(','));
+        });
+    }
 
     $(document).on('submit', '.js-confirm-delete-invoice', function (e) {
         const invoiceId = $(this).data('invoice-id');

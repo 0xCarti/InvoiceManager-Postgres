@@ -81,5 +81,6 @@ def test_dynamic_formula_inputs_do_not_create_numeric_only_keyboards(relative_pa
 def test_settings_integer_fields_opt_into_formula_handler():
     template_path = ROOT / "app/templates/admin/settings.html"
     content = template_path.read_text(encoding="utf-8")
+    assert "food_cost_tax_rate(class='form-control', type='text', inputmode='text'" in content
     assert "auto_backup_interval_value(class='form-control', type='text', inputmode='text'" in content
     assert "max_backups(class='form-control', type='text', inputmode='text'" in content

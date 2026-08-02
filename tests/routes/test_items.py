@@ -1,4 +1,3 @@
-import re
 from datetime import date
 
 import pytest
@@ -11,6 +10,7 @@ from app.models import (
     EventLocation,
     GLCode,
     Item,
+    ItemUnit,
     Location,
     LocationStandItem,
     Product,
@@ -22,6 +22,7 @@ from app.models import (
     Vendor,
 )
 from app.utils.activity import flush_activity_logs
+from tests.utils import extract_csrf_token
 
 
 def login_admin(client, app):
@@ -93,6 +94,124 @@ def test_bulk_update_items_success(client, app, purchase_gl_code):
         assert ActivityLog.query.filter(ActivityLog.activity.ilike('%Bulk updated items%')).count() == 1
 
 
+def test_ajax_edit_item_updates_purchase_gl_code(client, app):
+    with app.app_context():
+        original_code = GLCode(code="501001", description="Original")
+        updated_code = GLCode(code="501002", description="Updated")
+        item = Item(
+            name="Editable GL Item",
+            base_unit="each",
+            purchase_gl_code=original_code,
+            archived=False,
+        )
+        db.session.add_all([original_code, updated_code, item])
+        db.session.flush()
+        db.session.add(
+            ItemUnit(
+                item_id=item.id,
+                name="each",
+                factor=1,
+                receiving_default=True,
+                transfer_default=True,
+            )
+        )
+        db.session.commit()
+        item_id = item.id
+        updated_code_id = updated_code.id
+
+    login_admin(client, app)
+    response = client.post(
+        f"/items/edit/{item_id}",
+        data={
+            "name": "Editable GL Item",
+            "base_unit": "each",
+            "purchase_gl_code": str(updated_code_id),
+            "expiry_tracking_mode": "none",
+            "expiry_warning_days": "14",
+            "barcodes-0-code": "",
+            "units-0-name": "each",
+            "units-0-factor": "1",
+            "units-0-receiving_default": "y",
+            "units-0-transfer_default": "y",
+        },
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert str(item_id) in payload["row_html"]
+
+    with app.app_context():
+        edited_item = db.session.get(Item, item_id)
+        assert edited_item.purchase_gl_code_id == updated_code_id
+
+
+def test_ajax_edit_item_preserves_referenced_unit(client, app):
+    with app.app_context():
+        purchase_code = GLCode(code="501011", description="Food")
+        item = Item(
+            name="Referenced Unit Item",
+            base_unit="each",
+            purchase_gl_code=purchase_code,
+            archived=False,
+        )
+        product = Product(name="Recipe Product", price=10.0)
+        db.session.add_all([purchase_code, item, product])
+        db.session.flush()
+        unit = ItemUnit(
+            item_id=item.id,
+            name="each",
+            factor=1,
+            receiving_default=True,
+            transfer_default=True,
+        )
+        db.session.add(unit)
+        db.session.flush()
+        recipe_item = ProductRecipeItem(
+            product_id=product.id,
+            item_id=item.id,
+            unit_id=unit.id,
+            quantity=1,
+        )
+        db.session.add(recipe_item)
+        db.session.commit()
+        item_id = item.id
+        unit_id = unit.id
+        recipe_item_id = recipe_item.id
+        purchase_code_id = purchase_code.id
+
+    login_admin(client, app)
+    response = client.post(
+        f"/items/edit/{item_id}",
+        data={
+            "name": "Referenced Unit Item Renamed",
+            "base_unit": "each",
+            "purchase_gl_code": str(purchase_code_id),
+            "expiry_tracking_mode": "none",
+            "expiry_warning_days": "14",
+            "barcodes-0-code": "",
+            "units-0-unit_id": str(unit_id),
+            "units-0-name": "each",
+            "units-0-factor": "1",
+            "units-0-receiving_default": "y",
+            "units-0-transfer_default": "y",
+        },
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+
+    with app.app_context():
+        edited_item = db.session.get(Item, item_id)
+        recipe_item = db.session.get(ProductRecipeItem, recipe_item_id)
+        assert edited_item.name == "Referenced Unit Item Renamed"
+        assert db.session.get(ItemUnit, unit_id) is not None
+        assert recipe_item.unit_id == unit_id
+
+
 def test_bulk_update_items_constraint_failure(client, app):
     with app.app_context():
         item1 = Item(name='Duplicate', base_unit='each', archived=True)
@@ -139,12 +258,8 @@ def test_bulk_delete_items_archives_selected_rows(client, app):
     assert list_response.status_code == 200
 
     html = list_response.get_data(as_text=True)
-    csrf_match = re.search(
-        r'<form id="bulk-delete-form" action="[^"]+" method="post">\s*<input id="csrf_token" name="csrf_token" type="hidden" value="([^"]+)"',
-        html,
-    )
-    assert csrf_match is not None
-    csrf_token = csrf_match.group(1)
+    assert 'id="bulk-delete-form"' in html
+    csrf_token = extract_csrf_token(list_response, required=False)
 
     response = client.post(
         "/items/bulk_delete",
@@ -251,12 +366,8 @@ def test_duplicate_items_bulk_delete_returns_to_duplicate_report(client, app):
 
     report_response = client.get("/items/duplicates")
     html = report_response.get_data(as_text=True)
-    csrf_match = re.search(
-        r'<form id="duplicate-bulk-delete-form" action="[^"]+" method="post">\s*<input id="csrf_token" name="csrf_token" type="hidden" value="([^"]+)"',
-        html,
-    )
-    assert csrf_match is not None
-    csrf_token = csrf_match.group(1)
+    assert 'id="duplicate-bulk-delete-form"' in html
+    csrf_token = extract_csrf_token(report_response, required=False)
 
     response = client.post(
         "/items/bulk_delete",
@@ -313,12 +424,8 @@ def test_delete_item_unlinks_current_recipe_and_location_records(client, app):
 
     list_response = client.get("/items", follow_redirects=True)
     html = list_response.get_data(as_text=True)
-    csrf_match = re.search(
-        r'<form id="bulk-delete-form" action="[^"]+" method="post">\s*<input id="csrf_token" name="csrf_token" type="hidden" value="([^"]+)"',
-        html,
-    )
-    assert csrf_match is not None
-    csrf_token = csrf_match.group(1)
+    assert 'id="bulk-delete-form"' in html
+    csrf_token = extract_csrf_token(list_response, required=False)
 
     response = client.post(
         f"/items/delete/{item_id}",
@@ -373,12 +480,8 @@ def test_delete_item_blocked_while_open_event_uses_item(client, app):
 
     list_response = client.get("/items", follow_redirects=True)
     html = list_response.get_data(as_text=True)
-    csrf_match = re.search(
-        r'<form id="bulk-delete-form" action="[^"]+" method="post">\s*<input id="csrf_token" name="csrf_token" type="hidden" value="([^"]+)"',
-        html,
-    )
-    assert csrf_match is not None
-    csrf_token = csrf_match.group(1)
+    assert 'id="bulk-delete-form"' in html
+    csrf_token = extract_csrf_token(list_response, required=False)
 
     response = client.post(
         f"/items/delete/{item_id}",

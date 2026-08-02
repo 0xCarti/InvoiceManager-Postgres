@@ -46,18 +46,38 @@ def get_timezone(value: str | None, default: str = "UTC") -> ZoneInfo:
 
 
 def get_default_timezone_name(default: str = "UTC") -> str:
-    timezone_name = None
+    config_timezone_name = None
     try:
-        timezone_name = current_app.config.get("DEFAULT_TIMEZONE")
+        config_timezone_name = current_app.config.get("DEFAULT_TIMEZONE")
     except RuntimeError:
-        timezone_name = None
+        config_timezone_name = None
 
-    if not timezone_name:
-        import app as app_module
+    import app as app_module
 
-        timezone_name = getattr(app_module, "DEFAULT_TIMEZONE", None)
+    module_timezone_name = getattr(app_module, "DEFAULT_TIMEZONE", None)
+    normalized_config = (
+        normalize_timezone_name(config_timezone_name, default=default)
+        if config_timezone_name
+        else None
+    )
+    normalized_module = (
+        normalize_timezone_name(module_timezone_name, default=default)
+        if module_timezone_name
+        else None
+    )
 
-    return normalize_timezone_name(timezone_name, default=default)
+    if (
+        normalized_module
+        and normalized_module != default
+        and normalized_module != normalized_config
+    ):
+        try:
+            current_app.config["DEFAULT_TIMEZONE"] = normalized_module
+        except RuntimeError:
+            pass
+        return normalized_module
+
+    return normalized_config or normalized_module or normalize_timezone_name(default)
 
 
 def get_default_timezone(default: str = "UTC") -> ZoneInfo:

@@ -25,6 +25,7 @@ from app.models import (
 from app.utils.menu_assignments import (
     get_authoritative_location_products,
     get_location_drift_recipe_item_ids,
+    sync_location_stand_items,
 )
 from app.utils.text import normalize_name_for_sorting
 from app.utils.units import (
@@ -191,16 +192,33 @@ def load_open_event_location_candidates(
 def choose_auto_matched_event_location(
     location_id: int | None, target_date: date_cls
 ) -> EventLocation | None:
-    """Return the single open event-location match for ``location_id`` on ``target_date``."""
+    """Return the best open event-location match for a public count."""
 
     if not location_id:
         return None
     candidates = load_open_event_location_candidates(target_date, [location_id]).get(
         location_id, []
     )
-    if len(candidates) != 1:
+    non_inventory_candidates = [
+        candidate
+        for candidate in candidates
+        if candidate.event is not None
+        and candidate.event.event_type != "inventory"
+    ]
+    if len(non_inventory_candidates) == 1:
+        return non_inventory_candidates[0]
+    if non_inventory_candidates:
         return None
-    return candidates[0]
+
+    inventory_candidates = [
+        candidate
+        for candidate in candidates
+        if candidate.event is not None
+        and candidate.event.event_type == "inventory"
+    ]
+    if len(inventory_candidates) == 1:
+        return inventory_candidates[0]
+    return None
 
 
 def list_event_location_candidates(
@@ -387,6 +405,7 @@ def expected_opening_counts_for_event_day(
         if not counts and event_location.location_id is not None:
             for record in LocationStandItem.query.filter_by(
                 location_id=event_location.location_id,
+                active=True,
                 countable=True,
             ).all():
                 if record.item_id is not None:
@@ -423,7 +442,10 @@ def build_location_count_item_entries(location: Location) -> list[dict]:
     """Return countable item entries for a location's mobile count sheet."""
 
     conversions = _conversion_mapping()
-    stand_records = LocationStandItem.query.filter_by(location_id=location.id).all()
+    stand_records = LocationStandItem.query.filter_by(
+        location_id=location.id,
+        active=True,
+    ).all()
     stand_by_item_id = {record.item_id: record for record in stand_records}
     drift_item_ids = get_location_drift_recipe_item_ids(location)
 
@@ -485,8 +507,15 @@ def build_submission_row_entries(submission: LocationCountSubmission) -> list[di
     location_obj = submission.location or submission.source_location
     metadata_by_item_id: dict[int, dict] = {}
     if location_obj is not None:
+        if submission.submission_type == LocationCountSubmission.TYPE_INVENTORY:
+            metadata_entries = build_location_inventory_count_item_entries(location_obj)
+            for entry in metadata_entries:
+                entry["report_unit"] = entry.get("base_unit")
+                entry["report_unit_label"] = entry.get("base_unit_label")
+        else:
+            metadata_entries = build_location_count_item_entries(location_obj)
         metadata_by_item_id = {
-            entry["item"].id: entry for entry in build_location_count_item_entries(location_obj)
+            entry["item"].id: entry for entry in metadata_entries
         }
 
     entries: list[dict] = []
@@ -510,6 +539,7 @@ def build_submission_row_entries(submission: LocationCountSubmission) -> list[di
                 "report_unit": report_unit,
                 "report_unit_label": metadata.get("report_unit_label")
                 or get_unit_label(report_unit),
+                "unit_breakdown": row.unit_breakdown or [],
                 "display_value": display_value,
             }
         )
@@ -531,6 +561,184 @@ def parse_submission_count_value(
     return float(
         convert_report_value_to_base(numeric_value, base_unit, report_unit)
     )
+
+
+def _format_quantity(value: float | None) -> str:
+    try:
+        return f"{float(value or 0.0):g}"
+    except (TypeError, ValueError):
+        return "0"
+
+
+def build_inventory_unit_options(item: Item) -> list[dict]:
+    """Return count-sheet unit choices for an item."""
+
+    base_unit = item.base_unit
+    base_label = get_unit_label(base_unit) or base_unit or "Base Unit"
+    options = [
+        {
+            "value": "base",
+            "unit_id": None,
+            "name": base_label,
+            "factor": 1.0,
+            "label": base_label,
+        }
+    ]
+
+    units = sorted(
+        item.units or [],
+        key=lambda unit: (
+            not bool(unit.receiving_default),
+            not bool(unit.transfer_default),
+            (unit.name or "").casefold(),
+            unit.id or 0,
+        ),
+    )
+    for unit in units:
+        if unit.factor is None:
+            continue
+        factor = float(unit.factor or 0.0)
+        if factor <= 0:
+            continue
+        label = unit.name or f"Unit #{unit.id}"
+        if base_unit:
+            label = f"{label} ({_format_quantity(factor)} {base_label})"
+        options.append(
+            {
+                "value": str(unit.id),
+                "unit_id": unit.id,
+                "name": unit.name,
+                "factor": factor,
+                "label": label,
+            }
+        )
+    return options
+
+
+def build_inventory_count_item_entry(
+    item: Item,
+    *,
+    expected_count: float = 0.0,
+) -> dict:
+    """Return one inventory count entry for an item."""
+
+    return {
+        "item": item,
+        "base_unit": item.base_unit,
+        "base_unit_label": get_unit_label(item.base_unit),
+        "expected_count": float(expected_count or 0.0),
+        "unit_options": build_inventory_unit_options(item),
+    }
+
+
+def build_location_inventory_count_item_entries(location: Location) -> list[dict]:
+    """Return active, countable stock items for an inventory event count sheet."""
+
+    sync_location_stand_items(location, remove_missing=False)
+    db.session.flush()
+
+    records = (
+        LocationStandItem.query.join(Item)
+        .options(selectinload(LocationStandItem.item).selectinload(Item.units))
+        .filter(
+            LocationStandItem.location_id == location.id,
+            LocationStandItem.active.is_(True),
+            LocationStandItem.countable.is_(True),
+            Item.archived.is_(False),
+        )
+        .order_by(Item.name.asc())
+        .all()
+    )
+
+    entries: list[dict] = []
+    for record in records:
+        item = record.item
+        if item is None:
+            continue
+        entries.append(
+            build_inventory_count_item_entry(
+                item,
+                expected_count=record.expected_count,
+            )
+        )
+    return entries
+
+
+def parse_inventory_count_submission_rows(
+    form_data,
+    item_entries: list[dict],
+) -> list[dict]:
+    """Parse dynamic inventory count rows into base-unit submission rows."""
+
+    parsed_rows: list[dict] = []
+
+    for entry in item_entries:
+        item = entry["item"]
+        item_id = item.id
+        quantity_prefix = f"inventory_qty_{item_id}_"
+        suffixes: set[str] = set()
+        for key in form_data.keys():
+            if key.startswith(quantity_prefix):
+                suffixes.add(key[len(quantity_prefix):])
+
+        if not suffixes:
+            continue
+
+        unit_lookup = {
+            str(option["value"]): option for option in entry.get("unit_options", [])
+        }
+        breakdown: list[dict] = []
+        total_count = 0.0
+
+        def suffix_sort(value: str):
+            try:
+                return (0, int(value))
+            except (TypeError, ValueError):
+                return (1, value)
+
+        for suffix in sorted(suffixes, key=suffix_sort):
+            raw_quantity = (
+                form_data.get(f"inventory_qty_{item_id}_{suffix}") or ""
+            ).strip()
+            if raw_quantity == "":
+                continue
+            try:
+                quantity = float(raw_quantity)
+            except (TypeError, ValueError):
+                quantity = 0.0
+
+            unit_key = (
+                form_data.get(f"inventory_unit_{item_id}_{suffix}") or "base"
+            ).strip()
+            unit_option = unit_lookup.get(unit_key) or unit_lookup.get("base")
+            if unit_option is None:
+                continue
+            factor = float(unit_option.get("factor") or 1.0)
+            base_quantity = quantity * factor
+            total_count += base_quantity
+            breakdown.append(
+                {
+                    "unit_id": unit_option.get("unit_id"),
+                    "unit_name": unit_option.get("name") or unit_option.get("label"),
+                    "unit_factor": factor,
+                    "quantity": quantity,
+                    "base_quantity": base_quantity,
+                    "base_unit": item.base_unit,
+                }
+            )
+
+        if not breakdown:
+            continue
+        parsed_rows.append(
+            {
+                "item_id": item_id,
+                "count_value": total_count,
+                "submitted_count_value": total_count,
+                "unit_breakdown": breakdown,
+            }
+        )
+
+    return parsed_rows
 
 
 def _aggregate_submission_rows_for_type(
@@ -586,6 +794,12 @@ def _aggregate_submission_rows_for_type(
         ]
         return _roll_up_submission_rows(target_submissions)
 
+    if submission_type == LocationCountSubmission.TYPE_INVENTORY:
+        return _roll_up_submission_rows(
+            approved_submissions,
+            whole_sheet_overwrite=True,
+        )
+
     totals_by_item_id: dict[int, float] = {}
     rows_by_date: dict[date_cls, list[LocationCountSubmission]] = defaultdict(list)
     for submission in approved_submissions:
@@ -603,6 +817,8 @@ def _aggregate_submission_rows_for_type(
 
 def _roll_up_submission_rows(
     submissions: list[LocationCountSubmission],
+    *,
+    whole_sheet_overwrite: bool = False,
 ) -> dict[int, float]:
     """Combine submission rows honoring add vs overwrite approval modes."""
 
@@ -613,6 +829,11 @@ def _roll_up_submission_rows(
             submission.approval_mode
             or LocationCountSubmission.APPROVAL_MODE_ADD
         )
+        if (
+            whole_sheet_overwrite
+            and approval_mode == LocationCountSubmission.APPROVAL_MODE_OVERWRITE
+        ):
+            totals_by_item_id = {}
         for row in submission.rows:
             if row.item_id is None:
                 continue
@@ -624,6 +845,31 @@ def _roll_up_submission_rows(
                     totals_by_item_id.get(row.item_id, 0.0) + row_value
                 )
     return totals_by_item_id
+
+
+def _approved_submission_item_ids_for_type(
+    event_location_id: int,
+    submission_type: str,
+) -> set[int]:
+    """Return all item IDs present on approved submissions of a type."""
+
+    rows = (
+        db.session.query(LocationCountSubmissionRow.item_id)
+        .join(
+            LocationCountSubmission,
+            LocationCountSubmission.id
+            == LocationCountSubmissionRow.submission_id,
+        )
+        .filter(
+            LocationCountSubmission.event_location_id == event_location_id,
+            LocationCountSubmission.status
+            == LocationCountSubmission.STATUS_APPROVED,
+            LocationCountSubmission.submission_type == submission_type,
+        )
+        .distinct()
+        .all()
+    )
+    return {item_id for (item_id,) in rows if item_id is not None}
 
 
 def sync_event_location_inventory_from_approved_submissions(
@@ -652,10 +898,26 @@ def sync_event_location_inventory_from_approved_submissions(
     }
     opening_totals = totals_by_type[LocationCountSubmission.TYPE_OPENING]
     closing_totals = totals_by_type[LocationCountSubmission.TYPE_CLOSING]
+    inventory_totals = totals_by_type[LocationCountSubmission.TYPE_INVENTORY]
 
     sheet_by_item_id = {
         sheet.item_id: sheet for sheet in (event_location.stand_sheet_items or [])
     }
+
+    if inventory_totals:
+        approved_inventory_item_ids = _approved_submission_item_ids_for_type(
+            event_location_id,
+            LocationCountSubmission.TYPE_INVENTORY,
+        )
+        for item_id in approved_inventory_item_ids:
+            if item_id in sheet_by_item_id:
+                continue
+            sheet = EventStandSheetItem(
+                event_location_id=event_location.id,
+                item_id=item_id,
+            )
+            db.session.add(sheet)
+            sheet_by_item_id[item_id] = sheet
 
     for sheet in sheet_by_item_id.values():
         sheet.opening_count = 0.0
@@ -666,6 +928,7 @@ def sync_event_location_inventory_from_approved_submissions(
     for submission_type, field_name in (
         (LocationCountSubmission.TYPE_OPENING, "opening_count"),
         (LocationCountSubmission.TYPE_CLOSING, "closing_count"),
+        (LocationCountSubmission.TYPE_INVENTORY, "closing_count"),
         (LocationCountSubmission.TYPE_EATEN, "eaten"),
         (LocationCountSubmission.TYPE_SPOILAGE, "spoiled"),
     ):
@@ -686,21 +949,24 @@ def sync_event_location_inventory_from_approved_submissions(
             setattr(sheet, field_name, total_count)
 
     if (
-        closing_totals
+        (closing_totals or inventory_totals)
         and event_location.location_id is not None
         and event_location.event is not None
         and event_location.event.closed
     ):
-        for item_id, total_count in closing_totals.items():
+        final_counts = inventory_totals or closing_totals
+        for item_id, total_count in final_counts.items():
             record = LocationStandItem.query.filter_by(
                 location_id=event_location.location_id,
                 item_id=item_id,
             ).first()
             item = db.session.get(Item, item_id)
+            created_location_item = False
             if record is None:
                 record = LocationStandItem(
                     location_id=event_location.location_id,
                     item_id=item_id,
+                    active=True,
                     countable=True,
                     expected_count=0.0,
                     purchase_gl_code_id=(
@@ -708,7 +974,10 @@ def sync_event_location_inventory_from_approved_submissions(
                     ),
                 )
                 db.session.add(record)
-            record.countable = True
+                created_location_item = True
+            record.active = True
+            if created_location_item:
+                record.countable = True
             record.expected_count = total_count
 
 

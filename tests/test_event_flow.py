@@ -166,13 +166,13 @@ def setup_event_overlap_env(
             name=first_event_name,
             start_date=first_start,
             end_date=first_end,
-            event_type="inventory",
+            event_type="other",
         )
         second_event = Event(
             name=second_event_name,
             start_date=second_start,
             end_date=second_end,
-            event_type="inventory",
+            event_type="other",
         )
         db.session.add_all([user, location, first_event, second_event])
         db.session.flush()
@@ -292,7 +292,7 @@ def _prepare_upload_event(client, app, email: str, east_id: int, west_id: int, *
                 "name": name,
                 "start_date": "2025-06-20",
                 "end_date": "2025-06-21",
-                "event_type": "inventory",
+                "event_type": "other",
             },
             follow_redirects=True,
         )
@@ -347,7 +347,7 @@ def test_event_lifecycle(client, app):
                 "name": "Test Event",
                 "start_date": "2023-01-01",
                 "end_date": "2023-01-02",
-                "event_type": "inventory",
+                "event_type": "other",
             },
             follow_redirects=True,
         )
@@ -504,7 +504,7 @@ def test_edit_event_blocks_overlapping_dates_for_existing_location(client, app):
                 "name": "Evening Event",
                 "start_date": "2026-01-10",
                 "end_date": "2026-01-10",
-                "event_type": "inventory",
+                "event_type": "other",
                 "estimated_sales": "",
             },
             follow_redirects=True,
@@ -540,7 +540,7 @@ def test_conflicting_event_warns_and_blocks_sales_entry(client, app):
         event_response = client.get(f"/events/{env['second_event_id']}")
         assert event_response.status_code == 200
         assert b"Terminal sales assignment conflict" in event_response.data
-        assert b"POS sales overlap another event on the same day." in event_response.data
+        assert b"POS sales imports do not include timestamps" in event_response.data
 
         upload_response = client.get(
             f"/events/{env['second_event_id']}/sales/upload",
@@ -590,7 +590,7 @@ def test_bulk_stand_sheet(client, app):
                 "name": "BulkEvent",
                 "start_date": "2023-02-01",
                 "end_date": "2023-02-02",
-                "event_type": "inventory",
+                "event_type": "other",
             },
             follow_redirects=True,
         )
@@ -620,13 +620,17 @@ def test_bulk_stand_sheet(client, app):
                 event_id=eid,
                 location_id=loc_id,
             ).first()
-            db.session.add(
-                EventStandSheetItem(
+            sheet_item = EventStandSheetItem.query.filter_by(
+                event_location_id=event_location.id,
+                item_id=item_id,
+            ).first()
+            if sheet_item is None:
+                sheet_item = EventStandSheetItem(
                     event_location_id=event_location.id,
                     item_id=item_id,
-                    closing_count=10.5,
                 )
-            )
+                db.session.add(sheet_item)
+            sheet_item.closing_count = 10.5
             db.session.commit()
         resp = client.get(f"/events/{eid}/stand_sheets")
         assert resp.status_code == 200
@@ -651,7 +655,7 @@ def test_no_sales_after_confirmation(client, app):
                 "name": "ConfirmEvent",
                 "start_date": "2023-03-01",
                 "end_date": "2023-03-02",
-                "event_type": "inventory",
+                "event_type": "other",
             },
             follow_redirects=True,
         )
@@ -696,7 +700,7 @@ def test_undo_location_confirmation(client, app):
                 "name": "Undo Confirmation Event",
                 "start_date": "2023-05-01",
                 "end_date": "2023-05-02",
-                "event_type": "inventory",
+                "event_type": "other",
             },
             follow_redirects=True,
         )
@@ -757,7 +761,7 @@ def test_bulk_stand_sheets_render_multiple_pages(client, app):
                 "name": "QR Event",
                 "start_date": "2023-05-01",
                 "end_date": "2023-05-02",
-                "event_type": "inventory",
+                "event_type": "other",
             },
             follow_redirects=True,
         )
@@ -825,7 +829,7 @@ def test_view_event_location_email_button_uses_existing_bulk_email_route(
                 "name": "EmailButtonEvent",
                 "start_date": "2023-05-01",
                 "end_date": "2023-05-02",
-                "event_type": "inventory",
+                "event_type": "other",
             },
             follow_redirects=True,
         )
@@ -866,7 +870,7 @@ def test_email_bulk_stand_sheets_can_limit_to_single_location(
             name="Stand Sheet Email Event",
             start_date=date(2026, 4, 1),
             end_date=date(2026, 4, 1),
-            event_type="inventory",
+            event_type="other",
         )
         db.session.add_all([user, first_location, second_location, event])
         db.session.commit()
@@ -939,7 +943,7 @@ def test_email_bulk_stand_sheets_rejects_invalid_location_for_event(
             name="Invalid Stand Sheet Email Event",
             start_date=date(2026, 4, 2),
             end_date=date(2026, 4, 2),
-            event_type="inventory",
+            event_type="other",
         )
         db.session.add_all([user, location, other_location, event])
         db.session.commit()
@@ -983,7 +987,7 @@ def test_save_stand_sheet(client, app):
                 "name": "SheetEvent",
                 "start_date": "2023-03-01",
                 "end_date": "2023-03-02",
-                "event_type": "inventory",
+                "event_type": "other",
             },
             follow_redirects=True,
         )
@@ -1052,7 +1056,7 @@ def test_terminal_sales_prefill(client, app):
                 "name": "PrefillEvent",
                 "start_date": "2023-04-01",
                 "end_date": "2023-04-02",
-                "event_type": "inventory",
+                "event_type": "other",
             },
             follow_redirects=True,
         )
@@ -1097,7 +1101,7 @@ def test_saving_terminal_sales_does_not_confirm_location(client, app):
                 "name": "NoConfirmSalesEvent",
                 "start_date": "2023-04-05",
                 "end_date": "2023-04-06",
-                "event_type": "inventory",
+                "event_type": "other",
             },
             follow_redirects=True,
         )
@@ -1150,7 +1154,7 @@ def test_upload_sales_xls(client, app):
                 "name": "UploadXLS",
                 "start_date": "2025-06-20",
                 "end_date": "2025-06-21",
-                "event_type": "inventory",
+                "event_type": "other",
             },
             follow_redirects=True,
         )
@@ -1470,7 +1474,7 @@ def test_upload_sales_with_annotated_quantities(client, app, sticky_bun_sales_by
             name="Bakery Day",
             start_date=date(2025, 8, 1),
             end_date=date(2025, 8, 1),
-            event_type="inventory",
+            event_type="other",
         )
         location.products.extend([sticky, muffin])
         db.session.add_all([user, location, sticky, muffin, event])
@@ -1559,7 +1563,7 @@ def test_upload_sales_manual_product_match(client, app):
             name="Fuzzy Event",
             start_date=date(2025, 7, 4),
             end_date=date(2025, 7, 5),
-            event_type="inventory",
+            event_type="other",
         )
         db.session.add_all([user, location, product, event])
         location.products.append(product)
@@ -1681,7 +1685,7 @@ def test_terminal_sales_menu_issue_requires_resolution(client, app):
             name="Menu Issue Event",
             start_date=date(2026, 6, 1),
             end_date=date(2026, 6, 1),
-            event_type="inventory",
+            event_type="other",
         )
         db.session.add_all(
             [user, location, allowed_product, new_product, menu, event]
@@ -1804,7 +1808,7 @@ def test_terminal_sales_wizard_state_resume_and_new_product_menu_flow(client, ap
             name="Wizard Flow Event",
             start_date=date(2026, 7, 15),
             end_date=date(2026, 7, 15),
-            event_type="inventory",
+            event_type="other",
         )
         db.session.add_all([user, location, allowed_product, menu, event])
         event_location = EventLocation(event=event, location=location)
@@ -1965,7 +1969,7 @@ def test_upload_sales_replaces_removed_alias_mapping(client, app):
             name="Stale Alias Event",
             start_date=date(2026, 1, 1),
             end_date=date(2026, 1, 2),
-            event_type="inventory",
+            event_type="other",
         )
         db.session.add_all(
             [user, location, original_product, replacement_product, event]
@@ -2066,13 +2070,13 @@ def test_upload_sales_remembers_location_mapping(client, app):
             name="Concessions Night 1",
             start_date=date(2025, 6, 1),
             end_date=date(2025, 6, 1),
-            event_type="inventory",
+            event_type="other",
         )
         event_two = Event(
             name="Concessions Night 2",
             start_date=date(2025, 6, 2),
             end_date=date(2025, 6, 2),
-            event_type="inventory",
+            event_type="other",
         )
         db.session.add_all([user, location, product, event_one, event_two])
         first_el = EventLocation(event=event_one, location=location)
@@ -2136,7 +2140,7 @@ def test_upload_sales_skip_product(client, app):
             name="Skip Event",
             start_date=date(2025, 7, 4),
             end_date=date(2025, 7, 5),
-            event_type="inventory",
+            event_type="other",
         )
         db.session.add_all([user, location, event])
         event_location = EventLocation(event=event, location=location)
@@ -2207,7 +2211,7 @@ def test_upload_sales_create_product(client, app):
             name="Create Product Event",
             start_date=date(2025, 8, 1),
             end_date=date(2025, 8, 2),
-            event_type="inventory",
+            event_type="other",
         )
         db.session.add_all([user, location, event])
         event_location = EventLocation(event=event, location=location)
@@ -2306,7 +2310,7 @@ def test_upload_sales_create_product_prefers_price(client, app):
             name="Later Price Event",
             start_date=date(2025, 8, 3),
             end_date=date(2025, 8, 4),
-            event_type="inventory",
+            event_type="other",
         )
         db.session.add_all([user, location, event])
         event_location = EventLocation(event=event, location=location)
@@ -2391,7 +2395,7 @@ def test_upload_sales_create_product_uses_derived_amount_without_countable_assig
             name="Derived Price Event",
             start_date=date(2025, 9, 1),
             end_date=date(2025, 9, 2),
-            event_type="inventory",
+            event_type="other",
         )
         db.session.add_all([user, location, event])
         event_location = EventLocation(event=event, location=location)
@@ -2474,7 +2478,7 @@ def test_modal_product_creation_includes_recipe_details(client, app):
             name="Recipe Creation Event",
             start_date=date(2025, 10, 1),
             end_date=date(2025, 10, 2),
-            event_type="inventory",
+            event_type="other",
         )
         item = Item(name="Lemon Mix", base_unit="bag")
         db.session.add_all([user, location, event, item])
@@ -2569,7 +2573,7 @@ def test_terminal_sale_last_sale(app):
             name="TS1",
             start_date=date(2023, 1, 1),
             end_date=date(2023, 1, 2),
-            event_type="inventory",
+            event_type="other",
         )
         el1 = EventLocation(event=event1, location=loc)
         sale1 = TerminalSale(
@@ -2582,7 +2586,7 @@ def test_terminal_sale_last_sale(app):
             name="TS2",
             start_date=date(2023, 1, 3),
             end_date=date(2023, 1, 4),
-            event_type="inventory",
+            event_type="other",
         )
         el2 = EventLocation(event=event2, location=loc)
         sale2 = TerminalSale(
@@ -2607,7 +2611,7 @@ def test_physical_terminal_variance_includes_adjustments(app):
             name="Variance Check",
             start_date=date(2023, 1, 1),
             end_date=date(2023, 1, 1),
-            event_type="inventory",
+            event_type="other",
         )
         location = Location(name="Prairie Grill")
         item = Item(name="Test Item", base_unit="each")

@@ -3,10 +3,17 @@
 {% block content %}
 <div class="container mt-4">
     <h2>Scan Inventory Counts - {{ location.name }}</h2>
+    {% if operating_date %}
+    <div class="text-muted mb-3">{{ event.name }} | {{ operating_date.isoformat() }}</div>
+    {% endif %}
+    {% set scan_action = url_for('event.scan_counts', event_id=event.id, location_id=location.id, operating_date=operating_date.isoformat()) if operating_date else url_for('event.scan_counts', event_id=event.id, location_id=location.id) %}
     <form method="post"
-          action="{{ url_for('event.scan_counts', event_id=event.id, location_id=location.id) }}"
+          action="{{ scan_action }}"
           data-scan-form>
         {{ form.hidden_tag() }}
+        {% if operating_date %}
+        <input type="hidden" name="operating_date" value="{{ operating_date.isoformat() }}">
+        {% endif %}
         <div class="row g-3 align-items-end">
             <div class="col-md-6">
                 {{ form.upc.label(class="form-label") }}
@@ -172,7 +179,7 @@
                     return;
                 }
                 renderTotals(data.totals || []);
-                showMessage(`Recorded ${data.item.total.toFixed(2)} ${data.item.base_unit || ''} total for ${data.item.name}.`, 'success');
+                showMessage(`Submitted ${data.item.quantity.toFixed(2)} ${data.item.base_unit || ''} for ${data.item.name}. Pending review total: ${data.item.total.toFixed(2)}.`, 'success');
                 if (upcInput) {
                     upcInput.value = '';
                     upcInput.focus();

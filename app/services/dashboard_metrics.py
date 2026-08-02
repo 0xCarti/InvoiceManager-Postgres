@@ -25,6 +25,7 @@ from app.services.communication_service import (
 )
 from app.utils.dashboard_bulletins import load_saved_dashboard_bulletin_ids
 from app.services.event_service import current_user_today, event_schedule
+from app.services.inventory_expiry import expiry_summary
 from app.utils.dashboard_cards import (
     DASHBOARD_SECTION_DEFINITIONS_BY_ID,
     cards_visible_on_dashboard,
@@ -420,6 +421,7 @@ def dashboard_context(activity_interval: Optional[str] = None) -> Dict[str, Any]
         "transfer_completion_by_location": transfer_completion_by_location(),
         "purchase_orders": purchase_order_summary(today),
         "purchase_invoices": purchase_invoice_summary(),
+        "expiry": expiry_summary(today),
         "invoices": invoice_summary(),
         "events": events,
         "bulletins": {

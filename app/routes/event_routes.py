@@ -18,8 +18,8 @@ from flask import (
     make_response,
     redirect,
     render_template,
+    send_file,
     request,
-    send_from_directory,
     session,
     url_for,
 )
@@ -51,6 +51,7 @@ from app.models import (
     Item,
     Location,
     LocationCountSubmission,
+    LocationCountSubmissionRow,
     LocationStandItem,
     Product,
     ProductRecipeItem,
@@ -61,8 +62,10 @@ from app.models import (
 )
 from app.services.location_count_submissions import (
     aggregate_submission_rows_for_event_location_day,
+    build_location_inventory_count_item_entries,
     ensure_event_location_operating_days,
     event_operating_dates,
+    parse_inventory_count_submission_rows,
 )
 from app.services.event_documents import (
     cleanup_orphaned_event_document_storage,
@@ -82,6 +85,7 @@ from app.utils.filter_state import (
 from app.utils.menu_assignments import (
     get_authoritative_location_products,
     get_location_drift_recipe_item_ids,
+    get_recipe_item_ids,
     sync_location_stand_items,
 )
 from app.utils.numeric import coerce_float
@@ -99,6 +103,14 @@ from app.utils.recipe_history import (
     sync_terminal_sale_recipe_snapshots,
 )
 from app.utils.recipe_usage import recipe_item_base_units_per_sale
+from app.utils.sellable_amounts import (
+    choose_sellable_amount_for_price,
+    ensure_default_sellable_amount,
+    sellable_amount_snapshot,
+    terminal_sale_line_total,
+    terminal_sale_unit_price,
+    update_default_sellable_price,
+)
 from app.utils.units import (
     DEFAULT_BASE_UNIT_CONVERSIONS,
     convert_cost_for_reporting,
@@ -108,6 +120,7 @@ from app.utils.units import (
 )
 from app.utils.text import build_text_match_predicate, normalize_name_for_sorting
 from app.utils.email import send_email
+from app.utils.timezone import default_timezone_date
 from itsdangerous import BadSignature, URLSafeSerializer
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
@@ -183,6 +196,7 @@ def _find_terminal_sales_event_location_conflicts(
         .join(Location, Location.id == EventLocation.location_id)
         .filter(EventLocation.location_id.in_(unique_location_ids))
         .filter(Event.start_date <= end_date, Event.end_date >= start_date)
+        .filter(Event.event_type != "inventory")
         .order_by(Location.name.asc(), Event.start_date.asc(), Event.name.asc())
     )
     if exclude_event_id is not None:
@@ -495,10 +509,8 @@ def _calculate_confirmed_sales_summary(event: Event) -> SimpleNamespace | None:
         has_confirmed = True
         for sale in event_location.terminal_sales:
             quantity = float(sale.quantity or 0.0)
-            product = sale.product
-            price = float(getattr(product, "price", 0.0) or 0.0) if product else 0.0
             total_quantity += quantity
-            total_amount += quantity * price
+            total_amount += terminal_sale_line_total(sale)
 
     if not has_confirmed:
         return None
@@ -522,8 +534,9 @@ def _fallback_item_price(item, allowed_product_ids: set[int] | None = None) -> f
         units_per_product = recipe_item_base_units_per_sale(recipe)
         if units_per_product <= 0:
             continue
-        price = float(getattr(product, "price", 0.0) or 0.0)
-        prices.append(price / units_per_product)
+        sellable_quantity = product.default_sellable_quantity or 1.0
+        price = float(product.default_sellable_price or 0.0)
+        prices.append(price / (units_per_product * sellable_quantity))
 
     if prices:
         return sum(prices) / len(prices)
@@ -543,7 +556,7 @@ def _build_item_price_lookup(
         stand_record_map = {
             record.item_id: record
             for record in LocationStandItem.query.filter_by(
-                location_id=event_location.location_id
+                location_id=event_location.location_id,
             ).all()
         }
 
@@ -552,21 +565,25 @@ def _build_item_price_lookup(
         if product is None:
             continue
         quantity = float(sale.quantity or 0.0)
-        price = float(getattr(product, "price", 0.0) or 0.0)
+        sellable_quantity = float(sale.sellable_quantity or 1.0)
         if quantity == 0:
             continue
-        sale_revenue = quantity * price
+        sale_revenue = terminal_sale_line_total(sale)
         for recipe in product.recipe_items:
             if recipe.item_id is None:
                 continue
             record = stand_record_map.get(recipe.item_id)
-            is_countable = record.countable if record is not None else recipe.countable
+            is_countable = (
+                (record.active and record.countable)
+                if record is not None
+                else recipe.countable
+            )
             if not is_countable:
                 continue
             units_per_product = recipe_item_base_units_per_sale(recipe)
             if units_per_product <= 0:
                 continue
-            item_units = quantity * units_per_product
+            item_units = quantity * sellable_quantity * units_per_product
             usage_totals[recipe.item_id] += item_units
             revenue_totals[recipe.item_id] += sale_revenue
 
@@ -714,7 +731,8 @@ def _sync_event_location_opening_counts(event_location: EventLocation) -> int:
     db.session.flush()
 
     inventory_records = LocationStandItem.query.filter_by(
-        location_id=event_location.location_id
+        location_id=event_location.location_id,
+        active=True,
     ).filter(LocationStandItem.countable.is_(True)).all()
     if not inventory_records:
         return 0
@@ -739,6 +757,76 @@ def _sync_event_location_opening_counts(event_location: EventLocation) -> int:
         updated += 1
 
     return updated
+
+
+def _default_inventory_operating_date(event_obj: Event) -> date_cls | None:
+    """Return the default count date for inventory event pages."""
+
+    if event_obj.start_date is None or event_obj.end_date is None:
+        return None
+
+    today = default_timezone_date()
+    if event_obj.start_date <= today <= event_obj.end_date:
+        return today
+    return event_obj.start_date
+
+
+def _get_or_create_event_location_operating_days(
+    event_location: EventLocation,
+) -> list[EventLocationOperatingDay]:
+    """Return selected operating days, creating all event days only when unset."""
+
+    operating_days = list(event_location.operating_days or [])
+    if operating_days:
+        return sorted(operating_days, key=lambda day: day.operating_date)
+    operating_days = ensure_event_location_operating_days(event_location)
+    db.session.flush()
+    return operating_days
+
+
+def _resolve_inventory_operating_day(
+    event_location: EventLocation,
+    raw_operating_date: str | None = None,
+) -> tuple[date_cls | None, EventLocationOperatingDay | None, str | None]:
+    """Resolve and validate the inventory operating day for a count action."""
+
+    event_obj = event_location.event
+    if event_obj is None:
+        return None, None, "This event location is missing its event."
+
+    raw_operating_date = (raw_operating_date or "").strip()
+    if raw_operating_date:
+        operating_date = _parse_date(raw_operating_date)
+        if operating_date is None:
+            return None, None, "Choose a valid inventory count date."
+    else:
+        operating_date = _default_inventory_operating_date(event_obj)
+
+    if operating_date is None:
+        return None, None, "Choose a valid inventory count date."
+
+    operating_days = _get_or_create_event_location_operating_days(event_location)
+    operating_day = next(
+        (
+            day
+            for day in operating_days
+            if day.operating_date == operating_date
+        ),
+        None,
+    )
+    if operating_day is None:
+        location_name = (
+            event_location.location.name
+            if event_location.location is not None
+            else "This location"
+        )
+        return (
+            operating_date,
+            None,
+            f"{location_name} is not open for inventory counting on {operating_date}.",
+        )
+
+    return operating_date, operating_day, None
 
 
 def _event_day_status(submissions: list[LocationCountSubmission]) -> str:
@@ -893,7 +981,7 @@ def _set_operating_day_confirmation(
 def _sync_event_location_confirmation_from_days(
     event_location: EventLocation,
 ) -> None:
-    operating_days = ensure_event_location_operating_days(event_location)
+    operating_days = _get_or_create_event_location_operating_days(event_location)
     if not operating_days:
         event_location.confirmed = False
         return
@@ -903,7 +991,7 @@ def _sync_event_location_confirmation_from_days(
 def _set_event_location_all_days_confirmed(
     event_location: EventLocation, confirmed: bool
 ) -> None:
-    for operating_day in ensure_event_location_operating_days(event_location):
+    for operating_day in _get_or_create_event_location_operating_days(event_location):
         _set_operating_day_confirmation(operating_day, confirmed)
     _sync_event_location_confirmation_from_days(event_location)
 
@@ -1156,6 +1244,18 @@ def _apply_pending_sales(
             )
             db.session.add(product)
             db.session.flush()
+            ensure_default_sellable_amount(product, price=price_value)
+            db.session.flush()
+        sellable_amount = choose_sellable_amount_for_price(
+            product, entry.get("product_price")
+        )
+        if sellable_amount is None:
+            sellable_amount = ensure_default_sellable_amount(
+                product, price=entry.get("product_price")
+            )
+        amount_snapshot = sellable_amount_snapshot(sellable_amount)
+        sale_quantity = coerce_float(quantity_value, default=0.0) or 0.0
+        line_total = sale_quantity * float(amount_snapshot["unit_price"] or 0.0)
         normalized_name = (entry.get("normalized_name") or "").strip()
         if normalized_name:
             alias = TerminalSaleProductAlias.query.filter_by(
@@ -1179,11 +1279,21 @@ def _apply_pending_sales(
         ).first()
         if sale:
             sale.quantity = quantity_value
+            sale.sellable_amount_id = amount_snapshot["sellable_amount_id"]
+            sale.sellable_amount_name = amount_snapshot["sellable_amount_name"]
+            sale.sellable_quantity = amount_snapshot["sellable_quantity"]
+            sale.unit_price_snapshot = amount_snapshot["unit_price"]
+            sale.line_total_snapshot = line_total
             sync_terminal_sale_recipe_snapshots(sale, product=product)
         else:
             sale = TerminalSale(
                 event_location_id=event_location.id,
                 product_id=product.id,
+                sellable_amount_id=amount_snapshot["sellable_amount_id"],
+                sellable_amount_name=amount_snapshot["sellable_amount_name"],
+                sellable_quantity=amount_snapshot["sellable_quantity"],
+                unit_price_snapshot=amount_snapshot["unit_price"],
+                line_total_snapshot=line_total,
                 quantity=quantity_value,
                 sold_at=datetime.utcnow(),
             )
@@ -1263,7 +1373,7 @@ def _apply_resolution_actions(issue_state: dict) -> tuple[list[str], list[str]]:
             coerced_price = coerce_float(new_price)
             if coerced_price is None:
                 continue
-            product.price = coerced_price
+            update_default_sellable_price(product, coerced_price)
             price_updates.append(product.name)
 
         if event_location is None:
@@ -1284,6 +1394,10 @@ def _apply_resolution_actions(issue_state: dict) -> tuple[list[str], list[str]]:
                 continue
             if product not in location_obj.products:
                 location_obj.products.append(product)
+            if location_obj.current_menu:
+                amount = ensure_default_sellable_amount(product)
+                if amount not in location_obj.current_menu.sellable_amounts:
+                    location_obj.current_menu.sellable_amounts.append(amount)
             if (
                 location_obj.current_menu
                 and product not in location_obj.current_menu.products
@@ -1533,12 +1647,14 @@ def edit_event(event_id):
         abort(404)
     form = EventForm(obj=ev)
     if form.validate_on_submit():
-        conflicts = _find_terminal_sales_event_location_conflicts(
-            start_date=form.start_date.data,
-            end_date=form.end_date.data,
-            location_ids=[event_location.location_id for event_location in ev.locations],
-            exclude_event_id=ev.id,
-        )
+        conflicts = []
+        if form.event_type.data != "inventory":
+            conflicts = _find_terminal_sales_event_location_conflicts(
+                start_date=form.start_date.data,
+                end_date=form.end_date.data,
+                location_ids=[event_location.location_id for event_location in ev.locations],
+                exclude_event_id=ev.id,
+            )
         if conflicts:
             message = _build_terminal_sales_conflict_message(conflicts)
             form.start_date.errors.append(message)
@@ -1702,9 +1818,10 @@ def download_event_document(event_id: int, document_id: int):
         abort(404)
 
     log_activity(f"Downloaded event document {document.id} for event {event_id}")
-    return send_from_directory(
-        os.path.dirname(document_path),
-        os.path.basename(document_path),
+    with open(document_path, "rb") as document_file:
+        document_content = document_file.read()
+    return send_file(
+        io.BytesIO(document_content),
         as_attachment=True,
         download_name=document.download_name,
         mimetype=document.content_type or None,
@@ -1774,11 +1891,12 @@ def closed_event_report(event_id):
             ),
             reverse=True,
         )
-        price_lookup = {
+        price_lookup = _build_item_price_lookup(event_location, stand_items)
+        price_lookup.update({
             sheet.item_id: float(sheet.price_per_unit_snapshot)
             for sheet in event_location.stand_sheet_items
             if sheet.price_per_unit_snapshot is not None
-        }
+        })
 
         location_terminal_quantity = 0.0
         location_terminal_amount = Decimal("0.00")
@@ -2030,13 +2148,15 @@ def add_location(event_id):
     if form.validate_on_submit():
         selected_ids = form.location_id.data
         open_dates_by_location_id = _posted_open_dates(selected_ids)
-        conflicts = _find_terminal_sales_event_location_conflicts(
-            start_date=ev.start_date,
-            end_date=ev.end_date,
-            location_ids=selected_ids,
-            exclude_event_id=event_id,
-            open_dates_by_location_id=open_dates_by_location_id,
-        )
+        conflicts = []
+        if ev.event_type != "inventory":
+            conflicts = _find_terminal_sales_event_location_conflicts(
+                start_date=ev.start_date,
+                end_date=ev.end_date,
+                location_ids=selected_ids,
+                exclude_event_id=event_id,
+                open_dates_by_location_id=open_dates_by_location_id,
+            )
         if conflicts:
             message = _build_terminal_sales_conflict_message(conflicts)
             form.location_id.errors.append(message)
@@ -2301,16 +2421,39 @@ def add_terminal_sale(event_id, el_id):
                 manual_target = 0.0
 
             primary_manual_sale = manual_sales[0] if manual_sales else None
+            sellable_amount = product.default_sellable_amount
+            if sellable_amount is None:
+                sellable_amount = ensure_default_sellable_amount(product)
+            amount_snapshot = sellable_amount_snapshot(sellable_amount)
+            line_total = manual_target * float(amount_snapshot["unit_price"] or 0.0)
 
             if manual_target:
                 if primary_manual_sale:
                     if abs(float(primary_manual_sale.quantity or 0.0) - manual_target) > 1e-9:
                         primary_manual_sale.quantity = manual_target
-                        updated = True
+                    primary_manual_sale.sellable_amount_id = amount_snapshot[
+                        "sellable_amount_id"
+                    ]
+                    primary_manual_sale.sellable_amount_name = amount_snapshot[
+                        "sellable_amount_name"
+                    ]
+                    primary_manual_sale.sellable_quantity = amount_snapshot[
+                        "sellable_quantity"
+                    ]
+                    primary_manual_sale.unit_price_snapshot = amount_snapshot[
+                        "unit_price"
+                    ]
+                    primary_manual_sale.line_total_snapshot = line_total
+                    updated = True
                 else:
                     sale = TerminalSale(
                         event_location_id=el_id,
                         product_id=product.id,
+                        sellable_amount_id=amount_snapshot["sellable_amount_id"],
+                        sellable_amount_name=amount_snapshot["sellable_amount_name"],
+                        sellable_quantity=amount_snapshot["sellable_quantity"],
+                        unit_price_snapshot=amount_snapshot["unit_price"],
+                        line_total_snapshot=line_total,
                         quantity=manual_target,
                         sold_at=datetime.utcnow(),
                     )
@@ -2356,19 +2499,49 @@ def _wants_json_response() -> bool:
     )
 
 
-def _serialize_scan_totals(event_location: EventLocation):
+def _serialize_scan_totals(
+    event_location: EventLocation,
+    operating_date: date_cls,
+):
     """Return the location and summaries of counted items."""
 
-    location, stand_items = _get_stand_items(
-        event_location.location_id, event_location.event_id
+    location = event_location.location or db.session.get(
+        Location, event_location.location_id
     )
+    if location is None:
+        return None, []
+
+    item_entries = build_location_inventory_count_item_entries(location)
+    pending_totals: dict[int, float] = defaultdict(float)
+    pending_submissions = (
+        LocationCountSubmission.query.options(
+            selectinload(LocationCountSubmission.rows)
+        )
+        .filter(
+            LocationCountSubmission.event_location_id == event_location.id,
+            LocationCountSubmission.submission_type
+            == LocationCountSubmission.TYPE_INVENTORY,
+            LocationCountSubmission.status == LocationCountSubmission.STATUS_PENDING,
+            LocationCountSubmission.submission_date == operating_date,
+        )
+        .all()
+    )
+    for submission in pending_submissions:
+        for row in submission.rows:
+            if row.item_id is not None:
+                pending_totals[row.item_id] += float(row.count_value or 0.0)
+
+    sheet_map = {
+        sheet.item_id: sheet for sheet in (event_location.stand_sheet_items or [])
+    }
     totals = []
     seen_item_ids = set()
 
-    for entry in stand_items:
+    for entry in item_entries:
         item = entry["item"]
-        sheet = entry.get("sheet")
-        counted = float(sheet.closing_count or 0.0) if sheet else 0.0
+        sheet = sheet_map.get(item.id)
+        approved_count = float(sheet.closing_count or 0.0) if sheet else 0.0
+        counted = approved_count + pending_totals.pop(item.id, 0.0)
         totals.append(
             {
                 "item_id": item.id,
@@ -2381,10 +2554,32 @@ def _serialize_scan_totals(event_location: EventLocation):
         )
         seen_item_ids.add(item.id)
 
-    for sheet in event_location.stand_sheet_items:
+    for item_id, pending_count in pending_totals.items():
+        if item_id in seen_item_ids:
+            continue
+        item = db.session.get(Item, item_id)
+        if item is None:
+            continue
+        sheet = sheet_map.get(item_id)
+        approved_count = float(sheet.closing_count or 0.0) if sheet else 0.0
+        totals.append(
+            {
+                "item_id": item.id,
+                "name": item.name,
+                "upc": item.upc,
+                "expected": 0.0,
+                "counted": approved_count + pending_count,
+                "base_unit": item.base_unit,
+            }
+        )
+        seen_item_ids.add(item.id)
+
+    for sheet in event_location.stand_sheet_items or []:
         if sheet.item_id in seen_item_ids:
             continue
         item = sheet.item
+        if item is None:
+            continue
         totals.append(
             {
                 "item_id": item.id,
@@ -2398,6 +2593,50 @@ def _serialize_scan_totals(event_location: EventLocation):
 
     totals.sort(key=lambda record: record["name"].lower())
     return location, totals
+
+
+def _get_or_create_scan_inventory_submission(
+    event: Event,
+    event_location: EventLocation,
+    operating_day: EventLocationOperatingDay,
+) -> LocationCountSubmission:
+    """Return the current user's pending barcode-scan inventory submission."""
+
+    submission_date = operating_day.operating_date
+    submitted_name = (
+        current_user.display_name
+        or current_user.email
+        or "Barcode Scanner"
+    )
+    submission = (
+        LocationCountSubmission.query.filter_by(
+            event_location_id=event_location.id,
+            submission_type=LocationCountSubmission.TYPE_INVENTORY,
+            status=LocationCountSubmission.STATUS_PENDING,
+            submitted_name=submitted_name,
+            submission_date=submission_date,
+        )
+        .order_by(LocationCountSubmission.submitted_at.desc())
+        .first()
+    )
+    if submission is not None:
+        if submission.event_operating_day_id is None:
+            submission.event_operating_day = operating_day
+        return submission
+
+    submission = LocationCountSubmission(
+        source_location_id=event_location.location_id,
+        location_id=event_location.location_id,
+        event_location_id=event_location.id,
+        event_operating_day_id=operating_day.id,
+        submission_type=LocationCountSubmission.TYPE_INVENTORY,
+        submitted_name=submitted_name,
+        submission_date=submission_date,
+        status=LocationCountSubmission.STATUS_PENDING,
+    )
+    db.session.add(submission)
+    db.session.flush()
+    return submission
 
 
 @event.route(
@@ -2430,21 +2669,44 @@ def scan_counts(event_id, location_id):
             )
         abort(403, description="This event is closed to updates.")
 
+    json_payload = (
+        request.get_json(silent=True) or {}
+        if request.method == "POST" and wants_json
+        else {}
+    )
+    requested_operating_date = (
+        request.values.get("operating_date")
+        or json_payload.get("operating_date")
+        or ""
+    )
+    operating_date, operating_day, operating_day_error = (
+        _resolve_inventory_operating_day(
+            el,
+            requested_operating_date,
+        )
+    )
+    if operating_day_error:
+        if wants_json:
+            return jsonify(success=False, error=operating_day_error), 400
+        flash(operating_day_error, "warning")
+        return redirect(url_for("event.view_event", event_id=event_id))
+
     form = ScanCountForm()
     if form.quantity.data is None:
         form.quantity.data = 1
 
     if request.method == "GET" and wants_json:
-        location, totals = _serialize_scan_totals(el)
+        location, totals = _serialize_scan_totals(el, operating_date)
         return jsonify(
             success=True,
             location={"id": location.id, "name": location.name},
             totals=totals,
+            operating_date=operating_date.isoformat(),
         )
 
     if request.method == "POST":
         if wants_json:
-            payload = request.get_json(silent=True) or {}
+            payload = json_payload
             upc = (payload.get("upc") or "").strip()
             raw_quantity = payload.get("quantity", 1)
             try:
@@ -2469,7 +2731,7 @@ def scan_counts(event_id, location_id):
                 )
         else:
             if not form.validate_on_submit():
-                location, totals = _serialize_scan_totals(el)
+                location, totals = _serialize_scan_totals(el, operating_date)
                 return (
                     render_template(
                         "events/scan_count.html",
@@ -2477,6 +2739,7 @@ def scan_counts(event_id, location_id):
                         location=location,
                         form=form,
                         totals=totals,
+                        operating_date=operating_date,
                     ),
                     400,
                 )
@@ -2494,7 +2757,7 @@ def scan_counts(event_id, location_id):
                     404,
                 )
             flash(f"No item found for barcode {upc}.", "danger")
-            location, totals = _serialize_scan_totals(el)
+            location, totals = _serialize_scan_totals(el, operating_date)
             return (
                 render_template(
                     "events/scan_count.html",
@@ -2502,28 +2765,87 @@ def scan_counts(event_id, location_id):
                     location=location,
                     form=form,
                     totals=totals,
+                    operating_date=operating_date,
                 ),
                 404,
             )
 
-        sheet = EventStandSheetItem.query.filter_by(
-            event_location_id=el.id, item_id=item.id
+        location_record = LocationStandItem.query.filter_by(
+            location_id=location_id,
+            item_id=item.id,
         ).first()
-        if sheet is None:
-            sheet = EventStandSheetItem(
-                event_location_id=el.id, item_id=item.id
+        if (
+            location_record is None
+            or not bool(location_record.active)
+            or not bool(location_record.countable)
+        ):
+            message = f"{item.name} is not countable for this inventory location."
+            if wants_json:
+                return jsonify(success=False, error=message), 400
+            flash(message, "danger")
+            location, totals = _serialize_scan_totals(el, operating_date)
+            return (
+                render_template(
+                    "events/scan_count.html",
+                    event=ev,
+                    location=location,
+                    form=form,
+                    totals=totals,
+                    operating_date=operating_date,
+                ),
+                400,
             )
-            db.session.add(sheet)
 
-        sheet.transferred_out = (sheet.transferred_out or 0.0) + quantity
-        sheet.closing_count = (sheet.closing_count or 0.0) + quantity
+        submission = _get_or_create_scan_inventory_submission(
+            ev,
+            el,
+            operating_day,
+        )
+        row = next(
+            (existing for existing in submission.rows if existing.item_id == item.id),
+            None,
+        )
+        if row is None:
+            row = LocationCountSubmissionRow(
+                submission_id=submission.id,
+                item_id=item.id,
+                count_value=0.0,
+                submitted_count_value=0.0,
+                unit_breakdown=[],
+                parse_index=len(submission.rows or []),
+            )
+            db.session.add(row)
+            submission.rows.append(row)
+
+        row.count_value = float(row.count_value or 0.0) + quantity
+        row.submitted_count_value = float(row.submitted_count_value or 0.0) + quantity
+        breakdown = list(row.unit_breakdown or [])
+        breakdown.append(
+            {
+                "unit_id": None,
+                "unit_name": get_unit_label(item.base_unit) or item.base_unit,
+                "unit_factor": 1.0,
+                "quantity": quantity,
+                "base_quantity": quantity,
+                "base_unit": item.base_unit,
+            }
+        )
+        row.unit_breakdown = breakdown
         db.session.commit()
         log_activity(
-            f"Recorded scan count for event {event_id}"
+            f"Submitted scanned inventory count for event {event_id}"
             f" location {location_id} item {item.id}"
         )
 
-        location, totals = _serialize_scan_totals(el)
+        location, totals = _serialize_scan_totals(el, operating_date)
+        total_count = next(
+            (
+                float(entry["counted"] or 0.0)
+                for entry in totals
+                if entry["item_id"] == item.id
+            ),
+            float(row.count_value or 0.0),
+        )
 
         if wants_json:
             return jsonify(
@@ -2533,14 +2855,14 @@ def scan_counts(event_id, location_id):
                     "name": item.name,
                     "upc": item.upc,
                     "quantity": quantity,
-                    "total": float(sheet.transferred_out or 0.0),
+                    "total": total_count,
                     "base_unit": item.base_unit,
                 },
                 totals=totals,
             )
 
         flash(
-            f"Recorded {quantity:g} {item.base_unit} for {item.name}.",
+            f"Submitted {quantity:g} {item.base_unit} for {item.name} for manager review.",
             "success",
         )
         return redirect(
@@ -2548,16 +2870,18 @@ def scan_counts(event_id, location_id):
                 "event.scan_counts",
                 event_id=event_id,
                 location_id=location_id,
+                operating_date=operating_date.isoformat(),
             )
         )
 
-    location, totals = _serialize_scan_totals(el)
+    location, totals = _serialize_scan_totals(el, operating_date)
     return render_template(
         "events/scan_count.html",
         event=ev,
         location=location,
         form=form,
         totals=totals,
+        operating_date=operating_date,
     )
 
 
@@ -2568,12 +2892,14 @@ def upload_terminal_sales(event_id):
     ev = db.session.get(Event, event_id)
     if ev is None:
         abort(404)
-    conflicts = _terminal_sales_conflicts_for_event(ev)
+    conflicts = [] if ev.event_type == "inventory" else _terminal_sales_conflicts_for_event(ev)
     if conflicts:
         flash(_build_terminal_sales_conflict_message(conflicts), "warning")
         return redirect(url_for("event.view_event", event_id=event_id))
 
     form = TerminalSalesUploadForm()
+    if request.method == "POST" and not request.form.get(form.program.name):
+        form.program.data = form.program.default or "idealpos"
     product_form = ProductWithRecipeForm()
     if product_form.recipe_yield_quantity.data is None:
         product_form.recipe_yield_quantity.data = 1
@@ -2887,15 +3213,13 @@ def upload_terminal_sales(event_id):
             return False
 
     def _terminal_catalog_sell_price(product: Product | None) -> float | None:
-        """Return the terminal/event catalog price used for POS reconciliation.
-
-        Guardrail: terminal/event workflows intentionally use Product.price
-        (sell price). Product.invoice_sale_price is for customer invoices and
-        must not be used here.
-        """
+        """Return the default sellable amount price used for POS reconciliation."""
 
         if product is None:
             return None
+        amount = product.default_sellable_amount
+        if amount is not None:
+            return amount.price_float
         return coerce_float(product.price)
 
     def _store_location_aliases(pending_totals: list[dict]) -> set[str]:
@@ -3122,7 +3446,7 @@ def upload_terminal_sales(event_id):
                                         issue["catalog_price"] = coerce_float(
                                             _terminal_catalog_sell_price(product)
                                         )
-                                    product.price = new_price
+                                    update_default_sellable_price(product, new_price)
                                 elif resolution_value == "skip":
                                     if product is None:
                                         error_messages.append(
@@ -3134,10 +3458,10 @@ def upload_terminal_sales(event_id):
                                     issue["resolution"] = "skip"
                                     issue["selected_option"] = "catalog"
                                     issue["selected_price"] = catalog_price
-                                    if catalog_price is None:
-                                        product.price = None
-                                    else:
-                                        product.price = catalog_price
+                                    if catalog_price is not None:
+                                        update_default_sellable_price(
+                                            product, catalog_price
+                                        )
                                 break
                 else:
                     error_messages.append("Invalid price resolution request.")
@@ -4137,6 +4461,11 @@ def upload_terminal_sales(event_id):
                                 allowed_products.update(
                                     p.id for p in el.location.current_menu.products
                                 )
+                                allowed_products.update(
+                                    amount.product_id
+                                    for amount in el.location.current_menu.active_sellable_amounts
+                                    if amount.product_id is not None
+                                )
                         location_allowed_products[el.id] = allowed_products
 
                         location_obj = el.location
@@ -4749,7 +5078,14 @@ def upload_terminal_sales(event_id):
         try:
             if ext in {".xls", ".xlsx"}:
                 def _iter_excel_rows(path: str, extension: str):
-                    if extension == ".xls":
+                    def _looks_like_xlsx_file(file_path: str) -> bool:
+                        try:
+                            with open(file_path, "rb") as uploaded_file:
+                                return uploaded_file.read(4).startswith(b"PK")
+                        except OSError:
+                            return False
+
+                    if extension == ".xls" and not _looks_like_xlsx_file(path):
                         try:
                             import xlrd  # type: ignore
                         except ModuleNotFoundError:
@@ -4768,11 +5104,15 @@ def upload_terminal_sales(event_id):
                             raise RuntimeError("legacy_xls_error") from exc
 
                         try:
+                            rows = []
                             for row_idx in range(sheet.nrows):
-                                yield [
-                                    sheet.cell_value(row_idx, col_idx)
-                                    for col_idx in range(sheet.ncols)
-                                ]
+                                rows.append(
+                                    [
+                                        sheet.cell_value(row_idx, col_idx)
+                                        for col_idx in range(sheet.ncols)
+                                    ]
+                                )
+                            return rows
                         finally:  # pragma: no branch - ensure resources freed
                             try:
                                 book.release_resources()
@@ -4784,19 +5124,30 @@ def upload_terminal_sales(event_id):
                         except ImportError as exc:  # pragma: no cover - env issue
                             raise RuntimeError("xlsx_missing") from exc
 
+                        uploaded_file = None
                         try:
+                            workbook_source = path
+                            if extension == ".xls":
+                                uploaded_file = open(path, "rb")
+                                workbook_source = uploaded_file
                             workbook = load_workbook(
-                                path, read_only=True, data_only=True
+                                workbook_source, read_only=True, data_only=True
                             )
                         except Exception as exc:
+                            if uploaded_file is not None:
+                                uploaded_file.close()
                             raise RuntimeError("xlsx_error") from exc
 
                         try:
                             sheet = workbook.active
-                            for row in sheet.iter_rows(values_only=True):
-                                yield list(row)
+                            return [
+                                list(row)
+                                for row in sheet.iter_rows(values_only=True)
+                            ]
                         finally:
                             workbook.close()
+                            if uploaded_file is not None:
+                                uploaded_file.close()
 
                 try:
                     rows_iter = _iter_excel_rows(filepath, ext)
@@ -5143,11 +5494,7 @@ def confirm_location(event_id, el_id):
                 db.session.add(summary_record)
 
             total_quantity = sum(float(sale.quantity or 0.0) for sale in manual_sales)
-            total_amount = sum(
-                float(sale.quantity or 0.0)
-                * float(getattr(sale.product, "price", 0.0) or 0.0)
-                for sale in manual_sales
-            )
+            total_amount = sum(terminal_sale_line_total(sale) for sale in manual_sales)
             summary_record.total_quantity = total_quantity
             summary_record.total_amount = total_amount
 
@@ -5175,7 +5522,7 @@ def confirm_location(event_id, el_id):
         location_records = {
             record.item_id: record
             for record in LocationStandItem.query.filter_by(
-                location_id=el.location_id
+                location_id=el.location_id,
             ).all()
         }
         for sale in el.terminal_sales:
@@ -5192,14 +5539,18 @@ def confirm_location(event_id, el_id):
                 if ri.item_id is None:
                     continue
                 record = location_records.get(ri.item_id)
-                is_countable = record.countable if record is not None else ri.countable
+                is_countable = (
+                    (record.active and record.countable)
+                    if record is not None
+                    else ri.countable
+                )
                 if is_countable:
                     countable_items.append(ri.item_id)
             if not countable_items:
                 continue
 
             if not all(item_id in stand_sheet_item_ids for item_id in countable_items):
-                amount = quantity * float(getattr(product, "price", 0.0) or 0.0)
+                amount = terminal_sale_line_total(sale)
                 product_id = product.id
                 if product_id in aggregated:
                     aggregated_entry = aggregated[product_id]
@@ -5274,10 +5625,7 @@ def confirm_location(event_id, el_id):
         )
 
     app_total_quantity = sum(float(sale.quantity or 0.0) for sale in el.terminal_sales)
-    app_total_amount = sum(
-        float(sale.quantity or 0.0) * float(sale.product.price or 0.0)
-        for sale in el.terminal_sales
-    )
+    app_total_amount = sum(terminal_sale_line_total(sale) for sale in el.terminal_sales)
     summary_record = el.terminal_sales_summary
     file_total_amount = None
     file_total_quantity = None
@@ -5337,7 +5685,7 @@ def confirm_location(event_id, el_id):
             ) or "Unknown product"
             quantity = coerce_float(entry.get("quantity")) or 0.0
             app_price = (
-                coerce_float(product_obj.price)
+                product_obj.default_sellable_price
                 if product_obj is not None
                 else coerce_float(entry.get("app_price"))
             )
@@ -5375,7 +5723,7 @@ def confirm_location(event_id, el_id):
                 else entry.get("product_name")
             ) or "Unknown product"
             app_price = (
-                coerce_float(product_obj.price)
+                product_obj.default_sellable_price
                 if product_obj is not None
                 else coerce_float(entry.get("app_price"))
             )
@@ -5556,6 +5904,13 @@ def _get_stand_items(location_id, event_id=None, operating_date=None):
     seen = set()
     stand_records = {
         record.item_id: record
+        for record in LocationStandItem.query.filter_by(
+            location_id=location_id,
+            active=True,
+        ).all()
+    }
+    countability_records = {
+        record.item_id: record
         for record in LocationStandItem.query.filter_by(location_id=location_id).all()
     }
 
@@ -5583,24 +5938,32 @@ def _get_stand_items(location_id, event_id=None, operating_date=None):
                 if operating_date is not None:
                     if sale.sold_at is None or sale.sold_at.date() != operating_date:
                         continue
+                if sale.product is None:
+                    continue
                 for ri in sale.product.recipe_items:
                     if ri.item_id is None:
                         continue
-                    record = stand_records.get(ri.item_id)
-                    is_countable = record.countable if record is not None else ri.countable
+                    record = countability_records.get(ri.item_id)
+                    is_countable = (
+                        (record.active and record.countable)
+                        if record is not None
+                        else ri.countable
+                    )
                     if not is_countable:
                         continue
                     units_per_product = recipe_item_base_units_per_sale(ri)
                     if units_per_product <= 0:
                         continue
+                    sellable_quantity = float(sale.sellable_quantity or 1.0)
                     sales_by_item[ri.item_id] = (
                         sales_by_item.get(ri.item_id, 0)
-                        + sale.quantity * units_per_product
+                        + sale.quantity * sellable_quantity * units_per_product
                     )
             for sheet in el.stand_sheet_items:
                 sheet_map[sheet.item_id] = sheet
 
     authoritative_products = get_authoritative_location_products(location)
+    current_recipe_item_ids = get_recipe_item_ids(authoritative_products)
     drift_item_ids = get_location_drift_recipe_item_ids(location)
 
     for product_obj in authoritative_products:
@@ -5642,6 +6005,8 @@ def _get_stand_items(location_id, event_id=None, operating_date=None):
         if not record.countable:
             continue
         if record.item_id in drift_item_ids:
+            continue
+        if record.recipe_backed and record.item_id not in current_recipe_item_ids:
             continue
         item = record.item
         recv_unit = next((u for u in item.units if u.receiving_default), None)
@@ -5802,6 +6167,14 @@ def stand_sheet(event_id, location_id):
     ev = db.session.get(Event, event_id)
     if ev is None:
         abort(404)
+    if ev.event_type == "inventory":
+        return redirect(
+            url_for(
+                "event.count_sheet",
+                event_id=event_id,
+                location_id=location_id,
+            )
+        )
     el = EventLocation.query.filter_by(
         event_id=event_id, location_id=location_id
     ).first()
@@ -5988,6 +6361,8 @@ def count_sheet(event_id, location_id):
     ev = db.session.get(Event, event_id)
     if ev is None:
         abort(404)
+    if ev.event_type != "inventory":
+        abort(404)
     el = EventLocation.query.filter_by(
         event_id=event_id, location_id=location_id
     ).first()
@@ -5997,55 +6372,90 @@ def count_sheet(event_id, location_id):
         flash("This event is closed and cannot be modified.")
         return redirect(url_for("event.view_event", event_id=event_id))
 
-    location, stand_items = _get_stand_items(location_id, event_id)
+    operating_date, operating_day, operating_day_error = (
+        _resolve_inventory_operating_day(
+            el,
+            request.values.get("operating_date"),
+        )
+    )
+    if operating_day_error:
+        flash(operating_day_error, "warning")
+        return redirect(url_for("event.view_event", event_id=event_id))
+
+    location = el.location or db.session.get(Location, location_id)
+    if location is None:
+        abort(404)
+    items = build_location_inventory_count_item_entries(location)
 
     if request.method == "POST":
-        for entry in stand_items:
-            item_id = entry["item"].id
-            sheet = EventStandSheetItem.query.filter_by(
-                event_location_id=el.id,
-                item_id=item_id,
-            ).first()
-            if not sheet:
-                sheet = EventStandSheetItem(
-                    event_location_id=el.id, item_id=item_id
+        submitted_name = (
+            request.form.get("submitted_name")
+            or current_user.display_name
+            or current_user.email
+            or ""
+        ).strip()
+        if not submitted_name:
+            flash("Enter the counter name before submitting.", "danger")
+            return render_template(
+                "events/count_sheet.html",
+                event=ev,
+                location=location,
+                items=items,
+                submitted_name=submitted_name,
+                operating_date=operating_date,
+            )
+        requested_rows = parse_inventory_count_submission_rows(
+            request.form,
+            items,
+        )
+        if not requested_rows:
+            flash("Enter at least one inventory count before submitting.", "danger")
+            return render_template(
+                "events/count_sheet.html",
+                event=ev,
+                location=location,
+                items=items,
+                submitted_name=submitted_name,
+                operating_date=operating_date,
+            )
+
+        submission = LocationCountSubmission(
+            source_location_id=location.id,
+            location_id=location.id,
+            event_location_id=el.id,
+            event_operating_day_id=operating_day.id,
+            submission_type=LocationCountSubmission.TYPE_INVENTORY,
+            submitted_name=submitted_name,
+            submission_date=operating_date,
+            status=LocationCountSubmission.STATUS_PENDING,
+        )
+        db.session.add(submission)
+        db.session.flush()
+        for index, row_data in enumerate(requested_rows):
+            db.session.add(
+                LocationCountSubmissionRow(
+                    submission_id=submission.id,
+                    item_id=row_data["item_id"],
+                    count_value=row_data["count_value"],
+                    submitted_count_value=row_data["submitted_count_value"],
+                    unit_breakdown=row_data.get("unit_breakdown"),
+                    parse_index=index,
                 )
-                db.session.add(sheet)
-            recv_qty = coerce_float(
-                request.form.get(f"recv_{item_id}"), default=0.0
-            ) or 0
-            trans_qty = coerce_float(
-                request.form.get(f"trans_{item_id}"), default=0.0
-            ) or 0
-            base_qty = coerce_float(
-                request.form.get(f"base_{item_id}"), default=0.0
-            ) or 0
-            recv_factor = (
-                entry["recv_unit"].factor if entry["recv_unit"] else 0
             )
-            trans_factor = (
-                entry["trans_unit"].factor if entry["trans_unit"] else 0
-            )
-            total = (
-                recv_qty * recv_factor + trans_qty * trans_factor + base_qty
-            )
-            sheet.opening_count = recv_qty
-            sheet.transferred_in = trans_qty
-            sheet.transferred_out = base_qty
-            sheet.closing_count = total
-        _set_event_location_all_days_confirmed(el, True)
         db.session.commit()
         log_activity(
-            f"Updated count sheet for event {event_id} location {location_id}"
+            f"Submitted inventory count sheet {submission.id} for event {event_id} location {location_id}"
         )
-        flash("Count sheet saved")
+        flash("Inventory count submitted for manager review.", "success")
         return redirect(url_for("event.view_event", event_id=event_id))
 
     return render_template(
         "events/count_sheet.html",
         event=ev,
         location=location,
-        stand_items=stand_items,
+        items=items,
+        submitted_name=(current_user.display_name or current_user.email or ""),
+        operating_date=operating_date,
     )
 
 
@@ -6055,6 +6465,8 @@ def bulk_stand_sheets(event_id):
     ev = db.session.get(Event, event_id)
     if ev is None:
         abort(404)
+    if ev.event_type == "inventory":
+        return redirect(url_for("event.bulk_count_sheets", event_id=event_id))
     data = []
     for el in ev.locations:
         loc, items = _get_stand_items(el.location_id, event_id)
@@ -6231,20 +6643,84 @@ def bulk_count_sheets(event_id):
     ev = db.session.get(Event, event_id)
     if ev is None:
         abort(404)
+    if ev.event_type != "inventory":
+        abort(404)
+    event_dates = event_operating_dates(ev)
+    requested_operating_date = (request.args.get("operating_date") or "").strip()
+    if requested_operating_date:
+        selected_operating_date = _parse_date(requested_operating_date)
+        if selected_operating_date is None:
+            flash("Choose a valid inventory count date.", "warning")
+            return redirect(url_for("event.view_event", event_id=event_id))
+    else:
+        selected_operating_date = _default_inventory_operating_date(ev)
+
+    if (
+        selected_operating_date is None
+        or selected_operating_date not in set(event_dates)
+    ):
+        flash("Choose a valid inventory count date.", "warning")
+        return redirect(url_for("event.view_event", event_id=event_id))
+
     data = []
+    skipped_locations = []
     for el in ev.locations:
-        loc, items = _get_stand_items(el.location_id, event_id)
+        loc = el.location or db.session.get(Location, el.location_id)
+        if loc is None:
+            continue
+        _, operating_day, operating_day_error = _resolve_inventory_operating_day(
+            el,
+            selected_operating_date.isoformat(),
+        )
+        if operating_day_error or operating_day is None:
+            skipped_locations.append(
+                {
+                    "location": loc,
+                    "message": operating_day_error
+                    or f"{loc.name} is not open on {selected_operating_date}.",
+                }
+            )
+            continue
+        items = build_location_inventory_count_item_entries(loc)
         data.append(
             {
                 "location": loc,
-                "stand_items": items,
+                "items": items,
                 "page_number": 1,
                 "page_count": 1,
             }
         )
     return render_template(
-        "events/bulk_count_sheets.html", event=ev, data=data
+        "events/bulk_count_sheets.html",
+        event=ev,
+        data=data,
+        event_dates=event_dates,
+        selected_operating_date=selected_operating_date,
+        skipped_locations=skipped_locations,
     )
+
+
+def _approved_inventory_submission_item_ids(event_location_id: int) -> set[int]:
+    """Return item IDs that were explicitly counted for an inventory location."""
+
+    rows = (
+        db.session.query(LocationCountSubmissionRow.item_id)
+        .join(
+            LocationCountSubmission,
+            LocationCountSubmission.id
+            == LocationCountSubmissionRow.submission_id,
+        )
+        .filter(
+            LocationCountSubmission.event_location_id == event_location_id,
+            LocationCountSubmission.submission_type
+            == LocationCountSubmission.TYPE_INVENTORY,
+            LocationCountSubmission.status
+            == LocationCountSubmission.STATUS_APPROVED,
+        )
+        .distinct()
+        .all()
+    )
+    return {item_id for (item_id,) in rows if item_id is not None}
 
 
 @event.route("/events/<int:event_id>/close", methods=["POST"])
@@ -6263,43 +6739,58 @@ def close_event(event_id):
         )
         return redirect(url_for("event.view_event", event_id=event_id))
     for el in ev.locations:
+        approved_inventory_item_ids = (
+            _approved_inventory_submission_item_ids(el.id)
+            if ev.event_type == "inventory"
+            else None
+        )
         price_lookup = _build_item_price_lookup(
             el, _get_stand_items(el.location_id, ev.id)[1]
         )
         sync_closed_event_sheet_snapshots(el, price_lookup)
         counted_item_ids = set()
         for sheet in el.stand_sheet_items:
+            if (
+                approved_inventory_item_ids is not None
+                and sheet.item_id not in approved_inventory_item_ids
+            ):
+                continue
             counted_item_ids.add(sheet.item_id)
             lsi = LocationStandItem.query.filter_by(
                 location_id=el.location_id, item_id=sheet.item_id
             ).first()
-            if not sheet.closing_count:
+            if not sheet.closing_count and ev.event_type != "inventory":
                 if lsi and lsi.countable:
                     db.session.delete(lsi)
                 continue
+            created_location_item = False
             if not lsi:
                 lsi = LocationStandItem(
                     location_id=el.location_id,
                     item_id=sheet.item_id,
+                    active=True,
                     countable=True,
                     purchase_gl_code_id=sheet.item.purchase_gl_code_id,
                 )
                 db.session.add(lsi)
+                created_location_item = True
             elif (
                 lsi.purchase_gl_code_id is None
                 and sheet.item.purchase_gl_code_id is not None
             ):
                 lsi.purchase_gl_code_id = sheet.item.purchase_gl_code_id
-            lsi.countable = True
+            lsi.active = True
+            if ev.event_type != "inventory" or created_location_item:
+                lsi.countable = True
             lsi.expected_count = sheet.closing_count
 
-        if counted_item_ids:
+        if ev.event_type != "inventory" and counted_item_ids:
             LocationStandItem.query.filter(
                 LocationStandItem.location_id == el.location_id,
                 LocationStandItem.countable.is_(True),
                 ~LocationStandItem.item_id.in_(counted_item_ids),
             ).delete(synchronize_session=False)
-        else:
+        elif ev.event_type != "inventory":
             LocationStandItem.query.filter_by(
                 location_id=el.location_id,
                 countable=True,
@@ -6325,7 +6816,9 @@ def inventory_report(event_id):
 
     rows = []
     gl_totals = {}
+    gl_summary = {}
     grand_total = 0.0
+    grand_quantity = 0.0
 
     for el in ev.locations:
         loc = el.location
@@ -6346,6 +6839,7 @@ def inventory_report(event_id):
                 else None
             )
             gl_code = gl_obj.code if gl_obj else "Unassigned"
+            actual_count = float(sheet.closing_count or 0.0)
             rows.append(
                 {
                     "location": loc,
@@ -6359,12 +6853,21 @@ def inventory_report(event_id):
                 }
             )
             gl_totals[gl_code] = gl_totals.get(gl_code, 0.0) + cost_total
+            summary_entry = gl_summary.setdefault(
+                gl_code,
+                {"quantity": 0.0, "cost": 0.0},
+            )
+            summary_entry["quantity"] += actual_count
+            summary_entry["cost"] += cost_total
             grand_total += cost_total
+            grand_quantity += actual_count
 
     return render_template(
         "events/inventory_report.html",
         event=ev,
         rows=rows,
         gl_totals=gl_totals,
+        gl_summary=gl_summary,
         grand_total=grand_total,
+        grand_quantity=grand_quantity,
     )

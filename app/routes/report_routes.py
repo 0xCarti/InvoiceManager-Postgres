@@ -1,10 +1,9 @@
 import os
 import tempfile
 from dataclasses import asdict
-from datetime import datetime
-from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
+from datetime import datetime, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 from secrets import token_urlsafe
-from typing import Dict
 
 from flask import (
     Blueprint,
@@ -46,6 +45,7 @@ from app.models import (
     Invoice,
     InvoiceProduct,
     InvoiceProductRecipeItemSnapshot,
+    InventoryExpiryLot,
     Item,
     ItemUnit,
     Location,
@@ -61,8 +61,13 @@ from app.models import (
     TransferItem,
     User,
 )
+from app.services.purchase_invoice_reports import invoice_gl_code_rows
 from app.utils.forecasting import DemandForecastingHelper
 from app.utils.pos_import import parse_department_sales_forecast
+from app.utils.sellable_amounts import (
+    normalize_sellable_amount_entries,
+    replace_product_sellable_amounts,
+)
 from app.utils.text import build_text_match_predicate, normalize_request_text_filter
 from app.utils.text import normalize_request_text_filter
 from app.utils.units import (
@@ -80,6 +85,72 @@ report = Blueprint("report", __name__)
 
 
 _CENT = Decimal("0.01")
+_invoice_gl_code_rows = invoice_gl_code_rows
+
+
+def _inventory_expiry_state(lot: InventoryExpiryLot, today=None) -> str:
+    today = today or datetime.utcnow().date()
+    if lot.expiry_date is None:
+        return "unknown"
+    if lot.expiry_date < today:
+        return "expired"
+    warning_days = int(lot.item.expiry_warning_days or 14) if lot.item else 14
+    if lot.expiry_date <= today + timedelta(days=warning_days):
+        return "expiring_soon"
+    return "ok"
+
+
+@report.route("/reports/inventory_expiry")
+@login_required
+def inventory_expiry_report():
+    status = (request.args.get("status") or "actionable").strip().lower()
+    if status not in {"actionable", "expired", "expiring_soon", "unknown", "all"}:
+        status = "actionable"
+    item_id = request.args.get("item_id", type=int)
+    location_id = request.args.get("location_id", type=int)
+    today = datetime.utcnow().date()
+
+    query = (
+        InventoryExpiryLot.query.options(
+            selectinload(InventoryExpiryLot.item),
+            selectinload(InventoryExpiryLot.location),
+            selectinload(InventoryExpiryLot.purchase_invoice),
+        )
+        .join(Item)
+        .filter(InventoryExpiryLot.remaining_quantity > 0)
+        .filter(Item.expiry_tracking_mode != Item.EXPIRY_TRACKING_NONE)
+    )
+    if item_id:
+        query = query.filter(InventoryExpiryLot.item_id == item_id)
+    if location_id:
+        query = query.filter(InventoryExpiryLot.location_id == location_id)
+
+    lots = query.order_by(
+        InventoryExpiryLot.expiry_date.asc().nullslast(),
+        InventoryExpiryLot.received_date.asc(),
+        InventoryExpiryLot.id.asc(),
+    ).all()
+
+    rows = []
+    for lot in lots:
+        state = _inventory_expiry_state(lot, today=today)
+        if status == "actionable" and state not in {"expired", "expiring_soon", "unknown"}:
+            continue
+        if status not in {"all", "actionable"} and state != status:
+            continue
+        rows.append({"lot": lot, "state": state})
+
+    return render_template(
+        "report_inventory_expiry.html",
+        rows=rows,
+        status=status,
+        selected_item_id=item_id,
+        selected_location_id=location_id,
+        items=Item.query.filter(Item.expiry_tracking_mode != Item.EXPIRY_TRACKING_NONE)
+        .order_by(Item.name)
+        .all(),
+        locations=Location.query.order_by(Location.name).all(),
+    )
 
 
 def _to_decimal(value) -> Decimal:
@@ -104,15 +175,20 @@ def _load_invoice_recipe_usage_rows(
     end,
     selected_item_ids: list[int] | None = None,
     selected_product_ids: list[int] | None = None,
+    selected_customer_ids: list[int] | None = None,
     selected_gl_code_ids: list[int] | None = None,
     payment_status: str | None = None,
 ) -> list[dict]:
+    effective_snapshot_item_cost = func.coalesce(
+        func.nullif(InvoiceProductRecipeItemSnapshot.item_cost, 0),
+        Item.cost,
+    )
     snapshot_query = (
         db.session.query(
             InvoiceProductRecipeItemSnapshot.item_id.label("item_id"),
             InvoiceProductRecipeItemSnapshot.item_name.label("item_name"),
             InvoiceProductRecipeItemSnapshot.base_unit.label("base_unit"),
-            InvoiceProductRecipeItemSnapshot.item_cost.label("item_cost"),
+            effective_snapshot_item_cost.label("item_cost"),
             func.sum(
                 InvoiceProduct.quantity
                 * InvoiceProductRecipeItemSnapshot.quantity
@@ -125,6 +201,7 @@ def _load_invoice_recipe_usage_rows(
         )
         .join(Invoice, Invoice.id == InvoiceProduct.invoice_id)
         .join(Product, _invoice_product_matches_catalog_product())
+        .outerjoin(Item, Item.id == InvoiceProductRecipeItemSnapshot.item_id)
         .filter(
             Invoice.date_created >= start,
             Invoice.date_created <= end,
@@ -172,6 +249,8 @@ def _load_invoice_recipe_usage_rows(
             query = query.filter(Invoice.is_paid.is_(False))
         if selected_product_ids:
             query = query.filter(Product.id.in_(selected_product_ids))
+        if selected_customer_ids:
+            query = query.filter(Invoice.customer_id.in_(selected_customer_ids))
         if selected_item_ids:
             query = query.filter(
                 (
@@ -199,7 +278,7 @@ def _load_invoice_recipe_usage_rows(
         InvoiceProductRecipeItemSnapshot.item_id,
         InvoiceProductRecipeItemSnapshot.item_name,
         InvoiceProductRecipeItemSnapshot.base_unit,
-        InvoiceProductRecipeItemSnapshot.item_cost,
+        effective_snapshot_item_cost,
     ).all():
         key = (row.item_id, row.item_name or "")
         usage_totals[key] = {
@@ -225,47 +304,6 @@ def _load_invoice_recipe_usage_rows(
         entry["total_quantity"] += float(row.total_quantity or 0.0)
 
     return sorted(usage_totals.values(), key=lambda row: (row["item_name"] or "").casefold())
-
-
-def _allocate_amount(total: Decimal, weights: Dict[str, Decimal]):
-    """Allocate a currency amount across buckets using proportional rounding."""
-
-    allocations = {key: Decimal("0.00") for key in weights}
-    total = _quantize(total)
-
-    if not weights or total == 0:
-        return allocations
-
-    total_weight = sum(weights.values())
-    if total_weight == 0:
-        return allocations
-
-    remainder = total
-    fractional_shares = []
-
-    for key, weight in weights.items():
-        if weight <= 0:
-            fractional_shares.append((key, Decimal("0")))
-            continue
-
-        raw_share = (total * weight) / total_weight
-        rounded_share = raw_share.quantize(_CENT, rounding=ROUND_DOWN)
-        allocations[key] = rounded_share
-        remainder -= rounded_share
-        fractional_shares.append((key, raw_share - rounded_share))
-
-    cents_remaining = int(
-        ((remainder / _CENT).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-    )
-    cents_remaining = max(cents_remaining, 0)
-    fractional_shares.sort(key=lambda item: item[1], reverse=True)
-
-    if fractional_shares and cents_remaining:
-        for i in range(cents_remaining):
-            key, _ = fractional_shares[i % len(fractional_shares)]
-            allocations[key] += _CENT
-
-    return allocations
 
 
 def _coerce_float(value):
@@ -300,7 +338,7 @@ def _compute_vendor_invoice_line_base(invoice: Invoice, item: InvoiceProduct) ->
     if item.product is None:
         return 0.0
 
-    product_price = _coerce_float(item.product.price)
+    product_price = _coerce_float(item.product.default_sellable_price)
     if product_price is not None:
         return quantity * product_price
 
@@ -439,13 +477,26 @@ def _create_product_from_quick_form(form: QuickProductForm) -> Product:
     yield_quantity = form.recipe_yield_quantity.data
     if yield_quantity is None or yield_quantity <= 0:
         yield_quantity = 1
+    sellable_entries = normalize_sellable_amount_entries(
+        [
+            {
+                "amount_id": amount_form.form.amount_id.data,
+                "name": amount_form.form.name.data,
+                "quantity": amount_form.form.quantity.data,
+                "price": amount_form.form.price.data,
+                "active": amount_form.form.active.data,
+                "is_default": amount_form.form.is_default.data,
+            }
+            for amount_form in getattr(form, "sellable_amounts", [])
+        ],
+        fallback_price=form.price.data,
+    )
+    default_price = sellable_entries[0]["price"] if sellable_entries else 0.0
 
     product_obj = Product(
         name=form.name.data,
-        price=form.price.data,
-        invoice_sale_price=form.invoice_sale_price.data
-        if form.invoice_sale_price.data is not None
-        else form.price.data,
+        price=default_price,
+        invoice_sale_price=default_price,
         cost=cost_value,
         sales_gl_code_id=sales_gl_code_id,
         recipe_yield_quantity=float(yield_quantity),
@@ -453,6 +504,7 @@ def _create_product_from_quick_form(form: QuickProductForm) -> Product:
     )
     db.session.add(product_obj)
     db.session.flush()
+    replace_product_sellable_amounts(product_obj, sellable_entries)
 
     for item_form in form.items:
         item_id = item_form.item.data
@@ -808,10 +860,17 @@ def department_sales_forecast():
                 if not creation_step_requested:
                     quick_form.name.data = creation_data["display_name"]
                     price_value = creation_data.get("sample_price")
+                    if len(quick_form.sellable_amounts) < 1:
+                        quick_form.sellable_amounts.append_entry()
+                    amount_form = quick_form.sellable_amounts[0].form
+                    amount_form.name.data = "Each"
+                    amount_form.quantity.data = 1
+                    amount_form.active.data = True
+                    amount_form.is_default.data = True
                     if price_value is not None:
-                        quick_form.price.data = _to_decimal(price_value)
+                        amount_form.price.data = _to_decimal(price_value)
                     else:
-                        quick_form.price.data = Decimal("0.00")
+                        amount_form.price.data = Decimal("0.00")
                 quick_product_forms.append(
                     {
                         "form": quick_form,
@@ -1880,138 +1939,6 @@ def inventory_variance_report():
     )
 
 
-def _invoice_gl_code_rows(invoice: PurchaseInvoice):
-    buckets: Dict[str, Dict[str, Decimal]] = {}
-
-    for item in invoice.items:
-        line_location_id = item.location_id or invoice.location_id
-        gl = item.resolved_purchase_gl_code(line_location_id)
-        if gl is not None:
-            code_key = gl.code
-            display_code = gl.code
-            description = gl.description or ""
-        else:
-            code_key = "__unassigned__"
-            display_code = "Unassigned"
-            description = ""
-
-        entry = buckets.setdefault(
-            code_key,
-            {
-                "code": display_code,
-                "description": description,
-                "base_amount": Decimal("0.00"),
-                "delivery": Decimal("0.00"),
-                "pst": Decimal("0.00"),
-                "gst": Decimal("0.00"),
-            },
-        )
-
-        # Keep GL base amounts aligned with invoice line totals so report totals
-        # always reconcile to the invoice totals shown on the invoice screen.
-        line_total = _quantize(_to_decimal(item.line_total))
-        entry["base_amount"] += line_total
-
-    if not buckets:
-        buckets["__unassigned__"] = {
-            "code": "Unassigned",
-            "description": "",
-            "base_amount": Decimal("0.00"),
-            "delivery": Decimal("0.00"),
-            "pst": Decimal("0.00"),
-            "gst": Decimal("0.00"),
-        }
-
-    gst_code = "102702"
-    gst_gl = GLCode.query.filter_by(code=gst_code).first()
-    gst_entry = buckets.get(gst_code)
-    if gst_entry is None:
-        buckets[gst_code] = {
-            "code": gst_code,
-            "description": (gst_gl.description if gst_gl else ""),
-            "base_amount": Decimal("0.00"),
-            "delivery": Decimal("0.00"),
-            "pst": Decimal("0.00"),
-            "gst": Decimal("0.00"),
-        }
-        gst_entry = buckets[gst_code]
-    elif gst_gl and not gst_entry.get("description"):
-        gst_entry["description"] = gst_gl.description
-
-    pst_total = _quantize(_to_decimal(invoice.pst))
-    delivery_total = _quantize(_to_decimal(invoice.delivery_charge))
-    gst_total = _quantize(_to_decimal(invoice.gst))
-
-    proration_weights = {
-        key: data["base_amount"]
-        for key, data in buckets.items()
-        if key != gst_code and data["base_amount"] > 0
-    }
-
-    if (not proration_weights) and (pst_total > 0 or delivery_total > 0):
-        proration_weights = {"__unassigned__": Decimal("1.00")}
-        if "__unassigned__" not in buckets:
-            buckets["__unassigned__"] = {
-                "code": "Unassigned",
-                "description": "",
-                "base_amount": Decimal("0.00"),
-                "delivery": Decimal("0.00"),
-                "pst": Decimal("0.00"),
-                "gst": Decimal("0.00"),
-            }
-
-    pst_allocations = _allocate_amount(pst_total, proration_weights)
-    delivery_allocations = _allocate_amount(delivery_total, proration_weights)
-
-    rows = []
-    totals = {
-        "base_amount": Decimal("0.00"),
-        "delivery": Decimal("0.00"),
-        "pst": Decimal("0.00"),
-        "gst": Decimal("0.00"),
-        "total": Decimal("0.00"),
-    }
-
-    for key in sorted(
-        buckets.keys(), key=lambda c: (c == gst_code, c == "__unassigned__", c)
-    ):
-        data = buckets[key]
-        data["pst"] = pst_allocations.get(key, Decimal("0.00"))
-        data["delivery"] = delivery_allocations.get(key, Decimal("0.00"))
-        if key == gst_code:
-            data["gst"] = gst_total
-
-        line_total = (
-            data["base_amount"]
-            + data["delivery"]
-            + data["pst"]
-            + data["gst"]
-        )
-        line_total = _quantize(line_total)
-
-        totals["base_amount"] += data["base_amount"]
-        totals["delivery"] += data["delivery"]
-        totals["pst"] += data["pst"]
-        totals["gst"] += data["gst"]
-        totals["total"] += line_total
-
-        rows.append(
-            {
-                "code": data["code"],
-                "description": data["description"],
-                "base_amount": data["base_amount"],
-                "delivery": data["delivery"],
-                "pst": data["pst"],
-                "gst": data["gst"],
-                "total": line_total,
-            }
-        )
-
-    totals = {key: _quantize(value) for key, value in totals.items()}
-
-    return rows, totals
-
-
 @report.route("/reports/purchase-invoices/<int:invoice_id>/gl-code")
 @login_required
 def invoice_gl_code_report(invoice_id: int):
@@ -2070,14 +1997,28 @@ def product_sales_report():
         else:
             selected_product_ids = form.products.data or []
             selected_gl_code_ids = form.gl_codes.data or []
+            line_revenue = db.func.coalesce(
+                InvoiceProduct.line_subtotal,
+                InvoiceProduct.quantity * InvoiceProduct.unit_price,
+                0,
+            )
+            line_product_quantity = (
+                InvoiceProduct.quantity
+                * db.func.coalesce(InvoiceProduct.sellable_quantity, 1)
+            )
+            line_cost = line_product_quantity * Product.cost
 
             products_query = (
                 db.session.query(
                     Product.id,
                     Product.name,
                     Product.cost,
-                    Product.price,
                     db.func.sum(InvoiceProduct.quantity).label("total_quantity"),
+                    db.func.sum(line_product_quantity).label(
+                        "total_product_quantity"
+                    ),
+                    db.func.sum(line_revenue).label("total_revenue"),
+                    db.func.sum(line_cost).label("total_cost"),
                 )
                 .join(InvoiceProduct, InvoiceProduct.product_id == Product.id)
                 .join(Invoice, Invoice.id == InvoiceProduct.invoice_id)
@@ -2112,11 +2053,14 @@ def product_sales_report():
             for product_row in products:
                 quantity = float(product_row.total_quantity or 0.0)
                 cost = float(product_row.cost or 0.0)
-                price = float(product_row.price or 0.0)
-                profit_each = price - cost
-                total_item_cost = quantity * cost
-                revenue = quantity * price
-                profit = quantity * profit_each
+                total_product_quantity = float(
+                    product_row.total_product_quantity or quantity
+                )
+                total_item_cost = float(product_row.total_cost or 0.0)
+                revenue = float(product_row.total_revenue or 0.0)
+                price = revenue / quantity if quantity else 0.0
+                profit = revenue - total_item_cost
+                profit_each = profit / quantity if quantity else 0.0
 
                 total_quantity += quantity
                 total_cost += total_item_cost
@@ -2128,6 +2072,7 @@ def product_sales_report():
                         "id": product_row.id,
                         "name": product_row.name,
                         "quantity": quantity,
+                        "product_quantity": total_product_quantity,
                         "cost": cost,
                         "price": price,
                         "total_cost": total_item_cost,
@@ -2200,6 +2145,7 @@ def product_stock_usage_report():
     start = None
     end = None
     selected_product_names = []
+    selected_customer_names = []
     selected_gl_labels = []
     excluded_occurrences = []
     selected_payment_status = "all"
@@ -2218,12 +2164,20 @@ def product_stock_usage_report():
             )
         else:
             selected_product_ids = form.products.data or []
+            raw_customer_ids = form.customers.data or []
+            all_customers_selected = -1 in raw_customer_ids
+            selected_customer_ids = (
+                []
+                if all_customers_selected
+                else [customer_id for customer_id in raw_customer_ids if customer_id != -1]
+            )
             selected_gl_code_ids = form.gl_codes.data or []
 
             items = _load_invoice_recipe_usage_rows(
                 start=start,
                 end=end,
                 selected_product_ids=selected_product_ids,
+                selected_customer_ids=selected_customer_ids,
                 selected_gl_code_ids=selected_gl_code_ids,
                 payment_status=selected_payment_status,
             )
@@ -2269,6 +2223,10 @@ def product_stock_usage_report():
             if selected_product_ids:
                 excluded_query = excluded_query.filter(
                     Product.id.in_(selected_product_ids)
+                )
+            if selected_customer_ids:
+                excluded_query = excluded_query.filter(
+                    Invoice.customer_id.in_(selected_customer_ids)
                 )
 
             if selected_gl_code_ids:
@@ -2348,6 +2306,15 @@ def product_stock_usage_report():
             else:
                 form.products.choices = product_choices
 
+            if all_customers_selected:
+                selected_customer_names = ["All Customers"]
+            elif selected_customer_ids:
+                selected_customer_names = [
+                    label
+                    for value, label in form.customers.choices
+                    if value in selected_customer_ids
+                ]
+
             if selected_gl_code_ids:
                 selected_gl_labels = [
                     label
@@ -2363,9 +2330,192 @@ def product_stock_usage_report():
         start=start,
         end=end,
         selected_product_names=selected_product_names,
+        selected_customer_names=selected_customer_names,
         selected_gl_labels=selected_gl_labels,
         payment_status=selected_payment_status,
         excluded_occurrences=excluded_occurrences,
+    )
+
+
+@report.route("/reports/products-sold", methods=["GET", "POST"])
+@login_required
+def products_sold_report():
+    """Report showing sold products with quantities, cost, and sell price."""
+
+    form = ProductSalesReportForm()
+    product_choices = list(form.products.choices)
+    gl_code_choices = list(form.gl_codes.choices)
+    report_data = None
+    totals = None
+    start = None
+    end = None
+    selected_product_names = []
+    selected_customer_names = []
+    selected_gl_labels = []
+    selected_payment_status = "all"
+
+    if form.validate_on_submit():
+        start = form.start_date.data
+        end = form.end_date.data
+        selected_payment_status = form.payment_status.data or "all"
+        if selected_payment_status not in {"all", "paid", "unpaid"}:
+            selected_payment_status = "all"
+        form.payment_status.data = selected_payment_status
+
+        if end < start:
+            form.end_date.errors.append(
+                "End date must be on or after the start date."
+            )
+        else:
+            selected_product_ids = form.products.data or []
+            raw_customer_ids = form.customers.data or []
+            all_customers_selected = -1 in raw_customer_ids
+            selected_customer_ids = (
+                []
+                if all_customers_selected
+                else [
+                    customer_id
+                    for customer_id in raw_customer_ids
+                    if customer_id != -1
+                ]
+            )
+            selected_gl_code_ids = form.gl_codes.data or []
+            end_exclusive = end + timedelta(days=1)
+
+            products_query = (
+                db.session.query(
+                    Product.id.label("product_id"),
+                    Product.name.label("product_name"),
+                    Product.cost.label("product_cost"),
+                    InvoiceProduct.unit_price.label("sell_price"),
+                    func.sum(InvoiceProduct.quantity).label("total_quantity"),
+                    func.sum(InvoiceProduct.line_subtotal).label("total_sales"),
+                )
+                .join(InvoiceProduct, _invoice_product_matches_catalog_product())
+                .join(Invoice, Invoice.id == InvoiceProduct.invoice_id)
+                .filter(
+                    Invoice.date_created >= start,
+                    Invoice.date_created < end_exclusive,
+                    InvoiceProduct.is_custom_line.is_(False),
+                )
+            )
+
+            if selected_payment_status == "paid":
+                products_query = products_query.filter(Invoice.is_paid.is_(True))
+            elif selected_payment_status == "unpaid":
+                products_query = products_query.filter(Invoice.is_paid.is_(False))
+
+            if selected_product_ids:
+                products_query = products_query.filter(
+                    Product.id.in_(selected_product_ids)
+                )
+
+            if selected_customer_ids:
+                products_query = products_query.filter(
+                    Invoice.customer_id.in_(selected_customer_ids)
+                )
+
+            if selected_gl_code_ids:
+                included_ids = [gid for gid in selected_gl_code_ids if gid != -1]
+                conditions = []
+                if included_ids:
+                    conditions.append(Product.sales_gl_code_id.in_(included_ids))
+                if -1 in selected_gl_code_ids:
+                    conditions.append(Product.sales_gl_code_id.is_(None))
+                if conditions:
+                    products_query = products_query.filter(or_(*conditions))
+
+            product_rows = (
+                products_query.group_by(
+                    Product.id,
+                    Product.name,
+                    Product.cost,
+                    InvoiceProduct.unit_price,
+                )
+                .order_by(Product.name, InvoiceProduct.unit_price)
+                .all()
+            )
+
+            report_data = []
+            total_quantity = 0.0
+            total_cost = 0.0
+            total_sales = 0.0
+            total_profit = 0.0
+
+            for product_row in product_rows:
+                quantity = float(product_row.total_quantity or 0.0)
+                cost_each = float(product_row.product_cost or 0.0)
+                sell_price = float(product_row.sell_price or 0.0)
+                line_sales = float(product_row.total_sales or 0.0)
+                line_cost = quantity * cost_each
+                line_profit = line_sales - line_cost
+
+                total_quantity += quantity
+                total_cost += line_cost
+                total_sales += line_sales
+                total_profit += line_profit
+
+                report_data.append(
+                    {
+                        "id": product_row.product_id,
+                        "name": product_row.product_name,
+                        "quantity": quantity,
+                        "cost": cost_each,
+                        "sell_price": sell_price,
+                        "total_cost": line_cost,
+                        "total_sales": line_sales,
+                        "profit": line_profit,
+                    }
+                )
+
+            totals = {
+                "quantity": total_quantity,
+                "cost": total_cost,
+                "sales": total_sales,
+                "profit": total_profit,
+            }
+
+            if selected_product_ids:
+                selected_product_names = [
+                    label
+                    for value, label in product_choices
+                    if value in selected_product_ids
+                ]
+                form.products.choices = [
+                    choice
+                    for choice in product_choices
+                    if choice[0] in selected_product_ids
+                ]
+            else:
+                form.products.choices = product_choices
+
+            if all_customers_selected:
+                selected_customer_names = ["All Customers"]
+            elif selected_customer_ids:
+                selected_customer_names = [
+                    label
+                    for value, label in form.customers.choices
+                    if value in selected_customer_ids
+                ]
+
+            if selected_gl_code_ids:
+                selected_gl_labels = [
+                    label
+                    for value, label in gl_code_choices
+                    if value in selected_gl_code_ids
+                ]
+
+    return render_template(
+        "report_products_sold.html",
+        form=form,
+        report=report_data,
+        totals=totals,
+        start=start,
+        end=end,
+        selected_product_names=selected_product_names,
+        selected_customer_names=selected_customer_names,
+        selected_gl_labels=selected_gl_labels,
+        payment_status=selected_payment_status,
     )
 
 
@@ -2533,8 +2683,10 @@ def event_terminal_sales_report():
         start_dt = datetime.combine(start_date, datetime.min.time())
         end_dt = datetime.combine(end_date, datetime.max.time())
 
-        sale_amount = func.coalesce(TerminalSale.quantity, 0) * func.coalesce(
-            Product.price, 0
+        sale_amount = func.coalesce(
+            TerminalSale.line_total_snapshot,
+            func.coalesce(TerminalSale.quantity, 0)
+            * func.coalesce(TerminalSale.unit_price_snapshot, Product.price, 0),
         )
 
         event_total_sales = func.coalesce(func.sum(sale_amount), 0)

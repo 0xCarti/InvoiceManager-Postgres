@@ -29,11 +29,11 @@
         <div class="col-md-3">
             <div class="form-check form-switch">
                 {{ form.apply_price(class_='form-check-input', id='bulk-product-apply-price', **{'data-toggle-target': '#bulk-product-price'}) }}
-                <label class="form-check-label" for="bulk-product-apply-price">Update Price</label>
+                <label class="form-check-label" for="bulk-product-apply-price">Update Default Sellable Price</label>
             </div>
         </div>
         <div class="col-md-9">
-            <label class="form-label" for="bulk-product-price">Price</label>
+            <label class="form-label" for="bulk-product-price">Default Sellable Price</label>
             {{ form.price(class_='form-control' + (' is-invalid' if form.price.errors else ''), id='bulk-product-price', step='0.01', min='0') }}
             {% for error in form.price.errors %}
             <div class="invalid-feedback d-block">{{ error }}</div>

@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Invoice {{ invoice.id }}</title>
+    <style>
+        @page {
+            size: letter portrait;
+            margin: 0.55in;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            color: #111;
+            margin: 0;
+            font-variant-numeric: tabular-nums;
+        }
+        .print-toolbar {
+            display: none;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+        .logo {
+            width: 210px;
+            height: auto;
+        }
+        .invoice-title {
+            text-align: right;
+        }
+        h1 {
+            font-size: 26px;
+            margin: 0 0 8px;
+        }
+        .status {
+            display: inline-block;
+            border: 1px solid #444;
+            border-radius: 3px;
+            padding: 3px 8px;
+            font-weight: bold;
+        }
+        .meta {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 22px;
+        }
+        .meta-box {
+            border: 1px solid #c8c8c8;
+            padding: 10px 12px;
+        }
+        .meta-box h2 {
+            font-size: 12px;
+            text-transform: uppercase;
+            margin: 0 0 8px;
+            letter-spacing: 0.04em;
+        }
+        .meta-box p {
+            margin: 3px 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 18px;
+        }
+        th,
+        td {
+            border-bottom: 1px solid #ddd;
+            padding: 7px 6px;
+            vertical-align: top;
+        }
+        th {
+            border-top: 1px solid #222;
+            border-bottom: 1px solid #222;
+            text-align: left;
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+        .number {
+            text-align: right;
+            white-space: nowrap;
+        }
+        .totals {
+            margin-left: auto;
+            width: 260px;
+        }
+        .totals-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+        }
+        .totals-row.total {
+            border-top: 2px solid #111;
+            margin-top: 4px;
+            padding-top: 8px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        .footer {
+            margin-top: 28px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 28px;
+        }
+        .signature {
+            margin-top: 36px;
+            border-top: 1px solid #111;
+            padding-top: 6px;
+            text-align: center;
+        }
+        .fine-print {
+            margin-top: 22px;
+            font-size: 11px;
+        }
+        @media screen {
+            body.print-view {
+                background: #f3f4f6;
+                padding: 24px;
+            }
+            body.print-view .print-toolbar {
+                display: flex;
+                justify-content: flex-end;
+                gap: 8px;
+                max-width: 8.5in;
+                margin: 0 auto 16px;
+            }
+            body.print-view .print-toolbar a,
+            body.print-view .print-toolbar button {
+                border: 1px solid #6b7280;
+                border-radius: 4px;
+                background: #fff;
+                color: #111;
+                cursor: pointer;
+                font: inherit;
+                padding: 7px 12px;
+                text-decoration: none;
+            }
+            body.print-view .print-toolbar button {
+                background: #0d6efd;
+                border-color: #0d6efd;
+                color: #fff;
+            }
+            body.print-view .invoice-page {
+                background: #fff;
+                box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+                box-sizing: border-box;
+                margin: 0 auto;
+                max-width: 8.5in;
+                min-height: 11in;
+                padding: 0.55in;
+            }
+        }
+        @media print {
+            .print-toolbar {
+                display: none !important;
+            }
+            body.print-view {
+                background: #fff;
+                padding: 0;
+            }
+            body.print-view .invoice-page {
+                box-shadow: none;
+                margin: 0;
+                max-width: none;
+                min-height: 0;
+                padding: 0;
+            }
+        }
+    </style>
+</head>
+<body class="{% if print_view %}print-view{% endif %}">
+    {% if print_view %}
+    <div class="print-toolbar">
+        <a href="{{ url_for('invoice.view_invoice', invoice_id=invoice.id) }}">Back to Invoice</a>
+        <button type="button" onclick="window.print()">Print</button>
+    </div>
+    {% endif %}
+    <main class="invoice-page">
+    <div class="header">
+        <div>
+            <img src="{{ url_for('static', filename='live2.png') }}" alt="Sodexo Live" class="logo">
+        </div>
+        <div class="invoice-title">
+            <h1>Sales Invoice</h1>
+            <p><strong>Invoice #:</strong> {{ invoice.id }}</p>
+            <p><strong>Date:</strong> {{ invoice.date_created|format_datetime('%Y-%m-%d') }}</p>
+            <p><span class="status">{{ invoice.invoice_status_label }}</span></p>
+        </div>
+    </div>
+
+    <div class="meta">
+        <div class="meta-box">
+            <h2>Customer</h2>
+            <p>{{ invoice.customer.first_name }} {{ invoice.customer.last_name }}</p>
+        </div>
+        <div class="meta-box">
+            <h2>Invoice Details</h2>
+            {% if invoice.delivered_at %}
+            <p><strong>Delivered:</strong> {{ invoice.delivered_at|format_datetime('%Y-%m-%d %H:%M') }}</p>
+            {% endif %}
+            {% if invoice.paid_at %}
+            <p><strong>Paid:</strong> {{ invoice.paid_at|format_datetime('%Y-%m-%d %H:%M') }}</p>
+            {% endif %}
+            <p><strong>GST #:</strong> {{ GST }}</p>
+        </div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Product Name</th>
+                <th class="number">Quantity</th>
+                <th class="number">Price</th>
+                <th class="number">Tax</th>
+                <th class="number">Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for invoice_product, name, tax_flags in invoice_lines %}
+            <tr>
+                <td>{{ name }}</td>
+                <td class="number">{{ invoice_product.quantity }}</td>
+                <td class="number">${{ "%.2f"|format(invoice_product.unit_price) }}</td>
+                <td class="number">{{ tax_flags or "-" }}</td>
+                <td class="number">${{ "%.2f"|format(invoice_product.line_subtotal + invoice_product.line_gst + invoice_product.line_pst) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="totals">
+        <div class="totals-row"><span>Subtotal</span><span>${{ "%.2f"|format(subtotal) }}</span></div>
+        <div class="totals-row"><span>PST (7%)</span><span>${{ "%.2f"|format(pst) }}</span></div>
+        <div class="totals-row"><span>GST (5%)</span><span>${{ "%.2f"|format(gst) }}</span></div>
+        <div class="totals-row total"><span>Total</span><span>${{ "%.2f"|format(total) }}</span></div>
+    </div>
+
+    <div class="fine-print">
+        <p><strong>Notice:</strong> Retail Pop Price: ${{ retail_pop_price }} - NO REFUNDS</p>
+        <p><strong>Contact:</strong> Bryce.cotton@sodexo.com</p>
+    </div>
+
+    <div class="footer">
+        <div class="signature">Delivered by</div>
+        <div class="signature">Received by</div>
+    </div>
+    </main>
+</body>
+</html>

@@ -7,41 +7,30 @@
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <div>
             <h1 class="h4 mb-1">My Schedule</h1>
-            <div class="text-muted small">
-                {% if selected_department %}
-                {{ selected_department.name }} | {{ week_label }}
-                {% endif %}
-            </div>
+            <div class="text-muted small">{{ range_label }}</div>
         </div>
-        {% if receipt %}
-        <span class="badge text-bg-light border">Seen Version {{ receipt.last_seen_version or 0 }}</span>
-        {% endif %}
     </div>
 
     <div class="card mb-3">
         <div class="card-body">
             <form method="get" class="row g-2 align-items-end">
-                <div class="col-12 col-md-4">
-                    <label class="form-label">Department</label>
-                    <select name="department_id" class="form-select">
-                        {% for department in departments %}
-                        <option value="{{ department.id }}" {% if selected_department and department.id == selected_department.id %}selected{% endif %}>{{ department.name }}</option>
+                <div class="col-12 col-sm-6 col-lg-3">
+                    <label class="form-label" for="my-schedule-start-date">Date</label>
+                    <input id="my-schedule-start-date" type="date" name="start_date" class="form-control" value="{{ range_start.isoformat() }}">
+                </div>
+                <div class="col-12 col-sm-6 col-lg-3">
+                    <label class="form-label" for="my-schedule-period">Range</label>
+                    <select id="my-schedule-period" name="period" class="form-select">
+                        {% for value, label in period_choices %}
+                        <option value="{{ value }}" {% if selected_period == value %}selected{% endif %}>{{ label }}</option>
                         {% endfor %}
                     </select>
                 </div>
-                <div class="col-12 col-md-4">
-                    <label class="form-label">Week Starting</label>
-                    <input type="date" name="week_start" class="form-control" value="{{ schedule_week.week_start.isoformat() if schedule_week else '' }}">
-                </div>
-                <div class="col-12 col-md-auto d-flex flex-wrap gap-2">
-                    {% if selected_department %}
-                    <a class="btn btn-outline-secondary" href="{{ url_for('schedule.my_schedule', department_id=selected_department.id, week_start=previous_week.isoformat()) }}">Previous</a>
-                    {% endif %}
+                <div class="col-12 col-lg-auto d-flex flex-wrap gap-2">
+                    <a class="btn btn-outline-secondary" href="{{ url_for('schedule.my_schedule', period=selected_period, start_date=previous_start.isoformat()) }}">Previous</a>
                     <button type="submit" class="btn btn-primary">Go</button>
-                    {% if selected_department %}
-                    <a class="btn btn-outline-secondary" href="{{ url_for('schedule.my_schedule', department_id=selected_department.id, week_start=next_week.isoformat()) }}">Next</a>
-                    <a class="btn btn-outline-dark" href="{{ url_for('schedule.my_schedule', department_id=selected_department.id) }}">Current Week</a>
-                    {% endif %}
+                    <a class="btn btn-outline-secondary" href="{{ url_for('schedule.my_schedule', period=selected_period, start_date=next_start.isoformat()) }}">Next</a>
+                    <a class="btn btn-outline-dark" href="{{ url_for('schedule.my_schedule', period=selected_period, start_date=today.isoformat()) }}">Current</a>
                 </div>
             </form>
         </div>
@@ -49,21 +38,47 @@
 
     <div class="card">
         <div class="card-body">
-            {% if shifts %}
+            {% if schedule_days %}
             <div class="list-group list-group-flush">
-                {% for shift in shifts %}
-                <div class="list-group-item px-0">
-                    <div class="fw-semibold">{{ shift.shift_date.strftime('%A, %b %d') }}</div>
-                    <div>{{ shift.start_time.strftime('%H:%M') }} - {{ shift.end_time.strftime('%H:%M') }}</div>
-                    <div class="small text-muted">{{ shift.position.name }} | {{ '%.2f'|format(shift.paid_hours or 0.0) }} paid hrs</div>
-                    {% if shift.notes %}
-                    <div class="small mt-1">{{ shift.notes }}</div>
-                    {% endif %}
+                {% for day in schedule_days %}
+                <div class="list-group-item px-0 py-3">
+                    <div class="fw-semibold">{{ day.date.strftime('%A, %b %d, %Y') }}</div>
+                    {% for shift in day.shifts %}
+                    {% set break_minutes = shift_break_minutes(shift) %}
+                    <div class="{% if not loop.first %}border-top{% endif %} mt-2 pt-2">
+                        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                            <div>
+                                <div class="fw-semibold">{{ shift.start_time.strftime('%H:%M') }} - {{ shift.end_time.strftime('%H:%M') }}</div>
+                                {% if shift.assignment_mode == 'tradeboard' %}
+                                <span class="badge text-bg-warning">Posted to Tradeboard</span>
+                                {% endif %}
+                            </div>
+                            {% if can_post_shift_to_tradeboard(shift) %}
+                            <form method="post">
+                                {{ action_form.hidden_tag() }}
+                                <input type="hidden" name="action" value="post_tradeboard_shift">
+                                <input type="hidden" name="shift_id" value="{{ shift.id }}">
+                                <input type="hidden" name="period" value="{{ selected_period }}">
+                                <input type="hidden" name="start_date" value="{{ range_start.isoformat() }}">
+                                <button type="submit" class="btn btn-sm btn-outline-primary">Post to Tradeboard</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                        <div class="small text-muted d-flex flex-wrap gap-2">
+                            <span>Date: {{ shift.shift_date.strftime('%Y-%m-%d') }}</span>
+                            {% if break_minutes %}
+                            <span>Break: {{ format_break_minutes(break_minutes) }}</span>
+                            {% endif %}
+                            <span>Location: {{ shift.location.name if shift.location else 'No location' }}</span>
+                            <span>Event: {{ shift.event.name if shift.event else 'No event' }}</span>
+                        </div>
+                    </div>
+                    {% endfor %}
                 </div>
                 {% endfor %}
             </div>
-            {% elif selected_department %}
-            <div class="text-muted">No published shifts for this week.</div>
+            {% elif departments %}
+            <div class="text-muted">No published shifts in this range.</div>
             {% else %}
             <div class="text-muted">You are not assigned to any scheduling departments.</div>
             {% endif %}

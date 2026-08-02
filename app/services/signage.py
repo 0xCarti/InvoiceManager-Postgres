@@ -17,6 +17,7 @@ from app.models import (
     Playlist,
     PlaylistItem,
     Product,
+    ProductSellableAmount,
 )
 from app.services.signage_media import signage_media_public_url
 
@@ -61,12 +62,27 @@ def _display_query_options():
     return (
         selectinload(Display.location)
         .selectinload(Location.current_menu)
+        .selectinload(Menu.sellable_amounts)
+        .selectinload(ProductSellableAmount.product),
+        selectinload(Display.location)
+        .selectinload(Location.current_menu)
         .selectinload(Menu.products),
         selectinload(Display.location)
         .selectinload(Location.default_playlist)
         .selectinload(Playlist.items)
         .selectinload(PlaylistItem.menu)
+        .selectinload(Menu.sellable_amounts)
+        .selectinload(ProductSellableAmount.product),
+        selectinload(Display.location)
+        .selectinload(Location.default_playlist)
+        .selectinload(Playlist.items)
+        .selectinload(PlaylistItem.menu)
         .selectinload(Menu.products),
+        selectinload(Display.playlist_override)
+        .selectinload(Playlist.items)
+        .selectinload(PlaylistItem.menu)
+        .selectinload(Menu.sellable_amounts)
+        .selectinload(ProductSellableAmount.product),
         selectinload(Display.playlist_override)
         .selectinload(Playlist.items)
         .selectinload(PlaylistItem.menu)
@@ -327,9 +343,27 @@ def _playlist_item_to_slides(
 def _resolve_products_for_selection(
     menu: Menu | None,
     selected_product_ids: list[int] | None = None,
-) -> list[Product]:
+) -> list[ProductSellableAmount | Product]:
     if menu is None:
         return []
+    ordered_amounts = sorted(
+        menu.active_sellable_amounts,
+        key=lambda amount: (
+            ((amount.product.name if amount.product else "") or "").lower(),
+            amount.position or 0,
+            amount.id or 0,
+        ),
+    )
+    if ordered_amounts:
+        if not selected_product_ids:
+            return ordered_amounts
+        selected_set = {int(value) for value in selected_product_ids}
+        return [
+            amount
+            for amount in ordered_amounts
+            if amount.id in selected_set or amount.product_id in selected_set
+        ]
+
     ordered_products = sorted(
         menu.products, key=lambda product: ((product.name or "").lower(), product.id)
     )
@@ -345,7 +379,9 @@ def _resolve_products_for_selection(
     return filtered_products
 
 
-def _resolve_display_products(display: Display, menu: Menu | None) -> list[Product]:
+def _resolve_display_products(
+    display: Display, menu: Menu | None
+) -> list[ProductSellableAmount | Product]:
     return _resolve_products_for_selection(menu, display.selected_product_id_list)
 
 
@@ -356,8 +392,8 @@ def _resolve_block_media_url(block: BoardTemplateBlock) -> str:
 
 
 def _paginate_products(
-    products: list[Product], products_per_page: int
-) -> list[list[Product]]:
+    products: list[ProductSellableAmount | Product], products_per_page: int
+) -> list[list[ProductSellableAmount | Product]]:
     page_size = max(int(products_per_page or 0), 1)
     if not products:
         return [[]]
@@ -562,9 +598,21 @@ def _build_template_block_slides(
     return slides
 
 
-def _product_to_payload(product: Product) -> dict[str, Any]:
+def _product_to_payload(product: ProductSellableAmount | Product) -> dict[str, Any]:
+    if isinstance(product, ProductSellableAmount):
+        return {
+            "id": product.id,
+            "product_id": product.product_id,
+            "name": product.display_name,
+            "amount_name": product.name,
+            "quantity": float(product.quantity or 1.0),
+            "price": round(product.price_float, 2),
+        }
     return {
         "id": product.id,
+        "product_id": product.id,
         "name": product.name,
-        "price": round(float(product.price or 0.0), 2),
+        "amount_name": "Each",
+        "quantity": 1.0,
+        "price": round(product.default_sellable_price, 2),
     }

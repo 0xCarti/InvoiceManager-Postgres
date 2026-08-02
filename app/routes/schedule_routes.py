@@ -78,12 +78,21 @@ from app.services.schedule_service import (
 )
 from app.utils.filter_state import get_filter_defaults
 from app.utils.pagination import PAGINATION_SIZES, build_pagination_args, get_per_page
+from app.utils.timezone import get_default_timezone
 
 
 schedule = Blueprint("schedule", __name__)
 ALL_DEPARTMENTS_VALUE = "all"
 SCHEDULE_VIEW_USER = "user"
 SCHEDULE_VIEW_POSITION = "position"
+MY_SCHEDULE_PERIOD_WEEK = "week"
+MY_SCHEDULE_PERIOD_TWO_WEEKS = "two_weeks"
+MY_SCHEDULE_PERIOD_MONTH = "month"
+MY_SCHEDULE_PERIOD_CHOICES = (
+    (MY_SCHEDULE_PERIOD_WEEK, "Week"),
+    (MY_SCHEDULE_PERIOD_TWO_WEEKS, "Two Weeks"),
+    (MY_SCHEDULE_PERIOD_MONTH, "Month"),
+)
 
 
 def _parse_int(value, default=None):
@@ -97,6 +106,15 @@ def _parse_int(value, default=None):
 
 def _parse_checkbox(value) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "y", "yes", "on"}
+
+
+def _parse_iso_date(value, default=None):
+    if not value:
+        return default
+    try:
+        return datetime.strptime(str(value).strip(), "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return default
 
 
 def _schedule_membership_role_usage_counts() -> dict[str, int]:
@@ -486,6 +504,146 @@ def _team_schedule_access_mode() -> tuple[bool, bool]:
     )
     can_self = current_user.has_permission("schedules.self_schedule")
     return can_team, can_self
+
+
+def _month_start(value: date_cls) -> date_cls:
+    return value.replace(day=1)
+
+
+def _add_months(value: date_cls, months: int) -> date_cls:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    return value.replace(year=year, month=month, day=1)
+
+
+def _my_schedule_period(value) -> str:
+    normalized = str(value or "").strip().lower()
+    valid_periods = {period for period, _label in MY_SCHEDULE_PERIOD_CHOICES}
+    if normalized in valid_periods:
+        return normalized
+    return MY_SCHEDULE_PERIOD_WEEK
+
+
+def _resolve_my_schedule_range(raw_period, raw_date) -> tuple[str, date_cls, date_cls]:
+    period = _my_schedule_period(raw_period)
+    anchor_date = _parse_iso_date(raw_date, date_cls.today())
+    if period == MY_SCHEDULE_PERIOD_MONTH:
+        start_date = _month_start(anchor_date)
+        end_date = _add_months(start_date, 1) - timedelta(days=1)
+    elif period == MY_SCHEDULE_PERIOD_TWO_WEEKS:
+        start_date = normalize_week_start(anchor_date)
+        end_date = start_date + timedelta(days=13)
+    else:
+        start_date = normalize_week_start(anchor_date)
+        end_date = start_date + timedelta(days=6)
+    return period, start_date, end_date
+
+
+def _my_schedule_previous_start(period: str, start_date: date_cls) -> date_cls:
+    if period == MY_SCHEDULE_PERIOD_MONTH:
+        return _add_months(start_date, -1)
+    if period == MY_SCHEDULE_PERIOD_TWO_WEEKS:
+        return start_date - timedelta(days=14)
+    return start_date - timedelta(days=7)
+
+
+def _my_schedule_next_start(period: str, start_date: date_cls) -> date_cls:
+    if period == MY_SCHEDULE_PERIOD_MONTH:
+        return _add_months(start_date, 1)
+    if period == MY_SCHEDULE_PERIOD_TWO_WEEKS:
+        return start_date + timedelta(days=14)
+    return start_date + timedelta(days=7)
+
+
+def _format_schedule_period_label(start_date: date_cls, end_date: date_cls) -> str:
+    if start_date == end_date:
+        return start_date.strftime("%b %d, %Y")
+    if start_date.year == end_date.year and start_date.month == end_date.month:
+        return f"{start_date.strftime('%b %d')} - {end_date.strftime('%d, %Y')}"
+    return f"{start_date.strftime('%b %d')} - {end_date.strftime('%b %d, %Y')}"
+
+
+def _shift_break_minutes(shift: Shift) -> int:
+    if not shift.paid_hours_manual:
+        return 0
+    break_hours = float(shift.duration_hours or 0.0) - float(shift.paid_hours or 0.0)
+    if break_hours <= 0:
+        return 0
+    return int(round(break_hours * 60))
+
+
+def _format_break_minutes(minutes: int) -> str:
+    hours, remainder = divmod(int(minutes or 0), 60)
+    parts = []
+    if hours:
+        parts.append(f"{hours} hr" if hours == 1 else f"{hours} hrs")
+    if remainder:
+        parts.append(f"{remainder} min")
+    return " ".join(parts)
+
+
+def _current_schedule_datetime() -> datetime:
+    """Return the current app-local schedule datetime as a naive value."""
+    return datetime.now(get_default_timezone()).replace(tzinfo=None)
+
+
+def _shift_has_started(shift: Shift, now: datetime | None = None) -> bool:
+    current_time = now or _current_schedule_datetime()
+    return shift.starts_at <= current_time
+
+
+def _shift_is_tradeboard_visible(shift: Shift, now: datetime | None = None) -> bool:
+    return (
+        shift.assignment_mode in (Shift.ASSIGNMENT_OPEN, Shift.ASSIGNMENT_TRADEBOARD)
+        and not _shift_has_started(shift, now)
+    )
+
+
+def _expire_started_tradeboard_shift(
+    shift: Shift,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    if (
+        shift.assignment_mode != Shift.ASSIGNMENT_TRADEBOARD
+        or shift.assigned_user_id is None
+        or not _shift_has_started(shift, now)
+    ):
+        return False
+
+    before = capture_shift_snapshot(shift)
+    shift.assignment_mode = Shift.ASSIGNMENT_ASSIGNED
+    shift.updated_by = None
+    if shift.schedule_week is not None:
+        shift.schedule_week.current_version += 1
+        shift.live_version = shift.schedule_week.current_version
+    for claim in shift.tradeboard_claims:
+        if claim.status == TradeboardClaim.STATUS_PENDING:
+            claim.status = TradeboardClaim.STATUS_REJECTED
+            claim.reviewed_at = datetime.utcnow()
+            claim.manager_note = "Shift started before this claim was approved."
+    record_shift_audit(
+        shift,
+        actor=None,
+        action="tradeboard_post_expired",
+        version=shift.live_version or 0,
+        before=before,
+        after=capture_shift_snapshot(shift),
+        summary=f"Tradeboard posting expired for {shift.shift_date}.",
+    )
+    return True
+
+
+def _can_post_shift_to_tradeboard(shift: Shift, now: datetime | None = None) -> bool:
+    return (
+        current_user.has_permission("schedules.post_tradeboard")
+        and shift.assigned_user_id == current_user.id
+        and shift.assignment_mode == Shift.ASSIGNMENT_ASSIGNED
+        and shift.schedule_week is not None
+        and shift.schedule_week.is_published
+        and not _shift_has_started(shift, now)
+    )
 
 
 def _parse_schedule_view_mode(value) -> str:
@@ -1246,15 +1404,12 @@ def team_schedule():
                         "Editing a shift cannot change departments."
                     )
 
-                position = db.session.get(ShiftPosition, shift_form.position_id.data)
-                if (
-                    position is None
-                    or target_department is None
-                    or position.department_id != target_department.id
-                ):
-                    shift_form.position_id.errors.append(
-                        "Selected position does not belong to this department."
-                    )
+                position_id = (
+                    shift_form.position_id.data
+                    if shift_form.position_id.data not in (None, 0)
+                    else None
+                )
+                position = db.session.get(ShiftPosition, position_id) if position_id else None
 
                 selected_event_id = _parse_int(shift_form.event_id.data)
                 selected_location_id = _parse_int(shift_form.location_id.data)
@@ -1309,6 +1464,22 @@ def team_schedule():
                     if assigned_user is not None and target_department is not None
                     else []
                 )
+                if position is None:
+                    if (
+                        assignment_mode == Shift.ASSIGNMENT_ASSIGNED
+                        and assigned_user is not None
+                        and target_department is not None
+                        and not eligible_position_ids
+                    ):
+                        shift_form.position_id.errors.append(
+                            "Selected user has no active position eligibility in this department. Add position eligibility in Scheduling Setup before assigning shifts."
+                        )
+                    else:
+                        shift_form.position_id.errors.append("Select a position.")
+                elif target_department is None or position.department_id != target_department.id:
+                    shift_form.position_id.errors.append(
+                        "Selected position does not belong to this department."
+                    )
                 if not can_manage_team_shifts:
                     if assignment_mode != Shift.ASSIGNMENT_ASSIGNED:
                         shift_form.assignment_mode.errors.append(
@@ -1853,10 +2024,71 @@ def team_schedule():
     )
 
 
-@schedule.route("/schedules/mine", methods=["GET"])
+@schedule.route("/schedules/mine", methods=["GET", "POST"])
 @login_required
 def my_schedule():
     """Show the current user's published schedule."""
+    action_form = CSRFOnlyForm(prefix="tradeboardpost")
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip()
+        if action != "post_tradeboard_shift":
+            abort(400)
+        if not current_user.has_permission("schedules.post_tradeboard"):
+            abort(403)
+
+        shift = (
+            Shift.query.options(selectinload(Shift.schedule_week))
+            .filter_by(id=_parse_int(request.form.get("shift_id")))
+            .first()
+        )
+        if (
+            shift is None
+            or shift.schedule_week is None
+            or not shift.schedule_week.is_published
+            or shift.assigned_user_id != current_user.id
+        ):
+            abort(404)
+
+        now = _current_schedule_datetime()
+        if shift.assignment_mode == Shift.ASSIGNMENT_TRADEBOARD:
+            flash("That shift is already posted to the tradeboard.", "info")
+        elif shift.assignment_mode != Shift.ASSIGNMENT_ASSIGNED:
+            flash("Only assigned shifts can be posted to the tradeboard.", "warning")
+        elif _shift_has_started(shift, now):
+            flash("Shifts that have already started cannot be posted to the tradeboard.", "warning")
+        else:
+            before = capture_shift_snapshot(shift)
+            shift.assignment_mode = Shift.ASSIGNMENT_TRADEBOARD
+            shift.updated_by = current_user
+            shift.schedule_week.current_version += 1
+            shift.live_version = shift.schedule_week.current_version
+            record_shift_audit(
+                shift,
+                actor=current_user,
+                action="tradeboard_posted",
+                version=shift.live_version,
+                before=before,
+                after=capture_shift_snapshot(shift),
+                summary=f"Posted shift to tradeboard for {shift.shift_date}.",
+            )
+            db.session.commit()
+            notify_schedule_changes(shift.schedule_week, [(before, shift)])
+            flash("Shift posted to the tradeboard.", "success")
+            return redirect(
+                url_for(
+                    "schedule.my_schedule",
+                    period=request.form.get("period") or MY_SCHEDULE_PERIOD_WEEK,
+                    start_date=request.form.get("start_date") or shift.shift_date.isoformat(),
+                )
+            )
+        return redirect(
+            url_for(
+                "schedule.my_schedule",
+                period=request.form.get("period") or MY_SCHEDULE_PERIOD_WEEK,
+                start_date=request.form.get("start_date") or shift.shift_date.isoformat(),
+            )
+        )
+
     departments = [
         department
         for department in get_visible_departments(current_user)
@@ -1865,52 +2097,81 @@ def my_schedule():
             for membership in current_user.department_memberships
         )
     ]
-    selected_department = _select_department(
-        departments, _parse_int(request.args.get("department_id"))
+    department_ids = [department.id for department in departments]
+    selected_period, range_start, range_end = _resolve_my_schedule_range(
+        request.args.get("period"),
+        request.args.get("start_date") or request.args.get("week_start"),
     )
-    week_start = normalize_week_start(request.args.get("week_start"))
-    schedule_week = None
     shifts: list[Shift] = []
-    receipt = None
-    if selected_department is not None:
-        schedule_week = (
-            DepartmentScheduleWeek.query.options(
-                selectinload(DepartmentScheduleWeek.shifts).selectinload(Shift.position),
-                selectinload(DepartmentScheduleWeek.receipts),
+    schedule_weeks: list[DepartmentScheduleWeek] = []
+    if department_ids:
+        week_lookup_start = range_start - timedelta(days=6)
+        schedule_weeks = (
+            DepartmentScheduleWeek.query.options(selectinload(DepartmentScheduleWeek.receipts))
+            .filter(
+                DepartmentScheduleWeek.department_id.in_(department_ids),
+                DepartmentScheduleWeek.is_published.is_(True),
+                DepartmentScheduleWeek.week_start >= week_lookup_start,
+                DepartmentScheduleWeek.week_start <= range_end,
             )
-            .filter_by(
-                department_id=selected_department.id,
-                week_start=week_start,
-                is_published=True,
-            )
-            .first()
+            .order_by(DepartmentScheduleWeek.week_start.asc())
+            .all()
         )
-        if schedule_week is not None:
-            mark_schedule_week_seen(current_user, [schedule_week])
+        if schedule_weeks:
+            mark_schedule_week_seen(current_user, schedule_weeks)
             db.session.commit()
-            receipt = next(
-                (
-                    item
-                    for item in schedule_week.receipts
-                    if item.user_id == current_user.id
-                ),
-                None,
+            shifts = (
+                Shift.query.options(
+                    selectinload(Shift.position),
+                    selectinload(Shift.location),
+                    selectinload(Shift.event),
+                )
+                .filter(
+                    Shift.schedule_week_id.in_([week.id for week in schedule_weeks]),
+                    Shift.assigned_user_id == current_user.id,
+                    Shift.shift_date >= range_start,
+                    Shift.shift_date <= range_end,
+                )
+                .order_by(Shift.shift_date.asc(), Shift.start_time.asc(), Shift.id.asc())
+                .all()
             )
-            shifts = [
-                shift
-                for shift in schedule_week.shifts
-                if shift.assigned_user_id == current_user.id
-            ]
+
+    now = _current_schedule_datetime()
+    expired_tradeboard = False
+    for shift in shifts:
+        expired_tradeboard = (
+            _expire_started_tradeboard_shift(shift, now=now) or expired_tradeboard
+        )
+    if expired_tradeboard:
+        db.session.commit()
+
+    shifts_by_date: dict[date_cls, list[Shift]] = defaultdict(list)
+    for shift in shifts:
+        shifts_by_date[shift.shift_date].append(shift)
+    schedule_days = [
+        {"date": shift_date, "shifts": shifts_by_date[shift_date]}
+        for shift_date in sorted(shifts_by_date)
+    ]
+
     return render_template(
         "schedules/my_schedule.html",
         departments=departments,
-        selected_department=selected_department,
-        schedule_week=schedule_week,
-        week_label=format_week_label(week_start),
-        previous_week=week_start - timedelta(days=7),
-        next_week=week_start + timedelta(days=7),
-        shifts=sorted(shifts, key=lambda shift: (shift.shift_date, shift.start_time)),
-        receipt=receipt,
+        period_choices=MY_SCHEDULE_PERIOD_CHOICES,
+        selected_period=selected_period,
+        range_start=range_start,
+        range_end=range_end,
+        range_label=_format_schedule_period_label(range_start, range_end),
+        previous_start=_my_schedule_previous_start(selected_period, range_start),
+        next_start=_my_schedule_next_start(selected_period, range_start),
+        today=date_cls.today(),
+        schedule_days=schedule_days,
+        shifts=shifts,
+        shift_break_minutes=_shift_break_minutes,
+        format_break_minutes=_format_break_minutes,
+        action_form=action_form,
+        can_post_shift_to_tradeboard=lambda shift: _can_post_shift_to_tradeboard(
+            shift, now
+        ),
     )
 
 
@@ -2159,6 +2420,7 @@ def tradeboard():
     review_form = TradeboardClaimReviewForm(prefix="claimreview")
     action_form = CSRFOnlyForm(prefix="tradeboard")
     can_manage_claims = current_user.has_permission("schedules.approve_tradeboard")
+    now = _current_schedule_datetime()
 
     schedule_week = None
     shifts: list[Shift] = []
@@ -2179,6 +2441,15 @@ def tradeboard():
             .first()
         )
         if schedule_week is not None:
+            expired_tradeboard = False
+            for shift in schedule_week.shifts:
+                expired_tradeboard = (
+                    _expire_started_tradeboard_shift(shift, now=now)
+                    or expired_tradeboard
+                )
+            if expired_tradeboard:
+                db.session.commit()
+
             eligible_position_ids = {
                 eligibility.position_id
                 for eligibility in current_user.position_eligibilities
@@ -2186,10 +2457,7 @@ def tradeboard():
                 and eligibility.position.department_id == selected_department.id
             }
             for shift in schedule_week.shifts:
-                if shift.assignment_mode not in (
-                    Shift.ASSIGNMENT_OPEN,
-                    Shift.ASSIGNMENT_TRADEBOARD,
-                ):
+                if not _shift_is_tradeboard_visible(shift, now):
                     continue
                 if can_manage_claims or shift.position_id in eligible_position_ids:
                     shifts.append(shift)
@@ -2213,6 +2481,34 @@ def tradeboard():
                 Shift.ASSIGNMENT_TRADEBOARD,
             ):
                 abort(400)
+            if _expire_started_tradeboard_shift(shift, now=now):
+                db.session.commit()
+                flash("That shift has already started and is no longer on the tradeboard.", "warning")
+                return redirect(
+                    _schedule_redirect(
+                        "schedule.tradeboard",
+                        shift.schedule_week.department_id,
+                        shift.schedule_week.week_start,
+                    )
+                )
+            if not _shift_is_tradeboard_visible(shift, now):
+                flash("That shift has already started and is no longer on the tradeboard.", "warning")
+                return redirect(
+                    _schedule_redirect(
+                        "schedule.tradeboard",
+                        shift.schedule_week.department_id,
+                        shift.schedule_week.week_start,
+                    )
+                )
+            if shift.assigned_user_id == current_user.id:
+                flash("You cannot claim your own posted shift.", "warning")
+                return redirect(
+                    _schedule_redirect(
+                        "schedule.tradeboard",
+                        shift.schedule_week.department_id,
+                        shift.schedule_week.week_start,
+                    )
+                )
             existing_claim = TradeboardClaim.query.filter_by(
                 shift_id=shift.id,
                 user_id=current_user.id,
@@ -2269,8 +2565,25 @@ def tradeboard():
                 abort(404)
             if not _can_manage_user_in_any_department(current_user, claim.user):
                 abort(403)
+            shift = claim.shift
+            if _expire_started_tradeboard_shift(shift, now=now) or _shift_has_started(
+                shift, now
+            ):
+                if claim.status == TradeboardClaim.STATUS_PENDING:
+                    claim.status = TradeboardClaim.STATUS_REJECTED
+                    claim.reviewed_by = current_user
+                    claim.reviewed_at = datetime.utcnow()
+                    claim.manager_note = "Shift started before this claim was approved."
+                db.session.commit()
+                flash("That shift has already started, so the claim cannot be approved.", "warning")
+                return redirect(
+                    _schedule_redirect(
+                        "schedule.tradeboard",
+                        shift.schedule_week.department_id,
+                        shift.schedule_week.week_start,
+                    )
+                )
             if review_form.validate_on_submit():
-                shift = claim.shift
                 claim.status = review_form.status.data
                 claim.manager_note = (
                     review_form.manager_note.data or ""

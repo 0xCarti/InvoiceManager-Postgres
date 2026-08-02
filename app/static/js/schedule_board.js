@@ -343,10 +343,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const departmentOptions = getDepartmentPositionOptions(departmentId);
 
     if (!departmentOptions.length) {
-      inputs.position.disabled = true;
+      inputs.position.disabled = false;
       replacePositionOptions(
-        [{ value: "", label: departmentId === "0" ? "Select a department first" : "No active positions" }],
-        "",
+        [{ value: "0", label: departmentId === "0" ? "Select a department first" : "No active positions" }],
+        "0",
       );
       return;
     }
@@ -383,10 +383,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (!eligibleOptions.length) {
-      inputs.position.disabled = true;
+      inputs.position.disabled = false;
       replacePositionOptions(
-        [{ value: "", label: "No eligible positions" }],
-        "",
+        [{ value: "0", label: "No eligible positions" }],
+        "0",
       );
       return;
     }

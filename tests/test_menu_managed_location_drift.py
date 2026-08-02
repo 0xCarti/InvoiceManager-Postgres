@@ -242,6 +242,8 @@ def test_event_linked_sales_import_does_not_link_products_to_menu_managed_locati
                     }
                 ]
             },
+            source_import_id=None,
+            approval_batch_id="linked-sales-test",
         )
         db.session.flush()
 

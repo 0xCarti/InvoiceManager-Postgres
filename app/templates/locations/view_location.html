@@ -337,7 +337,7 @@
                                 {{ product.name }}
                                 {% endif %}
                             </div>
-                            <div class="small text-muted">Terminal price: {{ '%.2f'|format(product.price or 0) }}</div>
+                            <div class="small text-muted">Default sellable price: {{ '%.2f'|format(product.default_sellable_price or 0) }}</div>
                         </div>
                         {% endfor %}
                     </div>

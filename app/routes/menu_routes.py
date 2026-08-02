@@ -17,7 +17,7 @@ from flask import (
     url_for,
 )
 from flask_login import login_required
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import selectinload
 
 from app import db
@@ -27,7 +27,16 @@ from app.forms import (
     MenuForm,
     QuickProductForm,
 )
-from app.models import Location, Menu, MenuAssignment, PlaylistItem, Product, Setting
+from app.models import (
+    Location,
+    Menu,
+    MenuAssignment,
+    PlaylistItem,
+    Product,
+    ProductSellableAmount,
+    Setting,
+)
+from app.utils.sellable_amounts import ensure_default_sellable_amount
 from app.utils.activity import log_activity
 from app.utils.menu_assignments import set_location_menu, sync_menu_locations
 from app.utils.text import (
@@ -42,9 +51,58 @@ def _load_products(product_ids: list[int]) -> list[Product]:
     if not product_ids:
         return []
     unique_ids = list(dict.fromkeys(product_ids))
-    products = Product.query.filter(Product.id.in_(unique_ids)).all()
+    products = (
+        Product.query.filter(
+            Product.id.in_(unique_ids),
+            Product.archived.is_(False),
+        ).all()
+    )
     by_id = {product.id: product for product in products}
     return [by_id[pid] for pid in unique_ids if pid in by_id]
+
+
+def _load_sellable_amounts(amount_ids: list[int]) -> list[ProductSellableAmount]:
+    if not amount_ids:
+        return []
+    unique_ids = list(dict.fromkeys(amount_ids))
+    amounts = (
+        ProductSellableAmount.query.options(selectinload(ProductSellableAmount.product))
+        .join(Product)
+        .filter(
+            ProductSellableAmount.id.in_(unique_ids),
+            ProductSellableAmount.active.is_(True),
+            Product.archived.is_(False),
+        )
+        .all()
+    )
+    by_id = {amount.id: amount for amount in amounts}
+    return [by_id[amount_id] for amount_id in unique_ids if amount_id in by_id]
+
+
+def _products_for_sellable_amounts(
+    amounts: list[ProductSellableAmount],
+) -> list[Product]:
+    products: list[Product] = []
+    seen_ids: set[int] = set()
+    for amount in amounts:
+        product = amount.product
+        if product is None or product.id in seen_ids:
+            continue
+        products.append(product)
+        seen_ids.add(product.id)
+    return products
+
+
+def _resolve_menu_sellable_amounts(form: MenuForm) -> list[ProductSellableAmount]:
+    amounts = _load_sellable_amounts(form.sellable_amount_ids.data or [])
+    if amounts:
+        return amounts
+
+    # Compatibility for callers that still submit product_ids.
+    products = _load_products(form.product_ids.data or [])
+    if not products:
+        return []
+    return [ensure_default_sellable_amount(product) for product in products]
 
 
 def _extract_menu_feed_token() -> str:
@@ -75,22 +133,40 @@ def _is_menu_feed_authorized() -> bool:
     return secrets.compare_digest(provided_token, expected_token)
 
 
-def _menu_feed_products() -> list[Product]:
-    return Product.query.order_by(func.lower(Product.name), Product.id).all()
+def _menu_feed_sellable_amounts() -> list[ProductSellableAmount]:
+    return (
+        ProductSellableAmount.query.options(selectinload(ProductSellableAmount.product))
+        .join(Product)
+        .filter(
+            Product.archived.is_(False),
+            ProductSellableAmount.active.is_(True),
+        )
+        .order_by(
+            func.lower(Product.name),
+            ProductSellableAmount.position,
+            ProductSellableAmount.id,
+        )
+        .all()
+    )
 
 
-def _menu_feed_json_rows(products: list[Product]) -> list[dict[str, object]]:
+def _menu_feed_json_rows(
+    amounts: list[ProductSellableAmount],
+) -> list[dict[str, object]]:
     return [
         {
-            "id": str(product.id),
-            "name": product.name,
+            "id": str(amount.id),
+            "product_id": amount.product_id,
+            "name": amount.display_name,
+            "amount_name": amount.name,
+            "quantity": float(amount.quantity or 1.0),
             "category": "",
             "image_url": "",
             "description": "",
             "enabled": 1,
-            "price": round(float(product.price or 0.0), 2),
+            "price": round(amount.price_float, 2),
         }
-        for product in products
+        for amount in amounts
     ]
 
 
@@ -100,7 +176,10 @@ def _menu_feed_csv_text(rows: list[dict[str, object]]) -> str:
         output,
         fieldnames=[
             "id",
+            "product_id",
             "name",
+            "amount_name",
+            "quantity",
             "category",
             "image_url",
             "description",
@@ -136,6 +215,7 @@ def view_menus():
 
     query = Menu.query.options(
         selectinload(Menu.products),
+        selectinload(Menu.sellable_amounts).selectinload(ProductSellableAmount.product),
         selectinload(Menu.assignments).selectinload(MenuAssignment.location),
     )
 
@@ -161,10 +241,11 @@ def view_menus():
     else:
         assigned_status = "all"
 
+    has_selection = or_(Menu.sellable_amounts.any(), Menu.products.any())
     if product_status == "with":
-        query = query.filter(Menu.products.any())
+        query = query.filter(has_selection)
     elif product_status == "without":
-        query = query.filter(~Menu.products.any())
+        query = query.filter(~has_selection)
     else:
         product_status = "all"
 
@@ -188,11 +269,13 @@ def add_menu():
     quick_product_form = QuickProductForm()
     copy_menus = Menu.query.order_by(Menu.name).all()
     if form.validate_on_submit():
+        sellable_amounts = _resolve_menu_sellable_amounts(form)
         menu = Menu(
             name=form.name.data,
             description=form.description.data,
         )
-        menu.products = _load_products(form.product_ids.data)
+        menu.sellable_amounts = sellable_amounts
+        menu.products = _products_for_sellable_amounts(sellable_amounts)
         db.session.add(menu)
         db.session.commit()
         log_activity(f"Created menu {menu.name}")
@@ -219,11 +302,16 @@ def edit_menu(menu_id: int):
         Menu.query.filter(Menu.id != menu.id).order_by(Menu.name).all()
     )
     if request.method == "GET":
+        form.sellable_amount_ids.data = [
+            amount.id for amount in menu.active_sellable_amounts
+        ]
         form.product_ids.data = [product.id for product in menu.products]
     if form.validate_on_submit():
+        sellable_amounts = _resolve_menu_sellable_amounts(form)
         menu.name = form.name.data
         menu.description = form.description.data
-        menu.products = _load_products(form.product_ids.data)
+        menu.sellable_amounts = sellable_amounts
+        menu.products = _products_for_sellable_amounts(sellable_amounts)
         db.session.flush()
         sync_menu_locations(menu)
         db.session.commit()
@@ -303,6 +391,9 @@ def get_menu_products():
         {
             "id": menu.id,
             "name": menu.name,
+            "sellable_amount_ids": [
+                amount.id for amount in menu.active_sellable_amounts
+            ],
             "product_ids": [product.id for product in menu.products],
         }
     )
@@ -315,7 +406,7 @@ def menu_feed():
     if not _is_menu_feed_authorized():
         abort(403)
 
-    rows = _menu_feed_json_rows(_menu_feed_products())
+    rows = _menu_feed_json_rows(_menu_feed_sellable_amounts())
 
     response_payload = {
         "count": len(rows),

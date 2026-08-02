@@ -547,7 +547,7 @@
                                 <div class="col-6"><div class="border rounded p-2"><div class="text-muted">Net</div><div class="fw-semibold">{{ '%.2f'|format(row.net_inc) }}</div></div></div>
                                 <div class="col-6"><div class="border rounded p-2"><div class="text-muted">Discount</div><div class="fw-semibold">{{ '%.2f'|format(review.discount|default(0.0)) }}</div></div></div>
                                 <div class="col-6"><div class="border rounded p-2"><div class="text-muted">File</div><div class="fw-semibold">{{ '%.2f'|format(review.file_price|default(0.0)) }}</div></div></div>
-                                <div class="col-6"><div class="border rounded p-2"><div class="text-muted">App</div><div class="fw-semibold">{% if review.app_price is not none %}{{ '%.2f'|format(review.app_price) }}{% else %}n/a{% endif %}</div></div></div>
+                                <div class="col-6"><div class="border rounded p-2"><div class="text-muted">Default sellable</div><div class="fw-semibold">{% if review.app_price is not none %}{{ '%.2f'|format(review.app_price) }}{% else %}n/a{% endif %}</div></div></div>
                                 <div class="col-6"><div class="border rounded p-2"><div class="text-muted">Mapped</div><div class="fw-semibold text-break">{{ row.product.name if row.product else 'Unmapped' }}</div></div></div>
                             </div>
                             <div class="small text-muted mb-2">
@@ -581,7 +581,7 @@
                                     <select class="form-select form-select-sm" name="price_resolution" {% if price_review_locked %}disabled{% endif %}>
                                         <option value="" {% if not review.action %}selected{% endif %}>Select an option</option>
                                         <option value="file" {% if review.action == 'file' %}selected{% endif %}>Use file price (${{ '%.2f'|format(review.file_price|default(0.0)) }})</option>
-                                        <option value="app" {% if review.action == 'app' %}selected{% endif %}>Use app price{% if review.app_price is not none %} (${{ '%.2f'|format(review.app_price) }}){% endif %}</option>
+                                        <option value="app" {% if review.action == 'app' %}selected{% endif %}>Use default sellable price{% if review.app_price is not none %} (${{ '%.2f'|format(review.app_price) }}){% endif %}</option>
                                         <option value="custom" {% if review.action == 'custom' %}selected{% endif %}>Edit to custom price</option>
                                         <option value="skip" {% if review.action == 'skip' %}selected{% endif %}>Skip row</option>
                                     </select>
@@ -721,7 +721,7 @@
                                                     Use file price (${{ '%.2f'|format(review.file_price|default(0.0)) }})
                                                 </option>
                                                 <option value="app" {% if review.action == 'app' %}selected{% endif %}>
-                                                    Use app price{% if review.app_price is not none %} (${{ '%.2f'|format(review.app_price) }}){% endif %}
+                                                    Use default sellable price{% if review.app_price is not none %} (${{ '%.2f'|format(review.app_price) }}){% endif %}
                                                 </option>
                                                 <option value="custom" {% if review.action == 'custom' %}selected{% endif %}>Edit to custom price</option>
                                                 <option value="skip" {% if review.action == 'skip' %}selected{% endif %}>Skip row</option>

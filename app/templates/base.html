@@ -499,7 +499,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/item_search_selects.css') }}">
 </head>
 
-<body class="{% if current_user.is_authenticated %}has-auth-sidebar{% endif %}">
+<body class="{% if current_user.is_authenticated %}has-auth-sidebar{% endif %}{% if request.endpoint and request.endpoint.startswith('report.') %} report-page{% endif %}{% if is_report_result_request() %} report-result-tab{% endif %}">
     <nav class="navbar navbar-light bg-light">
         <div class="container-fluid">
             <button class="navbar-toggler me-2" id="sidebarMenuToggle" type="button" data-bs-toggle="offcanvas" data-bs-target="#navbarNav"
@@ -691,6 +691,8 @@
     <script src="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/js/select2.min.js"></script>
     <script src="{{ url_for('static', filename='js/table-sort.js') }}"></script>
     <script src="{{ url_for('static', filename='js/column_visibility.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/table_export.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/report_results.js') }}"></script>
     <script src="{{ url_for('static', filename='js/item_search_selects.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/responsive_tables.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/filter_defaults.js', v='20260417a') }}" defer></script>

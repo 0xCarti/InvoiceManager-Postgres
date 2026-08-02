@@ -192,7 +192,7 @@
                                     {% endif %}
                                 </p>
                                 <p class="mb-2">
-                                    <span class="fw-semibold">Catalog price in app:</span>
+                                    <span class="fw-semibold">Default sellable price in app:</span>
                                     {% if issue.catalog_price is not none %}
                                         ${{ '%.2f'|format(issue.catalog_price) }}
                                     {% elif issue.app_price is not none %}
@@ -210,7 +210,7 @@
                                     </span>
                                 {% elif issue.resolution == 'skip' %}
                                     <span class="badge bg-secondary">
-                                        Keeping catalog price
+                                        Keeping default sellable price
                                         {% if issue.catalog_price is not none %}
                                             (${{ '%.2f'|format(issue.catalog_price) }})
                                         {% endif %}
@@ -231,7 +231,7 @@
                                                 class="btn btn-sm btn-outline-secondary"
                                                 name="action"
                                                 value="price:{{ issue.product_id }}:skip">
-                                            Keep catalog price
+                                            Keep default sellable price
                                             {% if issue.catalog_price is not none %}
                                                 (${{ '%.2f'|format(issue.catalog_price) }})
                                             {% endif %}
@@ -239,7 +239,7 @@
                                     </div>
                                     {% if issue.terminal_price is none %}
                                         <div class="form-text text-muted">
-                                            Terminal sales did not include a unit price; keep the catalog price to continue.
+                                            Terminal sales did not include a unit price; keep the default sellable price to continue.
                                         </div>
                                     {% endif %}
                                 {% endif %}
@@ -583,7 +583,7 @@
                                                     <th scope="col">Matched product</th>
                                                     <th scope="col" class="text-end">Quantity</th>
                                                     <th scope="col" class="text-end">File price(s)</th>
-                                                    <th scope="col" class="text-end">App price</th>
+                                                    <th scope="col" class="text-end">Default sellable price</th>
                                                     <th scope="col" class="text-end">File total</th>
                                                 </tr>
                                             </thead>

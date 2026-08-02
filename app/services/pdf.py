@@ -219,3 +219,37 @@ def render_stand_sheet_pdf(
         writer.close()
         for stream in streams:
             stream.close()
+
+
+def render_template_pdf(
+    pages: Sequence[PDFPage], *, base_url: str | None = None
+) -> bytes:
+    """Render one or more portrait template pages into a merged PDF."""
+
+    if not pages:
+        raise ValueError("At least one template must be provided")
+
+    pdf_pages = []
+    for template_name, context in pages:
+        html = render_template(template_name, **context)
+        pdf_pages.append(_render_html_to_pdf(html, base_url=base_url))
+
+    if len(pdf_pages) == 1:
+        return pdf_pages[0]
+
+    writer = PdfWriter()
+    streams = []
+    try:
+        for pdf_bytes in pdf_pages:
+            stream = BytesIO(pdf_bytes)
+            streams.append(stream)
+            writer.append(stream)
+        output = BytesIO()
+        writer.write(output)
+        data = output.getvalue()
+        output.close()
+        return data
+    finally:
+        writer.close()
+        for stream in streams:
+            stream.close()

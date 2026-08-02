@@ -7,6 +7,7 @@ __pycache__/
 instance/
 logs/
 uploads/
+artifacts/
 inventory.db
 backups/*.db
 .coverage

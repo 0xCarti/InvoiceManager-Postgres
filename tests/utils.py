@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from io import BytesIO
 import re
 from typing import Any
+
+from openpyxl import Workbook
 
 
 _CSRF_RE = re.compile(r'name=["\']csrf_token["\'][^>]*value=["\']([^"\']+)["\']', re.IGNORECASE)
@@ -55,5 +58,20 @@ def save_filter_defaults(client, scope: str, values: dict[str, list[str]], *, to
     if response.status_code != 200:
         raise AssertionError(
             f"Failed to store defaults for {scope!r}: {response.status_code} {response.data!r}"
-        )
+    )
     return response
+
+
+def build_terminal_sales_workbook_bytes() -> bytes:
+    """Return a small IdealPOS-style workbook with one location and one sale row."""
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Sales"
+    sheet.append(["Main Stand"])
+    sheet.append(["1001", "Hot Dog", 4.50, None, 2, 9.00, None, 9.00, 0.00])
+    sheet.append([None, None, None, None, 2, 9.00, None, 9.00, 0.00])
+
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()

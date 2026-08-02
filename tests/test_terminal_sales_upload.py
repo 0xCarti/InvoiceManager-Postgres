@@ -14,6 +14,7 @@ from app.models import (
     EventLocationTerminalSalesSummary,
     Location,
     Product,
+    ProductSellableAmount,
     TerminalSale,
     TerminalSalesResolutionState,
     User,
@@ -1019,7 +1020,7 @@ def test_terminal_sales_zero_price_comp_does_not_queue_mismatch(app, client):
         assert any(math.isclose(value, product.price, abs_tol=0.01) for value in file_prices)
 
 
-def test_terminal_sales_price_matching_uses_sell_price_not_invoice_sale_price(
+def test_terminal_sales_price_matching_uses_default_sellable_amount_price(
     app, client
 ):
     with app.app_context():
@@ -1037,6 +1038,16 @@ def test_terminal_sales_price_matching_uses_sell_price_not_invoice_sale_price(
             cost=2.0,
         )
         db.session.add_all([event, location, event_location, product])
+        db.session.flush()
+        db.session.add(
+            ProductSellableAmount(
+                product=product,
+                name="Each",
+                quantity=1.0,
+                price=9.0,
+                is_default=True,
+            )
+        )
         db.session.commit()
         event_id = event.id
         mapping_field = f"mapping-{event_location.id}"

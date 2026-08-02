@@ -114,6 +114,10 @@ $(document).ready(function () {
     function addCatalogRow(productName, productPrice, options = {}) {
         const unitPrice = Number(productPrice || 0);
         const quantity = options.quantity ?? 1;
+        const productId = options.product_id ?? '';
+        const sellableAmountId = options.sellable_amount_id ?? '';
+        const sellableAmountName = options.sellable_amount_name ?? options.amount_name ?? '';
+        const sellableQuantity = options.sellable_quantity ?? options.amount_quantity ?? 1;
         const applyGST = (
             typeof options.override_gst === 'boolean'
                 ? options.override_gst
@@ -125,10 +129,10 @@ $(document).ready(function () {
                 : !currentTaxStatus.pst_exempt
         );
         const catalogRow = `
-<tr class="product-row" data-line-kind="catalog">
+<tr class="product-row" data-line-kind="catalog" data-product-id="${escapeHtml(productId)}" data-sellable-amount-id="${escapeHtml(sellableAmountId)}" data-sellable-amount-name="${escapeHtml(sellableAmountName)}" data-sellable-quantity="${escapeHtml(sellableQuantity)}">
     <td class="align-middle invoice-line-product" data-label="Product / Description">
         <div class="fw-semibold catalog-product-name mobile-card-primary">${escapeHtml(productName)}</div>
-        <div class="form-text mb-0">Saved product</div>
+        <div class="form-text mb-0">${sellableAmountName ? escapeHtml(sellableAmountName) : 'Saved product'}</div>
     </td>
     <td class="invoice-line-quantity" data-label="Quantity">
         <input type="text" class="form-control quantity invoice-quantity-input" value="${escapeHtml(quantity)}" inputmode="text" data-numeric-input="1">
@@ -290,6 +294,10 @@ $(document).ready(function () {
 
             lines.push({
                 line_type: 'catalog',
+                product_id: $row.data('productId') || null,
+                sellable_amount_id: $row.data('sellableAmountId') || null,
+                sellable_amount_name: String($row.data('sellableAmountName') || ''),
+                sellable_quantity: parseOptionalNumber($row.data('sellableQuantity')),
                 product_name: productName,
                 quantity: quantity,
                 unit_price: parseOptionalNumber($row.find('.catalog-price').data('price')),
@@ -347,9 +355,29 @@ $(document).ready(function () {
             url: searchProductsUrl,
             data: { query: query },
             success: function (response) {
-                const suggestions = response.map(function (product) {
-                    const invoicePrice = product.invoice_sale_price ?? product.price;
-                    return '<a href="#" class="list-group-item list-group-item-action" data-name="' + product.name + '" data-price="' + invoicePrice + '">' + product.name + ' - $' + invoicePrice + '</a>';
+                const suggestions = [];
+                response.forEach(function (product) {
+                    const amounts = Array.isArray(product.sellable_amounts) && product.sellable_amounts.length
+                        ? product.sellable_amounts
+                        : [{ id: '', name: 'Each', display_name: product.name, quantity: 1, price: product.price }];
+                    amounts.forEach(function (amount) {
+                        const amountName = amount.name || 'Each';
+                        const displayName = amount.display_name || product.name;
+                        const price = amount.price ?? product.price ?? 0;
+                        const quantity = amount.quantity ?? 1;
+                        suggestions.push(
+                            '<a href="#" class="list-group-item list-group-item-action"'
+                            + ' data-product-id="' + product.id + '"'
+                            + ' data-sellable-amount-id="' + (amount.id || '') + '"'
+                            + ' data-sellable-amount-name="' + escapeHtml(amountName) + '"'
+                            + ' data-sellable-quantity="' + quantity + '"'
+                            + ' data-name="' + escapeHtml(product.name) + '"'
+                            + ' data-display-name="' + escapeHtml(displayName) + '"'
+                            + ' data-price="' + price + '">'
+                            + escapeHtml(displayName) + ' - $' + formatCurrency(price)
+                            + '</a>'
+                        );
+                    });
                 });
                 $('#productSuggestions').html(suggestions.join(''));
             }
@@ -358,7 +386,12 @@ $(document).ready(function () {
 
     $('#productSuggestions').on('click', '.list-group-item', function (e) {
         e.preventDefault();
-        addCatalogRow($(this).data('name'), $(this).data('price'));
+        addCatalogRow($(this).data('name'), $(this).data('price'), {
+            product_id: $(this).data('productId'),
+            sellable_amount_id: $(this).data('sellableAmountId'),
+            sellable_amount_name: $(this).data('sellableAmountName'),
+            sellable_quantity: $(this).data('sellableQuantity')
+        });
     });
 
     $('#addCustomLineBtn').on('click', function () {

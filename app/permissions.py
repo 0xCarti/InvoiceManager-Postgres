@@ -234,8 +234,10 @@ PERMISSION_DEFINITIONS: tuple[PermissionDefinition, ...] = (
     _perm("reports.received_invoices", "reports", "Received Invoice Report", "Run the received invoice report."),
     _perm("reports.purchase_inventory_summary", "reports", "Purchase Inventory Summary", "Run the purchase inventory summary report."),
     _perm("reports.inventory_variance", "reports", "Inventory Variance Report", "Run the inventory variance report."),
+    _perm("reports.inventory_expiry", "reports", "Inventory Expiry Report", "Run the inventory expiry report."),
     _perm("reports.invoice_gl_codes", "reports", "Purchase Invoice GL Report", "View purchase invoice GL code reports."),
     _perm("reports.product_sales", "reports", "Revenue Report", "Run the revenue report."),
+    _perm("reports.products_sold", "reports", "Products Sold Report", "Run the products sold report."),
     _perm("reports.product_stock_usage", "reports", "Stock Usage Report", "Run the stock usage report."),
     _perm("reports.product_recipe", "reports", "Recipe Report", "Run the product recipe report."),
     _perm("reports.product_location_sales", "reports", "Product Location Sales Report", "Run the product location sales report."),
@@ -269,6 +271,7 @@ PERMISSION_DEFINITIONS: tuple[PermissionDefinition, ...] = (
     _perm("schedules.approve_time_off", "schedules", "Approve Time Off", "Approve or deny time-off requests for scoped users."),
     _perm("schedules.auto_assign", "schedules", "Auto Assign Shifts", "Run the schedule auto-assignment workflow."),
     _perm("schedules.view_seen_status", "schedules", "View Seen Status", "View who has seen published schedule versions."),
+    _perm("schedules.post_tradeboard", "schedules", "Post My Shifts to Tradeboard", "Post your own assigned shifts to the tradeboard."),
     _perm("schedules.view_tradeboard", "schedules", "View Tradeboard", "View open and tradeboard shifts."),
     _perm("schedules.claim_tradeboard", "schedules", "Claim Tradeboard Shifts", "Request tradeboard and open shifts."),
     _perm("schedules.approve_tradeboard", "schedules", "Approve Tradeboard Claims", "Approve or reject tradeboard claim requests."),
@@ -520,6 +523,7 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "product.calculate_product_cost": requirement(any_of=("products.view", "products.manage_recipe")),
     "product.calculate_product_cost_preview": requirement(any_of=("products.create", "products.edit", "products.manage_recipe")),
     "product.bulk_set_cost_from_recipe": requirement(any_of=("products.bulk_update",)),
+    "product.bulk_archive_products": requirement(any_of=("products.delete",)),
     "product.delete_product": requirement(any_of=("products.delete",)),
     "invoice.create_invoice": requirement(any_of=("invoices.create",)),
     "invoice.edit_invoice": requirement(any_of=("invoices.create",)),
@@ -527,7 +531,11 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "invoice.mark_invoice_delivered": requirement(any_of=("invoices.manage_payment",)),
     "invoice.mark_invoice_paid": requirement(any_of=("invoices.manage_payment",)),
     "invoice.mark_invoice_unpaid": requirement(any_of=("invoices.manage_payment",)),
+    "invoice.reverse_invoice_payment": requirement(any_of=("invoices.manage_payment",)),
+    "invoice.reverse_invoice_delivery": requirement(any_of=("invoices.manage_payment",)),
     "invoice.bulk_invoice_payment_status": requirement(any_of=("invoices.manage_payment",)),
+    "invoice.download_invoices_pdf": requirement(any_of=("invoices.view",)),
+    "invoice.print_invoice": requirement(any_of=("invoices.view",)),
     "invoice.view_invoice": requirement(any_of=("invoices.view",)),
     "invoice.get_customer_tax_status": requirement(any_of=("invoices.create",)),
     "invoice.filter_invoices_api": requirement(any_of=("invoices.view",)),
@@ -552,8 +560,16 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "report.received_invoice_report": requirement(any_of=("reports.received_invoices",)),
     "report.purchase_inventory_summary": requirement(any_of=("reports.purchase_inventory_summary",)),
     "report.inventory_variance_report": requirement(any_of=("reports.inventory_variance",)),
+    "report.inventory_expiry_report": requirement(any_of=("reports.inventory_expiry",)),
     "report.invoice_gl_code_report": requirement(any_of=("reports.invoice_gl_codes",)),
     "report.product_sales_report": requirement(any_of=("reports.product_sales",)),
+    "report.products_sold_report": requirement(
+        any_of=(
+            "reports.products_sold",
+            "reports.product_sales",
+            "reports.product_stock_usage",
+        )
+    ),
     "report.product_stock_usage_report": requirement(any_of=("reports.product_stock_usage",)),
     "report.product_recipe_report": requirement(any_of=("reports.product_recipe",)),
     "report.product_location_sales_report": requirement(any_of=("reports.product_location_sales",)),
@@ -899,6 +915,9 @@ ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] =
     ("schedule.my_schedule", "GET"): requirement(
         any_of=("schedules.view_self", "schedules.self_schedule")
     ),
+    ("schedule.my_schedule", "POST"): requirement(
+        any_of=("schedules.post_tradeboard",)
+    ),
     ("schedule.availability", "GET"): requirement(
         any_of=(
             "schedules.manage_self_availability",
@@ -934,7 +953,11 @@ ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] =
         )
     ),
     ("schedule.tradeboard", "POST"): requirement(
-        any_of=("schedules.claim_tradeboard", "schedules.approve_tradeboard")
+        any_of=(
+            "schedules.post_tradeboard",
+            "schedules.claim_tradeboard",
+            "schedules.approve_tradeboard",
+        )
     ),
     ("schedule.setup", "GET"): requirement(
         any_of=("schedules.manage_setup", "schedules.manage_pay_rates")

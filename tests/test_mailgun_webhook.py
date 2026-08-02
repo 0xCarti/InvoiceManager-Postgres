@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from app.models import PosSalesImport
+from tests.utils import build_terminal_sales_workbook_bytes
 
 
 def _signature(signing_key: str, timestamp: str, token: str) -> str:
@@ -67,8 +68,7 @@ def test_mailgun_webhook_stages_import_and_deduplicates(client, app, tmp_path):
         }
     )
 
-    spreadsheet = Path(__file__).resolve().parents[1] / "game_sales.xls"
-    content = spreadsheet.read_bytes()
+    content = build_terminal_sales_workbook_bytes()
 
     request_data = _payload("secret-key")
     request_data["attachment-1"] = (io.BytesIO(content), "game_sales.xls")

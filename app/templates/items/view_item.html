@@ -6,6 +6,52 @@
         <a class="btn btn-outline-secondary" href="{{ url_for('notes.entity_notes', entity_type='item', entity_id=item.id) }}">View Notes</a>
     </div>
     <p><strong>Base Unit:</strong> {{ item.base_unit }}</p>
+    <p><strong>Expiry Tracking:</strong> {{ item.expiry_tracking_label }}</p>
+    {% if item.tracks_expiry %}
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+                <div>
+                    <h3 class="h5 mb-1">Open Expiry Lots</h3>
+                    <p class="text-muted mb-0">Current tracked quantities for this item by received and expiry date.</p>
+                </div>
+                <a class="btn btn-outline-primary" href="{{ url_for('report.inventory_expiry_report', item_id=item.id, status='all') }}">Open Expiry Report</a>
+            </div>
+            <div class="table-responsive">
+                <table class="table align-middle">
+                    <thead>
+                        <tr>
+                            <th>Location</th>
+                            <th class="text-end">Remaining</th>
+                            <th>Received</th>
+                            <th>Expiry</th>
+                            <th>Invoice</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for lot in expiry_lots %}
+                        <tr>
+                            <td>{{ lot.location.name if lot.location else '-' }}</td>
+                            <td class="text-end">{{ '%.2f'|format(lot.remaining_quantity or 0) }} {{ item.base_unit }}</td>
+                            <td>{{ lot.received_date.strftime('%Y-%m-%d') if lot.received_date else '-' }}</td>
+                            <td>{{ lot.expiry_date.strftime('%Y-%m-%d') if lot.expiry_date else '-' }}</td>
+                            <td>
+                                {% if lot.purchase_invoice_id %}
+                                <a href="{{ url_for('purchase.view_purchase_invoice', invoice_id=lot.purchase_invoice_id) }}">Invoice #{{ lot.purchase_invoice_id }}</a>
+                                {% else %}
+                                -
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="5" class="text-muted">No open expiry lots.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
     {% if can_view_vendor_aliases %}
     <div class="card mb-4">
         <div class="card-body">

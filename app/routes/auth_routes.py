@@ -17,6 +17,7 @@ from flask import (
     abort,
     current_app,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -112,6 +113,11 @@ from app.services.notification_service import (
     operational_notification_groups,
     resolved_notification_preferences,
 )
+from app.services.inventory_expiry import (
+    SOURCE_POS_IMPORT,
+    consume_item_lots,
+    restore_lot_adjustments,
+)
 from app.permissions import (
     get_default_landing_endpoint,
     get_permission_categories,
@@ -126,6 +132,7 @@ from app.utils.menu_assignments import sync_location_stand_items
 from app.utils.numeric import coerce_float
 from app.utils.pagination import build_pagination_args, get_per_page
 from app.utils.recipe_usage import recipe_item_base_units_per_sale
+from app.utils.recipe_history import sync_terminal_sale_recipe_snapshots
 from app.utils.units import (
     DEFAULT_BASE_UNIT_CONVERSIONS,
     get_allowed_target_units,
@@ -133,6 +140,12 @@ from app.utils.units import (
     serialize_conversion_setting,
 )
 from app.utils.pos_import import normalize_pos_alias
+from app.utils.sellable_amounts import (
+    choose_sellable_amount_for_price,
+    ensure_default_sellable_amount,
+    sellable_amount_snapshot,
+    update_default_sellable_price,
+)
 from app.utils.text import build_text_match_predicate
 from app.utils.timezone import normalize_timezone_name
 
@@ -375,7 +388,18 @@ def _resolve_restore_mode(raw_mode: str | None) -> str:
     return current_app.config.get("RESTORE_MODE_DEFAULT", "strict")
 
 
+def _is_invalid_backup_error(exc: BaseException | None) -> bool:
+    while exc is not None:
+        details = str(exc).lower()
+        if any(marker in details for marker in SQLITE_INVALID_BACKUP_MARKERS):
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
 def _is_invalid_backup_sqlalchemy_error(exc: SQLAlchemyError) -> bool:
+    if _is_invalid_backup_error(exc):
+        return True
     details = str(exc).lower()
     return any(marker in details for marker in SQLITE_INVALID_BACKUP_MARKERS)
 
@@ -698,6 +722,60 @@ PROFILE_NOTIFICATION_BOOLEAN_FIELDS = (
     "notify_tradeboard_text",
 )
 PROFILE_NOTIFICATION_FIELDS = ("phone_number",) + PROFILE_NOTIFICATION_BOOLEAN_FIELDS
+OPERATIONAL_NOTIFICATION_GROUP_PERMISSIONS = {
+    "transfers": (
+        "transfers.view",
+        "transfers.create",
+        "transfers.edit",
+        "transfers.complete",
+    ),
+    "purchase_orders": (
+        "purchase_orders.view",
+        "purchase_orders.create",
+        "purchase_orders.edit",
+        "purchase_orders.mark_ordered",
+        "purchase_orders.delete",
+        "purchase_orders.merge",
+        "purchase_orders.upload",
+        "purchase_orders.resolve_vendor_items",
+        "purchase_orders.recommendations",
+        "purchase_invoices.view",
+        "purchase_invoices.receive",
+        "purchase_invoices.reverse",
+    ),
+    "inventory": (
+        "items.view",
+        "reports.inventory_expiry",
+        "reports.inventory_variance",
+        "reports.product_stock_usage",
+    ),
+    "events": (
+        "events.view",
+        "events.create",
+        "events.edit",
+        "events.manage_locations",
+        "events.manage_sales",
+        "events.confirm_locations",
+        "events.close",
+        "events.reports",
+    ),
+    "locations": (
+        "locations.view",
+        "locations.create",
+        "locations.edit",
+        "locations.delete",
+        "locations.manage_items",
+    ),
+    "users": ("users.manage",),
+    "communications": (
+        "communications.view",
+        "communications.view_history",
+        "communications.send_direct",
+        "communications.send_broadcast",
+        "communications.manage_bulletin",
+        "communications.view_bulletin_receipts",
+    ),
+}
 
 
 def _build_notification_form(user: User) -> NotificationForm:
@@ -707,10 +785,19 @@ def _build_notification_form(user: User) -> NotificationForm:
     return NotificationForm(**form_kwargs)
 
 
+def _can_view_operational_notification_group(user: User, group_key: str) -> bool:
+    required_permissions = OPERATIONAL_NOTIFICATION_GROUP_PERMISSIONS.get(group_key)
+    if not required_permissions:
+        return True
+    return user.has_any_permission(*required_permissions)
+
+
 def _build_operational_notification_groups(user: User):
     resolved_preferences = resolved_notification_preferences(user)
     groups = []
     for group in operational_notification_groups():
+        if not _can_view_operational_notification_group(user, group["key"]):
+            continue
         event_rows = []
         for definition in group["events"]:
             preferences = resolved_preferences.get(
@@ -1819,6 +1906,10 @@ def restore_backup_route():
         try:
             restore_summary = restore_backup(filepath, restore_mode=restore_mode)
         except RestoreBackupError as exc:
+            if _is_invalid_backup_error(exc):
+                _cleanup_uploaded_file()
+                flash("Invalid backup database file.", "error")
+                return redirect(url_for("admin.backups"))
             failure_class = type(exc.__cause__).__name__ if exc.__cause__ else type(exc).__name__
             restore_details = str(exc)
             current_app.logger.exception(
@@ -2322,6 +2413,16 @@ def settings():
         gst_setting = Setting(name="GST", value="")
         db.session.add(gst_setting)
 
+    food_cost_tax_rate_setting = Setting.query.filter_by(
+        name=Setting.FOOD_COST_TAX_RATE
+    ).first()
+    if food_cost_tax_rate_setting is None:
+        food_cost_tax_rate_setting = Setting(
+            name=Setting.FOOD_COST_TAX_RATE,
+            value=str(Setting.DEFAULT_FOOD_COST_TAX_RATE),
+        )
+        db.session.add(food_cost_tax_rate_setting)
+
     retail_pop_price_setting = Setting.query.filter_by(
         name="RETAIL_POP_PRICE"
     ).first()
@@ -2374,6 +2475,16 @@ def settings():
         )
         db.session.add(import_vendor_setting)
 
+    pos_sales_auto_approve_setting = Setting.query.filter_by(
+        name=Setting.POS_SALES_AUTO_APPROVE_CLEAN_IMPORTS
+    ).first()
+    if pos_sales_auto_approve_setting is None:
+        pos_sales_auto_approve_setting = Setting(
+            name=Setting.POS_SALES_AUTO_APPROVE_CLEAN_IMPORTS,
+            value="0",
+        )
+        db.session.add(pos_sales_auto_approve_setting)
+
     conversions_setting = Setting.query.filter_by(
         name="BASE_UNIT_CONVERSIONS"
     ).first()
@@ -2390,9 +2501,13 @@ def settings():
     receive_defaults = Setting.get_receive_location_defaults()
     enabled_import_vendors = Setting.get_enabled_purchase_import_vendors()
     pos_sales_import_interval = Setting.get_pos_sales_import_interval()
+    pos_sales_auto_approve_clean_imports = (
+        Setting.get_pos_sales_auto_approve_clean_imports()
+    )
     default_timezone = normalize_timezone_name(tz_setting.value or "UTC")
     settings_snapshot = {
         "gst_number": gst_setting.value or "",
+        "food_cost_tax_rate": Setting.get_food_cost_tax_rate(),
         "default_timezone": default_timezone,
         "auto_backup_enabled": auto_setting.value == "1",
         "auto_backup_interval": (
@@ -2402,6 +2517,9 @@ def settings():
         "pos_sales_import_interval": (
             int(pos_sales_import_interval["value"]),
             str(pos_sales_import_interval["unit"]),
+        ),
+        "pos_sales_auto_approve_clean_imports": (
+            pos_sales_auto_approve_clean_imports
         ),
         "max_backups": int(max_backups_setting.value),
         "base_unit_mapping": dict(conversion_mapping),
@@ -2423,7 +2541,9 @@ def settings():
         auto_backup_interval_unit=interval_unit_setting.value,
         pos_sales_import_interval_value=int(pos_sales_import_interval["value"]),
         pos_sales_import_interval_unit=str(pos_sales_import_interval["unit"]),
+        pos_sales_auto_approve_clean_imports=pos_sales_auto_approve_clean_imports,
         max_backups=int(max_backups_setting.value),
+        food_cost_tax_rate=Setting.get_food_cost_tax_rate(),
         base_unit_mapping=conversion_mapping,
         receive_location_defaults=receive_defaults,
         purchase_import_vendors=enabled_import_vendors,
@@ -2472,6 +2592,7 @@ def settings():
                 receive_location_updates[department] = field.data
 
         new_gst_number = form.gst_number.data or ""
+        new_food_cost_tax_rate = form.food_cost_tax_rate.data or 0
         new_default_timezone = normalize_timezone_name(
             form.default_timezone.data or "UTC"
         )
@@ -2484,6 +2605,9 @@ def settings():
             form.pos_sales_import_interval_value.data,
             form.pos_sales_import_interval_unit.data,
         )
+        new_pos_sales_auto_approve_clean_imports = bool(
+            form.pos_sales_auto_approve_clean_imports.data
+        )
         new_max_backups = form.max_backups.data
         new_retail_pop_price = (
             ""
@@ -2493,6 +2617,8 @@ def settings():
         changed_settings: list[str] = []
         if settings_snapshot["gst_number"] != new_gst_number:
             changed_settings.append("GST")
+        if settings_snapshot["food_cost_tax_rate"] != new_food_cost_tax_rate:
+            changed_settings.append("food cost tax rate")
         if settings_snapshot["default_timezone"] != new_default_timezone:
             changed_settings.append("default timezone")
         if settings_snapshot["auto_backup_enabled"] != new_auto_backup_enabled:
@@ -2504,6 +2630,11 @@ def settings():
             != new_pos_sales_import_interval
         ):
             changed_settings.append("POS sales import cadence")
+        if (
+            settings_snapshot["pos_sales_auto_approve_clean_imports"]
+            != new_pos_sales_auto_approve_clean_imports
+        ):
+            changed_settings.append("POS sales auto approval")
         if settings_snapshot["max_backups"] != new_max_backups:
             changed_settings.append("max backups")
         if settings_snapshot["base_unit_mapping"] != conversion_updates:
@@ -2519,6 +2650,7 @@ def settings():
             changed_settings.append("receive location defaults")
 
         gst_setting.value = new_gst_number
+        Setting.set_food_cost_tax_rate(new_food_cost_tax_rate)
         tz_setting.value = new_default_timezone
         auto_setting.value = "1" if new_auto_backup_enabled else "0"
         interval_value_setting.value = str(
@@ -2533,6 +2665,9 @@ def settings():
         Setting.set_pos_sales_import_interval(
             value=form.pos_sales_import_interval_value.data,
             unit=form.pos_sales_import_interval_unit.data,
+        )
+        Setting.set_pos_sales_auto_approve_clean_imports(
+            new_pos_sales_auto_approve_clean_imports
         )
         Setting.set_enabled_purchase_import_vendors(enabled_import_vendors)
         Setting.set_receive_location_defaults(receive_location_updates)
@@ -2560,12 +2695,16 @@ def settings():
         current_app.config["POS_SALES_IMPORT_INTERVAL_UNIT"] = (
             form.pos_sales_import_interval_unit.data
         )
+        current_app.config["POS_SALES_AUTO_APPROVE_CLEAN_IMPORTS"] = (
+            new_pos_sales_auto_approve_clean_imports
+        )
         current_app.config["MAX_BACKUPS"] = form.max_backups.data
         current_app.config["AUTO_BACKUP_INTERVAL"] = (
             form.auto_backup_interval_value.data
             * UNIT_SECONDS[form.auto_backup_interval_unit.data]
         )
         current_app.config["RETAIL_POP_PRICE"] = app.RETAIL_POP_PRICE
+        current_app.config["FOOD_COST_TAX_RATE"] = new_food_cost_tax_rate
         conversion_mapping = parse_conversion_setting(conversions_setting.value)
         app.BASE_UNIT_CONVERSIONS = conversion_mapping
         current_app.config["BASE_UNIT_CONVERSIONS"] = conversion_mapping
@@ -3010,6 +3149,11 @@ def _serialize_event_location_sales_state(
         terminal_sales.append(
             {
                 "product_id": sale.product_id,
+                "sellable_amount_id": sale.sellable_amount_id,
+                "sellable_amount_name": sale.sellable_amount_name,
+                "sellable_quantity": sale.sellable_quantity,
+                "unit_price_snapshot": sale.unit_price_snapshot,
+                "line_total_snapshot": sale.line_total_snapshot,
                 "quantity": float(sale.quantity or 0.0),
                 "sold_at": sale.sold_at.isoformat() if sale.sold_at else None,
             }
@@ -3053,14 +3197,29 @@ def _restore_event_location_sales_state(
                 sold_at = datetime.fromisoformat(sold_at_value)
             except ValueError:
                 sold_at = None
-        db.session.add(
-            TerminalSale(
-                event_location_id=event_location_id,
-                product_id=sale_payload.get("product_id"),
-                quantity=float(sale_payload.get("quantity") or 0.0),
-                sold_at=sold_at or datetime.utcnow(),
+        sale = TerminalSale(
+            event_location_id=event_location_id,
+            product_id=sale_payload.get("product_id"),
+            sellable_amount_id=sale_payload.get("sellable_amount_id"),
+            sellable_amount_name=sale_payload.get("sellable_amount_name"),
+            sellable_quantity=coerce_float(
+                sale_payload.get("sellable_quantity"), default=1.0
             )
+            or 1.0,
+            unit_price_snapshot=coerce_float(
+                sale_payload.get("unit_price_snapshot")
+            ),
+            line_total_snapshot=coerce_float(
+                sale_payload.get("line_total_snapshot")
+            ),
+            quantity=float(sale_payload.get("quantity") or 0.0),
+            sold_at=sold_at or datetime.utcnow(),
         )
+        db.session.add(sale)
+        db.session.flush()
+        product = db.session.get(Product, sale.product_id) if sale.product_id else None
+        if product is not None:
+            sync_terminal_sale_recipe_snapshots(sale, product=product)
 
     summary_payload = snapshot.get("summary")
     if isinstance(summary_payload, dict):
@@ -3270,7 +3429,7 @@ def _build_event_linked_sales_application_payload(
     import_locations: list[PosSalesImportLocation],
     row_review_data: dict[int, dict[str, Any]],
 ) -> dict[str, Any]:
-    aggregated_sales: dict[int, dict[str, Any]] = {}
+    aggregated_sales: dict[tuple[int, int | None, float], dict[str, Any]] = {}
     sales_date_value = sales_import.sales_date
     sold_at = (
         datetime.combine(sales_date_value, time(hour=12))
@@ -3281,17 +3440,45 @@ def _build_event_linked_sales_application_payload(
     for import_location in import_locations:
         for row in import_location.rows:
             row_review = row_review_data.get(row.id, {})
-            if row_review.get("is_active") and row.product_id is not None:
-                payload = aggregated_sales.setdefault(
-                    row.product_id,
-                    {
-                        "product_id": row.product_id,
-                        "quantity": 0.0,
-                        "sold_at": sold_at,
-                    },
-                )
-                payload["quantity"] += float(row.quantity or 0.0)
+            if not row_review.get("is_active") or row.product_id is None:
                 continue
+            product = row.product or db.session.get(Product, row.product_id)
+            if product is None:
+                continue
+            resolved_price = row_review.get("resolved_price")
+            if resolved_price is None:
+                resolved_price = row.computed_unit_price
+            sellable_amount = choose_sellable_amount_for_price(
+                product, resolved_price
+            )
+            if sellable_amount is None:
+                sellable_amount = ensure_default_sellable_amount(
+                    product, price=resolved_price
+                )
+            amount_snapshot = sellable_amount_snapshot(sellable_amount)
+            row.sellable_amount_id = amount_snapshot["sellable_amount_id"]
+            unit_price = float(amount_snapshot["unit_price"] or 0.0)
+            key = (
+                row.product_id,
+                amount_snapshot["sellable_amount_id"],
+                unit_price,
+            )
+            payload = aggregated_sales.setdefault(
+                key,
+                {
+                    "product_id": row.product_id,
+                    "sellable_amount_id": amount_snapshot["sellable_amount_id"],
+                    "sellable_amount_name": amount_snapshot["sellable_amount_name"],
+                    "sellable_quantity": amount_snapshot["sellable_quantity"],
+                    "unit_price_snapshot": unit_price,
+                    "line_total_snapshot": 0.0,
+                    "quantity": 0.0,
+                    "sold_at": sold_at,
+                },
+            )
+            quantity = float(row.quantity or 0.0)
+            payload["quantity"] += quantity
+            payload["line_total_snapshot"] += quantity * unit_price
 
     return {
         "terminal_sales": list(aggregated_sales.values()),
@@ -3331,16 +3518,29 @@ def _apply_event_linked_sales_payload(
                 products=[product],
                 remove_missing=False,
             )
-        db.session.add(
-            TerminalSale(
-                event_location_id=event_location.id,
-                product_id=product.id,
-                pos_sales_import_id=source_import_id,
-                approval_batch_id=approval_batch_id,
-                quantity=float(sale_payload.get("quantity") or 0.0),
-                sold_at=sale_payload.get("sold_at") or datetime.utcnow(),
+        sale = TerminalSale(
+            event_location_id=event_location.id,
+            product_id=product.id,
+            sellable_amount_id=sale_payload.get("sellable_amount_id"),
+            sellable_amount_name=sale_payload.get("sellable_amount_name"),
+            sellable_quantity=coerce_float(
+                sale_payload.get("sellable_quantity"), default=1.0
             )
+            or 1.0,
+            unit_price_snapshot=coerce_float(
+                sale_payload.get("unit_price_snapshot")
+            ),
+            line_total_snapshot=coerce_float(
+                sale_payload.get("line_total_snapshot")
+            ),
+            pos_sales_import_id=source_import_id,
+            approval_batch_id=approval_batch_id,
+            quantity=float(sale_payload.get("quantity") or 0.0),
+            sold_at=sale_payload.get("sold_at") or datetime.utcnow(),
         )
+        db.session.add(sale)
+        db.session.flush()
+        sync_terminal_sale_recipe_snapshots(sale, product=product)
 
 
 def _normalize_sales_import_price_action(raw_value: Any) -> str | None:
@@ -3407,7 +3607,7 @@ def _build_sales_import_review_context(
             custom_price = coerce_float(review.get("selected_price"))
             file_price = coerce_float(row.computed_unit_price, default=0.0)
             app_price = (
-                coerce_float(row.product.price)
+                row.product.default_sellable_price
                 if row.product is not None
                 else None
             )
@@ -3618,7 +3818,29 @@ def _detach_sales_import_attachment(import_record: PosSalesImport) -> None:
         os.remove(attachment_path)
 
 
-def _approve_sales_import(import_id: int) -> bool:
+def _sales_import_flash(message: str, category: str, enabled: bool) -> None:
+    if enabled and flask.has_request_context():
+        flash(message, category)
+
+
+def _sales_import_current_user_id() -> int | None:
+    if not flask.has_request_context():
+        return None
+    if not current_user or current_user.is_anonymous:
+        return None
+    return current_user.id
+
+
+def _approve_sales_import(
+    import_id: int,
+    *,
+    approver_id: int | None = None,
+    automated: bool = False,
+    flash_messages: bool = True,
+) -> bool:
+    if approver_id is None:
+        approver_id = _sales_import_current_user_id()
+
     try:
         locked_import = (
             PosSalesImport.query.filter(PosSalesImport.id == import_id)
@@ -3626,11 +3848,19 @@ def _approve_sales_import(import_id: int) -> bool:
             .first()
         )
         if locked_import is None:
-            flash("The requested import could not be found.", "danger")
+            _sales_import_flash(
+                "The requested import could not be found.",
+                "danger",
+                flash_messages,
+            )
             return False
 
         locked_import = (
             PosSalesImport.query.options(
+                selectinload(PosSalesImport.locations)
+                .selectinload(PosSalesImportLocation.rows)
+                .selectinload(PosSalesImportRow.product)
+                .selectinload(Product.sellable_amounts),
                 selectinload(PosSalesImport.locations)
                 .selectinload(PosSalesImportLocation.rows)
                 .selectinload(PosSalesImportRow.product)
@@ -3661,7 +3891,11 @@ def _approve_sales_import(import_id: int) -> bool:
             .first()
         )
         if locked_import is None:
-            flash("The requested import could not be found.", "danger")
+            _sales_import_flash(
+                "The requested import could not be found.",
+                "danger",
+                flash_messages,
+            )
             return False
 
         if locked_import.status in _SALES_IMPORT_REVIEW_EDITABLE_STATUSES:
@@ -3671,19 +3905,21 @@ def _approve_sales_import(import_id: int) -> bool:
             issue_state = _collect_sales_import_issue_state(locked_import)
 
         if not _sales_import_can_be_approved(locked_import):
-            flash(
+            _sales_import_flash(
                 "Import approval is only allowed while the import status is Pending.",
                 "warning",
+                flash_messages,
             )
             return False
 
         if issue_state["errors"]:
-            flash(
+            _sales_import_flash(
                 "Approval blocked: resolve mappings and price review issues before approval.",
                 "warning",
+                flash_messages,
             )
             for error in issue_state["errors"]:
-                flash(error, "warning")
+                _sales_import_flash(error, "warning", flash_messages)
             return False
 
         approval_batch_id = f"pos-import-{locked_import.id}-{uuid.uuid4().hex[:12]}"
@@ -3706,7 +3942,7 @@ def _approve_sales_import(import_id: int) -> bool:
             product = db.session.get(Product, product_id)
             if product is None:
                 continue
-            product.price = selected_price
+            update_default_sellable_price(product, selected_price)
 
         event_linked_groups: dict[int, list[PosSalesImportLocation]] = {}
         for import_location in locked_import.locations:
@@ -3799,6 +4035,22 @@ def _approve_sales_import(import_id: int) -> bool:
                 product = row.product
                 if product is None:
                     continue
+                resolved_price = row_review.get("resolved_price")
+                if resolved_price is None:
+                    resolved_price = row.computed_unit_price
+                sellable_amount = row.sellable_amount or choose_sellable_amount_for_price(
+                    product, resolved_price
+                )
+                if sellable_amount is None:
+                    sellable_amount = ensure_default_sellable_amount(
+                        product, price=resolved_price
+                    )
+                amount_snapshot = sellable_amount_snapshot(sellable_amount)
+                row.sellable_amount_id = amount_snapshot["sellable_amount_id"]
+                sold_product_quantity = (
+                    float(row.quantity or 0.0)
+                    * float(amount_snapshot["sellable_quantity"] or 1.0)
+                )
 
                 row_changes: list[dict] = []
                 for recipe_item in product.recipe_items:
@@ -3809,7 +4061,9 @@ def _approve_sales_import(import_id: int) -> bool:
                         item_id=recipe_item.item_id,
                     ).first()
                     is_countable = (
-                        record.countable if record is not None else recipe_item.countable
+                        (record.active and record.countable)
+                        if record is not None
+                        else recipe_item.countable
                     )
                     if not is_countable:
                         continue
@@ -3817,8 +4071,7 @@ def _approve_sales_import(import_id: int) -> bool:
                     if units_per_product <= 0:
                         continue
 
-                    sold_quantity = float(row.quantity or 0.0)
-                    delta = sold_quantity * units_per_product
+                    delta = sold_product_quantity * units_per_product
                     if abs(delta) < 1e-9:
                         continue
 
@@ -3853,6 +4106,14 @@ def _approve_sales_import(import_id: int) -> bool:
                     item_qty_after = item_qty_before - delta
                     if item is not None:
                         item.quantity = item_qty_after
+                        consume_item_lots(
+                            item_id=recipe_item.item_id,
+                            location_id=import_location.location_id,
+                            quantity=delta,
+                            source_type=SOURCE_POS_IMPORT,
+                            source_id=locked_import.id,
+                            source_line_id=row.id,
+                        )
 
                     row_changes.append(
                         {
@@ -3877,26 +4138,42 @@ def _approve_sales_import(import_id: int) -> bool:
                     row_change_count += 1
 
         locked_import.status = "approved"
-        locked_import.approved_by = current_user.id
+        locked_import.approved_by = approver_id
         locked_import.approved_at = approval_time
         locked_import.approval_batch_id = approval_batch_id
         db.session.commit()
-        success_message = "Import approved."
+        success_message = "Import approved automatically." if automated else "Import approved."
         if row_change_count:
             success_message += (
                 f" Applied mapped sales for {row_change_count} row"
                 f"{'s' if row_change_count != 1 else ''}."
             )
-        flash(success_message, "success")
+        _sales_import_flash(success_message, "success", flash_messages)
+        action = "Automatically approved" if automated else "Approved"
         log_activity(
-            f"Approved POS sales import {locked_import.id} "
-            f"(batch {approval_batch_id})"
+            f"{action} POS sales import {locked_import.id} "
+            f"(batch {approval_batch_id})",
+            user_id=approver_id,
         )
         return True
     except Exception:
         db.session.rollback()
-        flash("Unable to approve import due to an unexpected error.", "danger")
+        _sales_import_flash(
+            "Unable to approve import due to an unexpected error.",
+            "danger",
+            flash_messages,
+        )
         return False
+
+
+def _auto_approve_sales_import_if_ready(import_id: int) -> bool:
+    if not Setting.get_pos_sales_auto_approve_clean_imports():
+        return False
+    return _approve_sales_import(
+        import_id,
+        automated=True,
+        flash_messages=False,
+    )
 
 
 def _check_negative_sales_import_reverse(import_record: PosSalesImport) -> list[str]:
@@ -4720,6 +4997,11 @@ def sales_import_detail(import_id: int):
                             item_qty_before = float(item.quantity or 0.0) if item else 0.0
                             item_qty_after = item_qty_before + consumed_quantity
                             if item is not None:
+                                restore_lot_adjustments(
+                                    source_type=SOURCE_POS_IMPORT,
+                                    source_id=locked_import.id,
+                                    source_line_id=row.id,
+                                )
                                 item.quantity = item_qty_after
 
                             reversal_changes.append(
@@ -4834,14 +5116,15 @@ def sales_import_detail(import_id: int):
                 db.session.rollback()
                 flash("Unable to delete import due to an unexpected error.", "danger")
 
-        return redirect(
-            url_for(
-                "admin.sales_import_detail",
-                import_id=sales_import.id,
-                location_id=selected_location_id,
-                location_filter=active_location_filter,
+        if ajax_review_response is None:
+            return redirect(
+                url_for(
+                    "admin.sales_import_detail",
+                    import_id=sales_import.id,
+                    location_id=selected_location_id,
+                    location_filter=active_location_filter,
+                )
             )
-        )
 
     issue_state = _sync_detail_review_state()
     if issue_state["assignment_changed"] or issue_state["status_changed"]:

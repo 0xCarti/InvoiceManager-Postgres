@@ -35,6 +35,14 @@
                 {% endif %}
             </div>
             <div class="col-md-6">
+                {{ form.customers.label(class="form-label") }}
+                {{ form.customers(class="form-select", multiple=true) }}
+                <div class="form-text">Leave blank to include all customers.</div>
+                {% if form.customers.errors %}
+                    <div class="text-danger small">{{ form.customers.errors[0] }}</div>
+                {% endif %}
+            </div>
+            <div class="col-md-6">
                 {{ form.products.label(class="form-label") }}
                 {{ form.products(class="form-select", multiple=true) }}
                 <div class="form-text">Leave blank to include sales of all products.</div>
@@ -96,11 +104,14 @@
             </div>
         </div>
 
-        {% if selected_product_names or selected_gl_labels or payment_status|default('all') != 'all' %}
+        {% if selected_product_names or selected_customer_names or selected_gl_labels or payment_status|default('all') != 'all' %}
         <div class="alert alert-secondary" role="status">
             <div class="fw-semibold">Filters Applied</div>
             <ul class="mb-0 small">
                 <li><span class="fw-semibold">Payment Status:</span> {{ payment_status|default('all')|title }}</li>
+                {% if selected_customer_names %}
+                <li><span class="fw-semibold">Customers:</span> {{ selected_customer_names | join(', ') }}</li>
+                {% endif %}
                 {% if selected_product_names %}
                 <li><span class="fw-semibold">Products:</span> {{ selected_product_names | join(', ') }}</li>
                 {% endif %}

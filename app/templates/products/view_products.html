@@ -9,10 +9,12 @@
 {% set can_copy_products = can_access_endpoint('product.copy_product', 'GET') %}
 {% set can_bulk_update_products = can_access_endpoint('product.bulk_update_products', 'GET') %}
 {% set can_bulk_set_cost = can_access_endpoint('product.bulk_set_cost_from_recipe', 'POST') %}
-{% set can_select_products = can_bulk_update_products or can_bulk_set_cost %}
+{% set can_bulk_archive_products = can_access_endpoint('product.bulk_archive_products', 'POST') %}
+{% set can_select_products = can_bulk_update_products or can_bulk_set_cost or can_bulk_archive_products %}
 {% set can_product_reports = namespace(
     recipe=can_access_endpoint('report.product_recipe_report', 'GET'),
     sales=can_access_endpoint('report.product_sales_report', 'GET'),
+    products_sold=can_access_endpoint('report.products_sold_report', 'GET'),
     stock=can_access_endpoint('report.product_stock_usage_report', 'GET'),
     forecast=can_access_endpoint('report.department_sales_forecast', 'GET')
 ) %}
@@ -69,6 +71,17 @@
         {% if can_bulk_set_cost %}
         <button type="submit" class="btn btn-warning" form="bulk-cost-form">Set Cost From Recipe</button>
         {% endif %}
+        {% if can_bulk_archive_products %}
+        <button type="submit"
+                class="btn btn-outline-danger"
+                form="bulk-cost-form"
+                formaction="{{ url_for('product.bulk_archive_products') }}"
+                formmethod="post"
+                id="bulkArchiveProductsBtn"
+                disabled>
+            Archive Selected
+        </button>
+        {% endif %}
         {% if can_bulk_update_products %}
         <button type="button" class="btn btn-outline-secondary" id="bulkEditProductsBtn" disabled>Bulk Edit</button>
         {% endif %}
@@ -81,7 +94,7 @@
             </ul>
         </div>
         <div class="dropdown">
-            {% if can_product_reports.recipe or can_product_reports.sales or can_product_reports.stock or can_product_reports.forecast %}
+            {% if can_product_reports.recipe or can_product_reports.sales or can_product_reports.products_sold or can_product_reports.stock or can_product_reports.forecast %}
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                 Reports
             </button>
@@ -91,6 +104,9 @@
                 {% endif %}
                 {% if can_product_reports.sales %}
                 <li><a class="dropdown-item" href="{{ url_for('report.product_sales_report') }}">Revenue Report</a></li>
+                {% endif %}
+                {% if can_product_reports.products_sold %}
+                <li><a class="dropdown-item" href="{{ url_for('report.products_sold_report') }}">Products Sold Report</a></li>
                 {% endif %}
                 {% if can_product_reports.stock %}
                 <li><a class="dropdown-item" href="{{ url_for('report.product_stock_usage_report') }}">Stock Usage Report</a></li>
@@ -119,14 +135,9 @@
                         <label class="form-check-label" for="toggle-product-column-name">Name</label>
                     </div>
                     <div class="form-check">
-                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-price"
-                            data-column-target="col-product-price" checked>
-                        <label class="form-check-label" for="toggle-product-column-price">Terminal/Event Sell Price</label>
-                    </div>
-                    <div class="form-check">
-                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-invoice-price"
-                            data-column-target="col-product-invoice-price" checked>
-                        <label class="form-check-label" for="toggle-product-column-invoice-price">Sales Invoice Price (3rd-party customer)</label>
+                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-sellable-amounts"
+                            data-column-target="col-product-sellable-amounts" checked>
+                        <label class="form-check-label" for="toggle-product-column-sellable-amounts">Sellable Amounts</label>
                     </div>
                     <div class="form-check">
                         <input class="form-check-input column-toggle" type="checkbox" id="toggle-product-column-cost"
@@ -280,6 +291,16 @@
                 </select>
             </div>
             <div class="col-md-6">
+                <label for="archived" class="form-label">Archived</label>
+                <select id="archived" name="archived" class="form-select">
+                    <option value="active" {% if archived_filter == 'active' %}selected{% endif %}>Active products</option>
+                    <option value="archived" {% if archived_filter == 'archived' %}selected{% endif %}>Archived products</option>
+                    <option value="all" {% if archived_filter == 'all' %}selected{% endif %}>All products</option>
+                </select>
+            </div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
                 <label for="customer_id" class="form-label">Customer</label>
                 <select id="customer_id" name="customer_id" class="form-select">
                     <option value="" {% if not customer_id %}selected{% endif %}>All Customers</option>
@@ -301,11 +322,11 @@
         </div>
         <div class="row g-3 mb-3">
             <div class="col-md-6">
-                <label for="price_min" class="form-label">Price ≥</label>
+                <label for="price_min" class="form-label">Default Sellable Price ≥</label>
                 <input type="text" step="0.01" inputmode="text" data-numeric-input="1" id="price_min" name="price_min" class="form-control" value="{{ price_min if price_min is not none else '' }}">
             </div>
             <div class="col-md-6">
-                <label for="price_max" class="form-label">Price ≤</label>
+                <label for="price_max" class="form-label">Default Sellable Price ≤</label>
                 <input type="text" step="0.01" inputmode="text" data-numeric-input="1" id="price_max" name="price_max" class="form-control" value="{{ price_max if price_max is not none else '' }}">
             </div>
         </div>
@@ -324,7 +345,7 @@
         </div>
     {% endcall %}
 
-    {% if selected_sales_gl_codes or selected_customer %}
+    {% if selected_sales_gl_codes or selected_customer or archived_filter != 'active' %}
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
         <span class="text-muted small">Active filters:</span>
         {% if selected_sales_gl_codes %}
@@ -333,10 +354,14 @@
         {% if selected_customer %}
         <span class="badge rounded-pill text-bg-light border">Customer: {{ selected_customer.first_name }} {{ selected_customer.last_name }}</span>
         {% endif %}
+        {% if archived_filter != 'active' %}
+        <span class="badge rounded-pill text-bg-light border">Archived: {{ 'Archived products' if archived_filter == 'archived' else 'All products' }}</span>
+        {% endif %}
     </div>
     {% endif %}
     <form id="bulk-cost-form" action="{{ url_for('product.bulk_set_cost_from_recipe') }}" method="post">
         {{ bulk_cost_form.hidden_tag() }}
+    </form>
     <div class="table-responsive mobile-table-wrap">
         <table class="table sortable table-mobile-card" id="product-table">
         <thead>
@@ -346,8 +371,7 @@
                 {% endif %}
                 <th class="col-product-id" data-type="number">ID</th>
                 <th class="col-product-name">Name</th>
-                <th class="col-product-price" data-type="number">Terminal/Event Sell Price</th>
-                <th class="col-product-invoice-price" data-type="number">Sales Invoice Price (3rd-party customer)</th>
+                <th class="col-product-sellable-amounts" data-type="number">Sellable Amounts</th>
                 <th class="col-product-cost" data-type="number">Cost</th>
                 <th class="col-product-food-cost" data-type="number">Food Cost %</th>
                 <th class="col-product-last-sold">Last Sold</th>
@@ -370,7 +394,6 @@
         </tbody>
         </table>
         </div>
-    </form>
     <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mt-3 mobile-pagination-controls">
         <nav aria-label="Product pagination">
             <ul class="pagination mb-0">
@@ -461,12 +484,15 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     const bulkEditProductsBtn = document.getElementById('bulkEditProductsBtn');
+    const bulkArchiveProductsBtn = document.getElementById('bulkArchiveProductsBtn');
     function updateBulkProductsButtonState() {
-        if (!bulkEditProductsBtn) {
-            return;
-        }
         const selectedCount = document.querySelectorAll('#product-table tbody input[name="product_ids"]:checked').length;
-        bulkEditProductsBtn.disabled = selectedCount === 0;
+        if (bulkEditProductsBtn) {
+            bulkEditProductsBtn.disabled = selectedCount === 0;
+        }
+        if (bulkArchiveProductsBtn) {
+            bulkArchiveProductsBtn.disabled = selectedCount === 0;
+        }
     }
 
     window.updateProductBulkButtonState = updateBulkProductsButtonState;
@@ -488,6 +514,20 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     updateBulkProductsButtonState();
+
+    if (bulkArchiveProductsBtn) {
+        bulkArchiveProductsBtn.addEventListener('click', function(event) {
+            const selectedCount = document.querySelectorAll('#product-table tbody input[name="product_ids"]:checked').length;
+            if (!selectedCount) {
+                event.preventDefault();
+                return;
+            }
+            const confirmed = window.confirm(`Archive ${selectedCount} selected product${selectedCount === 1 ? '' : 's'}? Archived products are hidden from current product pickers but remain in historical reports.`);
+            if (!confirmed) {
+                event.preventDefault();
+            }
+        });
+    }
 
     const salesGlSelect = document.getElementById('sales_gl_code_id');
     if (salesGlSelect) {

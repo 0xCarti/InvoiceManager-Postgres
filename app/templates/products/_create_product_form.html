@@ -3,6 +3,7 @@
 {% set embedded = embedded if embedded is defined else False %}
 {% set show_submit = show_submit if show_submit is defined else True %}
 {% set sales_field = form.sales_gl_code if form.sales_gl_code is defined else form.gl_code_id %}
+{% set auto_cost_field = form.auto_update_recipe_cost if form.auto_update_recipe_cost is defined else none %}
 {% if not embedded %}
 <form id="{{ product_form_id }}" class="product-form" data-role="product-form" method="POST" action="{{ form_action }}">
 {% else %}
@@ -14,20 +15,74 @@
             {{ form.name.label(class="form-label") }}
             {{ form.name(class="form-control") }}
         </div>
-        <div class="col-md-6 mb-3">
-            {{ form.price.label(class="form-label") }}
-            {{ form.price(class="form-control" + (" is-invalid" if form.price.errors else ""), placeholder="0.00", step="0.01", min="0") }}
-            {% for error in form.price.errors %}
-            <div class="invalid-feedback d-block">{{ error }}</div>
-            {% endfor %}
+        <div class="col-12 mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <label class="form-label mb-0">Sellable Amounts</label>
+                <button type="button" class="btn btn-sm btn-outline-primary" data-add-sellable-amount>Add Amount</button>
+            </div>
+            {% if form.sellable_amounts.errors %}
+            <div class="text-danger small mb-2">{{ form.sellable_amounts.errors[0] }}</div>
+            {% endif %}
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0" data-sellable-amount-table data-next-index="{{ form.sellable_amounts|length }}">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Product Qty</th>
+                            <th>Price</th>
+                            <th>Default</th>
+                            <th>Active</th>
+                            <th class="text-end">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for amount_form in form.sellable_amounts %}
+                        <tr data-sellable-amount-row>
+                            <td>
+                                {{ amount_form.amount_id() }}
+                                {{ amount_form["name"](class="form-control form-control-sm", placeholder="Each") }}
+                                {% for error in amount_form["name"].errors %}
+                                <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </td>
+                            <td>
+                                {{ amount_form.quantity(class="form-control form-control-sm", inputmode="text", data_numeric_input="1", placeholder="1") }}
+                                {% for error in amount_form.quantity.errors %}
+                                <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </td>
+                            <td>
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-text">$</span>
+                                    {{ amount_form.price(class="form-control", inputmode="text", data_numeric_input="1", placeholder="0.00") }}
+                                </div>
+                                {% for error in amount_form.price.errors %}
+                                <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </td>
+                            <td class="text-center">
+                                {{ amount_form.is_default(class="form-check-input", data_sellable_default="1") }}
+                            </td>
+                            <td class="text-center">
+                                {{ amount_form.active(class="form-check-input") }}
+                            </td>
+                            <td class="text-end">
+                                <button type="button" class="btn btn-sm btn-outline-danger" data-remove-sellable-amount>Remove</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
-        <div class="col-md-6 mb-3">
-            {{ form.invoice_sale_price.label(class="form-label") }}
-            {{ form.invoice_sale_price(class="form-control" + (" is-invalid" if form.invoice_sale_price.errors else ""), placeholder="0.00", step="0.01", min="0") }}
-            {% for error in form.invoice_sale_price.errors %}
-            <div class="invalid-feedback d-block">{{ error }}</div>
-            {% endfor %}
+        {% if product_id %}
+        <div class="col-md-6 mb-3 d-flex align-items-end">
+            <div class="form-check">
+                {{ form.archived(class="form-check-input") }}
+                {{ form.archived.label(class="form-check-label") }}
+            </div>
         </div>
+        {% endif %}
     </div>
     <div class="row g-3">
         <div class="col-md-6 mb-3">
@@ -36,12 +91,16 @@
                 <div class="flex-grow-1">
                     {{ form.cost(class="form-control" + (" is-invalid" if form.cost.errors else ""), id="cost", placeholder="0.00", step="0.01", min="0", data_role="product-cost-input") }}
                 </div>
+                {% if auto_cost_field is not none %}
                 <div class="form-check flex-shrink-0">
-                    {{ form.auto_update_recipe_cost(class="form-check-input", data_role="auto-cost-toggle") }}
-                    {{ form.auto_update_recipe_cost.label(class="form-check-label") }}
+                    {{ auto_cost_field(class="form-check-input", data_role="auto-cost-toggle") }}
+                    {{ auto_cost_field.label(class="form-check-label") }}
                 </div>
+                {% endif %}
             </div>
+            {% if auto_cost_field is not none %}
             <div class="form-text">When enabled, cost stays synced to the current recipe items and yield.</div>
+            {% endif %}
             {% for error in form.cost.errors %}
             <div class="invalid-feedback d-block">{{ error }}</div>
             {% endfor %}
@@ -485,8 +544,117 @@
         });
     }
 
+    function initializeSellableAmounts() {
+        const table = root.querySelector('[data-sellable-amount-table]');
+        const addButton = root.querySelector('[data-add-sellable-amount]');
+        const body = table ? table.querySelector('tbody') : null;
+        if (!table || !addButton || !body) {
+            return;
+        }
+
+        function ensureOneDefault(changed) {
+            const defaults = Array.from(body.querySelectorAll('[data-sellable-default]'));
+            if (changed && changed.checked) {
+                defaults.forEach(input => {
+                    if (input !== changed) {
+                        input.checked = false;
+                    }
+                });
+                return;
+            }
+            if (!defaults.some(input => input.checked)) {
+                const firstActive = defaults.find(input => {
+                    const row = input.closest('[data-sellable-amount-row]');
+                    const active = row ? row.querySelector('input[name$="-active"]') : null;
+                    return !active || active.checked;
+                });
+                if (firstActive) {
+                    firstActive.checked = true;
+                }
+            }
+        }
+
+        function buildRow(index) {
+            const row = document.createElement('tr');
+            row.setAttribute('data-sellable-amount-row', '1');
+            row.innerHTML = `
+                <td>
+                    <input type="hidden" name="sellable_amounts-${index}-amount_id" value="">
+                    <input class="form-control form-control-sm" name="sellable_amounts-${index}-name" placeholder="Each">
+                </td>
+                <td>
+                    <input class="form-control form-control-sm" name="sellable_amounts-${index}-quantity" value="1" inputmode="text" data-numeric-input="1">
+                </td>
+                <td>
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text">$</span>
+                        <input class="form-control" name="sellable_amounts-${index}-price" placeholder="0.00" inputmode="text" data-numeric-input="1">
+                    </div>
+                </td>
+                <td class="text-center">
+                    <input type="checkbox" class="form-check-input" name="sellable_amounts-${index}-is_default" value="y" data-sellable-default="1">
+                </td>
+                <td class="text-center">
+                    <input type="checkbox" class="form-check-input" name="sellable_amounts-${index}-active" value="y" checked>
+                </td>
+                <td class="text-end">
+                    <button type="button" class="btn btn-sm btn-outline-danger" data-remove-sellable-amount>Remove</button>
+                </td>`;
+            return row;
+        }
+
+        body.addEventListener('change', event => {
+            if (event.target && event.target.matches('[data-sellable-default]')) {
+                ensureOneDefault(event.target);
+            }
+        });
+
+        body.addEventListener('click', event => {
+            const button = event.target.closest('[data-remove-sellable-amount]');
+            if (!button) {
+                return;
+            }
+            const rows = body.querySelectorAll('[data-sellable-amount-row]');
+            const row = button.closest('[data-sellable-amount-row]');
+            if (rows.length <= 1) {
+                row.querySelectorAll('input').forEach(input => {
+                    if (input.type === 'checkbox') {
+                        input.checked = input.name.endsWith('-active');
+                    } else if (input.name.endsWith('-quantity')) {
+                        input.value = '1';
+                    } else if (!input.name.endsWith('-amount_id')) {
+                        input.value = '';
+                    }
+                });
+                ensureOneDefault();
+                return;
+            }
+            row.remove();
+            ensureOneDefault();
+        });
+
+        addButton.addEventListener('click', () => {
+            const index = parseInt(table.dataset.nextIndex || '0', 10);
+            const safeIndex = Number.isFinite(index) ? index : 0;
+            const row = buildRow(safeIndex);
+            body.appendChild(row);
+            table.dataset.nextIndex = String(safeIndex + 1);
+            if (window.NumericInput) {
+                window.NumericInput.enableWithin(row);
+            }
+            ensureOneDefault();
+            const nameInput = row.querySelector('input[name$="-name"]');
+            if (nameInput) {
+                nameInput.focus();
+            }
+        });
+
+        ensureOneDefault();
+    }
+
     function init() {
         autoCostController = initializeAutoCostSync();
+        initializeSellableAmounts();
         initializeAddItem();
         initializeItemListInteractions();
     }

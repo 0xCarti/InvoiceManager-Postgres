@@ -273,6 +273,7 @@ NAV_LINKS = {
     "customer.view_customers": "Customers",
     "vendor.view_vendors": "Vendors",
     "invoice.view_invoices": "Invoices",
+    "report.inventory_expiry_report": "Inventory Expiry Report",
     "event.view_events": "Events",
     "schedule.team_schedule": "Team Schedule",
     "schedule.my_schedule": "My Schedule",
@@ -370,9 +371,11 @@ NAV_GROUPS = (
         (
             ("report.customer_invoice_report", "Customer Invoice Report"),
             ("report.received_invoice_report", "Received Invoice Report"),
+            ("report.inventory_expiry_report", "Inventory Expiry Report"),
             ("report.purchase_inventory_summary", "Purchase Inventory Summary"),
             ("report.inventory_variance_report", "Inventory Variance Report"),
             ("report.product_sales_report", "Revenue Report"),
+            ("report.products_sold_report", "Products Sold Report"),
             ("report.product_stock_usage_report", "Stock Usage Report"),
             ("report.department_sales_forecast", "Department Sales Forecast"),
             ("report.product_recipe_report", "Recipe Report"),
@@ -491,6 +494,7 @@ def create_app(args=None):
     )
     app.config["START_TIME"] = datetime.utcnow()
     app.config["DEFAULT_TIMEZONE"] = normalize_timezone_name(DEFAULT_TIMEZONE)
+    app.config["FOOD_COST_TAX_RATE"] = 0
     # Use absolute paths so that changing the working directory after app
     # creation does not break file references. This occurs in the test suite
     # which creates the app in a temporary directory and then changes back to
@@ -751,10 +755,19 @@ def create_app(args=None):
                 return url_for("main.home")
             return url_for(get_default_landing_endpoint(current_user))
 
+        def is_report_result_request():
+            if request.args.get("_report_result"):
+                return True
+            try:
+                return bool(request.form.get("_report_result"))
+            except RequestEntityTooLarge:
+                return False
+
         return {
             "has_permission": has_permission,
             "can_access_endpoint": can_access_endpoint,
             "default_home_url": default_home_url,
+            "is_report_result_request": is_report_result_request,
         }
 
     @app.context_processor
@@ -971,6 +984,20 @@ def create_app(args=None):
             if retail_price_setting is not None:
                 RETAIL_POP_PRICE = retail_price_setting.value or "0.00"
 
+            food_cost_tax_rate_setting = Setting.query.filter_by(
+                name=Setting.FOOD_COST_TAX_RATE
+            ).first()
+            if food_cost_tax_rate_setting is not None:
+                try:
+                    app.config["FOOD_COST_TAX_RATE"] = max(
+                        int(food_cost_tax_rate_setting.value or 0),
+                        0,
+                    )
+                except (TypeError, ValueError):
+                    app.config["FOOD_COST_TAX_RATE"] = (
+                        Setting.DEFAULT_FOOD_COST_TAX_RATE
+                    )
+
             tz_setting = Setting.query.filter_by(name="DEFAULT_TIMEZONE").first()
             if tz_setting is not None and tz_setting.value:
                 DEFAULT_TIMEZONE = normalize_timezone_name(tz_setting.value)
@@ -1014,6 +1041,9 @@ def create_app(args=None):
                 else 5
             )
             app.config["RETAIL_POP_PRICE"] = RETAIL_POP_PRICE
+            app.config["POS_SALES_AUTO_APPROVE_CLEAN_IMPORTS"] = (
+                Setting.get_pos_sales_auto_approve_clean_imports()
+            )
             if conversions_setting is not None and conversions_setting.value:
                 BASE_UNIT_CONVERSIONS = parse_conversion_setting(
                     conversions_setting.value

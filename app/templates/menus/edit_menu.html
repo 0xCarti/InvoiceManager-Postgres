@@ -19,7 +19,7 @@
             {% endfor %}
         </div>
         <div class="mb-4">
-            <label for="copy-menu-select" class="form-label">Copy products from another menu</label>
+            <label for="copy-menu-select" class="form-label">Copy sellable amounts from another menu</label>
             <div class="input-group">
                 <select id="copy-menu-select" class="form-select" data-products-endpoint="{{ url_for('menu.get_menu_products') }}">
                     <option value="">Select a menu…</option>
@@ -27,20 +27,20 @@
                     <option value="{{ other_menu.id }}">{{ other_menu.name }}</option>
                     {% endfor %}
                 </select>
-                <button type="button" class="btn btn-outline-secondary" id="copy-menu-button">Copy Products</button>
+                <button type="button" class="btn btn-outline-secondary" id="copy-menu-button">Copy Amounts</button>
             </div>
             <div id="copy-menu-status" class="form-text d-none"></div>
         </div>
         <div class="mb-3">
             <div class="d-flex justify-content-between align-items-center">
-                {{ form.product_ids.label(class="form-label mb-0") }}
+                {{ form.sellable_amount_ids.label(class="form-label mb-0") }}
                 <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#quickProductModal">
                     Quick Create Product
                 </button>
             </div>
             <div class="input-group mb-2">
                 <span class="input-group-text" id="product-search-label">Search</span>
-                <input type="text" class="form-control" id="product-search" placeholder="Search products" aria-describedby="product-search-label">
+                <input type="text" class="form-control" id="product-search" placeholder="Search sellable amounts" aria-describedby="product-search-label">
                 <button class="btn btn-outline-secondary" type="button" id="product-search-clear">Clear</button>
                 <button
                     class="btn btn-outline-secondary"
@@ -51,10 +51,10 @@
                     Show Selected Only
                 </button>
             </div>
-            {{ form.product_ids(class="form-select", multiple=True, size=12) }}
-            <div class="form-text">Use the search box or the selected-only toggle to quickly review products, then hold Ctrl (Windows) or Command (Mac) to select multiple items.</div>
+            {{ form.sellable_amount_ids(id="product_ids", class="form-select", multiple=True, size=12) }}
+            <div class="form-text">Use the search box or the selected-only toggle to quickly review amounts, then hold Ctrl (Windows) or Command (Mac) to select multiple items.</div>
             <div id="quick-product-feedback" class="form-text d-none"></div>
-            {% for error in form.product_ids.errors %}
+            {% for error in form.sellable_amount_ids.errors %}
             <div class="text-danger small">{{ error }}</div>
             {% endfor %}
         </div>
@@ -77,15 +77,28 @@
                         {{ quick_product_form.name.label(class="form-label") }}
                         {{ quick_product_form.name(class="form-control", placeholder="Product name") }}
                     </div>
-                    <div class="row g-3">
-                        <div class="col-md-4">
-                            {{ quick_product_form.price.label(class="form-label") }}
-                            {{ quick_product_form.price(class="form-control", placeholder="0.00", step="0.01") }}
+                    {% set quick_amount_form = quick_product_form.sellable_amounts[0] %}
+                    <div class="mt-3">
+                        <label class="form-label">Sellable Amount</label>
+                        <div class="row g-2">
+                            {{ quick_amount_form.amount_id() }}
+                            <input type="hidden" name="{{ quick_amount_form.active.name }}" value="y">
+                            <input type="hidden" name="{{ quick_amount_form.is_default.name }}" value="y">
+                            <div class="col-md-4">
+                                {{ quick_amount_form["name"](class="form-control", placeholder="Each") }}
+                            </div>
+                            <div class="col-md-4">
+                                {{ quick_amount_form.quantity(class="form-control", placeholder="Product qty", value=quick_amount_form.quantity.data or 1, inputmode="text", data_numeric_input="1") }}
+                            </div>
+                            <div class="col-md-4">
+                                <div class="input-group">
+                                    <span class="input-group-text">$</span>
+                                    {{ quick_amount_form.price(class="form-control", placeholder="0.00", inputmode="text", data_numeric_input="1") }}
+                                </div>
+                            </div>
                         </div>
-                        <div class="col-md-4">
-                            {{ quick_product_form.invoice_sale_price.label(class="form-label") }}
-                            {{ quick_product_form.invoice_sale_price(class="form-control", placeholder="0.00", step="0.01", min="0") }}
-                        </div>
+                    </div>
+                    <div class="row g-3 mt-1">
                         <div class="col-md-4">
                             {{ quick_product_form.cost.label(class="form-label") }}
                             {{ quick_product_form.cost(class="form-control", placeholder="0.00", step="0.01") }}

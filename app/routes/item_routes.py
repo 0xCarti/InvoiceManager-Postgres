@@ -30,7 +30,9 @@ from app.forms import (
 from app.models import (
     GLCode,
     Invoice,
+    InvoiceProductRecipeItemSnapshot,
     InvoiceProduct,
+    InventoryExpiryLot,
     Item,
     ItemBarcode,
     ItemUnit,
@@ -44,6 +46,8 @@ from app.models import (
     PurchaseOrderItem,
     Transfer,
     TransferItem,
+    TransferRequestItem,
+    TerminalSaleRecipeItemSnapshot,
     Vendor,
     VendorItemAlias,
 )
@@ -67,6 +71,16 @@ from app.utils.text import (
     normalize_text_match_mode,
 )
 from app.utils.units import BASE_UNITS
+
+
+def _expiry_form_is_valid(form) -> bool:
+    if form.expiry_tracking_mode.data == Item.EXPIRY_TRACKING_SHELF_LIFE:
+        if not form.expiry_shelf_life_days.data:
+            form.expiry_shelf_life_days.errors.append(
+                "Enter the default shelf life for this item."
+            )
+            return False
+    return True
 
 item = Blueprint("item", __name__)
 
@@ -131,6 +145,23 @@ def _populate_item_barcode_form(form, item=None):
         )
 
 
+def _populate_item_unit_form(form, item):
+    units = sorted(item.units, key=lambda unit: unit.id or 0)
+    target_count = max(1, len(units))
+    while len(form.units) < target_count:
+        form.units.append_entry()
+    for index, unit_form in enumerate(form.units):
+        if index >= len(units):
+            unit_form.form.unit_id.data = ""
+            continue
+        unit = units[index]
+        unit_form.form.unit_id.data = str(unit.id)
+        unit_form.form.name.data = unit.name
+        unit_form.form.factor.data = unit.factor
+        unit_form.form.receiving_default.data = unit.receiving_default
+        unit_form.form.transfer_default.data = unit.transfer_default
+
+
 def _collect_barcode_values(form):
     barcode_values = []
     seen = set()
@@ -189,6 +220,100 @@ def _sync_item_barcodes(item, barcode_values):
     ItemBarcode.query.filter_by(item_id=item.id).delete()
     for code in barcode_values[1:]:
         db.session.add(ItemBarcode(item_id=item.id, code=code))
+
+
+def _item_unit_has_references(unit_id: int | None) -> bool:
+    if unit_id is None:
+        return False
+
+    reference_checks = (
+        (VendorItemAlias, VendorItemAlias.item_unit_id),
+        (ProductRecipeItem, ProductRecipeItem.unit_id),
+        (PurchaseOrderItem, PurchaseOrderItem.unit_id),
+        (PurchaseInvoiceItem, PurchaseInvoiceItem.unit_id),
+        (TransferItem, TransferItem.unit_id),
+        (TransferRequestItem, TransferRequestItem.unit_id),
+        (InvoiceProductRecipeItemSnapshot, InvoiceProductRecipeItemSnapshot.unit_id),
+        (TerminalSaleRecipeItemSnapshot, TerminalSaleRecipeItemSnapshot.unit_id),
+    )
+    for model, column in reference_checks:
+        if db.session.query(model.id).filter(column == unit_id).first() is not None:
+            return True
+    return False
+
+
+def _clean_item_unit_form_values(form):
+    cleaned_units = []
+    receiving_set = False
+    transfer_set = False
+    for unit_entry in form.units:
+        unit_form = unit_entry.form
+        unit_name = (unit_form.name.data or "").strip()
+        if not unit_name:
+            continue
+        try:
+            unit_id = int(unit_form.unit_id.data)
+        except (TypeError, ValueError):
+            unit_id = None
+        receiving_default = bool(unit_form.receiving_default.data) and not receiving_set
+        transfer_default = bool(unit_form.transfer_default.data) and not transfer_set
+        cleaned_units.append(
+            {
+                "id": unit_id,
+                "name": unit_name,
+                "factor": float(unit_form.factor.data),
+                "receiving_default": receiving_default,
+                "transfer_default": transfer_default,
+            }
+        )
+        if receiving_default:
+            receiving_set = True
+        if transfer_default:
+            transfer_set = True
+    return cleaned_units
+
+
+def _sync_item_units(item, unit_values):
+    existing_units = sorted(item.units, key=lambda unit: unit.id or 0)
+    existing_by_id = {unit.id: unit for unit in existing_units if unit.id is not None}
+    remaining_ids = set(existing_by_id)
+    synced_units = []
+
+    for index, unit_data in enumerate(unit_values):
+        unit_id = unit_data.get("id")
+        unit = existing_by_id.get(unit_id) if unit_id in existing_by_id else None
+        if unit is None:
+            fallback = existing_units[index] if index < len(existing_units) else None
+            if fallback is not None and fallback.id in remaining_ids:
+                unit = fallback
+        if unit is None:
+            unit = ItemUnit(item=item)
+        elif unit.id is not None:
+            remaining_ids.discard(unit.id)
+
+        unit.name = unit_data["name"]
+        unit.factor = unit_data["factor"]
+        unit.receiving_default = unit_data["receiving_default"]
+        unit.transfer_default = unit_data["transfer_default"]
+        db.session.add(unit)
+        synced_units.append(unit)
+
+    for unit_id in remaining_ids:
+        unit = existing_by_id[unit_id]
+        if _item_unit_has_references(unit_id):
+            unit.receiving_default = False
+            unit.transfer_default = False
+            db.session.add(unit)
+            synced_units.append(unit)
+            continue
+        db.session.delete(unit)
+
+    if synced_units and not any(unit.receiving_default for unit in synced_units):
+        synced_units[0].receiving_default = True
+    if synced_units and not any(unit.transfer_default for unit in synced_units):
+        synced_units[0].transfer_default = True
+
+    return synced_units
 
 
 def _load_item_vendor_aliases(item_id: int) -> list[VendorItemAlias]:
@@ -795,6 +920,20 @@ def view_item(item_id):
             page=transfer_page, per_page=transfer_per_page
         )
     )
+    expiry_lots = (
+        InventoryExpiryLot.query.options(
+            selectinload(InventoryExpiryLot.location),
+            selectinload(InventoryExpiryLot.purchase_invoice),
+        )
+        .filter(InventoryExpiryLot.item_id == item_id)
+        .filter(InventoryExpiryLot.remaining_quantity > 0)
+        .order_by(
+            InventoryExpiryLot.expiry_date.asc().nullslast(),
+            InventoryExpiryLot.received_date.asc(),
+            InventoryExpiryLot.id.asc(),
+        )
+        .all()
+    )
     return render_template(
         "items/view_item.html",
         item=item_obj,
@@ -805,6 +944,7 @@ def view_item(item_id):
         purchase_items=purchase_items,
         sales_items=sales_items,
         transfer_items=transfer_items,
+        expiry_lots=expiry_lots,
         purchase_per_page=purchase_per_page,
         sales_per_page=sales_per_page,
         transfer_per_page=transfer_per_page,
@@ -902,6 +1042,13 @@ def add_item():
     """Add a new item to inventory."""
     form = ItemForm()
     if form.validate_on_submit():
+        if not _expiry_form_is_valid(form):
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                form_html = render_template("items/item_form.html", form=form)
+                return jsonify({"success": False, "form_html": form_html})
+            return render_template(
+                "items/item_form_page.html", form=form, title="Add Item"
+            )
         barcode_values, barcode_errors = _collect_barcode_values(form)
         recv_count = sum(
             1
@@ -939,6 +1086,13 @@ def add_item():
                 form.gl_code_id.data if "gl_code_id" in request.form else None
             ),
             purchase_gl_code_id=form.purchase_gl_code.data or None,
+            expiry_tracking_mode=form.expiry_tracking_mode.data,
+            expiry_shelf_life_days=(
+                form.expiry_shelf_life_days.data
+                if form.expiry_tracking_mode.data == Item.EXPIRY_TRACKING_SHELF_LIFE
+                else None
+            ),
+            expiry_warning_days=form.expiry_warning_days.data or 14,
         )
         db.session.add(item)
         db.session.commit()
@@ -1036,8 +1190,36 @@ def edit_item(item_id):
         form.gl_code.data = item.gl_code
         form.gl_code_id.data = item.gl_code_id
         form.purchase_gl_code.data = item.purchase_gl_code_id
+        form.expiry_tracking_mode.data = item.expiry_tracking_mode
+        form.expiry_shelf_life_days.data = item.expiry_shelf_life_days
+        form.expiry_warning_days.data = item.expiry_warning_days or 14
         _populate_item_barcode_form(form, item)
+        _populate_item_unit_form(form, item)
     if form.validate_on_submit():
+        if not _expiry_form_is_valid(form):
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                form_html = render_template(
+                    "items/item_form.html",
+                    form=form,
+                    item=item,
+                    location_stand_items=location_stand_items,
+                    purchase_gl_codes=purchase_gl_codes,
+                    recipe_product_items=recipe_product_items,
+                    vendor_aliases=vendor_aliases,
+                    vendor_alias_delete_form=vendor_alias_delete_form,
+                )
+                return jsonify({"success": False, "form_html": form_html})
+            return render_template(
+                "items/item_form_page.html",
+                form=form,
+                item=item,
+                title="Edit Item",
+                location_stand_items=location_stand_items,
+                purchase_gl_codes=purchase_gl_codes,
+                recipe_product_items=recipe_product_items,
+                vendor_aliases=vendor_aliases,
+                vendor_alias_delete_form=vendor_alias_delete_form,
+            )
         barcode_values, barcode_errors = _collect_barcode_values(form)
         recv_count = sum(
             1
@@ -1109,32 +1291,15 @@ def edit_item(item_id):
         if "gl_code_id" in request.form:
             item.gl_code_id = form.gl_code_id.data
         item.purchase_gl_code_id = form.purchase_gl_code.data or None
+        item.expiry_tracking_mode = form.expiry_tracking_mode.data
+        item.expiry_shelf_life_days = (
+            form.expiry_shelf_life_days.data
+            if form.expiry_tracking_mode.data == Item.EXPIRY_TRACKING_SHELF_LIFE
+            else None
+        )
+        item.expiry_warning_days = form.expiry_warning_days.data or 14
         _sync_item_barcodes(item, barcode_values)
-        ItemUnit.query.filter_by(item_id=item.id).delete()
-        receiving_set = False
-        transfer_set = False
-        for uf in form.units:
-            unit_form = uf.form
-            if unit_form.name.data:
-                receiving_default = (
-                    unit_form.receiving_default.data and not receiving_set
-                )
-                transfer_default = (
-                    unit_form.transfer_default.data and not transfer_set
-                )
-                db.session.add(
-                    ItemUnit(
-                        item_id=item.id,
-                        name=unit_form.name.data,
-                        factor=float(unit_form.factor.data),
-                        receiving_default=receiving_default,
-                        transfer_default=transfer_default,
-                    )
-                )
-                if receiving_default:
-                    receiving_set = True
-                if transfer_default:
-                    transfer_set = True
+        _sync_item_units(item, _clean_item_unit_form_values(form))
         for record in location_stand_items:
             field_name = f"location_gl_code_{record.location_id}"
             raw_value = request.form.get(field_name, "").strip()
@@ -1516,6 +1681,14 @@ def item_units(item_id):
                 if gl_obj and gl_obj.description
                 else "",
             },
+            "expiry_tracking": {
+                "mode": item.expiry_tracking_mode,
+                "shelf_life_days": item.expiry_shelf_life_days,
+                "warning_days": item.expiry_warning_days,
+                "requires_exact_date": (
+                    item.expiry_tracking_mode == Item.EXPIRY_TRACKING_EXACT
+                ),
+            },
         }
 
     if request.method == "GET":
@@ -1614,26 +1787,7 @@ def item_units(item_id):
     if not cleaned_units or not receiving_assigned or not transfer_assigned:
         return jsonify({"error": "Invalid data"}), 400
 
-    existing_units = {unit.id: unit for unit in item.units}
-    remaining_ids = set(existing_units.keys())
-
-    for unit_data in cleaned_units:
-        unit_id = unit_data.get("id")
-        unit = existing_units.get(unit_id) if unit_id in existing_units else None
-        if unit is None:
-            unit = ItemUnit(item=item)
-        else:
-            remaining_ids.discard(unit_id)
-
-        unit.name = unit_data["name"]
-        unit.factor = unit_data["factor"]
-        unit.receiving_default = unit_data["receiving_default"]
-        unit.transfer_default = unit_data["transfer_default"]
-        db.session.add(unit)
-
-    for unit_id in remaining_ids:
-        db.session.delete(existing_units[unit_id])
-
+    _sync_item_units(item, cleaned_units)
     db.session.flush()
     response_data = serialize_units()
     db.session.commit()

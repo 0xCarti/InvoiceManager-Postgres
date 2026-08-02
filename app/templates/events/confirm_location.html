@@ -181,7 +181,7 @@
                                             {% for mismatch in variance_breakdown.price_mismatches %}
                                                 <li>
                                                     <strong>{{ mismatch.product_name }}</strong>
-                                                    — App price:
+                                                    — Default sellable price:
                                                     {% if mismatch.app_price is not none %}
                                                         ${{ '%.2f'|format(mismatch.app_price) }}
                                                     {% else %}

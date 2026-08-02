@@ -10,6 +10,7 @@ from app.models import (
     Product,
     ProductRecipeItem,
 )
+from app.routes.location_routes import _protected_location_item_ids
 from tests.utils import login
 
 
@@ -37,6 +38,7 @@ def test_menu_edit_syncs_location_stand_sheet(client, app):
         sugar = Item(name="Sugar", base_unit="gram", purchase_gl_code_id=gl_code_id)
         db.session.add(sugar)
         db.session.flush()
+        sugar_id = sugar.id
         sugar_unit = ItemUnit(
             item_id=sugar.id,
             name="gram",
@@ -69,7 +71,8 @@ def test_menu_edit_syncs_location_stand_sheet(client, app):
     with app.app_context():
         location = Location.query.filter_by(name="Bakery").first()
         assert location is not None
-        assert LocationStandItem.query.filter_by(location_id=location.id).count() == 1
+        location_id = location.id
+        assert LocationStandItem.query.filter_by(location_id=location_id).count() == 1
     with client:
         login(client, email, "pass")
         resp = client.post(
@@ -83,7 +86,7 @@ def test_menu_edit_syncs_location_stand_sheet(client, app):
         )
         assert resp.status_code == 200
     with app.app_context():
-        stand_items = LocationStandItem.query.filter_by(location_id=location.id).all()
+        stand_items = LocationStandItem.query.filter_by(location_id=location_id).all()
         assert len(stand_items) == 2
         assert {item.item.name for item in stand_items} == {"Flour", "Sugar"}
     with client:
@@ -99,6 +102,8 @@ def test_menu_edit_syncs_location_stand_sheet(client, app):
         )
         assert resp.status_code == 200
     with app.app_context():
-        stand_items = LocationStandItem.query.filter_by(location_id=location.id).all()
-        assert len(stand_items) == 1
-        assert stand_items[0].item.name == "Sugar"
+        location = db.session.get(Location, location_id)
+        assert location is not None
+        stand_items = LocationStandItem.query.filter_by(location_id=location_id).all()
+        assert len(stand_items) == 2
+        assert _protected_location_item_ids(location) == {sugar_id}

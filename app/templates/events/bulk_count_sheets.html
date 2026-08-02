@@ -45,7 +45,40 @@
         .no-print { display: none; }
     }
 </style>
-<h2 class="no-print">Inventory Count Sheets - {{ event.name }}</h2>
+<div class="no-print d-flex flex-column flex-md-row justify-content-between gap-3 mb-3">
+    <div>
+        <h2 class="mb-1">Inventory Count Sheets - {{ event.name }}</h2>
+        {% if selected_operating_date %}
+        <div class="text-muted">{{ selected_operating_date.isoformat() }}</div>
+        {% endif %}
+    </div>
+    {% if event_dates and event_dates|length > 1 %}
+    <form method="get" class="d-flex gap-2 align-items-end">
+        <div>
+            <label class="form-label mb-1" for="operating_date">Inventory Day</label>
+            <select class="form-select" id="operating_date" name="operating_date">
+                {% for event_date in event_dates %}
+                <option value="{{ event_date.isoformat() }}" {% if selected_operating_date == event_date %}selected{% endif %}>
+                    {{ event_date.isoformat() }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit" class="btn btn-outline-secondary">Apply</button>
+    </form>
+    {% endif %}
+</div>
+{% if skipped_locations %}
+<div class="alert alert-warning no-print">
+    <div class="fw-semibold mb-1">Some locations are not available for this inventory day.</div>
+    {% for skipped in skipped_locations %}
+    <div>{{ skipped.message }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+{% if not data %}
+<div class="alert alert-info no-print">No locations are available for inventory counting on this date.</div>
+{% endif %}
 {% for block in data %}
     <h4 class="mt-4">
         {{ block.location.name }}
@@ -58,19 +91,19 @@
         <thead>
             <tr>
                 <th>Item</th>
-                <th>Receiving Quantity</th>
-                <th>Transfer Quantity</th>
-                <th>Base Quantity</th>
+                <th>Unit</th>
+                <th>Quantity</th>
             </tr>
         </thead>
         <tbody>
-            {% for entry in block.stand_items %}
+            {% for entry in block["items"] %}
+                {% for unit_option in entry.unit_options %}
             <tr>
                 <td data-label="Item">{{ entry.item.name }}</td>
-                <td data-label="Receiving Quantity">{% if entry.recv_unit %} _____ {{ entry.recv_unit.name }} of {{ entry.recv_unit.factor }} {{ entry.item.base_unit }}{% endif %}</td>
-                <td data-label="Transfer Quantity">{% if entry.trans_unit %} _____ {{ entry.trans_unit.name }} of {{ entry.trans_unit.factor }} {{ entry.item.base_unit }}{% endif %}</td>
-                <td data-label="Base Quantity">_____ {{ entry.item.base_unit }}</td>
+                <td data-label="Unit">{{ unit_option.label }}</td>
+                <td data-label="Quantity">_____</td>
             </tr>
+                {% endfor %}
             {% endfor %}
         </tbody>
     </table>

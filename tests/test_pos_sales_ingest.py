@@ -1,6 +1,5 @@
 from decimal import Decimal
 from datetime import datetime, timezone as dt_timezone
-from pathlib import Path
 
 import pytest
 
@@ -14,13 +13,13 @@ from app.models import (
 from app.services import pos_sales_ingest
 from app.services.pos_sales_ingest import ingest_pos_sales_attachment
 from app.utils.pos_import import parse_terminal_sales_email_rows
+from tests.utils import build_terminal_sales_workbook_bytes
 
 
 def test_ingest_pos_sales_attachment_is_idempotent_for_duplicate_message_and_attachment(
     app, tmp_path
 ):
-    spreadsheet = Path(__file__).resolve().parents[1] / "game_sales.xls"
-    content = spreadsheet.read_bytes()
+    content = build_terminal_sales_workbook_bytes()
 
     with app.app_context():
         first, first_duplicate = ingest_pos_sales_attachment(
@@ -127,6 +126,38 @@ def test_ingest_pos_sales_attachment_marks_parse_failures_as_ignored(
         assert staged_import.status == PosSalesImport.STATUS_IGNORED
         assert staged_import.failure_reason == "Unable to parse POS spreadsheet attachment."
         assert staged_import.attachment_storage_path
+
+
+def test_ingest_attempts_auto_approval_when_enabled(app, monkeypatch, tmp_path):
+    from app.routes import auth_routes
+
+    approved_import_ids = []
+
+    monkeypatch.setattr(
+        pos_sales_ingest,
+        "stage_pos_sales_import",
+        lambda sales_import, filepath, extension: None,
+    )
+    monkeypatch.setattr(
+        auth_routes,
+        "_auto_approve_sales_import_if_ready",
+        lambda import_id: approved_import_ids.append(import_id) or True,
+    )
+
+    with app.app_context():
+        Setting.set_pos_sales_auto_approve_clean_imports(True)
+        db.session.commit()
+
+        sales_import, duplicate = ingest_pos_sales_attachment(
+            source_provider="mailgun",
+            source_message_id="<auto-approval-hook>",
+            filename="auto_sales.xls",
+            content=b"placeholder spreadsheet bytes",
+            storage_dir=tmp_path / "mailgun_staging",
+        )
+
+        assert duplicate is False
+        assert approved_import_ids == [sales_import.id]
 
 
 def test_parse_rows_compute_unit_price_using_signed_discount():

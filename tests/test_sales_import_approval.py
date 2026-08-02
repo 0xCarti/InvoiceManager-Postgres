@@ -16,6 +16,7 @@ from app.models import (
     PosSalesImportRow,
     Product,
     ProductRecipeItem,
+    Setting,
     TerminalSale,
     User,
     UserFilterPreference,
@@ -1162,7 +1163,7 @@ def test_sales_import_detail_sidebar_shows_issue_counts_and_sorts_locations(
 
         html = detail_response.data.decode("utf-8")
         sidebar_cards = re.findall(
-            r'<a\s+href="[^"]*location_id=\d+"[^>]*>.*?<div class="fw-semibold">([^<]+)</div>.*?<span class="badge ([^"]*)">\s*([^<]+)\s*</span>',
+            r'<a\b[^>]*href="[^"]*location_id=\d+[^"]*"[^>]*>.*?<div class="fw-semibold">([^<]+)</div>.*?<span class="badge ([^"]*)">\s*([^<]+)\s*</span>',
             html,
             re.S,
         )
@@ -1718,6 +1719,88 @@ def test_sales_imports_list_shows_issue_counts_and_direct_approve_button(client,
     with app.app_context():
         ready_record = db.session.get(PosSalesImport, ready_import["import_id"])
         assert ready_record.status == "pending"
+
+
+def test_auto_approve_clean_sales_import_when_setting_enabled(app):
+    from app.routes.auth_routes import _auto_approve_sales_import_if_ready
+
+    ready_import = _create_price_review_import(
+        app,
+        message_id="msg-auto-approve-ready",
+        product_price=5.0,
+        file_price=5.0,
+    )
+
+    with app.app_context():
+        Setting.set_pos_sales_auto_approve_clean_imports(True)
+        db.session.commit()
+
+        approved = _auto_approve_sales_import_if_ready(ready_import["import_id"])
+
+        sales_import = db.session.get(PosSalesImport, ready_import["import_id"])
+        stand_item = LocationStandItem.query.filter_by(
+            location_id=ready_import["location_id"],
+            item_id=ready_import["item_id"],
+        ).one()
+        item = db.session.get(Item, ready_import["item_id"])
+
+        assert approved is True
+        assert sales_import.status == PosSalesImport.STATUS_APPROVED
+        assert sales_import.approved_by is None
+        assert sales_import.approval_batch_id
+        assert stand_item.expected_count == 8.0
+        assert item.quantity == 8.0
+
+
+def test_auto_approve_leaves_import_pending_when_review_is_needed(app):
+    from app.routes.auth_routes import _auto_approve_sales_import_if_ready
+
+    review_import = _create_price_review_import(
+        app,
+        message_id="msg-auto-approve-review",
+        product_price=4.0,
+        file_price=5.0,
+    )
+
+    with app.app_context():
+        Setting.set_pos_sales_auto_approve_clean_imports(True)
+        db.session.commit()
+
+        approved = _auto_approve_sales_import_if_ready(review_import["import_id"])
+
+        sales_import = db.session.get(PosSalesImport, review_import["import_id"])
+        stand_item = LocationStandItem.query.filter_by(
+            location_id=review_import["location_id"],
+            item_id=review_import["item_id"],
+        ).one()
+        item = db.session.get(Item, review_import["item_id"])
+
+        assert approved is False
+        assert sales_import.status == PosSalesImport.STATUS_PENDING
+        assert sales_import.approval_batch_id is None
+        assert stand_item.expected_count == 10.0
+        assert item.quantity == 10.0
+
+
+def test_auto_approve_setting_disabled_keeps_clean_import_pending(app):
+    from app.routes.auth_routes import _auto_approve_sales_import_if_ready
+
+    ready_import = _create_price_review_import(
+        app,
+        message_id="msg-auto-approve-disabled",
+        product_price=5.0,
+        file_price=5.0,
+    )
+
+    with app.app_context():
+        Setting.set_pos_sales_auto_approve_clean_imports(False)
+        db.session.commit()
+
+        approved = _auto_approve_sales_import_if_ready(ready_import["import_id"])
+
+        sales_import = db.session.get(PosSalesImport, ready_import["import_id"])
+        assert approved is False
+        assert sales_import.status == PosSalesImport.STATUS_PENDING
 
 
 def test_sales_imports_list_supports_search_filters_and_pagination_controls(

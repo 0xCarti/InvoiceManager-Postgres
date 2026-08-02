@@ -266,6 +266,24 @@ def test_user_can_access_endpoint_requires_matching_permission():
         DummyUser("schedules.apply_templates"),
         "schedule.templates",
     )
+    assert user_can_access_endpoint(
+        DummyUser("schedules.view_self"),
+        "schedule.my_schedule",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("schedules.post_tradeboard"),
+        "schedule.my_schedule",
+        "POST",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("schedules.post_tradeboard"),
+        "schedule.my_schedule",
+        "GET",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("schedules.view_self"),
+        "schedule.team_schedule",
+    )
     assert not user_can_access_endpoint(
         DummyUser("schedules.apply_templates"),
         "schedule.template_detail",
@@ -337,6 +355,7 @@ def test_default_landing_endpoint_prefers_first_accessible_route():
             "transfer.view_transfers": SimpleNamespace(),
             "main.home": SimpleNamespace(),
             "admin.users": SimpleNamespace(),
+            "schedule.my_schedule": SimpleNamespace(),
             "auth.profile": SimpleNamespace(),
         }
     )
@@ -347,6 +366,9 @@ def test_default_landing_endpoint_prefers_first_accessible_route():
         )
         assert get_default_landing_endpoint(DummyUser("dashboard.view")) == "main.home"
         assert get_default_landing_endpoint(DummyUser("users.view")) == "admin.users"
+        assert get_default_landing_endpoint(DummyUser("schedules.view_self")) == (
+            "schedule.my_schedule"
+        )
         assert get_default_landing_endpoint(DummyUser()) == "auth.profile"
 
 
@@ -369,6 +391,11 @@ def test_all_non_public_registered_endpoints_have_permission_rules(app):
         "auth.reset_token",
         "auth.toggle_favorite",
         "bootstrap.static",
+        "locations.scan_count_submission",
+        "locations.scan_eaten_submission",
+        "locations.scan_inventory_item_search",
+        "locations.scan_inventory_submission",
+        "locations.scan_spoilage_submission",
         "mailgun.inbound_mailgun",
         "menu.menu_feed",
         "preferences.save_filter_preferences",

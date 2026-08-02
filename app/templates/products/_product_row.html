@@ -1,8 +1,8 @@
 <tr id="product-row-{{ product.id }}">
-    {% set can_select_products = can_access_endpoint('product.bulk_update_products', 'GET') or can_access_endpoint('product.bulk_set_cost_from_recipe', 'POST') %}
+    {% set can_select_products = can_access_endpoint('product.bulk_update_products', 'GET') or can_access_endpoint('product.bulk_set_cost_from_recipe', 'POST') or can_access_endpoint('product.bulk_archive_products', 'POST') %}
     {% set can_view_product = can_access_endpoint('product.view_product', 'GET') %}
     {% if can_select_products %}
-    <td class="col-select"><input type="checkbox" name="product_ids" value="{{ product.id }}" style="transform: scale(1.5);"></td>
+    <td class="col-select"><input type="checkbox" name="product_ids" value="{{ product.id }}" form="bulk-cost-form" style="transform: scale(1.5);"></td>
     {% endif %}
     <td class="col-product-id" data-sort-value="{{ product.id }}">{{ product.id }}</td>
     <td class="col-product-name">
@@ -11,14 +11,32 @@
         {% else %}
         {{ product.name }}
         {% endif %}
+        {% if product.archived %}
+        <span class="badge text-bg-secondary ms-2">Archived</span>
+        {% endif %}
     </td>
-    <td class="col-product-price" data-sort-value="{{ '%.6f'|format(product.price or 0) }}">{{ '%.2f'|format(product.price or 0) }}</td>
-    <td class="col-product-invoice-price" data-sort-value="{{ '%.6f'|format(product.invoice_sale_price or 0) }}">{{ '%.2f'|format(product.invoice_sale_price if product.invoice_sale_price is not none else product.price or 0) }}</td>
+    <td class="col-product-sellable-amounts" data-sort-value="{{ '%.6f'|format(product.default_sellable_price or 0) }}">
+        {% set sellable_amounts = product.active_sellable_amounts %}
+        {% if sellable_amounts %}
+        <ul class="mb-0 ps-3 small">
+            {% for amount in sellable_amounts %}
+            <li>
+                {{ amount.name or 'Each' }}
+                {% if amount.quantity != 1 %}({{ '{:g}'.format(amount.quantity) }}x){% endif %}
+                - {{ '%.2f'|format(amount.price_float) }}
+                {% if amount.is_default %}<span class="text-muted">(default)</span>{% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <span class="text-muted">No active amounts</span>
+        {% endif %}
+    </td>
     <td class="col-product-cost" data-sort-value="{{ '%.6f'|format(product.cost or 0) }}">{{ '%.2f'|format(product.cost or 0) }}</td>
     <td class="col-product-food-cost" data-sort-value="{{ '%.6f'|format(product.food_cost_percentage or 0) }}">{{ '{:.2f}%'.format(product.food_cost_percentage or 0) }}</td>
     <td class="col-product-last-sold" data-sort-value="{{ product.last_sold_at.strftime('%Y%m%d') if product.last_sold_at else '' }}">{{ product.last_sold_at.strftime('%Y-%m-%d') if product.last_sold_at else 'Never' }}</td>
     <td class="col-product-quantity" data-sort-value="{{ '%.6f'|format(product.quantity or 0) }}">{{ '%.2f'|format(product.quantity or 0) }}</td>
-    {% set profit_value = (product.price or 0) - (product.cost or 0) %}
+    {% set profit_value = (product.default_sellable_price or 0) - ((product.cost or 0) * (product.default_sellable_quantity or 1)) %}
     <td class="col-product-profit" data-sort-value="{{ '%.6f'|format(profit_value) }}">{{ '%.2f'|format(profit_value) }}</td>
     <td class="col-product-sales-gl-code">{{ product.sales_gl_code.code if product.sales_gl_code else '—' }}</td>
     <td class="col-product-sales-gl-desc">{{ product.sales_gl_code.description if product.sales_gl_code and product.sales_gl_code.description else '—' }}</td>
@@ -94,7 +112,7 @@
                     <li>
                         <form action="{{ url_for('product.delete_product', product_id=product.id) }}" method="post">
                             {{ delete_form.hidden_tag() }}
-                            <button type="submit" class="dropdown-item text-danger">Delete</button>
+                            <button type="submit" class="dropdown-item text-danger">{{ 'Archive' if not product.archived else 'Delete' }}</button>
                         </form>
                     </li>
                     {% endif %}

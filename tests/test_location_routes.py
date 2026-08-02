@@ -608,6 +608,7 @@ def test_location_items_include_non_countable_recipe_items_and_save_countable_ov
         flour = Item.query.filter_by(name="Flour").first()
         assert product is not None
         assert flour is not None
+        flour_id = flour.id
         syrup = Item(name="Syrup", base_unit="ml")
         syrup_unit = ItemUnit(
             item=syrup,
@@ -645,7 +646,6 @@ def test_location_items_include_non_countable_recipe_items_and_save_countable_ov
         assert syrup is not None
         location_id = location.id
         syrup_id = syrup.id
-        flour_id = flour.id
         syrup_record = LocationStandItem.query.filter_by(
             location_id=location_id,
             item_id=syrup_id,

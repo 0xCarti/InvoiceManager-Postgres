@@ -186,6 +186,11 @@
                         <label class="form-label mb-1">GL Code</label>
                         {{ item.gl_code(class="form-control gl-code-select") }}
                     </div>
+                    <div class="col-md-6 col-sm-6 expiry-date-field d-none">
+                        <label class="form-label mb-1" for="{{ item.expiry_date.id }}">Expiry Date</label>
+                        {{ item.expiry_date(class="form-control expiry-date", **{"data-expiry-date": "1"}) }}
+                        <div class="form-text expiry-helper"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -221,7 +226,7 @@
     const invoiceLocationField = document.getElementById('location_id');
 
     initDatePickers({
-        fieldSelectors: ['#{{ form.received_date.id }}']
+        fieldSelectors: ['#{{ form.received_date.id }}', '.expiry-date']
     });
 
     function applyDepartmentDefault(department, { skipIfSet = false } = {}) {
@@ -298,6 +303,11 @@
                     <div class="col-md-6 col-sm-6">
                         <label class="form-label mb-1">GL Code</label>
                         <select name="items-${index}-gl_code" id="items-${index}-gl_code" class="form-control gl-code-select">${glCodeOptions}</select>
+                    </div>
+                    <div class="col-md-6 col-sm-6 expiry-date-field d-none">
+                        <label class="form-label mb-1" for="items-${index}-expiry_date">Expiry Date</label>
+                        <input type="text" name="items-${index}-expiry_date" id="items-${index}-expiry_date" class="form-control expiry-date" data-expiry-date="1" autocomplete="off">
+                        <div class="form-text expiry-helper"></div>
                     </div>
                 </div>
             </div>
@@ -382,7 +392,57 @@
         const defaultGl = glSelect ? glSelect.dataset.defaultValue : null;
         const glDiffers = glSelect && glSelect.value && defaultGl && glSelect.value !== defaultGl;
 
-        return Boolean(hasLocation || glDiffers);
+        const expiryMode = row.dataset.expiryTrackingMode || 'none';
+
+        return Boolean(hasLocation || glDiffers || expiryMode !== 'none');
+    }
+
+    function addDaysToIsoDate(dateValue, days) {
+        if (!dateValue || !Number.isFinite(days)) {
+            return '';
+        }
+        const date = new Date(`${dateValue}T00:00:00`);
+        if (Number.isNaN(date.getTime())) {
+            return '';
+        }
+        date.setDate(date.getDate() + days);
+        return date.toISOString().slice(0, 10);
+    }
+
+    function applyExpiryTracking(row, expiryData) {
+        const mode = expiryData && expiryData.mode ? expiryData.mode : 'none';
+        row.dataset.expiryTrackingMode = mode;
+        const field = row.querySelector('.expiry-date-field');
+        const input = row.querySelector('.expiry-date');
+        const helper = row.querySelector('.expiry-helper');
+        if (!field || !input || !helper) {
+            return;
+        }
+
+        input.required = false;
+        if (mode === 'none' || mode === 'received_date') {
+            field.classList.add('d-none');
+            helper.textContent = mode === 'received_date' ? 'Tracked by received date.' : '';
+            if (mode === 'none') {
+                input.value = '';
+                delete input.dataset.userSelected;
+            }
+            setOptionalPanelState(row, shouldExpandOptional(row));
+            return;
+        }
+
+        field.classList.remove('d-none');
+        if (mode === 'exact') {
+            input.required = true;
+            helper.textContent = 'Required for this item.';
+        } else {
+            const shelfLifeDays = parseInt(expiryData.shelf_life_days || 0, 10);
+            helper.textContent = shelfLifeDays > 0 ? `Default: received date + ${shelfLifeDays} days.` : '';
+            if (!input.dataset.userSelected && shelfLifeDays > 0) {
+                input.value = addDaysToIsoDate(document.getElementById('received_date').value, shelfLifeDays);
+            }
+        }
+        setOptionalPanelState(row, true);
     }
 
     function fetchUnits(selectEl, selectedUnitId=null, { skipCostRefresh = false } = {}) {
@@ -392,6 +452,7 @@
         if (!itemId) {
             unitSelect.innerHTML = '';
             applyDefaultGlCode(row, null);
+            applyExpiryTracking(row, null);
             return;
         }
         const params = new URLSearchParams();
@@ -408,6 +469,7 @@
             });
             unitSelect.innerHTML = opts;
             applyDefaultGlCode(row, data.purchase_gl_code);
+            applyExpiryTracking(row, data.expiry_tracking);
             if (!skipCostRefresh) {
                 fetchCost(selectEl.closest('.item-row'));
             }
@@ -462,6 +524,9 @@
         if (window.NumericInput) {
             window.NumericInput.enableWithin(row);
         }
+        initDatePickers({
+            fieldSelectors: [`#items-${itemIndex}-expiry_date`]
+        });
         const glSelect = row.querySelector('.gl-code-select');
         if (glSelect) {
             glSelect.value = '0';
@@ -541,6 +606,9 @@
         if (e.target && (e.target.classList.contains('quantity') || e.target.classList.contains('cost') || e.target.classList.contains('deposit'))) {
             updateTotals();
         }
+        if (e.target && e.target.classList.contains('expiry-date')) {
+            e.target.dataset.userSelected = '1';
+        }
     });
 
     const locationField = document.getElementById('location_id');
@@ -558,11 +626,28 @@
             });
         });
     }
+    const receivedDateField = document.getElementById('received_date');
+    if (receivedDateField) {
+        receivedDateField.addEventListener('change', () => {
+            document.querySelectorAll('#items .item-row').forEach(row => {
+                if (row.dataset.expiryTrackingMode !== 'shelf_life') {
+                    return;
+                }
+                const itemSelect = row.querySelector('.item-select');
+                if (itemSelect && itemSelect.value) {
+                    fetchUnits(itemSelect, row.querySelector('.unit-select')?.value || null, { skipCostRefresh: true });
+                }
+            });
+        });
+    }
 
     document.getElementById('items').addEventListener('input', function(e) {
         if (e.target && (e.target.classList.contains('quantity') || e.target.classList.contains('cost') || e.target.classList.contains('deposit'))) {
             if (e.target.classList.contains('cost') || e.target.classList.contains('deposit')) { e.target.dataset.touched = '1'; }
             updateTotals();
+        }
+        if (e.target && e.target.classList.contains('expiry-date')) {
+            e.target.dataset.userSelected = '1';
         }
     });
 

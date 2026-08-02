@@ -3,7 +3,7 @@
 {% block title %}{{ submission_type_label(submission.submission_type) }} Submission{% endblock %}
 
 {% block content %}
-{% set is_count_submission = submission.submission_type in ('opening', 'closing') %}
+{% set is_count_submission = submission.submission_type in ('opening', 'closing', 'inventory') %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .count-submission-detail-actions,
@@ -106,6 +106,7 @@
                     <select class="form-select" id="submission_type" name="submission_type" {% if not editable %}disabled{% endif %}>
                         <option value="opening" {% if submission.submission_type == 'opening' %}selected{% endif %}>Opening Count</option>
                         <option value="closing" {% if submission.submission_type == 'closing' %}selected{% endif %}>Closing Count</option>
+                        <option value="inventory" {% if submission.submission_type == 'inventory' %}selected{% endif %}>Inventory Count</option>
                         <option value="eaten" {% if submission.submission_type == 'eaten' %}selected{% endif %}>Eaten Items</option>
                         <option value="spoilage" {% if submission.submission_type == 'spoilage' %}selected{% endif %}>Spoilage Items</option>
                     </select>
@@ -181,7 +182,21 @@
                         <tbody>
                             {% for entry in row_entries %}
                             <tr>
-                                <td>{{ entry.item.name }}</td>
+                                <td>
+                                    <div>{{ entry.item.name }}</div>
+                                    {% if entry.unit_breakdown %}
+                                    <div class="small text-muted">
+                                        {% for unit_row in entry.unit_breakdown %}
+                                            <div>
+                                                {{ '%.4f'|format(unit_row.quantity or 0) }}
+                                                {{ unit_row.unit_name }}
+                                                = {{ '%.4f'|format(unit_row.base_quantity or 0) }}
+                                                {{ unit_row.base_unit }}
+                                            </div>
+                                        {% endfor %}
+                                    </div>
+                                    {% endif %}
+                                </td>
                                 <td>{{ entry.report_unit_label or '-' }}</td>
                                 {% if expected_opening_context %}
                                 {% set expected_entry = expected_opening_context.by_row_id.get(entry.row.id) %}
@@ -220,7 +235,11 @@
                 {% if editable %}
                 <div class="w-100 small text-muted">
                     {% if is_count_submission %}
+                    {% if submission.submission_type == 'inventory' %}
+                    Add will sum this inventory count with already-approved inventory counts for this location. Overwrite will replace the approved inventory count for the whole location.
+                    {% else %}
                     Add will sum this submission with already-approved values for the same count date. Overwrite will replace the current approved value for each item included in this submission.
+                    {% endif %}
                     {% else %}
                     Add will sum this submission with already-approved values for the same day. Overwrite will replace the approved value for each item on that day before totals are rolled up to the stand sheet.
                     {% endif %}

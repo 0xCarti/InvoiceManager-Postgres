@@ -44,7 +44,7 @@
 <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-end gap-2 mb-3">
     <div>
         <h2 class="mb-1">Terminal Sales - {{ event_location.location.name }}</h2>
-        <p class="text-muted mb-0">Enter the sold quantity for each product.</p>
+        <p class="text-muted mb-0">Enter the sold quantity for each product's default sellable amount.</p>
     </div>
 </div>
 <form method="post" id="terminal-sales-form">
@@ -52,14 +52,21 @@
     <div class="table-responsive">
     <table class="table table-sm align-middle terminal-sales-table">
         <thead>
-            <tr><th scope="col">Product</th><th scope="col" class="text-end">Price</th><th scope="col">Quantity</th></tr>
+            <tr><th scope="col">Product</th><th scope="col" class="text-end">Sellable Amount</th><th scope="col">Quantity</th></tr>
         </thead>
         <tbody>
         {% set product_list = products or event_location.location.products %}
         {% for product in product_list %}
-        <tr data-price="{{ product.price | float }}">
+        {% set amount = product.default_sellable_amount %}
+        {% set price = product.default_sellable_price %}
+        <tr data-price="{{ price | float }}">
             <td class="text-break" data-label="Product">{{ product.name }}</td>
-            <td class="text-end" data-label="Price">${{ '{:,.2f}'.format(product.price) }}</td>
+            <td class="text-end" data-label="Sellable Amount">
+                ${{ '{:,.2f}'.format(price) }}
+                {% if amount and amount.name and amount.name|lower != 'each' %}
+                <span class="d-block small text-muted">{{ amount.name }}</span>
+                {% endif %}
+            </td>
             <td data-label="Quantity">
                 <input type="text" step="any" inputmode="text" data-numeric-input="1" name="qty_{{ product.id }}" class="form-control terminal-sale-input"
                        value="{{ existing_sales.get(product.id, '') }}">

@@ -17,6 +17,7 @@ from app.models import (
     Vendor,
     db,
 )
+from app.utils.sellable_amounts import ensure_default_sellable_amount
 
 
 def _import_csv(path, model, mappings):
@@ -278,6 +279,7 @@ def _import_products(path):
         )
         db.session.add(product)
         db.session.flush()
+        ensure_default_sellable_amount(product, price=price)
         for item_id, qty, unit_id in recipe_items:
             db.session.add(
                 ProductRecipeItem(

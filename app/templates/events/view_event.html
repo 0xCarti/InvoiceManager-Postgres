@@ -1,11 +1,13 @@
 {% extends 'base.html' %}
 {% block content %}
+{% set is_inventory_event = event.event_type == 'inventory' %}
 {% set unconfirmed_count = event.locations | selectattr('confirmed', 'equalto', False) | list | length %}
 {% set can_add_location = can_access_endpoint('event.add_location') %}
 {% set can_view_stand_sheets = can_access_endpoint('event.bulk_stand_sheets') %}
 {% set can_email_stand_sheets = can_access_endpoint('event.email_bulk_stand_sheets', 'POST') %}
 {% set can_view_closed_event_report = can_access_endpoint('event.closed_event_report') %}
 {% set can_view_count_sheets = can_access_endpoint('event.bulk_count_sheets') %}
+{% set can_view_inventory_report = can_access_endpoint('event.inventory_report') %}
 {% set can_upload_sales = can_access_endpoint('event.upload_terminal_sales') %}
 {% set can_close_event = can_access_endpoint('event.close_event', 'POST') %}
 {% set can_view_stand_sheet = can_access_endpoint('event.stand_sheet') %}
@@ -17,6 +19,7 @@
 {% set can_download_event_documents = can_access_endpoint('event.download_event_document') %}
 {% set can_delete_event_documents = can_access_endpoint('event.delete_event_document_file', 'POST') %}
 {% set can_review_count_submissions = can_access_endpoint('locations.count_submissions', 'GET') %}
+{% set show_reports_menu = (event.closed and can_view_closed_event_report) or (is_inventory_event and (can_view_count_sheets or can_view_inventory_report)) %}
 <div class="container mt-4 app-page-shell">
     <div class="app-page-header">
         <div class="app-page-header-copy">
@@ -72,10 +75,12 @@
         {% if not event.closed and can_add_location %}
         <a class="btn btn-primary" href="{{ url_for('event.add_location', event_id=event.id) }}">Add Location</a>
         {% endif %}
-        {% if can_view_stand_sheets %}
+        {% if is_inventory_event and can_view_count_sheets %}
+        <a class="btn btn-outline-secondary" href="{{ url_for('event.bulk_count_sheets', event_id=event.id) }}">Count Sheets</a>
+        {% elif can_view_stand_sheets %}
         <a class="btn btn-outline-secondary" href="{{ url_for('event.bulk_stand_sheets', event_id=event.id) }}">Stand Sheets</a>
         {% endif %}
-        {% if can_email_stand_sheets %}
+        {% if not is_inventory_event and can_email_stand_sheets %}
         <button
             type="button"
             class="btn btn-outline-secondary"
@@ -88,7 +93,7 @@
             Email Stand Sheets
         </button>
         {% endif %}
-        {% if can_view_closed_event_report or can_view_count_sheets %}
+        {% if show_reports_menu %}
         <div class="dropdown">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                 Reports
@@ -97,8 +102,11 @@
                 {% if event.closed and can_view_closed_event_report %}
                 <li><a class="dropdown-item" href="{{ url_for('event.closed_event_report', event_id=event.id) }}">Closed Event Report</a></li>
                 {% endif %}
-                {% if event.event_type == 'inventory' and can_view_count_sheets %}
+                {% if is_inventory_event and can_view_count_sheets %}
                 <li><a class="dropdown-item" href="{{ url_for('event.bulk_count_sheets', event_id=event.id) }}">Count Sheets</a></li>
+                {% endif %}
+                {% if is_inventory_event and can_view_inventory_report %}
+                <li><a class="dropdown-item" href="{{ url_for('event.inventory_report', event_id=event.id) }}">Summary Source 18</a></li>
                 {% endif %}
             </ul>
         </div>
@@ -311,16 +319,19 @@
                                             {% if can_add_terminal_sale %}
                                             <a class="btn btn-sm btn-outline-primary" href="{{ url_for('event.add_terminal_sale', event_id=event.id, el_id=entry.event_location.id) }}">Sales</a>
                                             {% endif %}
-                                            {% if can_view_stand_sheet %}
+                                            {% if not is_inventory_event and can_view_stand_sheet %}
                                             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.stand_sheet', event_id=event.id, location_id=entry.event_location.location_id, operating_date=day.date.isoformat()) }}">Stand Sheet</a>
                                             {% endif %}
-                                            {% if event.event_type == 'inventory' and can_view_count_sheets %}
-                                            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.count_sheet', event_id=event.id, location_id=entry.event_location.location_id) }}">Count Sheet</a>
+                                            {% if is_inventory_event and can_view_count_sheets %}
+                                            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.count_sheet', event_id=event.id, location_id=entry.event_location.location_id, operating_date=day.date.isoformat()) }}">Count Sheet</a>
                                             {% endif %}
-                                            {% if event.event_type == 'inventory' and can_view_scan_counts %}
-                                            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.scan_counts', event_id=event.id, location_id=entry.event_location.location_id) }}">Scan Counts</a>
+                                            {% if is_inventory_event and entry.location %}
+                                            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('locations.scan_inventory_submission', token=entry.location.count_qr_token, event_id=event.id, operating_date=day.date.isoformat()) }}">Public Inventory</a>
                                             {% endif %}
-                                            {% if entry.location and can_email_stand_sheets %}
+                                            {% if is_inventory_event and can_view_scan_counts %}
+                                            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.scan_counts', event_id=event.id, location_id=entry.event_location.location_id, operating_date=day.date.isoformat()) }}">Scan Counts</a>
+                                            {% endif %}
+                                            {% if not is_inventory_event and entry.location and can_email_stand_sheets %}
                                             <a
                                                 href="#"
                                                 class="btn btn-sm btn-outline-secondary"
@@ -369,13 +380,16 @@
         </div>
         {% endif %}
 </div>
-{% if can_email_stand_sheets %}
+{% if not is_inventory_event and can_email_stand_sheets %}
 {% include 'shared/email_stand_sheet_modal.html' %}
 {% endif %}
 {% endblock %}
 {% block scripts %}
     {{ super() }}
+    {% if not is_inventory_event and can_email_stand_sheets %}
     <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='js/stand_sheet_email.js') }}"></script>
+    {% endif %}
+    {% if can_upload_event_documents %}
     <script nonce="{{ csp_nonce }}">
         document.addEventListener('DOMContentLoaded', function () {
             const form = document.querySelector('[data-event-document-form="1"]');
@@ -396,4 +410,5 @@
             syncDocumentNameState();
         });
     </script>
+    {% endif %}
 {% endblock %}

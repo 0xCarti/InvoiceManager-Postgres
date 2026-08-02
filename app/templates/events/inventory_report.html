@@ -81,17 +81,25 @@
   </tbody>
     </table>
 </div>
-<h2>Totals by GL Code</h2>
+<h2>Summary Source 18</h2>
 <div class="table-responsive">
 <table class="table table-striped table-sm align-middle inventory-report-gl-table">
   <thead>
-    <tr><th>GL Code</th><th>Total Cost</th></tr>
+    <tr><th>GL Code</th><th>Total Quantity</th><th>Total Cost</th></tr>
   </thead>
   <tbody>
-    {% for code, total in gl_totals.items() %}
-    <tr><td data-label="GL Code">{{ code }}</td><td data-label="Total Cost">{{ '%.2f'|format(total) }}</td></tr>
+    {% for code, total in gl_summary.items() %}
+    <tr>
+      <td data-label="GL Code">{{ code }}</td>
+      <td data-label="Total Quantity">{{ '%.4f'|format(total.quantity) }}</td>
+      <td data-label="Total Cost">{{ '%.2f'|format(total.cost) }}</td>
+    </tr>
     {% endfor %}
-    <tr><th data-label="GL Code">Grand Total</th><th data-label="Total Cost">{{ '%.2f'|format(grand_total) }}</th></tr>
+    <tr>
+      <th data-label="GL Code">Grand Total</th>
+      <th data-label="Total Quantity">{{ '%.4f'|format(grand_quantity) }}</th>
+      <th data-label="Total Cost">{{ '%.2f'|format(grand_total) }}</th>
+    </tr>
   </tbody>
 </table>
 </div>

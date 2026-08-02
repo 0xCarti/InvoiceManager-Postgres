@@ -53,6 +53,7 @@
                     <option value="">All types</option>
                     <option value="opening" {% if submission_type_filter == 'opening' %}selected{% endif %}>Opening Count</option>
                     <option value="closing" {% if submission_type_filter == 'closing' %}selected{% endif %}>Closing Count</option>
+                    <option value="inventory" {% if submission_type_filter == 'inventory' %}selected{% endif %}>Inventory Count</option>
                     <option value="eaten" {% if submission_type_filter == 'eaten' %}selected{% endif %}>Eaten Items</option>
                     <option value="spoilage" {% if submission_type_filter == 'spoilage' %}selected{% endif %}>Spoilage Items</option>
                 </select>

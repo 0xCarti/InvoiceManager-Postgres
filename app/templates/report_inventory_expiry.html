@@ -1,0 +1,101 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-4 app-page-shell">
+    <div class="app-page-header">
+        <div class="app-page-header-copy">
+            <h1 class="mb-1">Inventory Expiry</h1>
+            <p class="text-muted mb-0">Review tracked lots that are expired, expiring soon, or missing exact expiry dates.</p>
+        </div>
+    </div>
+
+    <form method="GET" class="app-form-card mb-3">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label" for="status">Status</label>
+                <select class="form-select" id="status" name="status">
+                    {% for value, label in [
+                        ('actionable', 'Actionable'),
+                        ('expired', 'Expired'),
+                        ('expiring_soon', 'Expiring Soon'),
+                        ('unknown', 'Unknown Expiry'),
+                        ('all', 'All Open Lots')
+                    ] %}
+                    <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label" for="item_id">Item</label>
+                <select class="form-select" id="item_id" name="item_id">
+                    <option value="">All tracked items</option>
+                    {% for item in items %}
+                    <option value="{{ item.id }}" {% if selected_item_id == item.id %}selected{% endif %}>{{ item.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="location_id">Location</label>
+                <select class="form-select" id="location_id" name="location_id">
+                    <option value="">All locations</option>
+                    {% for location in locations %}
+                    <option value="{{ location.id }}" {% if selected_location_id == location.id %}selected{% endif %}>{{ location.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary w-100">Filter</button>
+            </div>
+        </div>
+    </form>
+
+    <div class="table-responsive">
+        <table class="table table-striped align-middle">
+            <thead>
+                <tr>
+                    <th>Status</th>
+                    <th>Item</th>
+                    <th>Location</th>
+                    <th class="text-end">Remaining</th>
+                    <th>Received</th>
+                    <th>Expiry</th>
+                    <th>Purchase Invoice</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                {% set lot = row.lot %}
+                <tr>
+                    <td>
+                        {% if row.state == 'expired' %}
+                        <span class="badge text-bg-danger">Expired</span>
+                        {% elif row.state == 'expiring_soon' %}
+                        <span class="badge text-bg-warning">Expiring Soon</span>
+                        {% elif row.state == 'unknown' %}
+                        <span class="badge text-bg-secondary">Unknown</span>
+                        {% else %}
+                        <span class="badge text-bg-success">OK</span>
+                        {% endif %}
+                    </td>
+                    <td><a href="{{ url_for('item.view_item', item_id=lot.item_id) }}">{{ lot.item.name if lot.item else 'Unknown item' }}</a></td>
+                    <td>{{ lot.location.name if lot.location else '-' }}</td>
+                    <td class="text-end">{{ '%.2f'|format(lot.remaining_quantity or 0) }} {{ lot.item.base_unit if lot.item else '' }}</td>
+                    <td>{{ lot.received_date.strftime('%Y-%m-%d') if lot.received_date else '-' }}</td>
+                    <td>{{ lot.expiry_date.strftime('%Y-%m-%d') if lot.expiry_date else '-' }}</td>
+                    <td>
+                        {% if lot.purchase_invoice_id %}
+                        <a href="{{ url_for('purchase.view_purchase_invoice', invoice_id=lot.purchase_invoice_id) }}">Invoice #{{ lot.purchase_invoice_id }}</a>
+                        {% else %}
+                        -
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" class="text-center text-muted py-4">No matching expiry lots.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

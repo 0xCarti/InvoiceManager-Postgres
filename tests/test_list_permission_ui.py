@@ -85,7 +85,7 @@ def test_list_pages_hide_create_edit_bulk_and_report_controls(client, app):
             ("/menus", ["Create Menu", menu_edit_url, menu_assign_url]),
             ("/items", ["id=\"createItemBtn\"", "id=\"bulkEditItemsBtn\"", "id=\"select-all\"", "Import Items", "Delete Items", item_edit_url, item_copy_url, "id=\"itemModal\"", "id=\"itemBulkModal\""]),
             ("/locations", ["id=\"addLocationBtn\"", "id=\"bulkEditLocationsBtn\"", "id=\"emailStandSheetsBtn\"", "id=\"select-all-locations\"", "id=\"locationModal\"", "id=\"locationBulkModal\"", "id=\"copyModal\"", location_edit_url]),
-            ("/products", ["data-bs-target=\"#createProductModal\"", "id=\"editProductModal\"", "id=\"productBulkModal\"", "id=\"bulkEditProductsBtn\"", "id=\"select-all-products\"", "Set Cost From Recipe", "Recipe Report", "Revenue Report", "Stock Usage Report", "Department Sales Forecast", product_edit_url, product_copy_url, "/menus/edit/", "/locations/edit/"]),
+            ("/products", ["data-bs-target=\"#createProductModal\"", "id=\"editProductModal\"", "id=\"productBulkModal\"", "id=\"bulkEditProductsBtn\"", "id=\"select-all-products\"", "Set Cost From Recipe", "Recipe Report", "Revenue Report", "Products Sold Report", "Stock Usage Report", "Department Sales Forecast", product_edit_url, product_copy_url, "/menus/edit/", "/locations/edit/"]),
             ("/gl_codes", ["id=\"glCodeModal\"", "id=\"add-gl-code\"", "edit-gl-code"]),
         ]
 

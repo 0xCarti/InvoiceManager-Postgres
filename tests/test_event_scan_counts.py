@@ -8,11 +8,11 @@ from app import db
 from app.models import (
     Event,
     EventLocation,
-    EventStandSheetItem,
     Item,
     ItemBarcode,
     ItemUnit,
     Location,
+    LocationCountSubmission,
     LocationStandItem,
     User,
 )
@@ -122,13 +122,15 @@ def test_scan_counts_records_totals(client, app):
         assert refresh_payload["totals"][0]["counted"] == pytest.approx(5)
 
     with app.app_context():
-        sheet = EventStandSheetItem.query.filter_by(
+        submission = LocationCountSubmission.query.filter_by(
             event_location_id=context["event_location_id"],
-            item_id=context["item_id"],
-        ).first()
-        assert sheet is not None
-        assert sheet.transferred_out == pytest.approx(5)
-        assert sheet.closing_count == pytest.approx(5)
+            submission_type=LocationCountSubmission.TYPE_INVENTORY,
+        ).one()
+        assert submission.status == LocationCountSubmission.STATUS_PENDING
+        assert submission.rows[0].item_id == context["item_id"]
+        assert submission.rows[0].count_value == pytest.approx(5)
+        assert submission.rows[0].submitted_count_value == pytest.approx(5)
+        assert len(submission.rows[0].unit_breakdown) == 2
 
 
 def test_scan_counts_accepts_barcode_alias(client, app):
@@ -149,3 +151,27 @@ def test_scan_counts_accepts_barcode_alias(client, app):
         payload = post_resp.get_json()
         assert payload["success"] is True
         assert payload["item"]["total"] == pytest.approx(2)
+
+
+def test_scan_counts_rejects_non_inventory_location_item(client, app):
+    context = _setup_event(app)
+    url = f"/events/{context['event_id']}/locations/{context['location_id']}/scan_counts"
+
+    with app.app_context():
+        record = LocationStandItem.query.filter_by(
+            location_id=context["location_id"],
+            item_id=context["item_id"],
+        ).one()
+        record.countable = False
+        db.session.commit()
+
+    with client:
+        login(client, context["email"], "pass")
+        post_resp = client.post(url, json={"upc": context["item_upc"], "quantity": 1})
+        assert post_resp.status_code == 400
+        payload = post_resp.get_json()
+        assert payload["success"] is False
+        assert "not countable" in payload["error"]
+
+    with app.app_context():
+        assert LocationCountSubmission.query.count() == 0

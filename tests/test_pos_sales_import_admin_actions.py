@@ -183,10 +183,12 @@ def test_mapping_resolution_create_or_map_flow_updates_rows_and_aliases(client, 
         assert b"Create Product for Sales Import" in create_product_response.data
         assert b"Mega Pretzel" in create_product_response.data
         create_product_html = create_product_response.get_data(as_text=True)
-        assert re.search(
-            r'name="price"[^>]*value="7\\.50"',
+        price_input = re.search(
+            r'<input[^>]*name="sellable_amounts-0-price"[^>]*>',
             create_product_html,
         )
+        assert price_input is not None
+        assert re.search(r'value="7\.5(?:0)?"', price_input.group(0))
 
         save_created_product_response = client.post(
             f"/products/create?sales_import_id={import_id}&import_row_id={row_id}&return_location_id={location_import_id}",

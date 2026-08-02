@@ -3,6 +3,7 @@ import io
 
 from app import db
 from app.models import Product, Setting
+from app.utils.sellable_amounts import ensure_default_sellable_amount
 from tests.test_location_routes import setup_data
 
 
@@ -21,7 +22,12 @@ def test_menu_feed_requires_valid_token(client, app):
 def test_menu_feed_returns_json_rows_for_all_products(client, app):
     _, product_id, _ = setup_data(app)
     with app.app_context():
+        product = db.session.get(Product, product_id)
+        amount = ensure_default_sellable_amount(product)
+        db.session.flush()
+        amount_id = amount.id
         app.config["MENU_FEED_API_TOKEN"] = "menu-feed-secret"
+        db.session.commit()
 
     response = client.get("/integrations/menu-feed.json?token=menu-feed-secret")
 
@@ -30,8 +36,11 @@ def test_menu_feed_returns_json_rows_for_all_products(client, app):
     assert payload["count"] == 1
     assert payload["products"] == [
         {
-            "id": str(product_id),
+            "id": str(amount_id),
+            "product_id": product_id,
             "name": "Cake",
+            "amount_name": "Each",
+            "quantity": 1.0,
             "category": "",
             "image_url": "",
             "description": "",
@@ -42,10 +51,15 @@ def test_menu_feed_returns_json_rows_for_all_products(client, app):
 
 
 def test_menu_feed_csv_returns_all_products(client, app):
-    setup_data(app)
+    _, cake_product_id, _ = setup_data(app)
     with app.app_context():
         app.config["MENU_FEED_API_TOKEN"] = "menu-feed-secret"
-        db.session.add(Product(name="Brownie", price=3.25, cost=1.1))
+        cake_product = db.session.get(Product, cake_product_id)
+        ensure_default_sellable_amount(cake_product)
+        brownie = Product(name="Brownie", price=3.25, cost=1.1)
+        db.session.add(brownie)
+        db.session.flush()
+        ensure_default_sellable_amount(brownie)
         db.session.commit()
 
     response = client.get("/integrations/menu-feed.csv?token=menu-feed-secret")
@@ -57,6 +71,8 @@ def test_menu_feed_csv_returns_all_products(client, app):
     row_names = [row["name"] for row in rows]
     assert row_names == ["Brownie", "Cake"]
     assert rows[0]["category"] == ""
+    assert rows[0]["amount_name"] == "Each"
+    assert rows[0]["quantity"] == "1.0"
     assert rows[0]["price"] == "3.25"
     assert "calories" not in rows[0]
 

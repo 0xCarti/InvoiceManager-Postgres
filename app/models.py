@@ -49,6 +49,17 @@ menu_products = db.Table(
     ),
 )
 
+menu_sellable_amounts = db.Table(
+    "menu_sellable_amounts",
+    db.Column("menu_id", db.Integer, db.ForeignKey("menu.id"), primary_key=True),
+    db.Column(
+        "sellable_amount_id",
+        db.Integer,
+        db.ForeignKey("product_sellable_amount.id"),
+        primary_key=True,
+    ),
+)
+
 user_permission_groups = db.Table(
     "user_permission_groups",
     db.Column(
@@ -132,6 +143,12 @@ class LocationStandItem(db.Model):
     item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
     countable = db.Column(
         db.Boolean, nullable=False, default=True, server_default="1"
+    )
+    active = db.Column(
+        db.Boolean, nullable=False, default=True, server_default="1"
+    )
+    recipe_backed = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
     )
     expected_count = db.Column(
         db.Float, nullable=False, default=0.0, server_default="0.0"
@@ -1404,6 +1421,17 @@ class Location(db.Model):
 
 
 class Item(db.Model):
+    EXPIRY_TRACKING_NONE = "none"
+    EXPIRY_TRACKING_RECEIVED_DATE = "received_date"
+    EXPIRY_TRACKING_SHELF_LIFE = "shelf_life"
+    EXPIRY_TRACKING_EXACT = "exact"
+    EXPIRY_TRACKING_MODES = (
+        EXPIRY_TRACKING_NONE,
+        EXPIRY_TRACKING_RECEIVED_DATE,
+        EXPIRY_TRACKING_SHELF_LIFE,
+        EXPIRY_TRACKING_EXACT,
+    )
+
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     base_unit = db.Column(db.String(20), nullable=False)
@@ -1452,6 +1480,22 @@ class Item(db.Model):
     archived = db.Column(
         db.Boolean, default=False, nullable=False, server_default="0"
     )
+    expiry_tracking_mode = db.Column(
+        db.String(24),
+        nullable=False,
+        default=EXPIRY_TRACKING_NONE,
+        server_default=EXPIRY_TRACKING_NONE,
+    )
+    expiry_shelf_life_days = db.Column(db.Integer, nullable=True)
+    expiry_warning_days = db.Column(
+        db.Integer, nullable=False, default=14, server_default="14"
+    )
+    expiry_lots = relationship(
+        "InventoryExpiryLot",
+        back_populates="item",
+        cascade="all, delete-orphan",
+        order_by="InventoryExpiryLot.received_date.asc(), InventoryExpiryLot.id.asc()",
+    )
 
     def purchase_gl_code_for_location(self, location_id: int):
         """Return the purchase GL code for this item at a specific location."""
@@ -1490,6 +1534,19 @@ class Item(db.Model):
         if alias is None:
             return None
         return alias.item
+
+    @property
+    def tracks_expiry(self) -> bool:
+        return self.expiry_tracking_mode != self.EXPIRY_TRACKING_NONE
+
+    @property
+    def expiry_tracking_label(self) -> str:
+        return {
+            self.EXPIRY_TRACKING_NONE: "No expiry tracking",
+            self.EXPIRY_TRACKING_RECEIVED_DATE: "Track received date",
+            self.EXPIRY_TRACKING_SHELF_LIFE: "Use default shelf life",
+            self.EXPIRY_TRACKING_EXACT: "Exact expiry required",
+        }.get(self.expiry_tracking_mode, "No expiry tracking")
 
     __table_args__ = (
         db.Index(
@@ -2730,10 +2787,13 @@ class GLCode(db.Model):
 class Product(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
+    archived = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
     gl_code = db.Column(db.String(10), nullable=True)
-    # Terminal/event sale price retained for POS and stand-sheet workflows.
+    # Legacy mirror of the default sellable amount price for older queries.
     price = db.Column(db.Float, nullable=False)
-    # Dedicated unit price used when creating customer invoices.
+    # Legacy mirror retained for old data and compatibility.
     invoice_sale_price = db.Column(
         db.Numeric(10, 2),
         nullable=True,
@@ -2777,9 +2837,47 @@ class Product(db.Model):
         back_populates="product",
         cascade="all, delete-orphan",
     )
+    sellable_amounts = relationship(
+        "ProductSellableAmount",
+        back_populates="product",
+        cascade="all, delete-orphan",
+        order_by="ProductSellableAmount.position.asc(), ProductSellableAmount.id.asc()",
+    )
     menus = relationship(
         "Menu", secondary=menu_products, back_populates="products"
     )
+
+    @property
+    def active_sellable_amounts(self):
+        return [
+            amount
+            for amount in self.sellable_amounts
+            if getattr(amount, "active", True)
+        ]
+
+    @property
+    def default_sellable_amount(self):
+        amounts = self.active_sellable_amounts or list(self.sellable_amounts or [])
+        if not amounts:
+            return None
+        for amount in amounts:
+            if getattr(amount, "is_default", False):
+                return amount
+        return amounts[0]
+
+    @property
+    def default_sellable_price(self) -> float:
+        amount = self.default_sellable_amount
+        if amount is not None:
+            return amount.price_float
+        return float(self.price or 0.0)
+
+    @property
+    def default_sellable_quantity(self) -> float:
+        amount = self.default_sellable_amount
+        if amount is not None:
+            return float(amount.quantity or 1.0)
+        return 1.0
 
     @hybrid_property
     def last_sold_at(self):
@@ -2795,10 +2893,86 @@ class Product(db.Model):
 
     @property
     def food_cost_percentage(self) -> float:
-        """Return the food cost as a percentage of the price before tax."""
-        if self.price:
-            return (self.cost / self.price) * 100
+        """Return food cost percentage for the default sellable amount."""
+        sellable_price = self.default_sellable_price
+        if sellable_price:
+            tax_rate = Setting.get_food_cost_tax_rate()
+            price_before_tax = sellable_price / (1 + (tax_rate / 100))
+            if price_before_tax:
+                product_quantity = self.default_sellable_quantity or 1.0
+                return ((self.cost or 0.0) * product_quantity / price_before_tax) * 100
         return 0.0
+
+
+class ProductSellableAmount(db.Model):
+    __tablename__ = "product_sellable_amount"
+
+    id = db.Column(db.Integer, primary_key=True)
+    product_id = db.Column(
+        db.Integer,
+        db.ForeignKey("product.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name = db.Column(db.String(100), nullable=False, default="Each", server_default="Each")
+    quantity = db.Column(db.Float, nullable=False, default=1.0, server_default="1.0")
+    price = db.Column(
+        db.Numeric(10, 2),
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    active = db.Column(
+        db.Boolean, nullable=False, default=True, server_default="1"
+    )
+    is_default = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
+    position = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    created_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow, server_default=func.now()
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        onupdate=datetime.utcnow,
+    )
+
+    product = relationship("Product", back_populates="sellable_amounts")
+    invoice_products = relationship(
+        "InvoiceProduct", back_populates="sellable_amount"
+    )
+    terminal_sales = relationship(
+        "TerminalSale", back_populates="sellable_amount"
+    )
+    pos_sales_import_rows = relationship(
+        "PosSalesImportRow", back_populates="sellable_amount"
+    )
+    menus = relationship(
+        "Menu",
+        secondary=menu_sellable_amounts,
+        back_populates="sellable_amounts",
+    )
+
+    __table_args__ = (
+        db.CheckConstraint("quantity > 0", name="ck_product_sellable_amount_quantity"),
+        db.CheckConstraint("price >= 0", name="ck_product_sellable_amount_price"),
+        db.Index("ix_product_sellable_amount_product_active", "product_id", "active"),
+    )
+
+    @property
+    def price_float(self) -> float:
+        return float(self.price or 0.0)
+
+    @property
+    def display_name(self) -> str:
+        product_name = self.product.name if self.product is not None else "Product"
+        amount_name = (self.name or "").strip()
+        if not amount_name or amount_name.lower() in {"each", product_name.lower()}:
+            return product_name
+        return f"{product_name} - {amount_name}"
 
 
 class Menu(db.Model):
@@ -2820,6 +2994,12 @@ class Menu(db.Model):
     products = relationship(
         "Product", secondary=menu_products, back_populates="menus"
     )
+    sellable_amounts = relationship(
+        "ProductSellableAmount",
+        secondary=menu_sellable_amounts,
+        back_populates="menus",
+        order_by="ProductSellableAmount.position.asc(), ProductSellableAmount.id.asc()",
+    )
     assignments = relationship(
         "MenuAssignment",
         back_populates="menu",
@@ -2830,6 +3010,16 @@ class Menu(db.Model):
         "Location", back_populates="current_menu", foreign_keys="Location.current_menu_id"
     )
     playlist_items = relationship("PlaylistItem", back_populates="menu")
+
+    @property
+    def active_sellable_amounts(self):
+        return [
+            amount
+            for amount in self.sellable_amounts
+            if getattr(amount, "active", True)
+            and amount.product is not None
+            and not getattr(amount.product, "archived", False)
+        ]
 
 
 class MenuAssignment(db.Model):
@@ -3384,6 +3574,14 @@ class Invoice(db.Model):
     def can_mark_paid(self) -> bool:
         return self.invoice_status == self.STATUS_DELIVERED
 
+    @property
+    def can_reverse_payment(self) -> bool:
+        return self.invoice_status == self.STATUS_PAID
+
+    @property
+    def can_reverse_delivery(self) -> bool:
+        return self.invoice_status == self.STATUS_DELIVERED
+
 
 class InvoiceProduct(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -3399,6 +3597,18 @@ class InvoiceProduct(db.Model):
         nullable=True,
     )
     product = relationship("Product", back_populates="invoice_products")
+    sellable_amount_id = db.Column(
+        db.Integer,
+        db.ForeignKey("product_sellable_amount.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    sellable_amount = relationship(
+        "ProductSellableAmount", back_populates="invoice_products"
+    )
+    sellable_amount_name = db.Column(db.String(100), nullable=True)
+    sellable_quantity = db.Column(
+        db.Float, nullable=False, default=1.0, server_default="1.0"
+    )
     is_custom_line = db.Column(
         db.Boolean, nullable=False, default=False, server_default="0"
     )
@@ -3521,6 +3731,7 @@ class PurchaseOrder(db.Model):
         uselist=False,
         cascade="all, delete-orphan",
     )
+
     vendor = relationship("Vendor", backref="purchase_orders")
 
     __table_args__ = (
@@ -3659,6 +3870,11 @@ class PurchaseInvoiceItem(db.Model):
     purchase_gl_code = relationship(
         "GLCode", foreign_keys=[purchase_gl_code_id]
     )
+    expiry_lots = relationship(
+        "InventoryExpiryLot",
+        back_populates="purchase_invoice_item",
+        cascade="all, delete-orphan",
+    )
 
     @property
     def line_total(self):
@@ -3680,6 +3896,107 @@ class PurchaseInvoiceItem(db.Model):
             return self.item.purchase_gl_code_for_location(loc_id)
 
         return self.item.purchase_gl_code
+
+
+class InventoryExpiryLot(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    item_id = db.Column(
+        db.Integer, db.ForeignKey("item.id", ondelete="CASCADE"), nullable=False
+    )
+    location_id = db.Column(
+        db.Integer, db.ForeignKey("location.id", ondelete="SET NULL"), nullable=True
+    )
+    purchase_invoice_id = db.Column(
+        db.Integer,
+        db.ForeignKey("purchase_invoice.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    purchase_invoice_item_id = db.Column(
+        db.Integer,
+        db.ForeignKey("purchase_invoice_item.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    received_date = db.Column(db.Date, nullable=False)
+    expiry_date = db.Column(db.Date, nullable=True)
+    original_quantity = db.Column(db.Float, nullable=False)
+    remaining_quantity = db.Column(db.Float, nullable=False)
+    source_type = db.Column(db.String(32), nullable=False, server_default="purchase")
+    source_id = db.Column(db.String(64), nullable=True)
+    source_line_id = db.Column(db.Integer, nullable=True)
+    created_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow, server_default=func.now()
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        server_default=func.now(),
+    )
+
+    item = relationship("Item", back_populates="expiry_lots")
+    location = relationship("Location")
+    purchase_invoice = relationship("PurchaseInvoice")
+    purchase_invoice_item = relationship(
+        "PurchaseInvoiceItem", back_populates="expiry_lots"
+    )
+    adjustments = relationship(
+        "InventoryExpiryLotAdjustment",
+        back_populates="lot",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        db.Index("ix_inventory_expiry_lot_item_location", "item_id", "location_id"),
+        db.Index("ix_inventory_expiry_lot_expiry_date", "expiry_date"),
+        db.Index("ix_inventory_expiry_lot_remaining", "remaining_quantity"),
+        db.Index(
+            "ix_inventory_expiry_lot_source",
+            "source_type",
+            "source_id",
+            "source_line_id",
+        ),
+    )
+
+    @property
+    def expiry_state(self) -> str:
+        if self.expiry_date is None:
+            return "unknown"
+        today = datetime.utcnow().date()
+        if self.expiry_date < today:
+            return "expired"
+        warning_days = self.item.expiry_warning_days if self.item else 14
+        if self.expiry_date <= today + timedelta(days=int(warning_days or 14)):
+            return "expiring_soon"
+        return "ok"
+
+
+class InventoryExpiryLotAdjustment(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    lot_id = db.Column(
+        db.Integer,
+        db.ForeignKey("inventory_expiry_lot.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    quantity_delta = db.Column(db.Float, nullable=False)
+    source_type = db.Column(db.String(32), nullable=False)
+    source_id = db.Column(db.String(64), nullable=True)
+    source_line_id = db.Column(db.Integer, nullable=True)
+    created_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow, server_default=func.now()
+    )
+
+    lot = relationship("InventoryExpiryLot", back_populates="adjustments")
+
+    __table_args__ = (
+        db.Index(
+            "ix_inventory_expiry_lot_adjustment_source",
+            "source_type",
+            "source_id",
+            "source_line_id",
+        ),
+        db.Index("ix_inventory_expiry_lot_adjustment_lot", "lot_id"),
+    )
 
 
 class PurchaseInvoiceDraft(db.Model):
@@ -4091,17 +4408,31 @@ class TerminalSale(db.Model):
     product_id = db.Column(
         db.Integer, db.ForeignKey("product.id"), nullable=False
     )
+    sellable_amount_id = db.Column(
+        db.Integer,
+        db.ForeignKey("product_sellable_amount.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     pos_sales_import_id = db.Column(
         db.Integer, db.ForeignKey("pos_sales_import.id"), nullable=True
     )
     approval_batch_id = db.Column(db.String(64), nullable=True)
     quantity = db.Column(db.Float, nullable=False)
+    sellable_amount_name = db.Column(db.String(100), nullable=True)
+    sellable_quantity = db.Column(
+        db.Float, nullable=False, default=1.0, server_default="1.0"
+    )
+    unit_price_snapshot = db.Column(db.Float, nullable=True)
+    line_total_snapshot = db.Column(db.Float, nullable=True)
     sold_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     event_location = relationship(
         "EventLocation", back_populates="terminal_sales"
     )
     product = relationship("Product", back_populates="terminal_sales")
+    sellable_amount = relationship(
+        "ProductSellableAmount", back_populates="terminal_sales"
+    )
     pos_sales_import = relationship("PosSalesImport")
     recipe_item_snapshots = relationship(
         "TerminalSaleRecipeItemSnapshot",
@@ -4431,6 +4762,11 @@ class PosSalesImportRow(db.Model):
     source_product_name = db.Column(db.String(255), nullable=False)
     normalized_product_name = db.Column(db.String(255), nullable=False)
     product_id = db.Column(db.Integer, db.ForeignKey("product.id"), nullable=True)
+    sellable_amount_id = db.Column(
+        db.Integer,
+        db.ForeignKey("product_sellable_amount.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     quantity = db.Column(db.Float, nullable=False, default=0.0, server_default="0.0")
     net_inc = db.Column(db.Float, nullable=False, default=0.0, server_default="0.0")
     discount_raw = db.Column(db.String(64), nullable=True)
@@ -4465,6 +4801,9 @@ class PosSalesImportRow(db.Model):
     sales_import = relationship("PosSalesImport", back_populates="rows")
     import_location = relationship("PosSalesImportLocation", back_populates="rows")
     product = relationship("Product")
+    sellable_amount = relationship(
+        "ProductSellableAmount", back_populates="pos_sales_import_rows"
+    )
 
     __table_args__ = (
         db.UniqueConstraint(
@@ -4474,6 +4813,7 @@ class PosSalesImportRow(db.Model):
         db.Index("ix_pos_sales_import_row_location_import", "location_import_id"),
         db.Index("ix_pos_sales_import_row_normalized_product", "normalized_product_name"),
         db.Index("ix_pos_sales_import_row_product_id", "product_id"),
+        db.Index("ix_pos_sales_import_row_sellable_amount_id", "sellable_amount_id"),
         db.Index("ix_pos_sales_import_row_zero_qty", "is_zero_quantity"),
         db.Index("ix_pos_sales_import_row_approval_batch", "approval_batch_id"),
         db.Index("ix_pos_sales_import_row_reversal_batch", "reversal_batch_id"),
@@ -4534,9 +4874,11 @@ class LocationCountSubmission(db.Model):
     TYPE_CLOSING = "closing"
     TYPE_EATEN = "eaten"
     TYPE_SPOILAGE = "spoilage"
+    TYPE_INVENTORY = "inventory"
     COUNT_TYPES = (TYPE_OPENING, TYPE_CLOSING)
     VARIANCE_TYPES = (TYPE_EATEN, TYPE_SPOILAGE)
-    ALL_TYPES = COUNT_TYPES + VARIANCE_TYPES
+    INVENTORY_TYPES = (TYPE_INVENTORY,)
+    ALL_TYPES = COUNT_TYPES + VARIANCE_TYPES + INVENTORY_TYPES
     APPROVAL_MODE_ADD = "add"
     APPROVAL_MODE_OVERWRITE = "overwrite"
     APPLIED_SOURCE_SUBMITTED = "submitted"
@@ -4626,7 +4968,7 @@ class LocationCountSubmission(db.Model):
 
     __table_args__ = (
         db.CheckConstraint(
-            "submission_type IN ('opening', 'closing', 'eaten', 'spoilage')",
+            "submission_type IN ('opening', 'closing', 'eaten', 'spoilage', 'inventory')",
             name="ck_location_count_submission_type",
         ),
         db.CheckConstraint(
@@ -4683,6 +5025,7 @@ class LocationCountSubmissionRow(db.Model):
     )
     submitted_count_value = db.Column(db.Float, nullable=True)
     expected_count_value = db.Column(db.Float, nullable=True)
+    unit_breakdown = db.Column(db.JSON, nullable=True)
     parse_index = db.Column(db.Integer, nullable=False)
 
     submission = relationship(
@@ -4715,13 +5058,16 @@ class Setting(db.Model):
     RECEIVE_LOCATION_SETTING = "PURCHASE_RECEIVE_LOCATION_DEFAULTS"
     PURCHASE_IMPORT_VENDORS = "PURCHASE_IMPORT_VENDORS"
     POS_SALES_IMPORT_INTERVAL = "POS_SALES_IMPORT_INTERVAL"
+    POS_SALES_AUTO_APPROVE_CLEAN_IMPORTS = "POS_SALES_AUTO_APPROVE_CLEAN_IMPORTS"
     MENU_FEED_API_TOKEN = "MENU_FEED_API_TOKEN"
     SCHEDULE_MEMBERSHIP_ROLES = "SCHEDULE_MEMBERSHIP_ROLES"
+    FOOD_COST_TAX_RATE = "FOOD_COST_TAX_RATE"
     POS_SALES_IMPORT_INTERVAL_UNITS = ("hour", "day", "week")
     DEFAULT_POS_SALES_IMPORT_INTERVAL = {
         "value": 1,
         "unit": "day",
     }
+    DEFAULT_FOOD_COST_TAX_RATE = 0
     DEFAULT_PURCHASE_IMPORT_VENDORS = [
         "SYSCO",
         "PRATTS",
@@ -4856,6 +5202,50 @@ class Setting(db.Model):
             if definition["name"] == role_name:
                 return bool(definition["is_management"])
         return False
+
+    @classmethod
+    def get_food_cost_tax_rate(cls) -> int:
+        """Return the included tax percentage used for food cost calculations."""
+
+        default_rate = int(cls.DEFAULT_FOOD_COST_TAX_RATE)
+        if has_app_context():
+            configured_rate = current_app.config.get("FOOD_COST_TAX_RATE")
+            if configured_rate not in (None, ""):
+                try:
+                    rate = int(configured_rate)
+                except (TypeError, ValueError):
+                    return default_rate
+                return max(rate, 0)
+        else:
+            return default_rate
+
+        setting = cls.query.filter_by(name=cls.FOOD_COST_TAX_RATE).first()
+        if setting is None or setting.value in (None, ""):
+            return default_rate
+        try:
+            rate = int(setting.value)
+        except (TypeError, ValueError):
+            return default_rate
+        return max(rate, 0)
+
+    @classmethod
+    def set_food_cost_tax_rate(cls, tax_rate: int):
+        """Persist the included tax percentage used for food cost calculations."""
+
+        try:
+            cleaned_rate = int(tax_rate)
+        except (TypeError, ValueError):
+            cleaned_rate = int(cls.DEFAULT_FOOD_COST_TAX_RATE)
+        cleaned_rate = max(cleaned_rate, 0)
+
+        setting = cls.query.filter_by(name=cls.FOOD_COST_TAX_RATE).first()
+        if setting is None:
+            setting = cls(name=cls.FOOD_COST_TAX_RATE)
+            db.session.add(setting)
+        setting.value = str(cleaned_rate)
+        if has_app_context():
+            current_app.config["FOOD_COST_TAX_RATE"] = cleaned_rate
+        return setting
 
     @classmethod
     def get_receive_location_defaults(cls) -> dict[str, int]:
@@ -5005,6 +5395,28 @@ class Setting(db.Model):
                 "unit": cleaned_unit,
             }
         )
+        return setting
+
+    @classmethod
+    def get_pos_sales_auto_approve_clean_imports(cls) -> bool:
+        """Return whether clean POS sales imports should approve automatically."""
+
+        setting = cls.query.filter_by(
+            name=cls.POS_SALES_AUTO_APPROVE_CLEAN_IMPORTS
+        ).first()
+        return bool(setting is not None and setting.value == "1")
+
+    @classmethod
+    def set_pos_sales_auto_approve_clean_imports(cls, enabled: bool):
+        """Persist whether clean POS sales imports should approve automatically."""
+
+        setting = cls.query.filter_by(
+            name=cls.POS_SALES_AUTO_APPROVE_CLEAN_IMPORTS
+        ).first()
+        if setting is None:
+            setting = cls(name=cls.POS_SALES_AUTO_APPROVE_CLEAN_IMPORTS)
+            db.session.add(setting)
+        setting.value = "1" if enabled else "0"
         return setting
 
     @classmethod

@@ -15,6 +15,7 @@ from flask import (
 )
 from flask_login import current_user, login_required
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased, selectinload
 
 from app import db
@@ -35,6 +36,7 @@ from app.models import (
     PosSalesImportRow,
     Product,
     ProductRecipeItem,
+    ProductSellableAmount,
     Customer,
     Invoice,
     InvoiceProduct,
@@ -52,7 +54,15 @@ from app.utils.filter_state import (
 )
 from app.utils.numeric import coerce_float
 from app.utils.pagination import build_pagination_args, get_per_page
+from app.utils.menu_assignments import sync_menu_locations
 from app.utils.recipe_history import backfill_invoice_product_recipe_snapshots
+from app.utils.sellable_amounts import (
+    normalize_sellable_amount_entries,
+    replace_product_sellable_amounts,
+    sync_product_legacy_prices,
+    terminal_sale_unit_price,
+    update_default_sellable_price,
+)
 from app.utils.text import (
     build_text_match_predicate,
     normalize_request_text_filter,
@@ -60,6 +70,103 @@ from app.utils.text import (
 )
 
 product = Blueprint("product", __name__)
+
+
+def _product_delete_blockers(product_id):
+    """Return human-readable historical references that prevent product deletion."""
+    blockers = []
+    pos_row_count = (
+        db.session.query(func.count(PosSalesImportRow.id))
+        .filter(PosSalesImportRow.product_id == product_id)
+        .scalar()
+        or 0
+    )
+    if pos_row_count:
+        blockers.append(
+            f"{pos_row_count} POS sales import row"
+            f"{'s' if pos_row_count != 1 else ''}"
+        )
+
+    terminal_sale_count = (
+        db.session.query(func.count(TerminalSale.id))
+        .filter(TerminalSale.product_id == product_id)
+        .scalar()
+        or 0
+    )
+    if terminal_sale_count:
+        blockers.append(
+            f"{terminal_sale_count} terminal sale"
+            f"{'s' if terminal_sale_count != 1 else ''}"
+        )
+
+    invoice_line_count = (
+        db.session.query(func.count(InvoiceProduct.id))
+        .filter(InvoiceProduct.product_id == product_id)
+        .scalar()
+        or 0
+    )
+    if invoice_line_count:
+        blockers.append(
+            f"{invoice_line_count} sales invoice line"
+            f"{'s' if invoice_line_count != 1 else ''}"
+        )
+
+    return blockers
+
+
+def _sync_product_menu_locations(product_obj: Product) -> None:
+    """Refresh assigned locations for menus that contain this product."""
+    for menu in list(product_obj.menus):
+        sync_menu_locations(menu)
+
+
+def _sellable_entries_from_form(form) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
+    for amount_form in getattr(form, "sellable_amounts", []):
+        amount_fields = amount_form.form
+        entries.append(
+            {
+                "amount_id": amount_fields.amount_id.data,
+                "name": amount_fields.name.data,
+                "quantity": amount_fields.quantity.data,
+                "price": amount_fields.price.data,
+                "active": amount_fields.active.data,
+                "is_default": amount_fields.is_default.data,
+            }
+        )
+    return normalize_sellable_amount_entries(
+        entries,
+        fallback_price=getattr(form, "price", None).data
+        if getattr(form, "price", None) is not None
+        else None,
+    )
+
+
+def _populate_sellable_amount_form(form, product_obj: Product | None = None) -> None:
+    if product_obj is not None and product_obj.sellable_amounts:
+        while len(form.sellable_amounts) < len(product_obj.sellable_amounts):
+            form.sellable_amounts.append_entry()
+        for index, amount in enumerate(product_obj.sellable_amounts):
+            amount_form = form.sellable_amounts[index].form
+            amount_form.amount_id.data = str(amount.id)
+            amount_form.name.data = amount.name
+            amount_form.quantity.data = amount.quantity
+            amount_form.price.data = amount.price
+            amount_form.active.data = bool(amount.active)
+            amount_form.is_default.data = bool(amount.is_default)
+        return
+
+    if len(form.sellable_amounts) < 1:
+        form.sellable_amounts.append_entry()
+    amount_form = form.sellable_amounts[0].form
+    if not amount_form.name.data:
+        amount_form.name.data = "Each"
+    if amount_form.quantity.data is None:
+        amount_form.quantity.data = 1
+    if amount_form.price.data is None and getattr(form, "price", None) is not None:
+        amount_form.price.data = form.price.data
+    amount_form.active.data = True
+    amount_form.is_default.data = True
 
 
 @product.route("/products")
@@ -124,6 +231,9 @@ def view_products():
     cost_max = coerce_float(request.args.get("cost_max"))
     price_min = coerce_float(request.args.get("price_min"))
     price_max = coerce_float(request.args.get("price_max"))
+    archived_filter = (request.args.get("archived") or "active").strip().lower()
+    if archived_filter not in {"active", "archived", "all"}:
+        archived_filter = "active"
     last_sold_before_str = request.args.get("last_sold_before")
     include_unsold = request.args.get("include_unsold") in [
         "1",
@@ -144,6 +254,10 @@ def view_products():
             return redirect(url_for("product.view_products"))
 
     query = Product.query
+    if archived_filter == "active":
+        query = query.filter(Product.archived.is_(False))
+    elif archived_filter == "archived":
+        query = query.filter(Product.archived.is_(True))
     if name_query:
         if match_mode == "exact":
             name_filter = func.lower(Product.name) == name_query.lower()
@@ -216,6 +330,7 @@ def view_products():
         selectinload(Product.gl_code_rel),
         selectinload(Product.locations),
         selectinload(Product.menus),
+        selectinload(Product.sellable_amounts),
         selectinload(Product.recipe_items).selectinload(ProductRecipeItem.item),
         selectinload(Product.recipe_items).selectinload(ProductRecipeItem.unit),
     )
@@ -248,6 +363,7 @@ def view_products():
         cost_max=cost_max,
         price_min=price_min,
         price_max=price_max,
+        archived_filter=archived_filter,
         last_sold_before=last_sold_before_str,
         include_unsold=include_unsold,
         bulk_cost_form=bulk_cost_form,
@@ -549,6 +665,7 @@ def bulk_update_products():
                 selectinload(Product.gl_code_rel),
                 selectinload(Product.locations),
                 selectinload(Product.menus),
+                selectinload(Product.sellable_amounts),
                 selectinload(Product.recipe_items).selectinload(
                     ProductRecipeItem.item
                 ),
@@ -627,7 +744,7 @@ def bulk_update_products():
                 if apply_name:
                     product_obj.name = new_name
                 if apply_price:
-                    product_obj.price = new_price
+                    update_default_sellable_price(product_obj, new_price)
                 if apply_cost:
                     product_obj.cost = new_cost if new_cost is not None else 0.0
                 if apply_sales_gl:
@@ -647,6 +764,7 @@ def bulk_update_products():
                 selectinload(Product.gl_code_rel),
                 selectinload(Product.locations),
                 selectinload(Product.menus),
+                selectinload(Product.sellable_amounts),
                 selectinload(Product.recipe_items).selectinload(
                     ProductRecipeItem.item
                 ),
@@ -707,11 +825,18 @@ def create_product():
                     form.price.data = Decimal(str(imported_unit_price))
                 except (InvalidOperation, ValueError):
                     form.price.data = None
+        _populate_sellable_amount_form(form)
 
     if form.validate_on_submit():
         yield_quantity = _normalize_recipe_yield_quantity(
             form.recipe_yield_quantity.data
         )
+        sellable_entries = _sellable_entries_from_form(form)
+        default_entry = next(
+            (entry for entry in sellable_entries if entry.get("is_default")),
+            sellable_entries[0],
+        )
+        default_price = default_entry.get("price", 0.0)
         recipe_entries = _build_recipe_entries_from_item_forms(form.items)
         auto_update_recipe_cost = bool(form.auto_update_recipe_cost.data)
         selected_gl_code_id = form.gl_code_id.data or None
@@ -723,10 +848,8 @@ def create_product():
 
         product = Product(
             name=form.name.data,
-            price=form.price.data,
-            invoice_sale_price=form.invoice_sale_price.data
-            if form.invoice_sale_price.data is not None
-            else form.price.data,
+            price=default_price,
+            invoice_sale_price=default_price,
             cost=(
                 _calculate_recipe_cost_from_entries(recipe_entries, yield_quantity)
                 if auto_update_recipe_cost
@@ -746,6 +869,7 @@ def create_product():
         db.session.add(product)
         db.session.flush()
 
+        replace_product_sellable_amounts(product, sellable_entries)
         _replace_product_recipe_items(product, recipe_entries)
         if sales_import_context is not None:
             _map_product_to_sales_import(
@@ -769,6 +893,8 @@ def create_product():
         return redirect(url_for("product.view_products"))
     if form.recipe_yield_quantity.data is None:
         form.recipe_yield_quantity.data = 1
+    if request.method == "GET" and sales_import_context is None:
+        _populate_sellable_amount_form(form)
     return render_template(
         "products/create_product.html",
         form=form,
@@ -801,6 +927,12 @@ def ajax_create_product():
         yield_quantity = _normalize_recipe_yield_quantity(
             form.recipe_yield_quantity.data
         )
+        sellable_entries = _sellable_entries_from_form(form)
+        default_entry = next(
+            (entry for entry in sellable_entries if entry.get("is_default")),
+            sellable_entries[0],
+        )
+        default_price = default_entry.get("price", 0.0)
         recipe_entries = _build_recipe_entries_from_item_forms(form.items)
         auto_update_recipe_cost = bool(form.auto_update_recipe_cost.data)
         selected_gl_code_id = form.gl_code_id.data or None
@@ -812,10 +944,8 @@ def ajax_create_product():
 
         product = Product(
             name=form.name.data,
-            price=form.price.data,
-            invoice_sale_price=form.invoice_sale_price.data
-            if form.invoice_sale_price.data is not None
-            else form.price.data,
+            price=default_price,
+            invoice_sale_price=default_price,
             cost=(
                 _calculate_recipe_cost_from_entries(recipe_entries, yield_quantity)
                 if auto_update_recipe_cost
@@ -834,6 +964,7 @@ def ajax_create_product():
                 product.gl_code = gl.code
         db.session.add(product)
         db.session.flush()
+        replace_product_sellable_amounts(product, sellable_entries)
         _replace_product_recipe_items(product, recipe_entries)
         db.session.commit()
         log_activity(f"Created product {product.name}")
@@ -843,10 +974,16 @@ def ajax_create_product():
         product_payload = {
             "id": product.id,
             "name": product.name,
-            "price": float(product.price) if product.price is not None else None,
-            "invoice_sale_price": float(product.invoice_sale_price)
-            if product.invoice_sale_price is not None
-            else None,
+            "price": product.default_sellable_price,
+            "sellable_amounts": [
+                {
+                    "id": amount.id,
+                    "name": amount.name,
+                    "price": amount.price_float,
+                    "quantity": amount.quantity,
+                }
+                for amount in product.active_sellable_amounts
+            ],
         }
         return jsonify(success=True, html=row_html, product=product_payload)
     return jsonify(success=False, errors=form.errors), 400
@@ -868,12 +1005,16 @@ def quick_create_product():
         if yield_quantity is None or yield_quantity <= 0:
             yield_quantity = 1
 
+        sellable_entries = _sellable_entries_from_form(form)
+        default_entry = next(
+            (entry for entry in sellable_entries if entry.get("is_default")),
+            sellable_entries[0],
+        )
+        default_price = default_entry.get("price", 0.0)
         product_obj = Product(
             name=form.name.data,
-            price=form.price.data,
-            invoice_sale_price=form.invoice_sale_price.data
-            if form.invoice_sale_price.data is not None
-            else form.price.data,
+            price=default_price,
+            invoice_sale_price=default_price,
             cost=cost,
             sales_gl_code_id=sales_gl_code_id,
             recipe_yield_quantity=float(yield_quantity),
@@ -881,6 +1022,7 @@ def quick_create_product():
         )
         db.session.add(product_obj)
         db.session.flush()
+        replace_product_sellable_amounts(product_obj, sellable_entries)
 
         for item_form in form.items:
             item_id = item_form.item.data
@@ -903,7 +1045,19 @@ def quick_create_product():
         return (
             jsonify(
                 success=True,
-                product={"id": product_obj.id, "name": product_obj.name},
+                product={
+                    "id": product_obj.id,
+                    "name": product_obj.name,
+                    "sellable_amounts": [
+                        {
+                            "id": amount.id,
+                            "name": amount.name,
+                            "price": amount.price_float,
+                            "quantity": amount.quantity,
+                        }
+                        for amount in product_obj.active_sellable_amounts
+                    ],
+                },
             ),
             201,
         )
@@ -937,8 +1091,12 @@ def copy_product(product_id):
         else (product_obj.cost or 0.0)
     )
     form.name.data = product_obj.name
+    form.archived.data = False
     form.price.data = product_obj.price
     form.invoice_sale_price.data = product_obj.invoice_sale_price
+    _populate_sellable_amount_form(form, product_obj)
+    for amount_form in form.sellable_amounts:
+        amount_form.form.amount_id.data = ""
     form.cost.data = current_cost
     form.auto_update_recipe_cost.data = product_obj.auto_update_recipe_cost
     form.gl_code.data = product_obj.gl_code
@@ -978,13 +1136,10 @@ def edit_product(product_id):
     form = ProductWithRecipeForm()
     is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
     if form.validate_on_submit():
+        was_archived = bool(product.archived)
         product.name = form.name.data
-        product.price = form.price.data
-        product.invoice_sale_price = (
-            form.invoice_sale_price.data
-            if form.invoice_sale_price.data is not None
-            else form.price.data
-        )
+        product.archived = bool(form.archived.data)
+        sellable_entries = _sellable_entries_from_form(form)
         recipe_entries = _build_recipe_entries_from_item_forms(form.items)
         product.auto_update_recipe_cost = bool(form.auto_update_recipe_cost.data)
         product.cost = (
@@ -1014,7 +1169,10 @@ def edit_product(product_id):
             if gl:
                 product.gl_code = gl.code
 
+        replace_product_sellable_amounts(product, sellable_entries)
         _replace_product_recipe_items(product, recipe_entries)
+        if was_archived != bool(product.archived):
+            _sync_product_menu_locations(product)
         db.session.commit()
         log_activity(f"Edited product {product.id}")
         if not is_ajax:
@@ -1032,8 +1190,10 @@ def edit_product(product_id):
             db.session.commit()
             log_activity(f"Auto-updated recipe cost for product {product.id}")
         form.name.data = product.name
+        form.archived.data = bool(product.archived)
         form.price.data = product.price
         form.invoice_sale_price.data = product.invoice_sale_price
+        _populate_sellable_amount_form(form, product)
         form.cost.data = product.cost or 0.0
         form.auto_update_recipe_cost.data = product.auto_update_recipe_cost
         form.gl_code.data = product.gl_code
@@ -1105,6 +1265,7 @@ def view_product(product_id: int):
             selectinload(Product.gl_code_rel),
             selectinload(Product.locations).selectinload(Location.current_menu),
             selectinload(Product.menus),
+            selectinload(Product.sellable_amounts),
             selectinload(Product.recipe_items).selectinload(ProductRecipeItem.item),
             selectinload(Product.recipe_items).selectinload(ProductRecipeItem.unit),
             selectinload(Product.terminal_sale_aliases),
@@ -1148,12 +1309,15 @@ def view_product(product_id: int):
             selectinload(TerminalSale.event_location).selectinload(
                 EventLocation.location
             ),
+            selectinload(TerminalSale.sellable_amount),
             selectinload(TerminalSale.pos_sales_import),
         )
         .filter(TerminalSale.product_id == product_id)
         .order_by(TerminalSale.sold_at.desc(), TerminalSale.id.desc())
         .paginate(page=terminal_sales_page, per_page=terminal_sales_per_page)
     )
+    for sale in terminal_sales.items:
+        sale.unit_price = terminal_sale_unit_price(sale)
 
     latest_invoice_sale = (
         db.session.query(func.max(Invoice.date_created))
@@ -1384,13 +1548,15 @@ def bulk_set_cost_from_recipe():
             product_ids.append(int(raw_id))
         except (TypeError, ValueError):
             continue
+    product_ids = list(dict.fromkeys(product_ids))
+    if not product_ids:
+        flash("No products selected for recipe cost update.", "warning")
+        return redirect(url_for("product.view_products"))
 
     query = Product.query.options(
         selectinload(Product.recipe_items).selectinload(ProductRecipeItem.item),
         selectinload(Product.recipe_items).selectinload(ProductRecipeItem.unit),
-    )
-    if product_ids:
-        query = query.filter(Product.id.in_(product_ids))
+    ).filter(Product.id.in_(product_ids))
 
     products = query.all()
     if not products:
@@ -1417,6 +1583,73 @@ def bulk_set_cost_from_recipe():
     return redirect(url_for("product.view_products"))
 
 
+@product.route("/products/bulk_archive", methods=["POST"])
+@login_required
+def bulk_archive_products():
+    """Archive selected products from current operational use."""
+    form = DeleteForm()
+    if not form.validate_on_submit():
+        abort(400)
+
+    product_ids = []
+    for raw_id in request.form.getlist("product_ids"):
+        try:
+            product_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if product_id > 0:
+            product_ids.append(product_id)
+
+    product_ids = list(dict.fromkeys(product_ids))
+    if not product_ids:
+        flash("No products selected for archive.", "warning")
+        return redirect(url_for("product.view_products"))
+
+    products = (
+        Product.query.options(selectinload(Product.menus))
+        .filter(Product.id.in_(product_ids))
+        .order_by(Product.id)
+        .all()
+    )
+    if not products:
+        flash("No matching products were found to archive.", "warning")
+        return redirect(url_for("product.view_products"))
+
+    archived_count = 0
+    already_archived_count = 0
+    for product_obj in products:
+        if product_obj.archived:
+            already_archived_count += 1
+            continue
+        product_obj.archived = True
+        _sync_product_menu_locations(product_obj)
+        archived_count += 1
+
+    if archived_count:
+        db.session.commit()
+        log_activity(
+            "Bulk archived products: "
+            + ", ".join(str(product_obj.id) for product_obj in products)
+        )
+        flash(
+            f"Archived {archived_count} product"
+            f"{'s' if archived_count != 1 else ''}. Historical sales and "
+            "reports will still show archived products.",
+            "success",
+        )
+    else:
+        flash("Selected products were already archived.", "info")
+
+    if already_archived_count and archived_count:
+        flash(
+            f"{already_archived_count} selected product"
+            f"{'s were' if already_archived_count != 1 else ' was'} already archived.",
+            "info",
+        )
+
+    return redirect(url_for("product.view_products"))
+
+
 @product.route("/products/<int:product_id>/delete", methods=["POST"])
 @login_required
 def delete_product(product_id):
@@ -1427,8 +1660,58 @@ def delete_product(product_id):
     product = db.session.get(Product, product_id)
     if product is None:
         abort(404)
-    db.session.delete(product)
-    db.session.commit()
+
+    blockers = _product_delete_blockers(product.id)
+    if blockers:
+        if product.archived:
+            flash(
+                "Product is already archived. Historical sales and reporting "
+                "data remain available.",
+                "info",
+            )
+            return redirect(url_for("product.view_products"))
+        product.archived = True
+        _sync_product_menu_locations(product)
+        db.session.commit()
+        log_activity(
+            f"Archived product {product.id} because it is used by {', '.join(blockers)}"
+        )
+        flash(
+            "Product was archived because it is used by "
+            f"{', '.join(blockers)}. It is hidden from current product pickers, "
+            "but historical sales and reports will still show it.",
+            "success",
+        )
+        return redirect(url_for("product.view_products"))
+
+    try:
+        db.session.delete(product)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        product = db.session.get(Product, product_id)
+        if product is not None and not product.archived:
+            product.archived = True
+            _sync_product_menu_locations(product)
+            db.session.commit()
+            log_activity(
+                f"Archived product {product.id} after delete was blocked by historical references"
+            )
+            flash(
+                "Product was archived because it is still referenced by "
+                "historical records. It is hidden from current product pickers, "
+                "but historical sales and reports will still show it.",
+                "success",
+            )
+            return redirect(url_for("product.view_products"))
+        flash(
+            "Product cannot be deleted because it is still referenced by "
+            "historical records. Remove current links where possible, or leave "
+            "the product in place for audit history.",
+            "warning",
+        )
+        return redirect(url_for("product.view_products"))
+
     log_activity(f"Deleted product {product.id}")
     flash("Product deleted successfully!", "success")
     return redirect(url_for("product.view_products"))
@@ -1443,21 +1726,37 @@ def search_products():
         return jsonify([])
     matched_products = (
         Product.query.filter(
+            Product.archived.is_(False),
             build_text_match_predicate(Product.name, query, "contains")
         )
+        .options(selectinload(Product.sellable_amounts))
         .order_by(Product.name)
         .limit(25)
         .all()
     )
-    product_data = [
-        {
-            "id": product.id,
-            "name": product.name,
-            "price": product.price,
-            "invoice_sale_price": float(product.invoice_sale_price)
-            if product.invoice_sale_price is not None
-            else None,
-        }
-        for product in matched_products
-    ]
+    product_data = []
+    for product_obj in matched_products:
+        amounts = product_obj.active_sellable_amounts
+        if not amounts:
+            sync_product_legacy_prices(product_obj)
+            db.session.flush()
+            amounts = product_obj.active_sellable_amounts
+        product_data.append(
+            {
+                "id": product_obj.id,
+                "name": product_obj.name,
+                "price": product_obj.default_sellable_price,
+                "sellable_amounts": [
+                    {
+                        "id": amount.id,
+                        "name": amount.name,
+                        "display_name": amount.display_name,
+                        "quantity": amount.quantity,
+                        "price": amount.price_float,
+                        "is_default": amount.is_default,
+                    }
+                    for amount in amounts
+                ],
+            }
+        )
     return jsonify(product_data)

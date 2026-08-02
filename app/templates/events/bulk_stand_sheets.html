@@ -245,7 +245,7 @@
           {% if price.value is none %}
             {% for ri in product.recipe_items %}
               {% if price.value is none and ri.item_id == s.item.id %}
-                {% set price.value = product.price %}
+                {% set price.value = product.default_sellable_price %}
               {% endif %}
             {% endfor %}
           {% endif %}

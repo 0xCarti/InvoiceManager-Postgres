@@ -40,6 +40,11 @@ from app.models import (
     User,
 )
 from app.services.notification_service import notify_users_for_event
+from app.services.inventory_expiry import (
+    SOURCE_TRANSFER,
+    move_item_lots,
+    reverse_moved_item_lots,
+)
 from app.utils.activity import log_activity
 from app.utils.numeric import coerce_float
 from app.utils.pagination import build_pagination_args, get_per_page
@@ -705,6 +710,7 @@ def update_expected_counts(
             from_record = LocationStandItem(
                 location_id=transfer_obj.from_location_id,
                 item_id=ti.item_id,
+                active=True,
                 expected_count=0,
                 purchase_gl_code_id=(
                     item_obj.purchase_gl_code_id if item_obj else None
@@ -712,6 +718,8 @@ def update_expected_counts(
             )
             db.session.add(from_record)
             indexed[from_key] = from_record
+        else:
+            from_record.active = True
         from_record.expected_count = (
             from_record.expected_count - multiplier * quantity
         )
@@ -722,6 +730,7 @@ def update_expected_counts(
             to_record = LocationStandItem(
                 location_id=transfer_obj.to_location_id,
                 item_id=ti.item_id,
+                active=True,
                 expected_count=0,
                 purchase_gl_code_id=(
                     item_obj.purchase_gl_code_id if item_obj else None
@@ -729,9 +738,27 @@ def update_expected_counts(
             )
             db.session.add(to_record)
             indexed[to_key] = to_record
+        else:
+            to_record.active = True
         to_record.expected_count = (
             to_record.expected_count + multiplier * quantity
         )
+        if multiplier > 0:
+            move_item_lots(
+                item_id=ti.item_id,
+                from_location_id=transfer_obj.from_location_id,
+                to_location_id=transfer_obj.to_location_id,
+                quantity=quantity,
+                source_type=SOURCE_TRANSFER,
+                source_id=transfer_obj.id,
+                source_line_id=ti.id,
+            )
+        elif multiplier < 0:
+            reverse_moved_item_lots(
+                source_type=SOURCE_TRANSFER,
+                source_id=transfer_obj.id,
+                source_line_id=ti.id,
+            )
 
 
 @transfer.route("/transfers", methods=["GET"])

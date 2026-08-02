@@ -71,7 +71,7 @@
                 columns=[
                     {'id': 'toggle-menu-name', 'target': 'col-menu-name', 'label': 'Name', 'checked': True},
                     {'id': 'toggle-menu-description', 'target': 'col-menu-description', 'label': 'Description', 'checked': True},
-                    {'id': 'toggle-menu-products', 'target': 'col-menu-products', 'label': 'Products', 'checked': True},
+                    {'id': 'toggle-menu-products', 'target': 'col-menu-products', 'label': 'Sellable Amounts', 'checked': True},
                     {'id': 'toggle-menu-locations', 'target': 'col-menu-locations', 'label': 'Active Locations', 'checked': True},
                     {'id': 'toggle-menu-last-used', 'target': 'col-menu-last-used', 'label': 'Last Used', 'checked': True},
                     {'id': 'toggle-menu-actions', 'target': 'col-menu-actions', 'label': 'Actions', 'checked': True},
@@ -91,7 +91,7 @@
         <span class="badge rounded-pill text-bg-light border">Assigned Status: {{ 'Assigned to locations' if assigned_status == 'assigned' else 'Not assigned to any location' }}</span>
         {% endif %}
         {% if product_status != 'all' %}
-        <span class="badge rounded-pill text-bg-light border">Product Status: {{ 'Has products' if product_status == 'with' else 'No products' }}</span>
+        <span class="badge rounded-pill text-bg-light border">Sellable Amount Status: {{ 'Has sellable amounts' if product_status == 'with' else 'No sellable amounts' }}</span>
         {% endif %}
     </div>
     {% endif %}
@@ -103,7 +103,7 @@
                 <tr>
                     <th scope="col" class="col-menu-name">Name</th>
                     <th scope="col" class="col-menu-description">Description</th>
-                    <th scope="col" class="col-menu-products">Products</th>
+                    <th scope="col" class="col-menu-products">Sellable Amounts</th>
                     <th scope="col" class="col-menu-locations">Active Locations</th>
                     <th scope="col" class="col-menu-last-used">Last Used</th>
                     <th scope="col" class="col-menu-actions text-end">Actions</th>
@@ -116,14 +116,15 @@
                     <td class="col-menu-name fw-semibold">{{ menu.name }}</td>
                     <td class="col-menu-description text-wrap">{{ menu.description or '—' }}</td>
                     <td class="col-menu-products">
-                        {% if menu.products %}
+                        {% set menu_amounts = menu.active_sellable_amounts %}
+                        {% if menu_amounts %}
                         <ul class="mb-0 ps-3 small">
-                            {% for product in menu.products %}
-                            <li>{{ product.name }}</li>
+                            {% for amount in menu_amounts %}
+                            <li>{{ amount.display_name }} (${{ "%.2f"|format(amount.price_float) }})</li>
                             {% endfor %}
                         </ul>
                         {% else %}
-                        <span class="text-muted">No products</span>
+                        <span class="text-muted">No sellable amounts</span>
                         {% endif %}
                     </td>
                     <td class="col-menu-locations">
@@ -216,11 +217,11 @@
                         </select>
                     </div>
                     <div class="mb-3">
-                        <label for="product_status" class="form-label">Product Status</label>
+                        <label for="product_status" class="form-label">Sellable Amount Status</label>
                         <select id="product_status" name="product_status" class="form-select">
                             <option value="all" {% if product_status == 'all' %}selected{% endif %}>All</option>
-                            <option value="with" {% if product_status == 'with' %}selected{% endif %}>Has products</option>
-                            <option value="without" {% if product_status == 'without' %}selected{% endif %}>No products</option>
+                            <option value="with" {% if product_status == 'with' %}selected{% endif %}>Has sellable amounts</option>
+                            <option value="without" {% if product_status == 'without' %}selected{% endif %}>No sellable amounts</option>
                         </select>
                     </div>
                 </form>

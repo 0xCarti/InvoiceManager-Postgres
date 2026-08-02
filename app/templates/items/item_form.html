@@ -14,18 +14,52 @@
     <div class="row">
         <div class="col-md-6 mb-3">
             {{ form.name.label(class="form-label") }}
-            {{ form.name(class="form-control") }}
+            {{ form.name(class="form-control%s"|format(' is-invalid' if form.name.errors else '')) }}
+            {% for error in form.name.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+            {% endfor %}
         </div>
         <div class="col-md-6 mb-3">
             {{ form.base_unit.label(class="form-label") }}
-            {{ form.base_unit(class="form-control") }}
+            {{ form.base_unit(class="form-select%s"|format(' is-invalid' if form.base_unit.errors else '')) }}
+            {% for error in form.base_unit.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+            {% endfor %}
         </div>
     </div>
     <div class="row">
         <div class="col-md-6 mb-3">
             {{ form.purchase_gl_code.label(class="form-label") }}
-            {{ form.purchase_gl_code(class="form-control") }}
+            {{ form.purchase_gl_code(class="form-select%s"|format(' is-invalid' if form.purchase_gl_code.errors else '')) }}
+            {% for error in form.purchase_gl_code.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+            {% endfor %}
         </div>
+        <div class="col-md-6 mb-3">
+            {{ form.expiry_tracking_mode.label(class="form-label") }}
+            {{ form.expiry_tracking_mode(class="form-select%s"|format(' is-invalid' if form.expiry_tracking_mode.errors else ''), id="expiry_tracking_mode") }}
+            {% for error in form.expiry_tracking_mode.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            {{ form.expiry_shelf_life_days.label(class="form-label") }}
+            {{ form.expiry_shelf_life_days(class="form-control%s"|format(' is-invalid' if form.expiry_shelf_life_days.errors else ''), id="expiry_shelf_life_days", inputmode="numeric") }}
+            {% for error in form.expiry_shelf_life_days.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+            {% endfor %}
+        </div>
+        <div class="col-md-6 mb-3">
+            {{ form.expiry_warning_days.label(class="form-label") }}
+            {{ form.expiry_warning_days(class="form-control%s"|format(' is-invalid' if form.expiry_warning_days.errors else ''), id="expiry_warning_days", inputmode="numeric") }}
+            {% for error in form.expiry_warning_days.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="row">
         <div class="col-md-6 mb-3">
             <label class="form-label">Barcodes</label>
             <div id="barcodes-container">
@@ -79,15 +113,22 @@
     <div id="units-container">
     {% for unit in form.units %}
     <div class="row g-2 align-items-end unit-row mb-2">
+        {{ unit.form.unit_id() }}
         <div class="col-md-4">
             <label class="form-label {% if not loop.first %}visually-hidden{% endif %}"
                    for="{{ unit.form.name.id }}">Unit of Measure</label>
-            {{ unit.form.name(class="form-control", placeholder="e.g. case") }}
+            {{ unit.form.name(class="form-control%s"|format(' is-invalid' if unit.form.name.errors else ''), placeholder="e.g. case") }}
+            {% for error in unit.form.name.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+            {% endfor %}
         </div>
         <div class="col-md-3">
             <label class="form-label {% if not loop.first %}visually-hidden{% endif %}"
                    for="{{ unit.form.factor.id }}">Factor</label>
-            {{ unit.form.factor(class="form-control", placeholder="Quantity in base units") }}
+            {{ unit.form.factor(class="form-control%s"|format(' is-invalid' if unit.form.factor.errors else ''), placeholder="Quantity in base units") }}
+            {% for error in unit.form.factor.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+            {% endfor %}
         </div>
         <div class="col-md-2">
             <div class="form-check mt-4">
@@ -109,7 +150,7 @@
     </div>
     <button type="button" class="btn btn-outline-secondary" id="add-unit">Add Unit</button>
 {% endset %}
-<form method="POST" class="app-page-shell" data-item-form data-next-index="{{ form.units|length }}" data-barcode-next-index="{{ form.barcodes|length }}">
+<form method="POST" class="app-page-shell" data-item-form data-next-index="{{ form.units|length }}" data-barcode-next-index="{{ form.barcodes|length }}" novalidate>
     {{ form.hidden_tag() }}
     {% if show_location_tab %}
     <ul class="nav nav-tabs" id="itemFormTabs" role="tablist">
@@ -218,6 +259,7 @@
     </div>
     <template id="unit-row-template">
     <div class="row g-2 align-items-end unit-row mb-2">
+        <input type="hidden" name="units-__index__-unit_id" id="units-__index__-unit_id" value="">
         <div class="col-md-4">
             <label class="form-label visually-hidden" for="units-__index__-name">Unit of Measure</label>
             <input type="text" name="units-__index__-name" id="units-__index__-name"

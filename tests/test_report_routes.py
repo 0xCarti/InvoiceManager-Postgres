@@ -1,6 +1,7 @@
 import re
 from datetime import date
 from io import BytesIO
+from uuid import uuid4
 
 import pytest
 from openpyxl import Workbook
@@ -812,6 +813,69 @@ def test_vendor_and_sales_reports(client, app):
     assert b"Widget" in resp.data
     assert b"Gadget" not in resp.data
 
+    resp = client.get("/reports/products-sold")
+    assert resp.status_code == 200
+    assert b"Products Sold Report" in resp.data
+    assert b"Customer(s)" in resp.data
+    assert b"All Customers" in resp.data
+
+    with app.app_context():
+        user = User.query.filter_by(email="report@example.com").first()
+        second_customer = Customer(first_name="Sold", last_name="Customer")
+        db.session.add(second_customer)
+        db.session.flush()
+        second_invoice = Invoice(
+            id=f"INVREPSOLD{uuid4().hex[:8].upper()}",
+            user_id=user.id,
+            customer_id=second_customer.id,
+            date_created=date(2023, 12, 31),
+        )
+        db.session.add(second_invoice)
+        db.session.flush()
+        db.session.add(
+            InvoiceProduct(
+                invoice_id=second_invoice.id,
+                quantity=3,
+                product_id=widget.id,
+                product_name=widget.name,
+                unit_price=12.0,
+                line_subtotal=36.0,
+                line_gst=0.0,
+                line_pst=0.0,
+            )
+        )
+        db.session.commit()
+
+    resp = client.post(
+        "/reports/products-sold",
+        data={
+            "start_date": "2022-12-31",
+            "end_date": "2023-12-31",
+            "customers": [str(cid)],
+            "payment_status": "all",
+        },
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert b"Widget" in resp.data
+    assert b"Gadget" in resp.data
+    assert b"$5.00" in resp.data
+    assert b"$10.00" in resp.data
+    assert b"$20.00" in resp.data
+    assert b"$12.00" not in resp.data
+
+    resp = client.post(
+        "/reports/products-sold",
+        data={
+            "start_date": "2022-12-31",
+            "end_date": "2023-12-31",
+            "payment_status": "all",
+        },
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert b"$12.00" in resp.data
+
     resp = client.post(
         "/reports/product-sales",
         data={
@@ -1584,6 +1648,116 @@ def test_invoice_recipe_usage_snapshots_preserve_historical_items(app):
 
         assert any(row["item_name"] == "4oz Fry Cup" for row in rows)
         assert not any(row["item_name"] == "6oz Fry Cup" for row in rows)
+
+
+def test_invoice_recipe_usage_rows_filter_by_customer_and_fallback_zero_snapshot_cost(app):
+    unique = uuid4().hex
+    with app.app_context():
+        user = User(
+            email=f"stock-usage-customer-{unique}@example.com",
+            password=generate_password_hash("pass"),
+            is_admin=True,
+            active=True,
+        )
+        first_customer = Customer(first_name="Filtered", last_name="Customer")
+        second_customer = Customer(first_name="Other", last_name="Customer")
+        item = Item(
+            name=f"Filtered Stock Item {unique}",
+            base_unit="each",
+            cost=2.5,
+        )
+        product = Product(name=f"Filtered Product {unique}", price=8.0, cost=2.5)
+        db.session.add_all([user, first_customer, second_customer, item, product])
+        db.session.flush()
+
+        db.session.add(
+            ProductRecipeItem(
+                product_id=product.id,
+                item_id=item.id,
+                quantity=3.0,
+                countable=True,
+            )
+        )
+
+        first_invoice = Invoice(
+            id=f"STOCKA{unique[:8]}",
+            user_id=user.id,
+            customer_id=first_customer.id,
+            date_created=date(2026, 6, 5),
+            is_paid=True,
+        )
+        second_invoice = Invoice(
+            id=f"STOCKB{unique[:8]}",
+            user_id=user.id,
+            customer_id=second_customer.id,
+            date_created=date(2026, 6, 5),
+            is_paid=True,
+        )
+        db.session.add_all([first_invoice, second_invoice])
+        db.session.flush()
+
+        first_invoice_product = InvoiceProduct(
+            invoice_id=first_invoice.id,
+            product_id=product.id,
+            product_name=product.name,
+            quantity=2,
+            unit_price=product.price,
+            line_subtotal=16.0,
+            line_gst=0.0,
+            line_pst=0.0,
+        )
+        second_invoice_product = InvoiceProduct(
+            invoice_id=second_invoice.id,
+            product_id=product.id,
+            product_name=product.name,
+            quantity=5,
+            unit_price=product.price,
+            line_subtotal=40.0,
+            line_gst=0.0,
+            line_pst=0.0,
+        )
+        db.session.add_all([first_invoice_product, second_invoice_product])
+        db.session.flush()
+
+        db.session.add_all(
+            [
+                InvoiceProductRecipeItemSnapshot(
+                    invoice_product_id=first_invoice_product.id,
+                    item_id=item.id,
+                    item_name=item.name,
+                    base_unit=item.base_unit,
+                    item_cost=0.0,
+                    unit_name=None,
+                    unit_factor=1.0,
+                    quantity=3.0,
+                    countable=True,
+                ),
+                InvoiceProductRecipeItemSnapshot(
+                    invoice_product_id=second_invoice_product.id,
+                    item_id=item.id,
+                    item_name=item.name,
+                    base_unit=item.base_unit,
+                    item_cost=0.0,
+                    unit_name=None,
+                    unit_factor=1.0,
+                    quantity=3.0,
+                    countable=True,
+                ),
+            ]
+        )
+        db.session.commit()
+
+        rows = _load_invoice_recipe_usage_rows(
+            start=date(2026, 6, 1),
+            end=date(2026, 6, 9),
+            selected_customer_ids=[first_customer.id],
+            payment_status="paid",
+        )
+
+        assert len(rows) == 1
+        assert rows[0]["item_name"] == item.name
+        assert rows[0]["item_cost"] == pytest.approx(2.5)
+        assert rows[0]["total_quantity"] == pytest.approx(6.0)
 
 
 def test_department_sales_forecast_workflow(client, app):

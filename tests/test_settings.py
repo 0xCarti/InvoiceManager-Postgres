@@ -26,12 +26,14 @@ def test_admin_can_update_settings(client, app):
             "/controlpanel/settings",
             data={
                 "gst_number": "987654321",
+                "food_cost_tax_rate": "5",
                 "default_timezone": "US/Eastern",
                 "auto_backup_enabled": "y",
                 "auto_backup_interval_value": "2",
                 "auto_backup_interval_unit": "week",
                 "pos_sales_import_interval_value": "6",
                 "pos_sales_import_interval_unit": "hour",
+                "pos_sales_auto_approve_clean_imports": "y",
                 "max_backups": "5",
                 "enable_sysco_imports": "y",
                 "enable_manitoba_liquor_imports": "y",
@@ -49,6 +51,10 @@ def test_admin_can_update_settings(client, app):
         from app import GST
 
         assert GST == "987654321"
+        tax_rate_setting = Setting.query.filter_by(
+            name=Setting.FOOD_COST_TAX_RATE
+        ).first()
+        assert tax_rate_setting.value == "5"
         tz_setting = Setting.query.filter_by(name="DEFAULT_TIMEZONE").first()
         assert tz_setting.value == "US/Eastern"
         from app import DEFAULT_TIMEZONE
@@ -69,6 +75,7 @@ def test_admin_can_update_settings(client, app):
         assert interval_unit.value == "week"
         pos_sales_interval = Setting.get_pos_sales_import_interval()
         assert pos_sales_interval == {"value": 6, "unit": "hour"}
+        assert Setting.get_pos_sales_auto_approve_clean_imports() is True
         max_setting = Setting.query.filter_by(name="MAX_BACKUPS").first()
         assert max_setting.value == "5"
         conversion_setting = Setting.query.filter_by(
@@ -91,6 +98,8 @@ def test_admin_can_update_settings(client, app):
         assert app.config["AUTO_BACKUP_INTERVAL_UNIT"] == "week"
         assert app.config["POS_SALES_IMPORT_INTERVAL_VALUE"] == 6
         assert app.config["POS_SALES_IMPORT_INTERVAL_UNIT"] == "hour"
+        assert app.config["POS_SALES_AUTO_APPROVE_CLEAN_IMPORTS"] is True
+        assert app.config["FOOD_COST_TAX_RATE"] == 5
         assert app.config["AUTO_BACKUP_INTERVAL"] == 2 * UNIT_SECONDS["week"]
         assert app.config["MAX_BACKUPS"] == 5
         assert app.config["BASE_UNIT_CONVERSIONS"] == mapping
@@ -99,6 +108,8 @@ def test_admin_can_update_settings(client, app):
         assert any(
             "Updated settings:" in activity
             and "POS sales import cadence" in activity
+            and "POS sales auto approval" in activity
+            and "food cost tax rate" in activity
             for activity in activities
         )
 
@@ -143,6 +154,7 @@ def test_auto_backup_thread_uses_real_app(client, app, monkeypatch):
             "/controlpanel/settings",
             data={
                 "gst_number": "",  # keep defaults minimal for this test
+                "food_cost_tax_rate": "0",
                 "default_timezone": "UTC",
                 "auto_backup_enabled": "y",
                 "auto_backup_interval_value": "1",

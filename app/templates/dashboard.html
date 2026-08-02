@@ -124,6 +124,7 @@
     {% set can_receive_purchase_invoices = has_permission('purchase_invoices.receive') %}
     {% set can_view_purchase_invoices = can_access_endpoint('purchase.view_purchase_invoices') %}
     {% set can_view_invoices = can_access_endpoint('invoice.view_invoices') %}
+    {% set can_view_inventory_expiry = can_access_endpoint('report.inventory_expiry_report') %}
     {% set can_view_events = can_access_endpoint('event.view_events') %}
     {% set can_create_events = has_permission('events.create') %}
     {% set can_access_metabase = can_access_endpoint('main.metabase_redirect') %}
@@ -193,6 +194,18 @@
             {% endif %}
         </div>
     </div>
+
+    {% if can_view_inventory_expiry and context.expiry and (context.expiry.expired_count or context.expiry.expiring_soon_count or context.expiry.unknown_count) %}
+    <div class="alert alert-warning d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2" role="alert">
+        <div>
+            <strong>Expiry attention needed.</strong>
+            {{ context.expiry.expired_count }} expired,
+            {{ context.expiry.expiring_soon_count }} expiring soon,
+            {{ context.expiry.unknown_count }} with unknown expiry.
+        </div>
+        <a class="btn btn-sm btn-outline-dark" href="{{ url_for('report.inventory_expiry_report') }}">Review Expiry</a>
+    </div>
+    {% endif %}
 
     {% if can_view_metabase_cards and context.metabase.configured and context.metabase.cards %}
     <div class="row g-3 mb-1">

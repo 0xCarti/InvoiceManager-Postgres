@@ -8,10 +8,14 @@ from app.models import (
     EventLocationOperatingDay,
     EventStandSheetItem,
     Item,
+    ItemUnit,
     Location,
     LocationCountSubmission,
     LocationCountSubmissionRow,
     LocationStandItem,
+)
+from app.services.location_count_submissions import (
+    sync_event_location_counts_from_approved_submissions,
 )
 from tests.utils import login
 
@@ -222,6 +226,348 @@ def test_public_count_submission_renders_mobile_numeric_entry_inputs(client, app
     assert b'data-count-entry="1"' in response.data
     assert b'data-native-numeric="1"' in response.data
     assert b'data-count-submit="1"' in response.data
+
+
+def test_public_count_submission_auto_switches_to_inventory_for_inventory_event(
+    client, app
+):
+    today = date.today()
+    with app.app_context():
+        suffix = uuid4().hex[:8]
+        location = Location(name=f"Inventory QR Stand {suffix}")
+        item = Item(name=f"Inventory QR Cup {suffix}", base_unit="each")
+        db.session.add_all([location, item])
+        db.session.flush()
+        unit = ItemUnit(item_id=item.id, name="Case of 12", factor=12)
+        db.session.add_all(
+            [
+                unit,
+                LocationStandItem(
+                    location_id=location.id,
+                    item_id=item.id,
+                    countable=True,
+                    expected_count=0.0,
+                ),
+            ]
+        )
+        event = Event(
+            name=f"Inventory QR Event {suffix}",
+            start_date=today - timedelta(days=1),
+            end_date=today + timedelta(days=1),
+            event_type="inventory",
+        )
+        db.session.add(event)
+        db.session.flush()
+        event_location = EventLocation(
+            event_id=event.id,
+            location_id=location.id,
+        )
+        db.session.add(event_location)
+        db.session.commit()
+        token = location.count_qr_token
+        item_id = item.id
+        unit_id = unit.id
+        event_location_id = event_location.id
+
+    response = client.get(f"/locations/scan/{token}")
+    assert response.status_code == 200
+    assert b"Submit Inventory Count" in response.data
+    assert f"inventory_unit_{item_id}_0".encode() in response.data
+    assert f"inventory_qty_{item_id}_0".encode() in response.data
+    assert b"Case of 12" in response.data
+
+    response = client.post(
+        f"/locations/scan/{token}",
+        data={
+            "submitted_name": "Inventory Counter",
+            f"inventory_unit_{item_id}_0": str(unit_id),
+            f"inventory_qty_{item_id}_0": "2",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Inventory count submitted for manager review." in response.data
+
+    duplicate_response = client.post(
+        f"/locations/scan/{token}",
+        data={
+            "submitted_name": "Inventory Counter",
+            f"inventory_unit_{item_id}_0": str(unit_id),
+            f"inventory_qty_{item_id}_0": "2",
+        },
+        follow_redirects=True,
+    )
+    assert duplicate_response.status_code == 200
+    assert b"Inventory count already submitted for manager review." in duplicate_response.data
+
+    with app.app_context():
+        submission = LocationCountSubmission.query.one()
+        assert submission.submission_type == LocationCountSubmission.TYPE_INVENTORY
+        assert submission.event_location_id == event_location_id
+        assert submission.rows[0].count_value == 24.0
+        assert submission.rows[0].unit_breakdown[0]["quantity"] == 2.0
+        assert submission.rows[0].unit_breakdown[0]["base_quantity"] == 24.0
+
+
+def test_public_inventory_count_can_add_catalog_item(client, app):
+    today = date.today()
+    with app.app_context():
+        suffix = uuid4().hex[:8]
+        location = Location(name=f"Inventory Add Stand {suffix}")
+        configured_item = Item(
+            name=f"Configured Inventory Item {suffix}",
+            base_unit="each",
+        )
+        missing_item = Item(
+            name=f"Missing Inventory Item {suffix}",
+            base_unit="each",
+            upc=f"{uuid4().int % 10**12:012d}",
+        )
+        db.session.add_all([location, configured_item, missing_item])
+        db.session.flush()
+        configured_unit = ItemUnit(
+            item_id=configured_item.id,
+            name="each",
+            factor=1,
+        )
+        missing_unit = ItemUnit(
+            item_id=missing_item.id,
+            name="Case of 6",
+            factor=6,
+        )
+        event = Event(
+            name=f"Inventory Add Event {suffix}",
+            start_date=today,
+            end_date=today,
+            event_type="inventory",
+        )
+        event_location = EventLocation(event=event, location=location)
+        db.session.add_all(
+            [
+                configured_unit,
+                missing_unit,
+                LocationStandItem(
+                    location_id=location.id,
+                    item_id=configured_item.id,
+                    countable=True,
+                    expected_count=0.0,
+                ),
+                event,
+                event_location,
+            ]
+        )
+        db.session.commit()
+        token = location.count_qr_token
+        event_id = event.id
+        event_location_id = event_location.id
+        configured_item_id = configured_item.id
+        missing_item_id = missing_item.id
+        missing_unit_id = missing_unit.id
+        missing_item_name = missing_item.name
+        missing_item_upc = missing_item.upc
+
+    inventory_url = (
+        f"/locations/scan/{token}/inventory/{event_id}"
+        f"?operating_date={today.isoformat()}"
+    )
+    response = client.get(inventory_url)
+    assert response.status_code == 200
+    assert b'data-inventory-filter-input="1"' in response.data
+    assert b'data-inventory-filter-clear="1"' in response.data
+    assert b'data-inventory-status-filter="counted"' in response.data
+    assert b'data-inventory-add-search="1"' in response.data
+    assert b"data-inventory-item-search-url=" in response.data
+    assert f'data-inventory-item-id="{configured_item_id}"'.encode() in response.data
+    assert missing_item_name.encode() not in response.data
+    assert missing_item_upc.encode() not in response.data
+
+    search_response = client.get(
+        f"/locations/scan/{token}/inventory/{event_id}/items/search",
+        query_string={
+            "operating_date": today.isoformat(),
+            "q": missing_item_name,
+        },
+    )
+    assert search_response.status_code == 200
+    search_payload = search_response.get_json()
+    assert search_payload["limit"] == 12
+    search_items = search_payload["items"]
+    assert len(search_items) == 1
+    assert search_items[0]["id"] == missing_item_id
+    assert search_items[0]["name"] == missing_item_name
+    assert search_items[0]["upc"] == missing_item_upc
+    assert search_items[0]["unit_options"][1]["value"] == str(missing_unit_id)
+
+    short_search_response = client.get(
+        f"/locations/scan/{token}/inventory/{event_id}/items/search",
+        query_string={
+            "operating_date": today.isoformat(),
+            "q": missing_item_name[:1],
+        },
+    )
+    assert short_search_response.status_code == 200
+    assert short_search_response.get_json()["items"] == []
+
+    lookup_response = client.get(
+        f"/locations/scan/{token}/inventory/{event_id}/items/search",
+        query_string={
+            "operating_date": today.isoformat(),
+            "ids": str(missing_item_id),
+        },
+    )
+    assert lookup_response.status_code == 200
+    assert lookup_response.get_json()["items"][0]["id"] == missing_item_id
+
+    response = client.post(
+        inventory_url,
+        data={
+            "submitted_name": "Inventory Counter",
+            f"inventory_unit_{missing_item_id}_0": str(missing_unit_id),
+            f"inventory_qty_{missing_item_id}_0": "3",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Inventory count submitted for manager review." in response.data
+
+    with app.app_context():
+        submission = LocationCountSubmission.query.one()
+        assert submission.submission_type == LocationCountSubmission.TYPE_INVENTORY
+        assert submission.event_location_id == event_location_id
+        assert submission.submission_date == today
+        assert len(submission.rows) == 1
+        row = submission.rows[0]
+        assert row.item_id == missing_item_id
+        assert row.count_value == 18.0
+        assert row.unit_breakdown[0]["quantity"] == 3.0
+        assert row.unit_breakdown[0]["base_quantity"] == 18.0
+
+
+def test_public_count_submission_prefers_open_regular_event_over_inventory(
+    client, app
+):
+    today = date.today()
+    with app.app_context():
+        suffix = uuid4().hex[:8]
+        location = Location(name=f"Overlap Count Stand {suffix}")
+        item = Item(name=f"Overlap Count Cup {suffix}", base_unit="each")
+        regular_event = Event(
+            name=f"Regular Event {suffix}",
+            start_date=today - timedelta(days=1),
+            end_date=today + timedelta(days=1),
+            event_type="hockey",
+        )
+        inventory_event = Event(
+            name=f"Inventory Event {suffix}",
+            start_date=today - timedelta(days=1),
+            end_date=today + timedelta(days=1),
+            event_type="inventory",
+        )
+        db.session.add_all([location, item, regular_event, inventory_event])
+        db.session.flush()
+        unit = ItemUnit(item_id=item.id, name="each", factor=1)
+        regular_event_location = EventLocation(
+            event_id=regular_event.id,
+            location_id=location.id,
+        )
+        inventory_event_location = EventLocation(
+            event_id=inventory_event.id,
+            location_id=location.id,
+        )
+        db.session.add_all(
+            [
+                unit,
+                LocationStandItem(
+                    location_id=location.id,
+                    item_id=item.id,
+                    countable=True,
+                    expected_count=0.0,
+                ),
+                regular_event_location,
+                inventory_event_location,
+            ]
+        )
+        db.session.commit()
+        token = location.count_qr_token
+        regular_event_id = regular_event.id
+        inventory_event_id = inventory_event.id
+        item_id = item.id
+        unit_id = unit.id
+
+    response = client.get(f"/locations/scan/{token}")
+    assert response.status_code == 200
+    assert f"Regular Event {suffix}".encode() in response.data
+    assert b"Submit Inventory Count" not in response.data
+    assert f"inventory_qty_{item_id}_0".encode() not in response.data
+    assert f"/locations/scan/{token}/inventory/{inventory_event_id}".encode() in response.data
+
+    response = client.post(
+        f"/locations/scan/{token}",
+        data={
+            "submitted_name": "Event Counter",
+            "submission_type": "opening",
+            f"count_{item_id}": "3",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    response = client.post(
+        f"/locations/scan/{token}",
+        data={
+            "submitted_name": "Event Counter",
+            "submission_type": "closing",
+            f"count_{item_id}": "1",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Closing count submitted for manager review." in response.data
+
+    inventory_url = (
+        f"/locations/scan/{token}/inventory/{inventory_event_id}"
+        f"?operating_date={today.isoformat()}"
+    )
+    response = client.get(inventory_url)
+    assert response.status_code == 200
+    assert b"Submit Inventory Count" in response.data
+    assert f"inventory_qty_{item_id}_0".encode() in response.data
+
+    response = client.post(
+        inventory_url,
+        data={
+            "submitted_name": "Inventory Counter",
+            f"inventory_unit_{item_id}_0": str(unit_id),
+            f"inventory_qty_{item_id}_0": "8",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Inventory count submitted for manager review." in response.data
+
+    with app.app_context():
+        submissions = LocationCountSubmission.query.order_by(
+            LocationCountSubmission.id.asc()
+        ).all()
+        assert [submission.submission_type for submission in submissions] == [
+            LocationCountSubmission.TYPE_OPENING,
+            LocationCountSubmission.TYPE_CLOSING,
+            LocationCountSubmission.TYPE_INVENTORY,
+        ]
+        assert submissions[0].event_location.event_id == regular_event_id
+        assert submissions[1].event_location.event_id == regular_event_id
+        assert submissions[2].event_location.event_id == inventory_event_id
+        assert submissions[2].submission_date == today
+        assert submissions[2].rows[0].count_value == 8.0
+
+        regular_event = db.session.get(Event, regular_event_id)
+        assert regular_event.closed is False
+        regular_event.closed = True
+        db.session.commit()
+
+    response = client.get(f"/locations/scan/{token}")
+    assert response.status_code == 200
+    assert b"Submit Inventory Count" in response.data
 
 
 def test_manager_approval_uses_first_opening_day_last_closing_day_and_aggregates_same_day_submissions(
@@ -502,6 +848,81 @@ def test_manager_approval_can_overwrite_same_day_counts(client, app):
             second_submission.approval_mode
             == LocationCountSubmission.APPROVAL_MODE_OVERWRITE
         )
+
+
+def test_inventory_overwrite_replaces_whole_location_count(app):
+    context = _setup_location_count_context(app)
+
+    with app.app_context():
+        event = db.session.get(Event, context["event_id"])
+        event.event_type = "inventory"
+        second_item = Item(name=f"Second Inventory Item {uuid4().hex[:8]}", base_unit="each")
+        db.session.add(second_item)
+        db.session.flush()
+        db.session.add(
+            LocationStandItem(
+                location_id=context["location_id"],
+                item_id=second_item.id,
+                countable=True,
+                expected_count=0.0,
+            )
+        )
+        db.session.commit()
+
+        first_item_id = context["item_id"]
+        second_item_id = second_item.id
+        first_add_id = _create_pending_submission(
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            item_id=first_item_id,
+            submission_type=LocationCountSubmission.TYPE_INVENTORY,
+            submission_date=context["today"],
+            count_value=10.0,
+            submitted_name="First Counter",
+        )
+        second_add_id = _create_pending_submission(
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            item_id=second_item_id,
+            submission_type=LocationCountSubmission.TYPE_INVENTORY,
+            submission_date=context["today"],
+            count_value=5.0,
+            submitted_name="Second Counter",
+        )
+        overwrite_id = _create_pending_submission(
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            item_id=first_item_id,
+            submission_type=LocationCountSubmission.TYPE_INVENTORY,
+            submission_date=context["today"],
+            count_value=2.0,
+            submitted_name="Correction Counter",
+        )
+
+        for submission_id, approval_mode in (
+            (first_add_id, LocationCountSubmission.APPROVAL_MODE_ADD),
+            (second_add_id, LocationCountSubmission.APPROVAL_MODE_ADD),
+            (overwrite_id, LocationCountSubmission.APPROVAL_MODE_OVERWRITE),
+        ):
+            submission = db.session.get(LocationCountSubmission, submission_id)
+            submission.status = LocationCountSubmission.STATUS_APPROVED
+            submission.approval_mode = approval_mode
+
+        sync_event_location_counts_from_approved_submissions(
+            context["event_location_id"]
+        )
+        db.session.commit()
+
+        first_sheet = EventStandSheetItem.query.filter_by(
+            event_location_id=context["event_location_id"],
+            item_id=first_item_id,
+        ).one()
+        second_sheet = EventStandSheetItem.query.filter_by(
+            event_location_id=context["event_location_id"],
+            item_id=second_item_id,
+        ).one()
+        assert first_sheet.closing_count == 2.0
+        assert second_sheet.closing_count == 0.0
 
 
 def test_manager_can_approve_expected_opening_for_event_day(client, app):
