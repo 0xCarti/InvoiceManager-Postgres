@@ -11,19 +11,7 @@
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="{{ url_for('static', filename='js/jquery-3.5.1.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/numeric_inputs.js') }}"></script>
-    <script
-        src="{{ url_for('static', filename='js/ui_skin.js', v='20260805a') }}"
-        data-ui-skin-enabled="{{ 'true' if current_user.is_authenticated else 'false' }}"
-        data-ui-skin-storage-key="{% if current_user.is_authenticated %}assetflow.uiSkin.v1.user.{{ current_user.get_id() }}{% endif %}"
-    ></script>
     <style>
-        .dispatch-topbar-brand,
-        .dispatch-sidebar-brand,
-        .ui-skin-control,
-        .ui-skin-toggle-label-short {
-            display: none;
-        }
-
         @media print {
             nav,
             .navbar,
@@ -509,7 +497,6 @@
     </style>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile-responsive.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/item_search_selects.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dispatch-board.css', v='20260805a') }}">
 </head>
 
 <body class="{% if current_user.is_authenticated %}has-auth-sidebar{% endif %}{% if request.endpoint and request.endpoint.startswith('report.') %} report-page{% endif %}{% if is_report_result_request() %} report-result-tab{% endif %}">
@@ -521,13 +508,6 @@
             </button>
             <a class="navbar-icon-btn me-2" href="{{ default_home_url() }}" aria-label="Dashboard home">
                 <span aria-hidden="true">&#8962;</span>
-            </a>
-            <a class="dispatch-topbar-brand me-2" href="{{ default_home_url() }}" aria-label="AssetFlow dashboard home">
-                <span class="dispatch-brand-mark" aria-hidden="true">AF</span>
-                <span class="dispatch-brand-copy">
-                    <strong>AssetFlow</strong>
-                    <small>Operations workspace</small>
-                </span>
             </a>
             <button class="navbar-toggler d-md-none me-2" type="button" data-bs-toggle="offcanvas"
                 data-bs-target="#favoritesNav" aria-controls="favoritesNav" aria-label="Toggle favorites">
@@ -552,16 +532,7 @@
             {% endif %}
             <div class="offcanvas offcanvas-start offcanvas-lg" tabindex="-1" id="navbarNav" aria-labelledby="offcanvasNavbarLabel">
                 <div class="offcanvas-header">
-                    <h5 class="offcanvas-title" id="offcanvasNavbarLabel">
-                        <span class="ui-skin-classic-menu-title">Menu</span>
-                        <span class="dispatch-sidebar-brand">
-                            <span class="dispatch-brand-mark" aria-hidden="true">AF</span>
-                            <span class="dispatch-brand-copy">
-                                <strong>AssetFlow</strong>
-                                <small>Operations</small>
-                            </span>
-                        </span>
-                    </h5>
+                    <h5 class="offcanvas-title" id="offcanvasNavbarLabel">Menu</h5>
                     {% if current_user.is_authenticated %}
                     <button type="button" class="btn btn-sm btn-outline-secondary sidebar-collapse-toggle d-none d-lg-inline-flex me-2" id="sidebarCollapseToggle" aria-pressed="false">
                         Collapse
@@ -692,26 +663,6 @@
                     </ul>
                 </div>
             </div>
-            {% if current_user.is_authenticated %}
-            <div class="ui-skin-control ms-auto">
-                <button
-                    type="button"
-                    class="ui-skin-toggle"
-                    id="uiSkinToggle"
-                    role="switch"
-                    aria-checked="false"
-                    aria-label="Dispatch Board interface"
-                    title="Switch between the current interface and Dispatch Board"
-                >
-                    <span class="ui-skin-toggle-track" aria-hidden="true">
-                        <span class="ui-skin-toggle-thumb"></span>
-                    </span>
-                    <span class="ui-skin-toggle-label ui-skin-toggle-label-long">Dispatch Board</span>
-                    <span class="ui-skin-toggle-label ui-skin-toggle-label-short">Dispatch</span>
-                </button>
-                <span class="visually-hidden" aria-live="polite" id="uiSkinStatus"></span>
-            </div>
-            {% endif %}
         </div>
     </nav>
     <div class="container mt-3">
