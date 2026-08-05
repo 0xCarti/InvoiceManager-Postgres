@@ -667,7 +667,7 @@ def _deliver_user_invitation(
     return True
 
 
-def _send_password_reset_email_if_possible(user: User) -> None:
+def _send_password_reset_email_if_possible(user: User) -> bool:
     token = generate_reset_token(user)
     reset_url = url_for("auth.reset_token", token=token, _external=True)
     try:
@@ -676,17 +676,20 @@ def _send_password_reset_email_if_possible(user: User) -> None:
             "Password Reset",
             f"Click the link to reset your password: {reset_url}",
         )
+        return True
     except SMTPConfigurationError as exc:
         current_app.logger.warning(
             "SMTP configuration missing while sending password reset email to %s: %s",
             user.email,
             exc,
         )
+        return False
     except Exception:
         current_app.logger.exception(
             "Failed to send password reset email to %s",
             user.email,
         )
+        return False
 
 
 def generate_reset_token(user: User) -> str:
@@ -1323,6 +1326,26 @@ def users():
                     success_message="Invitation re-sent.",
                     activity_message=f"Re-sent invite to user {user.email}",
                 )
+                return redirect(url_for("admin.users"))
+            elif action == "send_password_reset":
+                if _is_pending_invited_user(user):
+                    flash(
+                        "Pending users should receive a re-sent invitation instead.",
+                        "warning",
+                    )
+                    return redirect(url_for("admin.users"))
+                if _send_password_reset_email_if_possible(user):
+                    log_activity(f"Sent password reset email to user {user.email}")
+                    flash(
+                        f"Password reset email sent to {user.email}.",
+                        "success",
+                    )
+                else:
+                    flash(
+                        "Unable to send password reset email. "
+                        "Please verify SMTP settings and try again.",
+                        "danger",
+                    )
                 return redirect(url_for("admin.users"))
             elif action == "toggle_super_admin":
                 if not current_user.is_super_admin:
