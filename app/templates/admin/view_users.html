@@ -166,6 +166,14 @@
                             Archive
                         </button>
                     </form>
+                    <form action="{{ url_for('admin.users') }}" method="post">
+                        {{ form.hidden_tag() }}
+                        <input type="hidden" name="user_id" value="{{ user.id }}">
+                        <button type="submit" name="action" value="send_password_reset" class="btn btn-outline-secondary btn-sm w-100"
+                                data-confirm-message="Send a password reset email to {{ user.email }}?">
+                            Send Password Reset
+                        </button>
+                    </form>
                     {% endif %}
                     {% endif %}
                     {% if can_access_endpoint('admin.user_access') %}
@@ -259,6 +267,14 @@
                         <button type="submit" class="btn btn-sm btn-danger"
                                 data-confirm-message="Are you sure you want to archive this user?">
                             Archive
+                        </button>
+                    </form>
+                    <form action="{{ url_for('admin.users') }}" method="post" class="d-inline">
+                        {{ form.hidden_tag() }}
+                        <input type="hidden" name="user_id" value="{{ user.id }}">
+                        <button type="submit" name="action" value="send_password_reset" class="btn btn-sm btn-outline-secondary"
+                                data-confirm-message="Send a password reset email to {{ user.email }}?">
+                            Send Password Reset
                         </button>
                     </form>
                     {% endif %}

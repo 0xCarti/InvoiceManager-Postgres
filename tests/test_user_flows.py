@@ -463,6 +463,124 @@ def test_admin_users_page_shows_invite_form_guidance(client, app):
     )
 
 
+def test_admin_can_send_password_reset_from_user_list(client, app, monkeypatch):
+    sent = {}
+
+    def fake_send_email(to_address, subject, body):
+        sent.update(to_address=to_address, subject=subject, body=body)
+
+    monkeypatch.setattr("app.routes.auth_routes.send_email", fake_send_email)
+
+    with app.app_context():
+        user = User(
+            email="reset-from-admin@example.com",
+            password=generate_password_hash("current-password"),
+            active=True,
+        )
+        db.session.add(user)
+        db.session.commit()
+        user_id = user.id
+        original_password_hash = user.password
+
+    with client:
+        login(client, "admin@example.com", "adminpass")
+        page = client.get("/controlpanel/users")
+        assert page.status_code == 200
+        assert b'value="send_password_reset"' in page.data
+        assert b"Send Password Reset" in page.data
+
+        response = client.post(
+            "/controlpanel/users",
+            data={"user_id": user_id, "action": "send_password_reset"},
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert (
+        b"Password reset email sent to reset-from-admin@example.com."
+        in response.data
+    )
+    assert sent["to_address"] == "reset-from-admin@example.com"
+    assert sent["subject"] == "Password Reset"
+    assert "/reset/" in sent["body"]
+
+    with app.app_context():
+        assert db.session.get(User, user_id).password == original_password_hash
+
+
+def test_admin_password_reset_send_failure_is_reported(client, app, monkeypatch):
+    def fail_send_email(*args, **kwargs):
+        raise TimeoutError("SMTP request timed out")
+
+    monkeypatch.setattr("app.routes.auth_routes.send_email", fail_send_email)
+
+    with app.app_context():
+        user = User(
+            email="reset-send-failure@example.com",
+            password=generate_password_hash("current-password"),
+            active=True,
+        )
+        db.session.add(user)
+        db.session.commit()
+        user_id = user.id
+
+    with client:
+        login(client, "admin@example.com", "adminpass")
+        response = client.post(
+            "/controlpanel/users",
+            data={"user_id": user_id, "action": "send_password_reset"},
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert (
+        b"Unable to send password reset email. Please verify SMTP settings and try again."
+        in response.data
+    )
+    assert b"Password reset email sent to" not in response.data
+
+
+def test_pending_invite_keeps_resend_invitation_action(client, app, monkeypatch):
+    def unexpected_send_email(*args, **kwargs):
+        raise AssertionError("Pending user should use the invitation email flow")
+
+    monkeypatch.setattr(
+        "app.routes.auth_routes.send_email", unexpected_send_email
+    )
+
+    with app.app_context():
+        user = User(
+            email="pending-reset@example.com",
+            password=generate_password_hash("temporary-password"),
+            active=False,
+        )
+        db.session.add(user)
+        db.session.commit()
+        user_id = user.id
+
+    with client:
+        login(client, "admin@example.com", "adminpass")
+        page = client.get("/controlpanel/users")
+        assert page.status_code == 200
+        assert b"Re-send Invite" in page.data
+        assert (
+            b"Send a password reset email to pending-reset@example.com?"
+            not in page.data
+        )
+
+        response = client.post(
+            "/controlpanel/users",
+            data={"user_id": user_id, "action": "send_password_reset"},
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert (
+        b"Pending users should receive a re-sent invitation instead."
+        in response.data
+    )
+
+
 def test_login_inactive_user(client, app):
     with app.app_context():
         user = User(
