@@ -18,6 +18,7 @@ from app.forms import MAX_BACKUP_SIZE
 from app.models import (
     ActivityLog,
     Customer,
+    Department,
     Event,
     EventLocation,
     EventStandSheetItem,
@@ -29,6 +30,8 @@ from app.models import (
     Location,
     Product,
     ProductRecipeItem,
+    Permission,
+    PermissionGroup,
     PurchaseInvoice,
     PurchaseInvoiceDraft,
     PurchaseInvoiceItem,
@@ -37,6 +40,7 @@ from app.models import (
     PurchaseOrderItemArchive,
     TerminalSale,
     User,
+    UserDepartmentMembership,
     Vendor,
     Setting,
 )
@@ -1026,6 +1030,190 @@ def test_restore_backup_adapts_legacy_purchase_gl_code_column(app):
         assert summary.table_transform_counts["purchase_invoice_item"] >= 1
 
 
+def test_restore_backup_backfills_legacy_schedule_membership_access(app):
+    with app.app_context():
+        users = {
+            role_name: User(
+                email=f"legacy-schedule-{role_name.replace(' ', '-')}@example.com",
+                password=generate_password_hash("pass"),
+                active=True,
+            )
+            for role_name in ("manager", "gm", "shift lead", "staff")
+        }
+        department = Department(name="Legacy Schedule Restore", active=True)
+        second_department = Department(
+            name="Legacy Schedule Restore Secondary",
+            active=True,
+        )
+        db.session.add_all([*users.values(), department, second_department])
+        db.session.flush()
+
+        role_setting = Setting.query.filter_by(
+            name="SCHEDULE_MEMBERSHIP_ROLES"
+        ).first()
+        if role_setting is None:
+            role_setting = Setting(name="SCHEDULE_MEMBERSHIP_ROLES")
+            db.session.add(role_setting)
+        role_setting.value = json.dumps(
+            [
+                {"name": "manager", "is_management": False},
+                {"name": "gm", "is_management": True},
+                {"name": "shift lead", "is_management": True},
+                {"name": "staff", "is_management": False},
+            ]
+        )
+
+        memberships = [
+            UserDepartmentMembership(
+                user_id=users["manager"].id,
+                department_id=department.id,
+                _legacy_role="manager",
+                can_manage_department=False,
+            ),
+            UserDepartmentMembership(
+                user_id=users["gm"].id,
+                department_id=department.id,
+                _legacy_role="GM",
+                can_manage_department=False,
+            ),
+            UserDepartmentMembership(
+                user_id=users["gm"].id,
+                department_id=second_department.id,
+                _legacy_role="gm",
+                can_manage_department=False,
+            ),
+            UserDepartmentMembership(
+                user_id=users["shift lead"].id,
+                department_id=department.id,
+                _legacy_role="  Shift   Lead  ",
+                can_manage_department=False,
+            ),
+            UserDepartmentMembership(
+                user_id=users["staff"].id,
+                department_id=department.id,
+                _legacy_role="staff",
+                can_manage_department=False,
+            ),
+        ]
+        db.session.add_all(memberships)
+        db.session.commit()
+        user_ids = {
+            role_name: user.id for role_name, user in users.items()
+        }
+
+        backup_path = _create_sqlite_backup_copy(
+            app,
+            "legacy_schedule_membership_access.db",
+        )
+        with sqlite3.connect(backup_path) as conn:
+            conn.execute(
+                "ALTER TABLE schedule_user_department_membership "
+                "DROP COLUMN can_manage_department"
+            )
+            conn.execute(
+                "DELETE FROM user_permission_groups "
+                "WHERE permission_group_id IN ("
+                "SELECT id FROM permission_group "
+                "WHERE key = 'legacy_schedule_gm_global_scope'"
+                ")"
+            )
+            conn.execute(
+                "DELETE FROM permission_group_permissions "
+                "WHERE permission_group_id IN ("
+                "SELECT id FROM permission_group "
+                "WHERE key = 'legacy_schedule_gm_global_scope'"
+                ") OR permission_id IN ("
+                "SELECT id FROM permission "
+                "WHERE code = 'communications.global_scope'"
+                ")"
+            )
+            conn.execute(
+                "DELETE FROM permission_group "
+                "WHERE key = 'legacy_schedule_gm_global_scope'"
+            )
+            conn.execute(
+                "DELETE FROM permission "
+                "WHERE code = 'communications.global_scope'"
+            )
+            conn.commit()
+
+        summary = restore_backup(backup_path, restore_mode="strict")
+        db.session.remove()
+
+        restored_memberships = UserDepartmentMembership.query.filter(
+            UserDepartmentMembership.user_id.in_(user_ids.values())
+        ).all()
+        access_by_user_id: dict[int, set[bool]] = {}
+        for membership in restored_memberships:
+            access_by_user_id.setdefault(membership.user_id, set()).add(
+                bool(membership.can_manage_department)
+            )
+
+        assert access_by_user_id == {
+            user_ids["manager"]: {False},
+            user_ids["gm"]: {True},
+            user_ids["shift lead"]: {True},
+            user_ids["staff"]: {False},
+        }
+        permission = Permission.query.filter_by(
+            code="communications.global_scope"
+        ).one()
+        legacy_group = PermissionGroup.query.filter_by(
+            key="legacy_schedule_gm_global_scope"
+        ).one()
+        assert {item.id for item in legacy_group.permissions} == {permission.id}
+        assert {user.id for user in legacy_group.users} == {user_ids["gm"]}
+        assert summary.table_transform_counts is not None
+        assert (
+            summary.table_transform_counts[
+                "schedule_user_department_membership"
+            ]
+            >= 1
+        )
+
+
+def test_restore_current_schedule_membership_keeps_boolean_access(app):
+    with app.app_context():
+        user = User(
+            email="current-schedule-restore@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        department = Department(name="Current Schedule Restore", active=True)
+        db.session.add_all([user, department])
+        db.session.flush()
+        db.session.add(
+            UserDepartmentMembership(
+                user_id=user.id,
+                department_id=department.id,
+                _legacy_role="gm",
+                can_manage_department=False,
+            )
+        )
+        db.session.commit()
+        user_id = user.id
+        department_id = department.id
+
+        backup_path = _create_sqlite_backup_copy(
+            app,
+            "current_schedule_membership_access.db",
+        )
+        restore_backup(backup_path, restore_mode="strict")
+        db.session.remove()
+
+        restored = UserDepartmentMembership.query.filter_by(
+            user_id=user_id,
+            department_id=department_id,
+        ).one()
+        assert restored.can_manage_department is False
+        assert (
+            PermissionGroup.query.filter_by(
+                key="legacy_schedule_gm_global_scope"
+            ).count()
+            == 0
+        )
+
+
 def test_restore_backup_permissive_mode_skips_invalid_rows_and_writes_quarantine(app):
     with app.app_context():
         populate_data()
@@ -1121,6 +1309,88 @@ def test_restore_backup_strict_mode_raises_and_rolls_back_on_invalid_row(app):
             restore_backup(backup_path, restore_mode="strict")
 
         assert Setting.query.filter_by(name="RESTORE_ROLLBACK_SENTINEL").count() == 1
+        assert User.query.count() == baseline_counts["user"]
+        assert Product.query.count() == baseline_counts["product"]
+        assert Setting.query.count() == baseline_counts["setting"]
+
+
+def test_restore_backup_post_load_failure_raises_and_rolls_back(
+    app,
+    monkeypatch,
+):
+    with app.app_context():
+        populate_data()
+        backup_path = _create_sqlite_backup_copy(
+            app,
+            "post_load_failure.db",
+        )
+        db.session.add(Setting(name="POST_LOAD_ROLLBACK_SENTINEL", value="before"))
+        db.session.commit()
+        baseline_counts = {
+            "user": User.query.count(),
+            "product": Product.query.count(),
+            "setting": Setting.query.count(),
+        }
+
+        def fail_post_load_hooks(*, context):
+            raise RuntimeError("forced post-load failure")
+
+        monkeypatch.setattr(
+            "app.utils.backup.apply_restore_post_load_hooks",
+            fail_post_load_hooks,
+        )
+
+        with pytest.raises(
+            RestoreBackupError,
+            match="preserving access from a legacy backup",
+        ):
+            restore_backup(backup_path, restore_mode="strict")
+
+        assert (
+            Setting.query.filter_by(name="POST_LOAD_ROLLBACK_SENTINEL").count()
+            == 1
+        )
+        assert User.query.count() == baseline_counts["user"]
+        assert Product.query.count() == baseline_counts["product"]
+        assert Setting.query.count() == baseline_counts["setting"]
+
+
+def test_restore_backup_sequence_failure_raises_and_rolls_back(
+    app,
+    monkeypatch,
+):
+    with app.app_context():
+        populate_data()
+        backup_path = _create_sqlite_backup_copy(
+            app,
+            "sequence_failure.db",
+        )
+        db.session.add(Setting(name="SEQUENCE_ROLLBACK_SENTINEL", value="before"))
+        db.session.commit()
+        baseline_counts = {
+            "user": User.query.count(),
+            "product": Product.query.count(),
+            "setting": Setting.query.count(),
+        }
+
+        def fail_sequence_repair(*args, **kwargs):
+            raise RuntimeError("forced sequence repair failure")
+
+        monkeypatch.setattr(
+            "app.utils.backup.check_and_fix_pk_sequences",
+            fail_sequence_repair,
+        )
+
+        with pytest.raises(
+            RestoreBackupError,
+            match="repairing database ID sequences",
+        ):
+            restore_backup(backup_path, restore_mode="strict")
+
+        assert (
+            Setting.query.filter_by(name="SEQUENCE_ROLLBACK_SENTINEL").count()
+            == 1
+        )
         assert User.query.count() == baseline_counts["user"]
         assert Product.query.count() == baseline_counts["product"]
         assert Setting.query.count() == baseline_counts["setting"]

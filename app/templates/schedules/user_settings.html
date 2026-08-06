@@ -76,10 +76,15 @@
                     <form method="post" class="row g-2 align-items-end mb-3">
                         {{ membership_form.hidden_tag() }}
                         <input type="hidden" name="action" value="add_membership">
-                        <div class="col-12 col-md-4">{{ membership_form.department_id.label(class_='form-label') }}{{ membership_form.department_id(class_='form-select') }}</div>
-                        <div class="col-12 col-md-3">{{ membership_form.role.label(class_='form-label') }}{{ membership_form.role(class_='form-select') }}</div>
-                        <div class="col-12 col-md-5">{{ membership_form.reports_to_user_id.label(class_='form-label') }}{{ membership_form.reports_to_user_id(class_='form-select') }}</div>
-                        <div class="col-12">
+                        <div class="col-12 col-md-6">{{ membership_form.department_id.label(class_='form-label') }}{{ membership_form.department_id(class_='form-select') }}</div>
+                        <div class="col-12 col-md-6">{{ membership_form.reports_to_user_id.label(class_='form-label') }}{{ membership_form.reports_to_user_id(class_='form-select') }}</div>
+                        <div class="col-12 col-md-6">
+                            <div class="form-check">
+                                {{ membership_form.can_manage_department(class_='form-check-input') }}
+                                {{ membership_form.can_manage_department.label(class_='form-check-label') }}
+                            </div>
+                        </div>
+                        <div class="col-12 col-md-6">
                             <div class="form-check">
                                 {{ membership_form.can_auto_assign(class_='form-check-input') }}
                                 {{ membership_form.can_auto_assign.label(class_='form-check-label') }}
@@ -87,7 +92,7 @@
                         </div>
                         <div class="col-12">
                             <div class="form-text">
-                                Roles are managed from Scheduling Setup. Add the user to each department they should be able to see, and use the auto-assign checkbox only for departments where they may run auto-schedule.
+                                When their permission group allows an action, department managers can apply it to every member of that department. Other users are limited to themselves and people assigned to report directly to them. Auto-assign access is controlled separately.
                             </div>
                         </div>
                         <div class="col-12">
@@ -106,7 +111,7 @@
 
                     <div class="table-responsive">
                         <table class="table table-sm align-middle table-mobile-card">
-                            <thead><tr><th>Department</th><th>Role</th><th>Auto Assign</th><th>Supervisor</th><th></th></tr></thead>
+                            <thead><tr><th>Department</th><th>Manage Department</th><th>Auto Assign</th><th>Supervisor</th><th></th></tr></thead>
                             <tbody>
                                 {% for membership in target_user.department_memberships %}
                                 <tr>
@@ -115,30 +120,31 @@
                                         {% if can_manage_setup %}
                                         <form method="post" class="d-flex flex-wrap gap-2 align-items-center schedule-inline-form">
                                             {{ action_form.hidden_tag() }}
-                                            <input type="hidden" name="action" value="update_membership_role">
+                                            <input type="hidden" name="action" value="update_membership_access">
                                             <input type="hidden" name="membership_id" value="{{ membership.id }}">
                                             <input type="hidden" name="can_auto_assign" value="{{ 1 if membership.can_auto_assign else 0 }}">
-                                            <select
-                                                name="role"
-                                                class="form-select form-select-sm"
-                                            >
-                                                {% for role_name, role_label in membership_role_choices %}
-                                                <option value="{{ role_name }}" {% if membership.role == role_name %}selected{% endif %}>{{ role_label }}</option>
-                                                {% endfor %}
-                                            </select>
-                                            <button type="submit" class="btn btn-sm btn-outline-secondary">Save</button>
+                                            <div class="form-check">
+                                                <input
+                                                    type="checkbox"
+                                                    class="form-check-input"
+                                                    name="can_manage_department"
+                                                    value="1"
+                                                    onchange="this.form.submit()"
+                                                    {% if membership.can_manage_department %}checked{% endif %}
+                                                >
+                                            </div>
                                         </form>
                                         {% else %}
-                                        {{ membership.role }}
+                                        {{ 'Yes' if membership.can_manage_department else 'No' }}
                                         {% endif %}
                                     </td>
                                     <td>
                                         {% if can_manage_setup %}
                                         <form method="post" class="d-flex justify-content-center">
                                             {{ action_form.hidden_tag() }}
-                                            <input type="hidden" name="action" value="update_membership_role">
+                                            <input type="hidden" name="action" value="update_membership_access">
                                             <input type="hidden" name="membership_id" value="{{ membership.id }}">
-                                            <input type="hidden" name="role" value="{{ membership.role }}">
+                                            <input type="hidden" name="can_manage_department" value="{{ 1 if membership.can_manage_department else 0 }}">
                                             <div class="form-check">
                                                 <input
                                                 type="checkbox"

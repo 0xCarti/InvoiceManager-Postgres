@@ -20,7 +20,9 @@ from app.models import Setting
 from app.utils.activity import log_activity
 from app.utils.restore_adapters import (
     RestoreAdapterContext,
+    RestorePostLoadContext,
     apply_restore_adapters,
+    apply_restore_post_load_hooks,
 )
 
 BACKUP_SCHEMA_VERSION = "2026.03"
@@ -1402,14 +1404,52 @@ def _restore_backup(file_path: str, *, restore_mode: str | None = None) -> Resto
             elif table_name not in available_parent_keys:
                 available_parent_keys[table_name] = set()
 
+        try:
+            post_load_result = apply_restore_post_load_hooks(
+                context=RestorePostLoadContext(
+                    backup_metadata=backup_metadata,
+                    schema_marker=backup_schema_marker,
+                    target_metadata=db.metadata,
+                    target_connection=target_conn,
+                )
+            )
+        except Exception as exc:
+            raise RestoreBackupError(
+                "Restore failed while preserving access from a legacy backup."
+            ) from exc
+
+        if post_load_result.transformed_count > 0:
+            scheduling_table = "schedule_user_department_membership"
+            post_load_tables = post_load_result.affected_tables or set()
+            for transformed_table in post_load_tables:
+                table_transform_counts[transformed_table] = (
+                    table_transform_counts.get(transformed_table, 0) + 1
+                )
+            affected_tables.update(post_load_tables)
+            table_metrics = adapter_transform_metrics.setdefault(
+                scheduling_table,
+                {},
+            )
+            for key, value in (post_load_result.metrics or {}).items():
+                table_metrics[key] = table_metrics.get(key, 0) + value
+            logger.info(
+                "Applied legacy scheduling access restore transforms: %s",
+                post_load_result.metrics,
+            )
+
         if target_conn.dialect.name == "postgresql":
             logger.info("Running post-restore PK sequence drift check for PostgreSQL")
-            check_and_fix_pk_sequences(
-                target_conn,
-                tables=list(db.metadata.sorted_tables),
-                auto_fix=True,
-                logger=logger,
-            )
+            try:
+                check_and_fix_pk_sequences(
+                    target_conn,
+                    tables=list(db.metadata.sorted_tables),
+                    auto_fix=True,
+                    logger=logger,
+                )
+            except Exception as exc:
+                raise RestoreBackupError(
+                    "Restore failed while repairing database ID sequences."
+                ) from exc
 
     quarantine_report = None
     if skipped_rows:

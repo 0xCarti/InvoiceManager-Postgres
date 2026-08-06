@@ -610,13 +610,13 @@ def test_message_and_bulletin_notifications_reach_recipients(
                 UserDepartmentMembership(
                     user_id=manager.id,
                     department_id=department.id,
-                    role="manager",
+                    can_manage_department=True,
                     is_primary=True,
                 ),
                 UserDepartmentMembership(
                     user_id=staff.id,
                     department_id=department.id,
-                    role="staff",
+                    can_manage_department=False,
                     is_primary=True,
                 ),
             ]

@@ -281,6 +281,12 @@ PERMISSION_DEFINITIONS: tuple[PermissionDefinition, ...] = (
     _perm("communications.send_broadcast", "communications", "Send Broadcasts", "Broadcast messages to multiple users, departments, or all scoped users."),
     _perm("communications.manage_bulletin", "communications", "Manage Bulletin Board", "Post and archive pinned bulletin board updates."),
     _perm("communications.view_bulletin_receipts", "communications", "View Bulletin Read Receipts", "View who has read assigned bulletin board updates."),
+    _perm(
+        "communications.global_scope",
+        "communications",
+        "Global Communications Scope",
+        "Access communication recipients and bulletins across the organization.",
+    ),
     _perm("users.view", "users", "View Users", "View the user list and user access pages."),
     _perm("users.manage", "users", "Manage Users", "Invite users, activate users, archive users, and assign groups."),
     _perm("permission_groups.view", "permission_groups", "View Permission Groups", "View permission groups."),

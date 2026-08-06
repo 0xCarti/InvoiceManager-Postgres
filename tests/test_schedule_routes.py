@@ -1,3 +1,4 @@
+import json
 import os
 import re
 from datetime import date, datetime, time, timedelta
@@ -16,6 +17,7 @@ from app.models import (
     ScheduleTemplateEntry,
     Shift,
     ShiftPosition,
+    Setting,
     TimeOffRequest,
     TradeboardClaim,
     User,
@@ -254,13 +256,13 @@ def test_schedule_notification_service_sends_change_and_time_off_alerts(
                 UserDepartmentMembership(
                     user_id=approver.id,
                     department_id=department.id,
-                    role="manager",
+                    can_manage_department=True,
                     is_primary=True,
                 ),
                 UserDepartmentMembership(
                     user_id=old_user.id,
                     department_id=department.id,
-                    role="staff",
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserPositionEligibility(
@@ -421,7 +423,7 @@ def test_publish_and_published_shift_edit_trigger_schedule_notifiers(
                 UserDepartmentMembership(
                     user_id=employee_id,
                     department_id=department.id,
-                    role="staff",
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserPositionEligibility(
@@ -557,27 +559,9 @@ def test_schedule_setup_and_user_settings_flow(client, app):
             assert position is not None
             position_id = position.id
 
-        response = client.post(
-            "/schedules/setup",
-            data={
-                "action": "add_membership_role",
-                "membership_role-name": "lead",
-                "membership_role-is_management": "y",
-            },
-            follow_redirects=True,
-        )
+        response = client.get("/schedules/setup")
         assert response.status_code == 200
-
-        response = client.post(
-            "/schedules/setup",
-            data={
-                "action": "add_membership_role",
-                "membership_role-name": "assistant operations lead",
-                "membership_role-is_management": "y",
-            },
-            follow_redirects=True,
-        )
-        assert response.status_code == 200
+        assert b"Membership Roles" not in response.data
 
         response = client.post(
             f"/schedules/users/{target_user_id}",
@@ -598,8 +582,8 @@ def test_schedule_setup_and_user_settings_flow(client, app):
             data={
                 "action": "add_membership",
                 "membership-department_id": str(department_id),
-                "membership-role": "lead",
                 "membership-reports_to_user_id": "0",
+                "membership-can_manage_department": "y",
                 "membership-can_auto_assign": "y",
                 "membership-is_primary": "y",
             },
@@ -617,9 +601,9 @@ def test_schedule_setup_and_user_settings_flow(client, app):
         response = client.post(
             f"/schedules/users/{target_user_id}",
             data={
-                "action": "update_membership_role",
+                "action": "update_membership_access",
                 "membership_id": str(membership_id),
-                "role": "assistant operations lead",
+                "can_manage_department": "1",
                 "can_auto_assign": "1",
             },
             follow_redirects=True,
@@ -646,14 +630,155 @@ def test_schedule_setup_and_user_settings_flow(client, app):
             user_id=target_user_id, department_id=department_id
         ).first()
         assert membership
-        assert membership.role == "assistant operations lead"
+        assert membership.can_manage_department is True
         assert membership.can_auto_assign is True
         assert UserPositionEligibility.query.filter_by(
             user_id=target_user_id, position_id=position_id
         ).first()
 
 
-def test_schedule_role_catalog_scopes_gm_visibility_by_department(client, app):
+def test_auto_assign_update_preserves_legacy_role_during_rollback_window(
+    client,
+    app,
+):
+    target_user_id = create_user(app, "legacy-role-update@example.com")
+    with app.app_context():
+        department = Department(name="Legacy Role Update", active=True)
+        db.session.add(department)
+        db.session.flush()
+        membership = UserDepartmentMembership(
+            user_id=target_user_id,
+            department_id=department.id,
+            _legacy_role="gm",
+            can_manage_department=True,
+            can_auto_assign=False,
+        )
+        db.session.add(membership)
+        db.session.commit()
+        membership_id = membership.id
+
+    with client:
+        login(
+            client,
+            os.getenv("ADMIN_EMAIL", "admin@example.com"),
+            os.getenv("ADMIN_PASS", "adminpass"),
+        )
+        response = client.post(
+            f"/schedules/users/{target_user_id}",
+            data={
+                "action": "update_membership_access",
+                "membership_id": str(membership_id),
+                "can_manage_department": "1",
+                "can_auto_assign": "1",
+            },
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    with app.app_context():
+        membership = db.session.get(UserDepartmentMembership, membership_id)
+        assert membership is not None
+        assert membership.can_auto_assign is True
+        assert membership._legacy_role == "gm"
+
+
+def test_membership_access_toggles_write_matching_rollback_roles(client, app):
+    target_user_id = create_user(app, "rollback-role-toggle@example.com")
+    supervisor_user_id = create_user(app, "rollback-role-supervisor@example.com")
+    with app.app_context():
+        department = Department(name="Rollback Role Toggle", active=True)
+        db.session.add(department)
+        db.session.flush()
+        db.session.add(
+            Setting(
+                name="SCHEDULE_MEMBERSHIP_ROLES",
+                value=json.dumps(
+                    [
+                        {"name": "manager", "is_management": False},
+                        {"name": "shift lead", "is_management": True},
+                        {"name": "staff", "is_management": False},
+                    ]
+                ),
+            )
+        )
+        membership = UserDepartmentMembership(
+            user_id=target_user_id,
+            department_id=department.id,
+            _legacy_role="staff",
+            can_manage_department=False,
+            can_auto_assign=True,
+            reports_to_user_id=supervisor_user_id,
+            is_primary=True,
+        )
+        db.session.add(membership)
+        db.session.commit()
+        membership_id = membership.id
+
+    with client:
+        login(
+            client,
+            os.getenv("ADMIN_EMAIL", "admin@example.com"),
+            os.getenv("ADMIN_PASS", "adminpass"),
+        )
+        response = client.post(
+            f"/schedules/users/{target_user_id}",
+            data={
+                "action": "update_membership_access",
+                "membership_id": str(membership_id),
+                "can_manage_department": "1",
+                "can_auto_assign": "1",
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+
+        with app.app_context():
+            membership = db.session.get(UserDepartmentMembership, membership_id)
+            assert membership is not None
+            assert membership.can_manage_department is True
+            assert membership.can_auto_assign is True
+            assert membership._legacy_role == "shift lead"
+
+        response = client.post(
+            f"/schedules/users/{target_user_id}",
+            data={
+                "action": "update_membership_access",
+                "membership_id": str(membership_id),
+                "can_manage_department": "1",
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+
+        with app.app_context():
+            membership = db.session.get(UserDepartmentMembership, membership_id)
+            assert membership is not None
+            assert membership.can_manage_department is True
+            assert membership.can_auto_assign is False
+            assert membership._legacy_role == "shift lead"
+
+        response = client.post(
+            f"/schedules/users/{target_user_id}",
+            data={
+                "action": "update_membership_access",
+                "membership_id": str(membership_id),
+                "can_auto_assign": "0",
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+
+    with app.app_context():
+        membership = db.session.get(UserDepartmentMembership, membership_id)
+        assert membership is not None
+        assert membership.can_manage_department is False
+        assert membership.can_auto_assign is False
+        assert membership._legacy_role == "staff"
+        assert membership.reports_to_user_id == supervisor_user_id
+        assert membership.is_primary is True
+
+
+def test_department_manager_visibility_is_scoped_by_membership(client, app):
     gm_user_id = create_user(app, "gm-scope@example.com")
     worker_a_id = create_user(app, "gm-scope-worker-a@example.com")
     worker_b_id = create_user(app, "gm-scope-worker-b@example.com")
@@ -690,19 +815,19 @@ def test_schedule_role_catalog_scopes_gm_visibility_by_department(client, app):
                 UserDepartmentMembership(
                     user_id=gm_user_id,
                     department_id=department_a.id,
-                    role=UserDepartmentMembership.ROLE_GM,
+                    can_manage_department=True,
                     is_primary=True,
                 ),
                 UserDepartmentMembership(
                     user_id=worker_a_id,
                     department_id=department_a.id,
-                    role=UserDepartmentMembership.ROLE_STAFF,
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserDepartmentMembership(
                     user_id=worker_b_id,
                     department_id=department_b.id,
-                    role=UserDepartmentMembership.ROLE_STAFF,
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserPositionEligibility(
@@ -806,7 +931,7 @@ def test_schedule_setup_hides_manage_controls_for_pay_rate_only_users(client, ap
             UserDepartmentMembership(
                 user_id=viewer.id,
                 department_id=department.id,
-                role="manager",
+                can_manage_department=True,
                 is_primary=True,
             )
         )
@@ -849,7 +974,7 @@ def test_schedule_user_settings_hide_setup_controls_for_pay_rate_only_users(clie
             UserDepartmentMembership(
                 user_id=target_user.id,
                 department_id=department.id,
-                role="assistant",
+                can_manage_department=False,
                 is_primary=True,
                 can_auto_assign=True,
             )
@@ -873,7 +998,7 @@ def test_schedule_user_settings_hide_setup_controls_for_pay_rate_only_users(clie
             UserDepartmentMembership(
                 user_id=viewer.id,
                 department_id=department.id,
-                role="manager",
+                can_manage_department=True,
                 is_primary=True,
             )
         )
@@ -915,7 +1040,7 @@ def test_team_schedule_can_create_and_publish_shift(client, app):
             UserDepartmentMembership(
                 user_id=employee_id,
                 department_id=department.id,
-                role="staff",
+                can_manage_department=False,
                 is_primary=True,
             )
         )
@@ -1053,7 +1178,7 @@ def test_team_schedule_view_only_user_cannot_see_or_save_shift_controls(client, 
             UserDepartmentMembership(
                 user_id=viewer_id,
                 department_id=department.id,
-                role="staff",
+                can_manage_department=False,
                 is_primary=True,
             )
         )
@@ -1138,13 +1263,13 @@ def test_view_self_my_schedule_permission_shows_only_own_published_range(client,
                 UserDepartmentMembership(
                     user_id=worker_id,
                     department_id=department.id,
-                    role="staff",
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserDepartmentMembership(
                     user_id=other_user_id,
                     department_id=department.id,
-                    role="staff",
+                    can_manage_department=False,
                     is_primary=True,
                 ),
             ]
@@ -1279,7 +1404,7 @@ def test_team_schedule_self_schedule_user_can_still_save_own_shift(client, app):
                 UserDepartmentMembership(
                     user_id=scheduler_id,
                     department_id=department.id,
-                    role="staff",
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserPositionEligibility(
@@ -1381,7 +1506,7 @@ def test_schedule_templates_apply_only_user_hides_management_controls(client, ap
                 UserDepartmentMembership(
                     user_id=planner_id,
                     department_id=department.id,
-                    role=UserDepartmentMembership.ROLE_MANAGER,
+                    can_manage_department=True,
                     is_primary=True,
                 ),
                 template,
@@ -1482,13 +1607,13 @@ def test_tradeboard_claim_only_user_hides_review_controls(client, app):
                 UserDepartmentMembership(
                     user_id=claimant_id,
                     department_id=department.id,
-                    role=UserDepartmentMembership.ROLE_STAFF,
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserDepartmentMembership(
                     user_id=other_user_id,
                     department_id=department.id,
-                    role=UserDepartmentMembership.ROLE_STAFF,
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserPositionEligibility(
@@ -1580,13 +1705,13 @@ def test_tradeboard_approver_only_user_hides_claim_controls(client, app):
                 UserDepartmentMembership(
                     user_id=approver_id,
                     department_id=department.id,
-                    role=UserDepartmentMembership.ROLE_MANAGER,
+                    can_manage_department=True,
                     is_primary=True,
                 ),
                 UserDepartmentMembership(
                     user_id=claimant_id,
                     department_id=department.id,
-                    role=UserDepartmentMembership.ROLE_STAFF,
+                    can_manage_department=False,
                     is_primary=True,
                 ),
             ]
@@ -1778,7 +1903,7 @@ def test_team_schedule_position_view_filters_by_event_and_location(client, app):
                 UserDepartmentMembership(
                     user_id=worker_id,
                     department_id=department.id,
-                    role="staff",
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserPositionEligibility(
@@ -2014,7 +2139,7 @@ def test_team_schedule_rejects_multiple_assigned_copies_per_day(client, app):
             UserDepartmentMembership(
                 user_id=worker_id,
                 department_id=department.id,
-                role="staff",
+                can_manage_department=False,
                 is_primary=True,
             )
         )
@@ -2095,7 +2220,7 @@ def test_team_schedule_rejects_assigned_user_without_position_eligibility(client
             UserDepartmentMembership(
                 user_id=worker_id,
                 department_id=department.id,
-                role="staff",
+                can_manage_department=False,
                 is_primary=True,
             )
         )
@@ -2165,7 +2290,7 @@ def test_team_schedule_save_shift_reports_missing_position_eligibility(client, a
             UserDepartmentMembership(
                 user_id=worker_id,
                 department_id=department.id,
-                role="staff",
+                can_manage_department=False,
                 is_primary=True,
             )
         )
@@ -2236,7 +2361,7 @@ def test_auto_assign_uses_default_availability_and_preferred_hours_cap(client, a
             UserDepartmentMembership(
                 user_id=employee_id,
                 department_id=department.id,
-                role="staff",
+                can_manage_department=False,
                 is_primary=True,
             )
         )
@@ -2328,13 +2453,13 @@ def test_team_schedule_supports_all_departments_and_user_filter(client, app):
                 UserDepartmentMembership(
                     user_id=worker_a_id,
                     department_id=department_a.id,
-                    role="staff",
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserDepartmentMembership(
                     user_id=worker_b_id,
                     department_id=department_b.id,
-                    role="staff",
+                    can_manage_department=False,
                     is_primary=True,
                 ),
             ]
@@ -2440,26 +2565,26 @@ def test_auto_assign_access_is_department_scoped_and_role_independent(client, ap
                 UserDepartmentMembership(
                     user_id=scheduler_id,
                     department_id=department_a.id,
-                    role="lead",
+                    can_manage_department=False,
                     can_auto_assign=True,
                     is_primary=True,
                 ),
                 UserDepartmentMembership(
                     user_id=scheduler_id,
                     department_id=department_b.id,
-                    role="lead",
+                    can_manage_department=False,
                     can_auto_assign=False,
                 ),
                 UserDepartmentMembership(
                     user_id=worker_a_id,
                     department_id=department_a.id,
-                    role="staff",
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserDepartmentMembership(
                     user_id=worker_b_id,
                     department_id=department_b.id,
-                    role="staff",
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserPositionEligibility(
@@ -2590,26 +2715,26 @@ def test_all_departments_auto_assign_only_processes_allowed_departments(client, 
                 UserDepartmentMembership(
                     user_id=scheduler_id,
                     department_id=department_a.id,
-                    role="coordinator",
+                    can_manage_department=False,
                     can_auto_assign=True,
                     is_primary=True,
                 ),
                 UserDepartmentMembership(
                     user_id=scheduler_id,
                     department_id=department_b.id,
-                    role="coordinator",
+                    can_manage_department=False,
                     can_auto_assign=False,
                 ),
                 UserDepartmentMembership(
                     user_id=worker_a_id,
                     department_id=department_a.id,
-                    role="staff",
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserDepartmentMembership(
                     user_id=worker_b_id,
                     department_id=department_b.id,
-                    role="staff",
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserPositionEligibility(
@@ -2729,13 +2854,13 @@ def test_all_departments_publish_only_processes_managed_departments(client, app)
                 UserDepartmentMembership(
                     user_id=scheduler_id,
                     department_id=department_a.id,
-                    role=UserDepartmentMembership.ROLE_MANAGER,
+                    can_manage_department=True,
                     is_primary=True,
                 ),
                 UserDepartmentMembership(
                     user_id=scheduler_id,
                     department_id=department_b.id,
-                    role=UserDepartmentMembership.ROLE_STAFF,
+                    can_manage_department=False,
                 ),
             ]
         )
@@ -2856,13 +2981,13 @@ def test_all_departments_publish_requires_managed_departments(client, app):
                 UserDepartmentMembership(
                     user_id=scheduler_id,
                     department_id=department_a.id,
-                    role=UserDepartmentMembership.ROLE_STAFF,
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserDepartmentMembership(
                     user_id=scheduler_id,
                     department_id=department_b.id,
-                    role=UserDepartmentMembership.ROLE_STAFF,
+                    can_manage_department=False,
                 ),
                 DepartmentScheduleWeek(
                     department_id=department_a.id,
@@ -2988,7 +3113,7 @@ def test_tradeboard_claim_and_approval_flow(client, app):
             UserDepartmentMembership(
                 user_id=claimant_id,
                 department_id=department.id,
-                role="staff",
+                can_manage_department=False,
                 is_primary=True,
             )
         )
@@ -3104,13 +3229,13 @@ def test_my_schedule_post_tradeboard_claim_and_approve_transfers_shift(client, a
                 UserDepartmentMembership(
                     user_id=poster_id,
                     department_id=department.id,
-                    role=UserDepartmentMembership.ROLE_STAFF,
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserDepartmentMembership(
                     user_id=claimant_id,
                     department_id=department.id,
-                    role=UserDepartmentMembership.ROLE_STAFF,
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserPositionEligibility(
@@ -3256,13 +3381,13 @@ def test_tradeboard_denial_and_own_claim_preserve_posted_assignment(client, app)
                 UserDepartmentMembership(
                     user_id=poster_id,
                     department_id=department.id,
-                    role=UserDepartmentMembership.ROLE_STAFF,
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserDepartmentMembership(
                     user_id=claimant_id,
                     department_id=department.id,
-                    role=UserDepartmentMembership.ROLE_STAFF,
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserPositionEligibility(
@@ -3397,13 +3522,13 @@ def test_tradeboard_started_posting_expires_and_rejects_pending_claim(
                 UserDepartmentMembership(
                     user_id=poster_id,
                     department_id=department.id,
-                    role=UserDepartmentMembership.ROLE_STAFF,
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserDepartmentMembership(
                     user_id=claimant_id,
                     department_id=department.id,
-                    role=UserDepartmentMembership.ROLE_STAFF,
+                    can_manage_department=False,
                     is_primary=True,
                 ),
                 UserPositionEligibility(
@@ -3492,7 +3617,7 @@ def test_schedule_templates_can_create_add_entries_and_apply_to_draft_schedule(
             UserDepartmentMembership(
                 user_id=worker.id,
                 department_id=department.id,
-                role="staff",
+                can_manage_department=False,
                 is_primary=True,
             )
         )
@@ -3811,7 +3936,7 @@ def test_schedule_templates_are_scoped_to_managed_departments(client, app):
             UserDepartmentMembership(
                 user_id=manager.id,
                 department_id=department_a.id,
-                role=UserDepartmentMembership.ROLE_MANAGER,
+                can_manage_department=True,
                 is_primary=True,
             )
         )

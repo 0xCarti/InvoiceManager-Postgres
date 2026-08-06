@@ -780,29 +780,25 @@ class ScheduleTemplateEntry(db.Model):
 class UserDepartmentMembership(db.Model):
     __tablename__ = "schedule_user_department_membership"
 
-    ROLE_STAFF = "staff"
-    ROLE_MANAGER = "manager"
-    ROLE_GM = "gm"
-    MANAGEMENT_ROLES = {ROLE_MANAGER, ROLE_GM}
-    DEFAULT_ROLE_DEFINITIONS = (
-        {"name": ROLE_STAFF, "is_management": False},
-        {"name": ROLE_MANAGER, "is_management": True},
-        {"name": ROLE_GM, "is_management": True},
-    )
-    DEFAULT_ROLE_SUGGESTIONS = tuple(
-        definition["name"] for definition in DEFAULT_ROLE_DEFINITIONS
-    )
-
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     department_id = db.Column(
         db.Integer, db.ForeignKey("schedule_department.id"), nullable=False
     )
-    role = db.Column(
+    # Retained temporarily for rollback compatibility. Application access decisions
+    # use can_manage_department and no longer expose configurable membership roles.
+    _legacy_role = db.Column(
+        "role",
         db.String(50),
         nullable=False,
-        default=ROLE_STAFF,
-        server_default=ROLE_STAFF,
+        default="staff",
+        server_default="staff",
+    )
+    can_manage_department = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False,
+        server_default="0",
     )
     can_auto_assign = db.Column(
         db.Boolean,
@@ -854,24 +850,6 @@ class UserDepartmentMembership(db.Model):
             "reports_to_user_id",
         ),
     )
-
-    @classmethod
-    def normalize_role(cls, value: str | None) -> str:
-        normalized = " ".join(str(value or "").strip().lower().split())
-        return normalized or cls.ROLE_STAFF
-
-    @classmethod
-    def is_gm_role(cls, value: str | None) -> bool:
-        return cls.normalize_role(value) == cls.ROLE_GM
-
-    @classmethod
-    def is_management_role(cls, value: str | None) -> bool:
-        return Setting.is_schedule_management_role(value)
-
-    @classmethod
-    def default_auto_assign_access_for_role(cls, value: str | None) -> bool:
-        return cls.is_management_role(value)
-
 
 class UserPositionEligibility(db.Model):
     __tablename__ = "schedule_user_position_eligibility"
@@ -5060,7 +5038,6 @@ class Setting(db.Model):
     POS_SALES_IMPORT_INTERVAL = "POS_SALES_IMPORT_INTERVAL"
     POS_SALES_AUTO_APPROVE_CLEAN_IMPORTS = "POS_SALES_AUTO_APPROVE_CLEAN_IMPORTS"
     MENU_FEED_API_TOKEN = "MENU_FEED_API_TOKEN"
-    SCHEDULE_MEMBERSHIP_ROLES = "SCHEDULE_MEMBERSHIP_ROLES"
     FOOD_COST_TAX_RATE = "FOOD_COST_TAX_RATE"
     POS_SALES_IMPORT_INTERVAL_UNITS = ("hour", "day", "week")
     DEFAULT_POS_SALES_IMPORT_INTERVAL = {
@@ -5074,135 +5051,6 @@ class Setting(db.Model):
         "MANITOBA LIQUOR & LOTTERIES",
     ]
     LEGACY_DISABLED_PURCHASE_IMPORT_VENDORS = {"CENTRAL SUPPLY"}
-    DEFAULT_SCHEDULE_MEMBERSHIP_ROLES = tuple(
-        dict(definition)
-        for definition in UserDepartmentMembership.DEFAULT_ROLE_DEFINITIONS
-    )
-
-    @classmethod
-    def normalize_schedule_role_name(cls, value: str | None) -> str:
-        return " ".join(str(value or "").strip().lower().split())
-
-    @classmethod
-    def _legacy_schedule_management_roles(cls) -> set[str]:
-        return {
-            cls.normalize_schedule_role_name(role_name)
-            for role_name in UserDepartmentMembership.MANAGEMENT_ROLES
-        }
-
-    @classmethod
-    def _normalize_schedule_role_entry(cls, raw_value) -> dict[str, object] | None:
-        if isinstance(raw_value, str):
-            role_name = cls.normalize_schedule_role_name(raw_value)
-            if not role_name:
-                return None
-            return {
-                "name": role_name,
-                "is_management": role_name in cls._legacy_schedule_management_roles(),
-            }
-
-        if not isinstance(raw_value, dict):
-            return None
-
-        role_name = cls.normalize_schedule_role_name(raw_value.get("name"))
-        if not role_name:
-            return None
-        return {
-            "name": role_name,
-            "is_management": bool(raw_value.get("is_management")),
-        }
-
-    @classmethod
-    def _clean_schedule_membership_roles(
-        cls,
-        roles: list[object] | tuple[object, ...] | None,
-    ) -> list[dict[str, object]]:
-        cleaned_roles: list[dict[str, object]] = []
-        seen_names: set[str] = set()
-
-        for raw_role in roles or []:
-            normalized_role = cls._normalize_schedule_role_entry(raw_role)
-            if normalized_role is None:
-                continue
-            role_name = str(normalized_role["name"])
-            if role_name in seen_names:
-                continue
-            cleaned_roles.append(normalized_role)
-            seen_names.add(role_name)
-
-        if cleaned_roles:
-            return cleaned_roles
-
-        return [dict(definition) for definition in cls.DEFAULT_SCHEDULE_MEMBERSHIP_ROLES]
-
-    @classmethod
-    def get_schedule_membership_roles(
-        cls,
-        *,
-        include_legacy: bool = True,
-    ) -> list[dict[str, object]]:
-        setting = cls.query.filter_by(name=cls.SCHEDULE_MEMBERSHIP_ROLES).first()
-        parsed_roles: list[object] | tuple[object, ...] | None = None
-        if setting is not None and setting.value:
-            try:
-                payload = json.loads(setting.value)
-            except (TypeError, ValueError):
-                payload = None
-            if isinstance(payload, list):
-                parsed_roles = payload
-
-        role_definitions = cls._clean_schedule_membership_roles(parsed_roles)
-        if not include_legacy:
-            return role_definitions
-
-        seen_names = {str(definition["name"]) for definition in role_definitions}
-        legacy_roles = [
-            cls.normalize_schedule_role_name(role_name)
-            for role_name, in UserDepartmentMembership.query.with_entities(
-                UserDepartmentMembership.role
-            )
-            .distinct()
-            .order_by(UserDepartmentMembership.role.asc())
-            .all()
-            if role_name
-        ]
-        for role_name in legacy_roles:
-            if not role_name or role_name in seen_names:
-                continue
-            role_definitions.append(
-                {
-                    "name": role_name,
-                    "is_management": role_name
-                    in cls._legacy_schedule_management_roles(),
-                }
-            )
-            seen_names.add(role_name)
-
-        return role_definitions
-
-    @classmethod
-    def set_schedule_membership_roles(
-        cls,
-        roles: list[dict[str, object]] | tuple[dict[str, object], ...],
-    ):
-        cleaned_roles = cls._clean_schedule_membership_roles(list(roles))
-        setting = cls.query.filter_by(name=cls.SCHEDULE_MEMBERSHIP_ROLES).first()
-        if setting is None:
-            setting = cls(name=cls.SCHEDULE_MEMBERSHIP_ROLES)
-            db.session.add(setting)
-        setting.value = json.dumps(cleaned_roles)
-        return setting
-
-    @classmethod
-    def is_schedule_management_role(cls, value: str | None) -> bool:
-        role_name = cls.normalize_schedule_role_name(value)
-        if not role_name:
-            return False
-        for definition in cls.get_schedule_membership_roles(include_legacy=True):
-            if definition["name"] == role_name:
-                return bool(definition["is_management"])
-        return False
-
     @classmethod
     def get_food_cost_tax_rate(cls) -> int:
         """Return the included tax percentage used for food cost calculations."""

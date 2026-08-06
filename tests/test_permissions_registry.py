@@ -55,6 +55,10 @@ def test_user_can_access_endpoint_requires_matching_permission():
         DummyUser("communications.view_bulletin_receipts"),
         "communication.center",
     )
+    assert not user_can_access_endpoint(
+        DummyUser("communications.global_scope"),
+        "communication.center",
+    )
     assert user_can_access_endpoint(
         DummyUser("communications.view"),
         "communication.bulletin_detail",

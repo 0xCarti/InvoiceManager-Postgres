@@ -34,12 +34,17 @@ def create_department(name: str) -> int:
     return department.id
 
 
-def add_membership(user_id: int, department_id: int, *, role: str) -> None:
+def add_membership(
+    user_id: int,
+    department_id: int,
+    *,
+    can_manage_department: bool = False,
+) -> None:
     db.session.add(
         UserDepartmentMembership(
             user_id=user_id,
             department_id=department_id,
-            role=role,
+            can_manage_department=can_manage_department,
             is_primary=True,
         )
     )
@@ -51,10 +56,13 @@ def test_manager_can_broadcast_to_all_scoped_users(client, app):
         manager_id = create_user("comm-manager@example.com")
         staff_one_id = create_user("comm-staff-one@example.com")
         staff_two_id = create_user("comm-staff-two@example.com")
+        outsider_id = create_user("comm-outsider@example.com")
         department_id = create_department("Warehouse")
-        add_membership(manager_id, department_id, role="manager")
-        add_membership(staff_one_id, department_id, role="staff")
-        add_membership(staff_two_id, department_id, role="staff")
+        outside_department_id = create_department("Kitchen")
+        add_membership(manager_id, department_id, can_manage_department=True)
+        add_membership(staff_one_id, department_id, can_manage_department=False)
+        add_membership(staff_two_id, department_id, can_manage_department=False)
+        add_membership(outsider_id, outside_department_id)
 
         manager = db.session.get(User, manager_id)
         grant_permissions(
@@ -91,6 +99,169 @@ def test_manager_can_broadcast_to_all_scoped_users(client, app):
         assert recipient_user_ids == {staff_one_id, staff_two_id}
 
 
+def test_global_scope_permission_can_broadcast_across_departments(client, app):
+    with app.app_context():
+        sender_id = create_user("global-comms@example.com")
+        local_user_id = create_user("global-local@example.com")
+        outside_user_id = create_user("global-outside@example.com")
+        unassigned_user_id = create_user("global-unassigned@example.com")
+        local_department_id = create_department("Global Local")
+        outside_department_id = create_department("Global Outside")
+        add_membership(sender_id, local_department_id)
+        add_membership(local_user_id, local_department_id)
+        add_membership(outside_user_id, outside_department_id)
+
+        sender = db.session.get(User, sender_id)
+        grant_permissions(
+            sender,
+            "communications.view",
+            "communications.send_broadcast",
+            "communications.global_scope",
+            group_name="Global Communications Sender",
+            description="Can communicate across scheduling departments.",
+        )
+
+    with client:
+        login(client, "global-comms@example.com", "pass")
+        response = client.post(
+            "/communications",
+            data={
+                "action": "send_message",
+                "message-audience": "all",
+                "message-subject": "Organization update",
+                "message-body": "This update applies across every department.",
+            },
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    with app.app_context():
+        message = Communication.query.filter_by(subject="Organization update").one()
+        recipient_user_ids = {receipt.user_id for receipt in message.recipients}
+        assert sender_id not in recipient_user_ids
+        assert {local_user_id, outside_user_id, unassigned_user_id}.issubset(
+            recipient_user_ids
+        )
+
+
+def test_global_scope_bulletin_reaches_future_unassigned_user(client, app):
+    with app.app_context():
+        sender_id = create_user("global-bulletin@example.com")
+        sender = db.session.get(User, sender_id)
+        grant_permissions(
+            sender,
+            "communications.view",
+            "communications.send_broadcast",
+            "communications.manage_bulletin",
+            "communications.global_scope",
+            group_name="Global Bulletin Sender",
+            description="Can post organization-wide bulletins.",
+        )
+
+    with client:
+        login(client, "global-bulletin@example.com", "pass")
+        response = client.post(
+            "/communications",
+            data={
+                "action": "post_bulletin",
+                "bulletin-audience": "all",
+                "bulletin-subject": "Organization handbook",
+                "bulletin-body": "This bulletin also applies to future users.",
+            },
+            follow_redirects=True,
+        )
+    assert response.status_code == 200
+
+    with app.app_context():
+        bulletin = Communication.query.filter_by(
+            subject="Organization handbook"
+        ).one()
+        assert bulletin.audience_snapshot == {
+            "all_users": True,
+            "department_ids": [],
+        }
+        future_user_id = create_user("future-unassigned@example.com")
+        future_user = db.session.get(User, future_user_id)
+        grant_permissions(
+            future_user,
+            "communications.view",
+            group_name="Future Bulletin Reader",
+            description="Can read organization-wide bulletins.",
+        )
+
+    with client:
+        login(client, "future-unassigned@example.com", "pass")
+        inbox_response = client.get("/communications", follow_redirects=True)
+
+    assert inbox_response.status_code == 200
+    assert b"Organization handbook" in inbox_response.data
+    with app.app_context():
+        assert (
+            CommunicationRecipient.query.join(Communication)
+            .filter(
+                Communication.subject == "Organization handbook",
+                CommunicationRecipient.user_id == future_user_id,
+            )
+            .count()
+            == 1
+        )
+
+
+def test_global_scope_history_crosses_department_boundaries(client, app):
+    with app.app_context():
+        viewer_id = create_user(
+            "global-history@example.com",
+            display_name="Global Reviewer",
+        )
+        sender_id = create_user(
+            "global-history-sender@example.com",
+            display_name="Department A Sender",
+        )
+        recipient_id = create_user(
+            "global-history-recipient@example.com",
+            display_name="Department B Recipient",
+        )
+        department_a_id = create_department("Global History A")
+        department_b_id = create_department("Global History B")
+        add_membership(viewer_id, department_a_id)
+        add_membership(sender_id, department_a_id)
+        add_membership(recipient_id, department_b_id)
+
+        viewer = db.session.get(User, viewer_id)
+        grant_permissions(
+            viewer,
+            "communications.view_history",
+            "communications.global_scope",
+            group_name="Global History Reviewer",
+            description="Can review communication history across departments.",
+        )
+        message = Communication(
+            kind=Communication.KIND_MESSAGE,
+            sender_id=sender_id,
+            audience_type=Communication.AUDIENCE_USERS,
+            subject="Cross-department handoff",
+            body="This message spans two different departments.",
+        )
+        db.session.add(message)
+        db.session.flush()
+        db.session.add(
+            CommunicationRecipient(
+                communication_id=message.id,
+                user_id=recipient_id,
+            )
+        )
+        db.session.commit()
+
+    with client:
+        login(client, "global-history@example.com", "pass")
+        history_response = client.get("/communications", follow_redirects=True)
+
+    assert history_response.status_code == 200
+    assert b"Cross-department handoff" in history_response.data
+    assert b"Department A Sender" in history_response.data
+    assert b"Department B Recipient" in history_response.data
+
+
 def test_manager_department_bulletin_is_scoped_to_department(client, app):
     with app.app_context():
         manager_id = create_user("bulletin-manager@example.com")
@@ -98,9 +269,9 @@ def test_manager_department_bulletin_is_scoped_to_department(client, app):
         staff_two_id = create_user("bulletin-staff-two@example.com")
         warehouse_id = create_department("Warehouse")
         kitchen_id = create_department("Kitchen")
-        add_membership(manager_id, warehouse_id, role="manager")
-        add_membership(staff_one_id, warehouse_id, role="staff")
-        add_membership(staff_two_id, kitchen_id, role="staff")
+        add_membership(manager_id, warehouse_id, can_manage_department=True)
+        add_membership(staff_one_id, warehouse_id, can_manage_department=False)
+        add_membership(staff_two_id, kitchen_id, can_manage_department=False)
 
         manager = db.session.get(User, manager_id)
         grant_permissions(
@@ -146,8 +317,8 @@ def test_new_scoped_employee_sees_existing_all_scope_bulletin(client, app):
         manager_id = create_user("dynamic-bulletin-manager@example.com")
         staff_one_id = create_user("dynamic-bulletin-staff-one@example.com")
         warehouse_id = create_department("Dynamic Warehouse")
-        add_membership(manager_id, warehouse_id, role="manager")
-        add_membership(staff_one_id, warehouse_id, role="staff")
+        add_membership(manager_id, warehouse_id, can_manage_department=True)
+        add_membership(staff_one_id, warehouse_id, can_manage_department=False)
 
         manager = db.session.get(User, manager_id)
         grant_permissions(
@@ -177,7 +348,7 @@ def test_new_scoped_employee_sees_existing_all_scope_bulletin(client, app):
 
     with app.app_context():
         staff_two_id = create_user("dynamic-bulletin-staff-two@example.com")
-        add_membership(staff_two_id, warehouse_id, role="staff")
+        add_membership(staff_two_id, warehouse_id, can_manage_department=False)
         staff_two = db.session.get(User, staff_two_id)
         grant_permissions(
             staff_two,
@@ -210,8 +381,8 @@ def test_selected_user_bulletin_does_not_expand_to_new_staff(client, app):
         manager_id = create_user("explicit-bulletin-manager@example.com")
         staff_one_id = create_user("explicit-bulletin-staff-one@example.com")
         warehouse_id = create_department("Explicit Warehouse")
-        add_membership(manager_id, warehouse_id, role="manager")
-        add_membership(staff_one_id, warehouse_id, role="staff")
+        add_membership(manager_id, warehouse_id, can_manage_department=True)
+        add_membership(staff_one_id, warehouse_id, can_manage_department=False)
 
         manager = db.session.get(User, manager_id)
         grant_permissions(
@@ -242,7 +413,7 @@ def test_selected_user_bulletin_does_not_expand_to_new_staff(client, app):
 
     with app.app_context():
         staff_two_id = create_user("explicit-bulletin-staff-two@example.com")
-        add_membership(staff_two_id, warehouse_id, role="staff")
+        add_membership(staff_two_id, warehouse_id, can_manage_department=False)
         staff_two = db.session.get(User, staff_two_id)
         grant_permissions(
             staff_two,
@@ -275,8 +446,8 @@ def test_staff_can_read_direct_message_and_mark_it_read(client, app):
         manager_id = create_user("direct-manager@example.com")
         staff_id = create_user("direct-staff@example.com")
         department_id = create_department("Retail")
-        add_membership(manager_id, department_id, role="manager")
-        add_membership(staff_id, department_id, role="staff")
+        add_membership(manager_id, department_id, can_manage_department=True)
+        add_membership(staff_id, department_id, can_manage_department=False)
 
         manager = db.session.get(User, manager_id)
         staff = db.session.get(User, staff_id)
@@ -349,8 +520,8 @@ def test_messages_page_lists_mailbox_and_archives_message(client, app):
         manager_id = create_user("mailbox-manager@example.com")
         staff_id = create_user("mailbox-staff@example.com")
         department_id = create_department("Mailbox Ops")
-        add_membership(manager_id, department_id, role="manager")
-        add_membership(staff_id, department_id, role="staff")
+        add_membership(manager_id, department_id, can_manage_department=True)
+        add_membership(staff_id, department_id, can_manage_department=False)
 
         manager = db.session.get(User, manager_id)
         staff = db.session.get(User, staff_id)
@@ -440,8 +611,8 @@ def test_messages_page_can_delete_message_for_current_user(client, app):
         manager_id = create_user("mailbox-delete-manager@example.com")
         staff_id = create_user("mailbox-delete-staff@example.com")
         department_id = create_department("Mailbox Delete")
-        add_membership(manager_id, department_id, role="manager")
-        add_membership(staff_id, department_id, role="staff")
+        add_membership(manager_id, department_id, can_manage_department=True)
+        add_membership(staff_id, department_id, can_manage_department=False)
 
         manager = db.session.get(User, manager_id)
         staff = db.session.get(User, staff_id)
@@ -519,7 +690,7 @@ def test_manager_cannot_post_bulletin_to_unmanaged_department(client, app):
         manager_id = create_user("scope-manager@example.com")
         warehouse_id = create_department("Warehouse")
         kitchen_id = create_department("Kitchen")
-        add_membership(manager_id, warehouse_id, role="manager")
+        add_membership(manager_id, warehouse_id, can_manage_department=True)
 
         manager = db.session.get(User, manager_id)
         grant_permissions(
@@ -566,9 +737,9 @@ def test_manager_with_history_permission_can_view_messages_between_other_users(
             display_name="Jordan Receiver",
         )
         department_id = create_department("Operations")
-        add_membership(manager_id, department_id, role="manager")
-        add_membership(staff_sender_id, department_id, role="staff")
-        add_membership(staff_recipient_id, department_id, role="staff")
+        add_membership(manager_id, department_id, can_manage_department=True)
+        add_membership(staff_sender_id, department_id, can_manage_department=False)
+        add_membership(staff_recipient_id, department_id, can_manage_department=False)
 
         manager = db.session.get(User, manager_id)
         sender = db.session.get(User, staff_sender_id)

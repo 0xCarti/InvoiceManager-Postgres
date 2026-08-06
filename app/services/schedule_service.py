@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -15,6 +16,7 @@ from app.models import (
     DepartmentScheduleWeek,
     RecurringAvailabilityWindow,
     ScheduleWeekViewReceipt,
+    Setting,
     Shift,
     ShiftAudit,
     TimeOffRequest,
@@ -38,6 +40,97 @@ MATERIAL_SHIFT_FIELDS = (
     "paid_hours",
     "notes",
 )
+
+LEGACY_SCHEDULE_ROLE_SETTING = "SCHEDULE_MEMBERSHIP_ROLES"
+LEGACY_SCHEDULE_ROLE_DEFAULTS = (
+    {"name": "staff", "is_management": False},
+    {"name": "manager", "is_management": True},
+    {"name": "gm", "is_management": True},
+)
+
+
+def _normalize_legacy_schedule_role(value: object) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _legacy_schedule_role_definitions() -> tuple[list[dict[str, object]], Setting | None]:
+    setting = Setting.query.filter_by(name=LEGACY_SCHEDULE_ROLE_SETTING).first()
+    raw_definitions: object = None
+    if setting is not None and setting.value:
+        try:
+            raw_definitions = json.loads(setting.value)
+        except (TypeError, ValueError):
+            raw_definitions = None
+
+    cleaned: list[dict[str, object]] = []
+    seen_names: set[str] = set()
+    if isinstance(raw_definitions, list):
+        for definition in raw_definitions:
+            if isinstance(definition, str):
+                role_name = _normalize_legacy_schedule_role(definition)
+                is_management = role_name in {"manager", "gm"}
+            elif isinstance(definition, dict):
+                role_name = _normalize_legacy_schedule_role(
+                    definition.get("name")
+                )
+                is_management = bool(definition.get("is_management"))
+            else:
+                continue
+            if not role_name or role_name in seen_names:
+                continue
+            cleaned.append(
+                {
+                    "name": role_name,
+                    "is_management": is_management,
+                }
+            )
+            seen_names.add(role_name)
+
+    if not cleaned:
+        cleaned = [dict(definition) for definition in LEGACY_SCHEDULE_ROLE_DEFAULTS]
+    return cleaned, setting
+
+
+def legacy_role_for_department_access(can_manage_department: bool) -> str:
+    """Return a rollback role whose saved meaning matches the new access flag."""
+
+    desired_management = bool(can_manage_department)
+    definitions, setting = _legacy_schedule_role_definitions()
+    definitions_by_name = {
+        str(definition["name"]): bool(definition["is_management"])
+        for definition in definitions
+    }
+    preferred_name = "manager" if desired_management else "staff"
+    preferred_management = definitions_by_name.get(preferred_name)
+    if preferred_management is None:
+        preferred_management = preferred_name in {"manager", "gm"}
+    if preferred_management == desired_management:
+        return preferred_name
+
+    for definition in definitions:
+        role_name = str(definition["name"])
+        if role_name == "gm":
+            continue
+        if bool(definition["is_management"]) == desired_management:
+            return role_name
+
+    base_name = "department manager" if desired_management else "department member"
+    fallback_name = base_name
+    suffix = 2
+    while fallback_name in definitions_by_name:
+        fallback_name = f"{base_name} {suffix}"
+        suffix += 1
+    definitions.append(
+        {
+            "name": fallback_name,
+            "is_management": desired_management,
+        }
+    )
+    if setting is None:
+        setting = Setting(name=LEGACY_SCHEDULE_ROLE_SETTING)
+        db.session.add(setting)
+    setting.value = json.dumps(definitions, separators=(",", ":"))
+    return fallback_name
 
 
 @dataclass
@@ -84,15 +177,6 @@ def get_or_create_schedule_week(
         db.session.add(schedule_week)
         db.session.flush()
     return schedule_week
-
-
-def user_is_schedule_gm(user: User) -> bool:
-    if getattr(user, "is_super_admin", False):
-        return True
-    return any(
-        UserDepartmentMembership.is_gm_role(membership.role)
-        for membership in getattr(user, "department_memberships", [])
-    )
 
 
 def get_user_membership(user: User, department_id: int) -> UserDepartmentMembership | None:
@@ -148,7 +232,7 @@ def user_can_manage_department(user: User, department_id: int) -> bool:
     membership = get_user_membership(user, department_id)
     if membership is None:
         return False
-    return UserDepartmentMembership.is_management_role(membership.role)
+    return bool(membership.can_manage_department)
 
 
 def user_can_auto_assign_department(user: User, department_id: int) -> bool:

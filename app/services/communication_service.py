@@ -17,8 +17,17 @@ from app.services.schedule_service import (
     user_can_manage_department,
     user_can_manage_other_user,
     user_department_ids,
-    user_is_schedule_gm,
 )
+
+
+GLOBAL_COMMUNICATION_SCOPE_PERMISSION = "communications.global_scope"
+
+
+def user_has_global_communication_scope(user: User) -> bool:
+    return bool(
+        getattr(user, "is_super_admin", False)
+        or user.has_permission(GLOBAL_COMMUNICATION_SCOPE_PERMISSION)
+    )
 
 
 def _user_sort_key(user: User) -> tuple[str, str]:
@@ -26,7 +35,7 @@ def _user_sort_key(user: User) -> tuple[str, str]:
 
 
 def communication_scope_departments(actor: User) -> list[Department]:
-    if getattr(actor, "is_super_admin", False) or user_is_schedule_gm(actor):
+    if user_has_global_communication_scope(actor):
         return (
             Department.query.filter(Department.active.is_(True))
             .order_by(Department.name.asc())
@@ -48,7 +57,7 @@ def communication_scope_departments(actor: User) -> list[Department]:
 
 
 def communication_scope_users(actor: User) -> list[User]:
-    if getattr(actor, "is_super_admin", False) or user_is_schedule_gm(actor):
+    if user_has_global_communication_scope(actor):
         users = User.query.filter(User.active.is_(True)).all()
         return sorted(users, key=_user_sort_key)
 
@@ -148,7 +157,7 @@ def build_bulletin_audience_snapshot(
     if audience != Communication.AUDIENCE_ALL:
         return None
 
-    if getattr(actor, "is_super_admin", False) or user_is_schedule_gm(actor):
+    if user_has_global_communication_scope(actor):
         return {
             "all_users": True,
             "department_ids": [],
@@ -163,7 +172,7 @@ def build_bulletin_audience_snapshot(
 
 
 def can_manage_bulletin(actor: User, sender_id: int) -> bool:
-    if getattr(actor, "is_super_admin", False) or user_is_schedule_gm(actor):
+    if user_has_global_communication_scope(actor):
         return True
     return actor.id == sender_id
 
@@ -197,9 +206,7 @@ def _normalize_audience_snapshot(raw_value: object) -> dict[str, object]:
 
 def _fallback_all_scope_snapshot(communication: Communication) -> dict[str, object]:
     sender = communication.sender or db.session.get(User, communication.sender_id)
-    if sender is not None and (
-        getattr(sender, "is_super_admin", False) or user_is_schedule_gm(sender)
-    ):
+    if sender is not None and user_has_global_communication_scope(sender):
         return {
             "all_users": True,
             "department_ids": [],
@@ -612,8 +619,7 @@ def visible_message_history(actor: User, *, limit: int = 15) -> list[Communicati
 
 def user_can_broadcast_to_all(actor: User) -> bool:
     return bool(
-        getattr(actor, "is_super_admin", False)
-        or user_is_schedule_gm(actor)
+        user_has_global_communication_scope(actor)
         or any(
             user_can_manage_department(actor, department_id)
             for department_id in user_department_ids(actor)
