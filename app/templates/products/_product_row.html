@@ -92,11 +92,11 @@
             <a href="{{ url_for('product.view_product', product_id=product.id) }}" class="btn btn-outline-primary btn-sm">View</a>
             {% endif %}
             {% if has_product_more_actions or can_view_product %}
-            <div class="dropdown">
+            <div class="dropdown" data-dropdown-portal>
                 <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="product-actions-{{ product.id }}" data-bs-toggle="dropdown" aria-expanded="false">
                     More
                 </button>
-                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="product-actions-{{ product.id }}">
+                <ul class="dropdown-menu dropdown-menu-end app-row-action-menu" aria-labelledby="product-actions-{{ product.id }}">
                     {% if can_access_endpoint('product.edit_product', 'GET') %}
                     <li>
                         <a href="{{ url_for('product.edit_product', product_id=product.id) }}"

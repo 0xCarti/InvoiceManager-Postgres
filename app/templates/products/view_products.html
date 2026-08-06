@@ -780,9 +780,8 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    const productTableEl = document.getElementById('product-table');
-    if (productTableEl && editProductModalEl) {
-        productTableEl.addEventListener('click', function(event) {
+    if (editProductModalEl) {
+        document.addEventListener('click', function(event) {
             const target = event.target.closest('.edit-product-link');
             if (!target) {
                 return;
