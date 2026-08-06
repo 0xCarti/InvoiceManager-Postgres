@@ -340,7 +340,19 @@ def view_items():
     """Display the inventory item list."""
     session_key = "item_filters"
     scope = request.endpoint or "item.view_items"
-    default_filters = get_filter_defaults(current_user, scope)
+    default_filters = normalize_filters(
+        get_filter_defaults(current_user, scope),
+        exclude=("gl_code_id",),
+    )
+
+    if "gl_code_id" in request.args:
+        cleaned_args = normalize_filters(
+            request.args,
+            exclude=("gl_code_id",),
+        )
+        return redirect(
+            url_for("item.view_items", **filters_to_query_args(cleaned_args))
+        )
 
     if request.args.get("reset"):
         session.pop(session_key, None)
@@ -355,13 +367,18 @@ def view_items():
 
     if not request.args:
         if session_key in session:
-            stored_filters = normalize_filters(session[session_key])
-            session[session_key] = stored_filters
-            return redirect(
-                url_for(
-                    "item.view_items", **filters_to_query_args(stored_filters)
-                )
+            stored_filters = normalize_filters(
+                session[session_key],
+                exclude=("gl_code_id",),
             )
+            if stored_filters:
+                session[session_key] = stored_filters
+                return redirect(
+                    url_for(
+                        "item.view_items", **filters_to_query_args(stored_filters)
+                    )
+                )
+            session.pop(session_key, None)
         if default_filters:
             session[session_key] = default_filters
             return redirect(
@@ -371,7 +388,8 @@ def view_items():
             )
     else:
         filters = normalize_filters(
-            request.args, exclude=("page", "reset")
+            request.args,
+            exclude=("page", "reset", "gl_code_id"),
         )
         if filters:
             session[session_key] = filters
@@ -388,23 +406,27 @@ def view_items():
         return coerced
 
     if request.args:
-        filters = normalize_filters(request.args, exclude=("page", "reset"))
+        filters = normalize_filters(
+            request.args,
+            exclude=("page", "reset", "gl_code_id"),
+        )
         purchase_filter_values = filters.get("purchase_gl_code_id", [])
         if purchase_filter_values:
             coerced_purchase_ids = _coerce_int_list(purchase_filter_values)
             filters["purchase_gl_code_id"] = [
                 str(value) for value in coerced_purchase_ids
             ]
-        session[session_key] = filters
+        if filters:
+            session[session_key] = filters
+        else:
+            session.pop(session_key, None)
 
     page = request.args.get("page", 1, type=int)
     per_page = get_per_page()
     name_query = normalize_request_text_filter(request.args.get("name_query"))
     match_mode = normalize_text_match_mode(request.args.get("match_mode"))
     purchase_gl_code_params = request.args.getlist("purchase_gl_code_id")
-    sales_gl_code_params = request.args.getlist("gl_code_id")
     purchase_gl_code_ids = _coerce_int_list(purchase_gl_code_params)
-    sales_gl_code_ids = [int(x) for x in sales_gl_code_params if x.isdigit()]
     archived = request.args.get("archived", "active")
     base_unit = request.args.get("base_unit")
     cost_min = request.args.get("cost_min", type=float)
@@ -416,7 +438,6 @@ def view_items():
     query = Item.query.options(
         selectinload(Item.units),
         selectinload(Item.purchase_gl_code),
-        selectinload(Item.gl_code_rel),
     )
     if archived == "active":
         query = query.filter(Item.archived.is_(False))
@@ -435,9 +456,6 @@ def view_items():
 
     if purchase_gl_code_ids:
         query = query.filter(Item.purchase_gl_code_id.in_(purchase_gl_code_ids))
-
-    if sales_gl_code_ids:
-        query = query.filter(Item.gl_code_id.in_(sales_gl_code_ids))
 
     if vendor_ids:
         query = (
@@ -500,22 +518,6 @@ def view_items():
         if purchase_gl_code_ids
         else []
     )
-    active_sales_gl_codes = (
-        GLCode.query.filter(GLCode.id.in_(sales_gl_code_ids)).all()
-        if sales_gl_code_ids
-        else []
-    )
-    active_gl_code_filter = None
-    if active_purchase_gl_codes:
-        active_gl_code_filter = {
-            "label": "Purchase",
-            "codes": active_purchase_gl_codes,
-        }
-    elif active_sales_gl_codes:
-        active_gl_code_filter = {
-            "label": "Inventory",
-            "codes": active_sales_gl_codes,
-        }
     active_vendors = (
         Vendor.query.filter(Vendor.id.in_(vendor_ids)).all() if vendor_ids else []
     )
@@ -533,8 +535,6 @@ def view_items():
         cost_min=cost_min,
         cost_max=cost_max,
         active_purchase_gl_codes=active_purchase_gl_codes,
-        active_sales_gl_codes=active_sales_gl_codes,
-        active_gl_code_filter=active_gl_code_filter,
         archived=archived,
         vendors=vendors,
         vendor_ids=vendor_ids,
@@ -605,7 +605,6 @@ def bulk_update_items():
             Item.query.options(
                 selectinload(Item.units),
                 selectinload(Item.purchase_gl_code),
-                selectinload(Item.gl_code_rel),
             )
             .filter(Item.id.in_(selected_ids))
             .order_by(Item.id)
@@ -624,13 +623,11 @@ def bulk_update_items():
 
         apply_name = form.apply_name.data
         apply_base_unit = form.apply_base_unit.data
-        apply_gl_code = form.apply_gl_code_id.data
         apply_purchase_gl = form.apply_purchase_gl_code_id.data
         apply_archived = form.apply_archived.data
 
         new_name = form.name.data if apply_name else None
         new_base_unit = form.base_unit.data if apply_base_unit else None
-        new_gl_code_id = form.gl_code_id.data if apply_gl_code else None
         new_purchase_gl_code_id = (
             form.purchase_gl_code_id.data if apply_purchase_gl else None
         )
@@ -710,17 +707,6 @@ def bulk_update_items():
                     item_obj.name = new_name
                 if apply_base_unit:
                     item_obj.base_unit = new_base_unit
-                if apply_gl_code:
-                    if new_gl_code_id:
-                        item_obj.gl_code_id = new_gl_code_id or None
-                        if item_obj.gl_code_id:
-                            code = db.session.get(GLCode, item_obj.gl_code_id)
-                            item_obj.gl_code = code.code if code else None
-                        else:
-                            item_obj.gl_code = None
-                    else:
-                        item_obj.gl_code_id = None
-                        item_obj.gl_code = None
                 if apply_purchase_gl:
                     item_obj.purchase_gl_code_id = (
                         new_purchase_gl_code_id or None
@@ -733,7 +719,6 @@ def bulk_update_items():
             Item.query.options(
                 selectinload(Item.units),
                 selectinload(Item.purchase_gl_code),
-                selectinload(Item.gl_code_rel),
             )
             .filter(Item.id.in_(selected_ids))
             .order_by(Item.id)
@@ -773,7 +758,6 @@ def duplicate_items():
     items = (
         Item.query.options(
             selectinload(Item.purchase_gl_code),
-            selectinload(Item.gl_code_rel),
         )
         .filter(Item.archived.is_(False))
         .order_by(Item.name, Item.id)
@@ -1081,10 +1065,6 @@ def add_item():
         item = Item(
             name=form.name.data,
             base_unit=form.base_unit.data,
-            gl_code=form.gl_code.data if "gl_code" in request.form else None,
-            gl_code_id=(
-                form.gl_code_id.data if "gl_code_id" in request.form else None
-            ),
             purchase_gl_code_id=form.purchase_gl_code.data or None,
             expiry_tracking_mode=form.expiry_tracking_mode.data,
             expiry_shelf_life_days=(
@@ -1144,8 +1124,6 @@ def copy_item(item_id):
     if item is None:
         abort(404)
     form = ItemForm(obj=item)
-    form.gl_code.data = item.gl_code
-    form.gl_code_id.data = item.gl_code_id
     form.purchase_gl_code.data = item.purchase_gl_code_id
     _populate_item_barcode_form(form)
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
@@ -1187,8 +1165,6 @@ def edit_item(item_id):
     purchase_gl_codes = ItemForm._fetch_purchase_gl_codes()
     form = ItemForm(obj=item)
     if request.method == "GET":
-        form.gl_code.data = item.gl_code
-        form.gl_code_id.data = item.gl_code_id
         form.purchase_gl_code.data = item.purchase_gl_code_id
         form.expiry_tracking_mode.data = item.expiry_tracking_mode
         form.expiry_shelf_life_days.data = item.expiry_shelf_life_days
@@ -1286,10 +1262,6 @@ def edit_item(item_id):
             )
         item.name = form.name.data
         item.base_unit = form.base_unit.data
-        if "gl_code" in request.form:
-            item.gl_code = form.gl_code.data
-        if "gl_code_id" in request.form:
-            item.gl_code_id = form.gl_code_id.data
         item.purchase_gl_code_id = form.purchase_gl_code.data or None
         item.expiry_tracking_mode = form.expiry_tracking_mode.data
         item.expiry_shelf_life_days = (

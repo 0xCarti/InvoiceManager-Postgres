@@ -1414,6 +1414,8 @@ class Item(db.Model):
     name = db.Column(db.String(100), nullable=False)
     base_unit = db.Column(db.String(20), nullable=False)
     upc = db.Column(db.String(32), unique=True, nullable=True)
+    # Legacy generic GL fields retained for old imports and backup compatibility.
+    # User-facing item accounting uses purchase_gl_code_id.
     gl_code = db.Column(db.String(10), nullable=True)
     gl_code_id = db.Column(
         db.Integer, db.ForeignKey("gl_code.id"), nullable=True
@@ -2768,6 +2770,8 @@ class Product(db.Model):
     archived = db.Column(
         db.Boolean, default=False, nullable=False, server_default="0"
     )
+    # Legacy generic GL fields are retained for old imports and backups.
+    # User-facing product accounting uses sales_gl_code_id.
     gl_code = db.Column(db.String(10), nullable=True)
     # Legacy mirror of the default sellable amount price for older queries.
     price = db.Column(db.Float, nullable=False)
@@ -2782,6 +2786,7 @@ class Product(db.Model):
     auto_update_recipe_cost = db.Column(
         db.Boolean, nullable=False, default=False, server_default="0"
     )
+    # Legacy generic GL foreign key retained for compatibility only.
     gl_code_id = db.Column(
         db.Integer, db.ForeignKey("gl_code.id"), nullable=True
     )

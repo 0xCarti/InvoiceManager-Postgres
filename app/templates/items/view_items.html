@@ -134,16 +134,6 @@
                         <label class="form-check-label" for="toggle-column-last-received">Last Received</label>
                     </div>
                     <div class="form-check">
-                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-column-gl-code"
-                            data-column-target="col-gl-code" checked>
-                        <label class="form-check-label" for="toggle-column-gl-code">Inventory GL Code</label>
-                    </div>
-                    <div class="form-check">
-                        <input class="form-check-input column-toggle" type="checkbox" id="toggle-column-gl-desc"
-                            data-column-target="col-gl-desc" checked>
-                        <label class="form-check-label" for="toggle-column-gl-desc">Inventory GL Description</label>
-                    </div>
-                    <div class="form-check">
                         <input class="form-check-input column-toggle" type="checkbox" id="toggle-column-purchase-gl-code"
                             data-column-target="col-purchase-gl-code" checked>
                         <label class="form-check-label" for="toggle-column-purchase-gl-code">Purchase GL Code</label>
@@ -256,11 +246,11 @@
             </div>
         </div>
     {% endcall %}
-    {% if active_gl_code_filter or base_unit or active_vendors %}
+    {% if active_purchase_gl_codes or base_unit or active_vendors %}
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
         <span class="text-muted small">Active filters:</span>
-        {% if active_gl_code_filter %}
-        <span class="badge rounded-pill text-bg-light border">{{ active_gl_code_filter.label }} GL Code: {{ active_gl_code_filter.codes | map(attribute='code') | join(', ') }}</span>
+        {% if active_purchase_gl_codes %}
+        <span class="badge rounded-pill text-bg-light border">Purchase GL Code: {{ active_purchase_gl_codes | map(attribute='code') | join(', ') }}</span>
         {% endif %}
         {% if base_unit %}
         <span class="badge rounded-pill text-bg-light border">Base Unit: {{ base_unit|capitalize }}</span>
@@ -290,8 +280,6 @@
                     <th scope="col" class="col-cost" data-type="number">Cost / Base Unit</th>
                     <th scope="col" class="col-quantity" data-type="number">Quantity</th>
                     <th scope="col" class="col-last-received" data-type="text">Last Received</th>
-                    <th scope="col" class="col-gl-code">Inventory GL Code</th>
-                    <th scope="col" class="col-gl-desc">Inventory GL Description</th>
                     <th scope="col" class="col-purchase-gl-code">Purchase GL Code</th>
                     <th scope="col" class="col-purchase-gl-desc">Purchase GL Description</th>
                     <th scope="col" class="col-units">Units</th>

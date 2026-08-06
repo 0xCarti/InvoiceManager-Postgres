@@ -59,20 +59,48 @@ def purchase_gl_code(app):
 
 def test_bulk_update_items_success(client, app, purchase_gl_code):
     with app.app_context():
-        item1 = Item(name='Item One', base_unit='each', archived=False)
-        item2 = Item(name='Item Two', base_unit='each', archived=False)
+        legacy_gl_code = GLCode(code='701001', description='Legacy inventory')
+        attempted_gl_code = GLCode(code='701002', description='Ignored inventory')
+        db.session.add_all([legacy_gl_code, attempted_gl_code])
+        db.session.flush()
+        item1 = Item(
+            name='Item One',
+            base_unit='each',
+            archived=False,
+            gl_code=legacy_gl_code.code,
+            gl_code_id=legacy_gl_code.id,
+        )
+        item2 = Item(
+            name='Item Two',
+            base_unit='each',
+            archived=False,
+            gl_code=legacy_gl_code.code,
+            gl_code_id=legacy_gl_code.id,
+        )
         db.session.add_all([item1, item2])
         db.session.commit()
         item1_id, item2_id = item1.id, item2.id
+        legacy_gl_code_id = legacy_gl_code.id
+        attempted_gl_code_id = attempted_gl_code.id
         ids = f"{item1_id},{item2_id}"
 
     login_admin(client, app)
+    form_response = client.get(
+        f'/items/bulk-update?ids={item1_id}&ids={item2_id}'
+    )
+    assert form_response.status_code == 200
+    assert b'Inventory GL' not in form_response.data
+    assert b'name="gl_code_id"' not in form_response.data
+    assert b'name="apply_gl_code_id"' not in form_response.data
+
     response = client.post(
         '/items/bulk-update',
         data={
             'selected_ids': ids,
             'apply_purchase_gl_code_id': 'y',
             'purchase_gl_code_id': str(purchase_gl_code.id),
+            'apply_gl_code_id': 'y',
+            'gl_code_id': str(attempted_gl_code_id),
             'apply_archived': 'y',
             'archived': 'y',
         },
@@ -88,6 +116,10 @@ def test_bulk_update_items_success(client, app, purchase_gl_code):
         item2 = db.session.get(Item, item2_id)
         assert item1.purchase_gl_code_id == purchase_gl_code.id
         assert item2.purchase_gl_code_id == purchase_gl_code.id
+        assert item1.gl_code_id == legacy_gl_code_id
+        assert item2.gl_code_id == legacy_gl_code_id
+        assert item1.gl_code == '701001'
+        assert item2.gl_code == '701001'
         assert item1.archived is True
         assert item2.archived is True
         flush_activity_logs()
@@ -102,6 +134,8 @@ def test_ajax_edit_item_updates_purchase_gl_code(client, app):
             name="Editable GL Item",
             base_unit="each",
             purchase_gl_code=original_code,
+            gl_code=original_code.code,
+            gl_code_rel=original_code,
             archived=False,
         )
         db.session.add_all([original_code, updated_code, item])
@@ -117,15 +151,23 @@ def test_ajax_edit_item_updates_purchase_gl_code(client, app):
         )
         db.session.commit()
         item_id = item.id
+        original_code_id = original_code.id
         updated_code_id = updated_code.id
 
     login_admin(client, app)
+    form_response = client.get(f"/items/edit/{item_id}")
+    assert form_response.status_code == 200
+    assert b"Inventory GL" not in form_response.data
+    assert b'name="gl_code_id"' not in form_response.data
+
     response = client.post(
         f"/items/edit/{item_id}",
         data={
             "name": "Editable GL Item",
             "base_unit": "each",
             "purchase_gl_code": str(updated_code_id),
+            "gl_code": "501002",
+            "gl_code_id": str(updated_code_id),
             "expiry_tracking_mode": "none",
             "expiry_warning_days": "14",
             "barcodes-0-code": "",
@@ -145,6 +187,8 @@ def test_ajax_edit_item_updates_purchase_gl_code(client, app):
     with app.app_context():
         edited_item = db.session.get(Item, item_id)
         assert edited_item.purchase_gl_code_id == updated_code_id
+        assert edited_item.gl_code_id == original_code_id
+        assert edited_item.gl_code == "501001"
 
 
 def test_ajax_edit_item_preserves_referenced_unit(client, app):

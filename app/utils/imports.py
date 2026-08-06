@@ -51,6 +51,16 @@ def _import_csv(path, model, mappings):
     return created
 
 
+def _resolve_gl_code_id(row, explicit_column):
+    """Resolve an explicit GL column while accepting the legacy ``gl_code`` alias."""
+
+    code = (row.get(explicit_column) or row.get("gl_code") or "").strip()
+    if not code:
+        return None
+    gl_code = GLCode.query.filter_by(code=code).first()
+    return gl_code.id if gl_code else None
+
+
 def _import_items(path):
     """Import items from a CSV or plain text file."""
     if not os.path.exists(path):
@@ -72,16 +82,15 @@ def _import_items(path):
                     row.get("base_unit", "each").strip().lower() or "each"
                 )
                 cost = float(row.get("cost") or 0)
-                gl_code_id = None
-                if row.get("gl_code"):
-                    gl = GLCode.query.filter_by(code=row["gl_code"]).first()
-                    if gl:
-                        gl_code_id = gl.id
+                purchase_gl_code_id = _resolve_gl_code_id(
+                    row,
+                    "purchase_gl_code",
+                )
                 item = Item(
                     name=name,
                     base_unit=base_unit,
                     cost=cost,
-                    gl_code_id=gl_code_id,
+                    purchase_gl_code_id=purchase_gl_code_id,
                 )
                 db.session.add(item)
                 db.session.flush()
@@ -217,11 +226,7 @@ def _import_products(path):
             if Product.query.filter_by(name=name).first():
                 continue
 
-            gl_code_id = None
-            if row.get("gl_code"):
-                gl = GLCode.query.filter_by(code=row["gl_code"]).first()
-                if gl:
-                    gl_code_id = gl.id
+            sales_gl_code_id = _resolve_gl_code_id(row, "sales_gl_code")
 
             recipe_items = []
             recipe_field = row.get("recipe", "")
@@ -263,19 +268,19 @@ def _import_products(path):
                     name,
                     float(row["price"]),
                     float(row.get("cost", 0) or 0),
-                    gl_code_id,
+                    sales_gl_code_id,
                     recipe_items,
                 )
             )
 
     created = 0
-    for name, price, cost, gl_code_id, recipe_items in pending:
+    for name, price, cost, sales_gl_code_id, recipe_items in pending:
         product = Product(
             name=name,
             price=price,
             invoice_sale_price=price,
             cost=cost,
-            gl_code_id=gl_code_id,
+            sales_gl_code_id=sales_gl_code_id,
         )
         db.session.add(product)
         db.session.flush()

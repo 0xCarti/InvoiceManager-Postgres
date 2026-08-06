@@ -327,7 +327,6 @@ def view_products():
 
     query = query.options(
         selectinload(Product.sales_gl_code),
-        selectinload(Product.gl_code_rel),
         selectinload(Product.locations),
         selectinload(Product.menus),
         selectinload(Product.sellable_amounts),
@@ -662,7 +661,6 @@ def bulk_update_products():
         query = (
             Product.query.options(
                 selectinload(Product.sales_gl_code),
-                selectinload(Product.gl_code_rel),
                 selectinload(Product.locations),
                 selectinload(Product.menus),
                 selectinload(Product.sellable_amounts),
@@ -695,13 +693,11 @@ def bulk_update_products():
         apply_price = form.apply_price.data
         apply_cost = form.apply_cost.data
         apply_sales_gl = form.apply_sales_gl_code_id.data
-        apply_inventory_gl = form.apply_gl_code_id.data
 
         new_name = form.name.data if apply_name else None
         new_price = float(form.price.data) if apply_price else None
         new_cost = float(form.cost.data) if apply_cost else None
         new_sales_gl = form.sales_gl_code_id.data if apply_sales_gl else None
-        new_inventory_gl = form.gl_code_id.data if apply_inventory_gl else None
 
         if apply_name and new_name:
             if len(selected_ids) > 1:
@@ -749,19 +745,11 @@ def bulk_update_products():
                     product_obj.cost = new_cost if new_cost is not None else 0.0
                 if apply_sales_gl:
                     product_obj.sales_gl_code_id = new_sales_gl or None
-                if apply_inventory_gl:
-                    product_obj.gl_code_id = new_inventory_gl or None
-                    if product_obj.gl_code_id:
-                        gl = db.session.get(GLCode, product_obj.gl_code_id)
-                        product_obj.gl_code = gl.code if gl else None
-                    else:
-                        product_obj.gl_code = None
         db.session.commit()
 
         refreshed_products = (
             Product.query.options(
                 selectinload(Product.sales_gl_code),
-                selectinload(Product.gl_code_rel),
                 selectinload(Product.locations),
                 selectinload(Product.menus),
                 selectinload(Product.sellable_amounts),
@@ -839,9 +827,6 @@ def create_product():
         default_price = default_entry.get("price", 0.0)
         recipe_entries = _build_recipe_entries_from_item_forms(form.items)
         auto_update_recipe_cost = bool(form.auto_update_recipe_cost.data)
-        selected_gl_code_id = form.gl_code_id.data or None
-        if selected_gl_code_id == 0:
-            selected_gl_code_id = None
         sales_gl_code_id = form.sales_gl_code.data
         if not sales_gl_code_id:
             sales_gl_code_id = None
@@ -856,16 +841,10 @@ def create_product():
                 else coerce_float(form.cost.data) or 0.0
             ),
             auto_update_recipe_cost=auto_update_recipe_cost,
-            gl_code=form.gl_code.data,
-            gl_code_id=selected_gl_code_id,
             sales_gl_code_id=sales_gl_code_id,
             recipe_yield_quantity=yield_quantity,
             recipe_yield_unit=form.recipe_yield_unit.data or None,
         )
-        if not product.gl_code and product.gl_code_id:
-            gl = db.session.get(GLCode, product.gl_code_id)
-            if gl:
-                product.gl_code = gl.code
         db.session.add(product)
         db.session.flush()
 
@@ -935,9 +914,6 @@ def ajax_create_product():
         default_price = default_entry.get("price", 0.0)
         recipe_entries = _build_recipe_entries_from_item_forms(form.items)
         auto_update_recipe_cost = bool(form.auto_update_recipe_cost.data)
-        selected_gl_code_id = form.gl_code_id.data or None
-        if selected_gl_code_id == 0:
-            selected_gl_code_id = None
         sales_gl_code_id = form.sales_gl_code.data
         if not sales_gl_code_id:
             sales_gl_code_id = None
@@ -952,16 +928,10 @@ def ajax_create_product():
                 else coerce_float(form.cost.data) or 0.0
             ),
             auto_update_recipe_cost=auto_update_recipe_cost,
-            gl_code=form.gl_code.data,
-            gl_code_id=selected_gl_code_id,
             sales_gl_code_id=sales_gl_code_id,
             recipe_yield_quantity=yield_quantity,
             recipe_yield_unit=form.recipe_yield_unit.data or None,
         )
-        if not product.gl_code and product.gl_code_id:
-            gl = db.session.get(GLCode, product.gl_code_id)
-            if gl:
-                product.gl_code = gl.code
         db.session.add(product)
         db.session.flush()
         replace_product_sellable_amounts(product, sellable_entries)
@@ -1099,8 +1069,6 @@ def copy_product(product_id):
         amount_form.form.amount_id.data = ""
     form.cost.data = current_cost
     form.auto_update_recipe_cost.data = product_obj.auto_update_recipe_cost
-    form.gl_code.data = product_obj.gl_code
-    form.gl_code_id.data = product_obj.gl_code_id
     form.sales_gl_code.data = product_obj.sales_gl_code_id
     form.recipe_yield_quantity.data = product_obj.recipe_yield_quantity or 1.0
     form.recipe_yield_unit.data = product_obj.recipe_yield_unit
@@ -1150,25 +1118,15 @@ def edit_product(product_id):
             if product.auto_update_recipe_cost
             else coerce_float(form.cost.data) or 0.0
         )
-        selected_gl_code_id = form.gl_code_id.data or None
-        if selected_gl_code_id == 0:
-            selected_gl_code_id = None
         sales_gl_code_id = form.sales_gl_code.data
         if not sales_gl_code_id:
             sales_gl_code_id = None
 
-        product.gl_code = form.gl_code.data
-        product.gl_code_id = selected_gl_code_id
         product.sales_gl_code_id = sales_gl_code_id
         product.recipe_yield_quantity = _normalize_recipe_yield_quantity(
             form.recipe_yield_quantity.data
         )
         product.recipe_yield_unit = form.recipe_yield_unit.data or None
-        if not product.gl_code and product.gl_code_id:
-            gl = db.session.get(GLCode, product.gl_code_id)
-            if gl:
-                product.gl_code = gl.code
-
         replace_product_sellable_amounts(product, sellable_entries)
         _replace_product_recipe_items(product, recipe_entries)
         if was_archived != bool(product.archived):
@@ -1196,8 +1154,6 @@ def edit_product(product_id):
         _populate_sellable_amount_form(form, product)
         form.cost.data = product.cost or 0.0
         form.auto_update_recipe_cost.data = product.auto_update_recipe_cost
-        form.gl_code.data = product.gl_code
-        form.gl_code_id.data = product.gl_code_id
         form.sales_gl_code.data = product.sales_gl_code_id
         form.recipe_yield_quantity.data = product.recipe_yield_quantity or 1.0
         form.recipe_yield_unit.data = product.recipe_yield_unit
@@ -1262,7 +1218,6 @@ def view_product(product_id: int):
     product_obj = (
         Product.query.options(
             selectinload(Product.sales_gl_code),
-            selectinload(Product.gl_code_rel),
             selectinload(Product.locations).selectinload(Location.current_menu),
             selectinload(Product.menus),
             selectinload(Product.sellable_amounts),

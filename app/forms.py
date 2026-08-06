@@ -917,13 +917,6 @@ class BulkItemUpdateForm(FlaskForm):
         validators=[Optional()],
         validate_choice=False,
     )
-    apply_gl_code_id = BooleanField("Apply")
-    gl_code_id = SelectField(
-        "Inventory GL Code",
-        coerce=int,
-        validators=[Optional()],
-        validate_choice=False,
-    )
     apply_purchase_gl_code_id = BooleanField("Apply")
     purchase_gl_code_id = SelectField(
         "Purchase GL Code",
@@ -937,15 +930,6 @@ class BulkItemUpdateForm(FlaskForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        purchase_codes = ItemForm._fetch_purchase_gl_codes()
-        formatted = [
-            (
-                code.id,
-                f"{code.code} - {code.description}" if code.description else code.code,
-            )
-            for code in purchase_codes
-        ]
-        self.gl_code_id.choices = [(0, "Unassigned")] + formatted
         self.purchase_gl_code_id.choices = load_purchase_gl_code_choices()
 
     def validate(self, **kwargs):
@@ -956,7 +940,6 @@ class BulkItemUpdateForm(FlaskForm):
         apply_fields = [
             self.apply_name.data,
             self.apply_base_unit.data,
-            self.apply_gl_code_id.data,
             self.apply_purchase_gl_code_id.data,
             self.apply_archived.data,
         ]
@@ -966,10 +949,6 @@ class BulkItemUpdateForm(FlaskForm):
 
         if self.apply_name.data and not self.name.data:
             self.name.errors.append("Enter a name to apply.")
-            return False
-
-        if self.apply_gl_code_id.data and self.gl_code_id.data is None:
-            self.gl_code_id.errors.append("Select an inventory GL code.")
             return False
 
         if (
@@ -996,12 +975,8 @@ class ItemBarcodeForm(FlaskForm):
 
 class ItemForm(FlaskForm):
     name = StringField("Name", validators=[DataRequired()])
-    gl_code = SelectField("GL Code", validators=[Optional()])
     base_unit = SelectField(
         "Base Unit", choices=BASE_UNIT_CHOICES, validators=[DataRequired()]
-    )
-    gl_code_id = SelectField(
-        "GL Code", coerce=int, validators=[Optional()], validate_choice=False
     )
     purchase_gl_code = SelectField(
         "Purchase GL Code", coerce=int, validators=[Optional()]
@@ -1033,31 +1008,12 @@ class ItemForm(FlaskForm):
     def __init__(self, *args, **kwargs):
         super(ItemForm, self).__init__(*args, **kwargs)
         codes = self._fetch_purchase_gl_codes()
-        self.gl_code.choices = [
-            (
-                g.code,
-                f"{g.code} - {g.description}" if g.description else g.code,
-            )
-            for g in codes
-        ]
         purchase_codes = [(0, "Unassigned")]
         purchase_codes.extend(
             (g.id, f"{g.code} - {g.description}" if g.description else g.code)
             for g in codes
         )
-        self.gl_code_id.choices = purchase_codes
         self.purchase_gl_code.choices = purchase_codes
-
-    def validate_gl_code(self, field):
-        if field.data and not str(field.data).startswith(("5", "6")):
-            raise ValidationError("Item GL codes must start with 5 or 6")
-        codes = self._fetch_purchase_gl_codes()
-        purchase_codes = [(0, "Unassigned")]
-        purchase_codes.extend(
-            (g.id, f"{g.code} - {g.description}" if g.description else g.code)
-            for g in codes
-        )
-        self.gl_code_id.choices = purchase_codes
 
     @staticmethod
     def _fetch_purchase_gl_codes():
@@ -2830,7 +2786,6 @@ class ProductSellableAmountEntryForm(Form):
 class ProductForm(FlaskForm):
     name = StringField("Name", validators=[DataRequired()])
     archived = BooleanField("Archived")
-    gl_code = SelectField("GL Code", validators=[Optional()])
     price = DecimalField(
         "Legacy Price",
         validators=[Optional(), NumberRange(min=0)],
@@ -2848,9 +2803,6 @@ class ProductForm(FlaskForm):
         "Cost", validators=[Optional(), NumberRange(min=0)], default=0.0
     )
     auto_update_recipe_cost = BooleanField("Auto-update cost")
-    gl_code_id = SelectField(
-        "GL Code", coerce=int, validators=[Optional()], validate_choice=False
-    )
     sales_gl_code = SelectField(
         "Sales GL Code", coerce=int, validators=[Optional()]
     )
@@ -2870,8 +2822,6 @@ class ProductForm(FlaskForm):
             )
             for g in sales_codes_raw
         ]
-        self.gl_code.choices = [(g.code, g.code) for g in sales_codes_raw]
-        self.gl_code_id.choices = formatted_sales_codes
         self.sales_gl_code.choices = formatted_sales_codes
 
     def validate(self, extra_validators=None):
@@ -2933,13 +2883,6 @@ class BulkProductUpdateForm(FlaskForm):
         validators=[Optional()],
         validate_choice=False,
     )
-    apply_gl_code_id = BooleanField("Apply")
-    gl_code_id = SelectField(
-        "Inventory GL Code",
-        coerce=int,
-        validators=[Optional()],
-        validate_choice=False,
-    )
     submit = SubmitField("Apply Updates")
 
     def __init__(self, *args, **kwargs):
@@ -2956,16 +2899,7 @@ class BulkProductUpdateForm(FlaskForm):
             )
             for code in sales_codes_raw
         ]
-        purchase_codes = ItemForm._fetch_purchase_gl_codes()
-        formatted_inventory = [
-            (
-                code.id,
-                f"{code.code} - {code.description}" if code.description else code.code,
-            )
-            for code in purchase_codes
-        ]
         self.sales_gl_code_id.choices = [(0, "Unassigned")] + formatted_sales_codes
-        self.gl_code_id.choices = [(0, "Unassigned")] + formatted_inventory
 
     def validate(self, **kwargs):
         valid = super().validate(**kwargs)
@@ -2977,7 +2911,6 @@ class BulkProductUpdateForm(FlaskForm):
             self.apply_price.data,
             self.apply_cost.data,
             self.apply_sales_gl_code_id.data,
-            self.apply_gl_code_id.data,
         ]
         if not any(apply_fields):
             self.form_errors.append("Select at least one field to update.")
@@ -2996,27 +2929,6 @@ class BulkProductUpdateForm(FlaskForm):
             return False
 
         return True
-
-    def validate_gl_code(self, field):
-        if field.data and not str(field.data).startswith("4"):
-            raise ValidationError("Product GL codes must start with 4")
-        from app.models import GLCode
-
-        sales_codes_raw = (
-            GLCode.query.filter(GLCode.code.like("4%"))
-            .order_by(GLCode.code)
-            .all()
-        )
-        formatted_sales_codes = [
-            (
-                g.id,
-                f"{g.code} - {g.description}" if g.description else g.code,
-            )
-            for g in sales_codes_raw
-        ]
-        self.gl_code_id.choices = formatted_sales_codes
-        self.sales_gl_code.choices = formatted_sales_codes
-
 
 class RecipeItemForm(FlaskForm):
     item = SelectField(

@@ -485,13 +485,16 @@ starting point:
 - `example_locations.csv` – includes a `products` column listing product names
   separated by semicolons. The import will fail if any product name cannot be
   matched exactly.
-- `example_products.csv` – may include a `recipe` column listing item names with
+- `example_products.csv` – includes an optional `sales_gl_code` column and may
+  include a `recipe` column listing item names with
   quantities and units separated by semicolons (e.g. `Buns:2:each;Patties:1:each`). The import will
   fail if any item name or unit cannot be matched exactly.
-- `example_items.csv` – includes optional `cost`, `base_unit`, `gl_code` and `units`
+- `example_items.csv` – includes optional `cost`, `base_unit`, `purchase_gl_code` and `units`
   columns. The `units` column lists unit name and factor pairs separated by
   semicolons (e.g. `each:1;case:12`). The first unit becomes the receiving and
-  transfer default. The `gl_code` column should reference an existing GL code.
+  transfer default. GL code columns should reference an existing GL code.
+  Older files using a `gl_code` column remain supported: it maps to Purchase GL
+  for items and Sales GL for products.
 - `example_customers.csv`
 - `example_vendors.csv`
 - `example_users.csv` – uses placeholder passwords; replace them before importing.

@@ -56,13 +56,18 @@ def test_additional_product_routes(client, app):
         assert client.get("/products/create").status_code == 200
         with app.app_context():
             gl_id = GLCode.query.filter_by(code="4000").first().id
+            legacy_gl = GLCode.query.filter_by(code="5000").first()
+            legacy_gl_id = legacy_gl.id
+            legacy_gl_code = legacy_gl.code
         resp = client.post(
             "/products/create",
             data={
                 "name": "Candy",
                 "price": 2,
                 "cost": 1,
-                "gl_code_id": gl_id,
+                "sales_gl_code": gl_id,
+                # A caller can still craft this removed field; it must be ignored.
+                "gl_code_id": legacy_gl_id,
                 "recipe_yield_quantity": 35,
                 "recipe_yield_unit": "cups",
                 "items-0-item": item_id,
@@ -75,10 +80,14 @@ def test_additional_product_routes(client, app):
         assert resp.status_code == 200
     with app.app_context():
         prod = Product.query.filter_by(name="Candy").first()
-        assert prod.gl_code == "4000"
+        assert prod.sales_gl_code_id == gl_id
+        assert prod.gl_code_id is None
+        assert prod.gl_code is None
         assert prod.recipe_yield_quantity == pytest.approx(35.0)
         assert prod.recipe_yield_unit == "cups"
         pid = prod.id
+        prod.gl_code_id = legacy_gl_id
+        prod.gl_code = legacy_gl_code
         # add second recipe item for append_entry path
         db.session.add(
             ProductRecipeItem(
@@ -109,13 +118,14 @@ def test_additional_product_routes(client, app):
             ).status_code
             == 200
         )
-        # Trigger gl_code lookup in edit by posting without gl_code
+        # Sales GL remains editable while crafted legacy fields are ignored.
         resp = client.post(
             f"/products/{pid}/edit",
             data={
                 "name": "Candy",
                 "price": 3,
                 "cost": 1,
+                "sales_gl_code": gl_id,
                 "gl_code_id": gl_id,
                 "recipe_yield_quantity": 35,
                 "recipe_yield_unit": "cups",
@@ -127,6 +137,11 @@ def test_additional_product_routes(client, app):
             follow_redirects=True,
         )
         assert resp.status_code == 200
+        with app.app_context():
+            edited = db.session.get(Product, pid)
+            assert edited.sales_gl_code_id == gl_id
+            assert edited.gl_code_id == legacy_gl_id
+            assert edited.gl_code == legacy_gl_code
         # Recipe page GET should append entry for second recipe item
         assert client.get(f"/products/{pid}/recipe").status_code == 200
         # Calculate cost
@@ -385,6 +400,8 @@ def test_view_product_replaces_modal_actions_and_handles_terminal_aliases(
 
         detail_response = client.get(f"/products/{product_id}")
         assert detail_response.status_code == 200
+        assert b"Sales GL Code" in detail_response.data
+        assert b"Inventory GL" not in detail_response.data
         assert b"Arena Menu" in detail_response.data
         assert b"Arena Stand" in detail_response.data
         assert b"POS Detail Product" in detail_response.data

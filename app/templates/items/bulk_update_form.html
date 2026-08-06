@@ -40,21 +40,6 @@
     <div class="row align-items-center mb-3">
         <div class="col-md-3">
             <div class="form-check form-switch">
-                {{ form.apply_gl_code_id(class_='form-check-input', id='bulk-item-apply-inventory-gl', **{'data-toggle-target': '#bulk-item-inventory-gl'}) }}
-                <label class="form-check-label" for="bulk-item-apply-inventory-gl">Update Inventory GL</label>
-            </div>
-        </div>
-        <div class="col-md-9">
-            <label class="form-label" for="bulk-item-inventory-gl">Inventory GL Code</label>
-            {{ form.gl_code_id(class_='form-select' + (' is-invalid' if form.gl_code_id.errors else ''), id='bulk-item-inventory-gl') }}
-            {% for error in form.gl_code_id.errors %}
-            <div class="invalid-feedback d-block">{{ error }}</div>
-            {% endfor %}
-        </div>
-    </div>
-    <div class="row align-items-center mb-3">
-        <div class="col-md-3">
-            <div class="form-check form-switch">
                 {{ form.apply_purchase_gl_code_id(class_='form-check-input', id='bulk-item-apply-purchase-gl', **{'data-toggle-target': '#bulk-item-purchase-gl'}) }}
                 <label class="form-check-label" for="bulk-item-apply-purchase-gl">Update Purchase GL</label>
             </div>

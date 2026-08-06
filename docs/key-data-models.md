@@ -25,7 +25,8 @@ background tasks.
 ### Item
 * **Table**: `item`
 * **Purpose**: Stock-keeping unit used in inventory counts and recipes. Stores
-  base unit, GL codes, quantity on hand, and cost.
+  base unit, Purchase GL, quantity on hand, and cost. Older generic GL fields
+  remain in the table for backup/import compatibility but are not user-facing.
 * **Key Relationships**: Many-to-many with `Transfer` through `transfer_items`;
   one-to-many with `ItemUnit` (conversion factors), `ProductRecipeItem`
   (ingredient usage), and `PurchaseInvoiceItem`. Helper methods resolve GL codes
@@ -49,8 +50,8 @@ background tasks.
 ### Product
 * **Table**: `product`
 * **Purpose**: Sellable item with separate terminal/event `price`, dedicated
-  `invoice_sale_price` for 3rd-party customer invoices, cost, and GL codes for
-  accounting.
+  `invoice_sale_price` for 3rd-party customer invoices, cost, and a Sales GL
+  mapping for accounting. Older generic GL fields remain for compatibility.
 * **Key Relationships**: Connected to `InvoiceProduct` (sales history),
   `ProductRecipeItem` (ingredients), `TerminalSale` (event sales), and optional
   `GLCode` entries for accounting mappings.

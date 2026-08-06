@@ -5,7 +5,8 @@ from app.models import Item, ItemUnit, Product, ProductRecipeItem
 from app.utils.imports import _import_products
 
 
-def test_import_products_with_recipe(tmp_path, app):
+@pytest.mark.parametrize("gl_column", ["sales_gl_code", "gl_code"])
+def test_import_products_with_recipe(tmp_path, app, gl_column):
     csv_path = tmp_path / "prods.csv"
     with app.app_context():
         b = Item(name="Buns", base_unit="each")
@@ -30,7 +31,8 @@ def test_import_products_with_recipe(tmp_path, app):
         db.session.commit()
 
     csv_path.write_text(
-        "name,price,cost,gl_code,recipe\nBurger,5,3,4000,Buns:2:each;Patties:1:each\n"
+        f"name,price,cost,{gl_column},recipe\n"
+        "Burger,5,3,4000,Buns:2:each;Patties:1:each\n"
     )
 
     with app.app_context():
@@ -38,6 +40,11 @@ def test_import_products_with_recipe(tmp_path, app):
         assert count == 1
         prod = Product.query.filter_by(name="Burger").first()
         assert prod is not None
+        sales_gl = prod.sales_gl_code
+        assert sales_gl is not None
+        assert sales_gl.code == "4000"
+        assert prod.gl_code_id is None
+        assert prod.gl_code is None
         items = {ri.item.name for ri in prod.recipe_items}
         assert items == {"Buns", "Patties"}
         qty_map = {ri.item.name: ri.quantity for ri in prod.recipe_items}
@@ -51,7 +58,7 @@ def test_import_products_with_recipe(tmp_path, app):
 def test_import_products_missing_item(tmp_path, app):
     csv_path = tmp_path / "prods.csv"
     csv_path.write_text(
-        "name,price,cost,gl_code,recipe\nBurger,5,3,4000,Missing:1\n"
+        "name,price,cost,sales_gl_code,recipe\nBurger,5,3,4000,Missing:1\n"
     )
 
     with app.app_context():

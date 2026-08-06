@@ -12,8 +12,6 @@
     <td class="col-last-received" data-sort-value="{{ last_received.strftime('%Y%m%d') if last_received else '' }}">
         {{ last_received.strftime('%Y-%m-%d') if last_received else '—' }}
     </td>
-    <td class="col-gl-code">{{ item.gl_code_rel.code if item.gl_code_rel else item.gl_code or '—' }}</td>
-    <td class="col-gl-desc">{{ item.gl_code_rel.description if item.gl_code_rel and item.gl_code_rel.description else '—' }}</td>
     <td class="col-purchase-gl-code">{{ item.purchase_gl_code.code if item.purchase_gl_code else '—' }}</td>
     <td class="col-purchase-gl-desc">{{ item.purchase_gl_code.description if item.purchase_gl_code and item.purchase_gl_code.description else '—' }}</td>
     <td class="col-units text-wrap">

@@ -49,14 +49,35 @@ def product_gl_codes(app):
 def test_bulk_update_products_success(client, app, product_gl_codes):
     sales_gl, inventory_gl = product_gl_codes
     with app.app_context():
-        product1 = Product(name='Product One', price=10.0, cost=5.0)
-        product2 = Product(name='Product Two', price=8.0, cost=4.0)
+        product1 = Product(
+            name='Product One',
+            price=10.0,
+            cost=5.0,
+            gl_code=inventory_gl.code,
+            gl_code_id=inventory_gl.id,
+        )
+        product2 = Product(
+            name='Product Two',
+            price=8.0,
+            cost=4.0,
+            gl_code=inventory_gl.code,
+            gl_code_id=inventory_gl.id,
+        )
         db.session.add_all([product1, product2])
         db.session.commit()
         product1_id, product2_id = product1.id, product2.id
         ids = f"{product1_id},{product2_id}"
 
     login_admin(client, app)
+    form_response = client.get(
+        '/products/bulk-update',
+        query_string=[('ids', product1_id), ('ids', product2_id)],
+    )
+    assert form_response.status_code == 200
+    form_page = form_response.get_data(as_text=True)
+    assert 'Sales GL Code' in form_page
+    assert 'Inventory GL' not in form_page
+
     response = client.post(
         '/products/bulk-update',
         data={
@@ -67,8 +88,9 @@ def test_bulk_update_products_success(client, app, product_gl_codes):
             'cost': '6.25',
             'apply_sales_gl_code_id': 'y',
             'sales_gl_code_id': str(sales_gl.id),
+            # Crafted legacy fields must be ignored even when posted directly.
             'apply_gl_code_id': 'y',
-            'gl_code_id': str(inventory_gl.id),
+            'gl_code_id': str(sales_gl.id),
         },
         headers={'X-Requested-With': 'XMLHttpRequest'},
     )
@@ -158,6 +180,8 @@ def test_product_create_and_list_surfaces_sellable_amounts(client, app):
     assert list_response.status_code == 200
     page = list_response.get_data(as_text=True)
     assert 'Sellable Amounts' in page
+    assert 'Sales GL Code' in page
+    assert 'Inventory GL' not in page
     assert 'Terminal/Event Sell Price' not in page
     assert 'Sales Invoice Price (3rd-party customer)' not in page
     assert 'Each' in page
@@ -169,6 +193,8 @@ def test_product_create_and_list_surfaces_sellable_amounts(client, app):
     assert create_response.status_code == 200
     create_page = create_response.get_data(as_text=True)
     assert 'Sellable Amounts' in create_page
+    assert 'Sales GL Code' in create_page
+    assert 'Inventory GL' not in create_page
     assert 'Product Qty' in create_page
     assert 'Terminal/Event Sell Price' not in create_page
     assert 'Sales Invoice Price (3rd-party customer)' not in create_page

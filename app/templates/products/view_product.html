@@ -91,21 +91,7 @@
                         {% endif %}
                     </div>
                     <div class="row g-3 mb-3">
-                        <div class="col-md-6">
-                            <div class="border rounded p-3 h-100">
-                                <div class="small text-muted">Inventory GL Code</div>
-                                <div class="fw-semibold">
-                                    {% if product.gl_code_rel %}
-                                    {{ product.gl_code_rel.code }}{% if product.gl_code_rel.description %} - {{ product.gl_code_rel.description }}{% endif %}
-                                    {% elif product.gl_code %}
-                                    {{ product.gl_code }}
-                                    {% else %}
-                                    -
-                                    {% endif %}
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
+                        <div class="col-12">
                             <div class="border rounded p-3 h-100">
                                 <div class="small text-muted">Sales GL Code</div>
                                 <div class="fw-semibold">

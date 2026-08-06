@@ -67,18 +67,6 @@
             {{ form.sales_gl_code_id(class_='form-select', id='bulk-product-sales-gl') }}
         </div>
     </div>
-    <div class="row align-items-center mb-3">
-        <div class="col-md-3">
-            <div class="form-check form-switch">
-                {{ form.apply_gl_code_id(class_='form-check-input', id='bulk-product-apply-inventory-gl', **{'data-toggle-target': '#bulk-product-inventory-gl'}) }}
-                <label class="form-check-label" for="bulk-product-apply-inventory-gl">Update Inventory GL</label>
-            </div>
-        </div>
-        <div class="col-md-9">
-            <label class="form-label" for="bulk-product-inventory-gl">Inventory GL Code</label>
-            {{ form.gl_code_id(class_='form-select', id='bulk-product-inventory-gl') }}
-        </div>
-    </div>
     <div class="text-end">
         {{ form.submit(class_='btn btn-primary') }}
     </div>

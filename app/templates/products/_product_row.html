@@ -40,8 +40,6 @@
     <td class="col-product-profit" data-sort-value="{{ '%.6f'|format(profit_value) }}">{{ '%.2f'|format(profit_value) }}</td>
     <td class="col-product-sales-gl-code">{{ product.sales_gl_code.code if product.sales_gl_code else '—' }}</td>
     <td class="col-product-sales-gl-desc">{{ product.sales_gl_code.description if product.sales_gl_code and product.sales_gl_code.description else '—' }}</td>
-    <td class="col-product-gl-code">{{ product.gl_code_rel.code if product.gl_code_rel else product.gl_code or '—' }}</td>
-    <td class="col-product-gl-desc">{{ product.gl_code_rel.description if product.gl_code_rel and product.gl_code_rel.description else '—' }}</td>
     <td class="col-product-locations text-wrap">
         {% if product.locations %}
             {% for location in product.locations %}

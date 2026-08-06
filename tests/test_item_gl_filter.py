@@ -89,34 +89,41 @@ def setup_data(app):
         }
 
 
-def test_view_items_filter_by_gl_code(client, app):
+def test_view_items_ignores_legacy_inventory_gl_filter(client, app):
     data = setup_data(app)
     email = data["email"]
     gl1_id = data["sales_gl_ids"][0]
-    gl_code = data["sales_gl_codes"][0]
     with client:
         login(client, email, "pass")
-        resp = client.get(f"/items?gl_code_id={gl1_id}")
-        assert resp.status_code == 200
-        assert b'<td class="col-name">A0</td>' in resp.data
-        assert b'<td class="col-name">B0</td>' not in resp.data
-        assert b"Active filters:" in resp.data
-        assert b"Inventory GL Code:" in resp.data
-        assert gl_code.encode() in resp.data
-
-
-def test_view_items_filter_by_multiple_gl_codes(client, app):
-    data = setup_data(app)
-    email = data["email"]
-    gl1_id, gl2_id = data["sales_gl_ids"]
-    with client:
-        login(client, email, "pass")
-        resp = client.get(f"/items?gl_code_id={gl1_id}&gl_code_id={gl2_id}")
+        resp = client.get(
+            f"/items?gl_code_id={gl1_id}&gl_code_id={data['sales_gl_ids'][1]}",
+            follow_redirects=True,
+        )
         assert resp.status_code == 200
         assert b'<td class="col-name">A0</td>' in resp.data
         assert b'<td class="col-name">B0</td>' in resp.data
-        assert b"Active filters:" in resp.data
-        assert b"Inventory GL Code:" in resp.data
+        assert b"Inventory GL" not in resp.data
+        assert resp.request.path == "/items"
+        assert resp.request.query_string == b""
+
+
+def test_view_items_discards_legacy_inventory_gl_session_filter(client, app):
+    data = setup_data(app)
+    email = data["email"]
+    with client:
+        login(client, email, "pass")
+        with client.session_transaction() as session:
+            session["item_filters"] = {
+                "gl_code_id": [str(data["sales_gl_ids"][0])]
+            }
+
+        resp = client.get("/items", follow_redirects=True)
+        assert resp.status_code == 200
+        assert b'<td class="col-name">A0</td>' in resp.data
+        assert b'<td class="col-name">B0</td>' in resp.data
+        assert b"Inventory GL" not in resp.data
+        with client.session_transaction() as session:
+            assert "item_filters" not in session
 
 
 def test_view_items_filter_by_purchase_gl_code(client, app):

@@ -2,7 +2,7 @@
 {% set form_action = form_action if form_action is defined else '' %}
 {% set embedded = embedded if embedded is defined else False %}
 {% set show_submit = show_submit if show_submit is defined else True %}
-{% set sales_field = form.sales_gl_code if form.sales_gl_code is defined else form.gl_code_id %}
+{% set sales_field = form.sales_gl_code if form.sales_gl_code is defined else none %}
 {% set auto_cost_field = form.auto_update_recipe_cost if form.auto_update_recipe_cost is defined else none %}
 {% if not embedded %}
 <form id="{{ product_form_id }}" class="product-form" data-role="product-form" method="POST" action="{{ form_action }}">
