@@ -6,6 +6,13 @@ from sqlalchemy.exc import IntegrityError
 
 from app import _build_user_error_details, _redact_error_details, db
 from app.models import User
+from app.permissions import PUBLIC_ENDPOINTS
+
+
+def _allow_test_endpoint(monkeypatch, endpoint):
+    """Let a temporary error route reach the handler under fail-closed auth."""
+
+    monkeypatch.setattr("app.PUBLIC_ENDPOINTS", PUBLIC_ENDPOINTS | {endpoint})
 
 
 def test_redact_error_details_masks_common_secret_patterns():
@@ -25,7 +32,7 @@ def test_redact_error_details_masks_common_secret_patterns():
     assert "<redacted>" in redacted
 
 
-def test_error_page_hides_trace_details_by_default(client, app):
+def test_error_page_hides_trace_details_by_default(client, app, monkeypatch):
     app.config["PROPAGATE_EXCEPTIONS"] = False
     app.config["SHOW_ERROR_DETAILS_TO_USERS"] = False
 
@@ -33,6 +40,7 @@ def test_error_page_hides_trace_details_by_default(client, app):
     def _explode_default():
         raise RuntimeError("password=supersecret")
 
+    _allow_test_endpoint(monkeypatch, "_explode_default")
     response = client.get("/__explode_default")
     body = response.get_data(as_text=True)
 
@@ -43,7 +51,9 @@ def test_error_page_hides_trace_details_by_default(client, app):
     assert "Copy for support" in body
 
 
-def test_error_page_support_mode_shows_detailed_trace_with_truncation(client, app):
+def test_error_page_support_mode_shows_detailed_trace_with_truncation(
+    client, app, monkeypatch
+):
     app.config["PROPAGATE_EXCEPTIONS"] = False
     app.config["SHOW_ERROR_DETAILS_TO_USERS"] = True
     app.config["ERROR_DETAILS_MAX_LENGTH"] = 120
@@ -52,6 +62,7 @@ def test_error_page_support_mode_shows_detailed_trace_with_truncation(client, ap
     def _explode_support():
         raise RuntimeError("token=abcd1234 " + ("x" * 600))
 
+    _allow_test_endpoint(monkeypatch, "_explode_support")
     response = client.get("/__explode_support")
     body = response.get_data(as_text=True)
 
@@ -74,7 +85,7 @@ def test_build_user_error_details_summary_uses_last_trace_line():
 
 
 def test_unhandled_exception_recovers_from_failed_transaction_for_user_logging(
-    client, app
+    client, app, monkeypatch
 ):
     app.config["PROPAGATE_EXCEPTIONS"] = False
 
@@ -101,6 +112,7 @@ def test_unhandled_exception_recovers_from_failed_transaction_for_user_logging(
             db.session.flush()
         raise RuntimeError("trigger unhandled exception after failed transaction")
 
+    _allow_test_endpoint(monkeypatch, "_explode_pending_rollback")
     response = client.get("/__explode_pending_rollback")
     body = response.get_data(as_text=True)
 
@@ -143,6 +155,9 @@ def test_unhandled_exception_handles_pending_rollback_when_rollback_fails(
             db.session.flush()
         raise RuntimeError("trigger unhandled exception after failed transaction")
 
+    _allow_test_endpoint(
+        monkeypatch, "_explode_pending_rollback_rollback_fails"
+    )
     response = client.get("/__explode_pending_rollback_rollback_fails")
     body = response.get_data(as_text=True)
 
