@@ -43,9 +43,9 @@
         </div>
         <div class="d-flex flex-wrap gap-2 count-submission-detail-actions">
             <a class="btn btn-outline-secondary" href="{{ url_for('locations.count_submissions') }}">Back to Queue</a>
-            {% if submission.location %}
+            {% if submission.location and can_access_endpoint('locations.view_location', 'GET') %}
             <a class="btn btn-outline-secondary" href="{{ url_for('locations.view_location', location_id=submission.location.id) }}">Mapped Location</a>
-            {% elif submission.source_location %}
+            {% elif submission.source_location and can_access_endpoint('locations.view_location', 'GET') %}
             <a class="btn btn-outline-secondary" href="{{ url_for('locations.view_location', location_id=submission.source_location.id) }}">Source Location</a>
             {% endif %}
         </div>

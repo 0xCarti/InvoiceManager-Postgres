@@ -75,10 +75,14 @@
                         <h6 class="fw-semibold">Sales not tracked on the stand sheet</h6>
                         <p class="small text-muted mb-2">
                             These products use countable items that are missing from the stand sheet for this location.
+                            {% if can_access_endpoint('event.stand_sheet', 'GET') %}
                             <a href="{{ url_for('event.stand_sheet', event_id=event_location.event_id, location_id=event_location.location_id) }}">
-                                Update the stand sheet
+                                Open the stand sheet
                             </a>
-                            to assign the items before confirming.
+                            to review or assign the items before confirming.
+                            {% else %}
+                            A user with stand-sheet access must assign the items before confirming.
+                            {% endif %}
                         </p>
                         <div class="table-responsive">
                             <table class="table table-sm align-middle mb-0">

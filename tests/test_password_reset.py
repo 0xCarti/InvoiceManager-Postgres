@@ -52,20 +52,26 @@ def test_password_reset_flow(client, app, monkeypatch):
 
     client.post(
         f"/auth/reset/{token}",
-        data={"new_password": "newpass", "confirm_password": "newpass"},
+        data={
+            "new_password": "new-reset-password",
+            "confirm_password": "new-reset-password",
+        },
         follow_redirects=True,
     )
 
     reused = client.post(
         f"/auth/reset/{token}",
-        data={"new_password": "anotherpass", "confirm_password": "anotherpass"},
+        data={
+            "new_password": "another-reset-password",
+            "confirm_password": "another-reset-password",
+        },
         follow_redirects=True,
     )
     assert b"Invalid or expired token." in reused.data
 
     with app.app_context():
         user = User.query.filter_by(email="reset@example.com").first()
-        assert check_password_hash(user.password, "newpass")
+        assert check_password_hash(user.password, "new-reset-password")
 
 
 def test_login_page_has_reset_link(client):

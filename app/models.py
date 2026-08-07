@@ -178,6 +178,9 @@ class User(UserMixin, db.Model):
     transfers = db.relationship("Transfer", backref="creator", lazy=True)
     invoices = db.relationship("Invoice", backref="creator", lazy=True)
     active = db.Column(db.Boolean, default=False, nullable=False)
+    invitation_pending = db.Column(
+        db.Boolean, default=False, nullable=False, server_default="0"
+    )
     favorites = db.Column(db.Text, default="")
     timezone = db.Column(db.String(50))
     default_transfer_from_location_id = db.Column(
@@ -383,6 +386,11 @@ class User(UserMixin, db.Model):
     @property
     def is_super_admin(self) -> bool:
         return bool(self.is_admin)
+
+    @property
+    def is_invitation_pending(self) -> bool:
+        """Return whether this account is waiting for invite acceptance."""
+        return bool(self.invitation_pending and not self.active)
 
     @property
     def preferred_name(self) -> str:
@@ -5044,6 +5052,17 @@ class Setting(db.Model):
     POS_SALES_AUTO_APPROVE_CLEAN_IMPORTS = "POS_SALES_AUTO_APPROVE_CLEAN_IMPORTS"
     MENU_FEED_API_TOKEN = "MENU_FEED_API_TOKEN"
     FOOD_COST_TAX_RATE = "FOOD_COST_TAX_RATE"
+    SCHEDULE_WEEK_START_DAY = "SCHEDULE_WEEK_START_DAY"
+    DEFAULT_SCHEDULE_WEEK_START_DAY = 0
+    SCHEDULE_WEEKDAY_NAMES = (
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    )
     POS_SALES_IMPORT_INTERVAL_UNITS = ("hour", "day", "week")
     DEFAULT_POS_SALES_IMPORT_INTERVAL = {
         "value": 1,
@@ -5056,6 +5075,36 @@ class Setting(db.Model):
         "MANITOBA LIQUOR & LOTTERIES",
     ]
     LEGACY_DISABLED_PURCHASE_IMPORT_VENDORS = {"CENTRAL SUPPLY"}
+
+    @classmethod
+    def get_schedule_week_start_day(cls) -> int:
+        """Return the configured Python weekday index used to start schedules."""
+
+        default_day = int(cls.DEFAULT_SCHEDULE_WEEK_START_DAY)
+        if not has_app_context():
+            return default_day
+        setting = cls.query.filter_by(name=cls.SCHEDULE_WEEK_START_DAY).first()
+        if setting is None or setting.value in (None, ""):
+            return default_day
+        try:
+            weekday = int(setting.value)
+        except (TypeError, ValueError):
+            return default_day
+        return weekday if 0 <= weekday <= 6 else default_day
+
+    @classmethod
+    def set_schedule_week_start_day(cls, weekday: int) -> None:
+        """Persist the Python weekday index used to start schedule weeks."""
+
+        normalized_weekday = int(weekday)
+        if normalized_weekday < 0 or normalized_weekday > 6:
+            raise ValueError("Schedule week start day must be between 0 and 6.")
+        setting = cls.query.filter_by(name=cls.SCHEDULE_WEEK_START_DAY).first()
+        if setting is None:
+            setting = cls(name=cls.SCHEDULE_WEEK_START_DAY)
+            db.session.add(setting)
+        setting.value = str(normalized_weekday)
+
     @classmethod
     def get_food_cost_tax_rate(cls) -> int:
         """Return the included tax percentage used for food cost calculations."""

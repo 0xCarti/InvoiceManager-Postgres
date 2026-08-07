@@ -9,12 +9,25 @@ from werkzeug.datastructures import MultiDict
 from werkzeug.security import generate_password_hash
 
 from app import db
-from app.models import Event, EventLocation, Item, Location, User
+from app.models import (
+    Event,
+    EventLocation,
+    Item,
+    Location,
+    LocationCountSubmission,
+    User,
+)
 from tests.permission_helpers import grant_event_permissions, grant_permissions
-from tests.utils import login
+from tests.utils import extract_csrf_token, login
 
 
-def _seed_event_user(app, *, email: str, with_item: bool = False):
+def _seed_event_user(
+    app,
+    *,
+    email: str,
+    with_item: bool = False,
+    event_type: str = "inventory",
+):
     with app.app_context():
         user = User(
             email=email,
@@ -26,7 +39,7 @@ def _seed_event_user(app, *, email: str, with_item: bool = False):
             name="Permission Test Event",
             start_date=date(2026, 4, 1),
             end_date=date(2026, 4, 2),
-            event_type="inventory",
+            event_type=event_type,
         )
         db.session.add_all([user, location, event])
         db.session.flush()
@@ -116,6 +129,82 @@ def test_event_detail_hides_management_controls_without_permission(client, app):
     assert "Enter Sales" not in body
     assert f"/events/{seeded['event_id']}/locations/{seeded['event_location_id']}/confirm" not in body
     assert "/undo_confirm_location" not in body
+
+
+def test_report_only_user_cannot_mutate_stand_sheet(client, app):
+    seeded = _seed_event_user(
+        app,
+        email="stand-sheet-report-only@example.com",
+        event_type="other",
+    )
+
+    with app.app_context():
+        user = User.query.filter_by(email=seeded["email"]).one()
+        grant_permissions(
+            user,
+            "events.reports",
+            group_name=f"Event Reports Only {user.email}",
+            description="Can view event reports without changing count data.",
+        )
+
+    path = f"/events/{seeded['event_id']}/stand_sheet/{seeded['location_id']}"
+    with client:
+        login(client, seeded["email"], "pass")
+        page = client.get(path)
+        body = page.data.decode()
+        token = extract_csrf_token(page)
+        response = client.post(
+            path,
+            data={"csrf_token": token, "notes": "unauthorized change"},
+        )
+
+    assert page.status_code == 200
+    assert "This stand sheet is read only for your account." in body
+    assert ">Save</button>" not in body
+    assert response.status_code == 403
+    with app.app_context():
+        event_location = db.session.get(
+            EventLocation, seeded["event_location_id"]
+        )
+        assert event_location.notes is None
+
+
+def test_report_only_user_cannot_submit_inventory_count_sheet(client, app):
+    seeded = _seed_event_user(
+        app,
+        email="count-sheet-report-only@example.com",
+        with_item=True,
+    )
+
+    with app.app_context():
+        user = User.query.filter_by(email=seeded["email"]).one()
+        grant_permissions(
+            user,
+            "events.reports",
+            group_name=f"Inventory Reports Only {user.email}",
+            description="Can view inventory reports without submitting counts.",
+        )
+
+    path = f"/events/{seeded['event_id']}/count_sheet/{seeded['location_id']}"
+    with client:
+        login(client, seeded["email"], "pass")
+        page = client.get(path)
+        body = page.data.decode()
+        token = extract_csrf_token(page)
+        response = client.post(
+            path,
+            data={
+                "csrf_token": token,
+                "submitted_name": "Unauthorized Counter",
+            },
+        )
+
+    assert page.status_code == 200
+    assert "This count sheet is read only for your account." in body
+    assert "Submit For Review" not in body
+    assert response.status_code == 403
+    with app.app_context():
+        assert LocationCountSubmission.query.count() == 0
 
 
 def test_terminal_sales_upload_hides_product_creation_without_products_create_permission(

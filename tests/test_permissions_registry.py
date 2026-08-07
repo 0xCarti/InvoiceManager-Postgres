@@ -3,12 +3,14 @@ from types import SimpleNamespace
 from flask import Flask
 
 from app.permissions import (
-    ENDPOINT_METHOD_PERMISSION_RULES,
-    ENDPOINT_PERMISSION_RULES,
+    AUTHENTICATED_BASELINE_ENDPOINTS,
+    PUBLIC_ENDPOINTS,
     get_default_landing_endpoint,
     get_permission_categories,
+    get_permission_requirement,
     user_can_access_endpoint,
 )
+from tests.utils import login
 
 
 class DummyUser:
@@ -352,6 +354,101 @@ def test_super_admin_bypasses_endpoint_permission_checks():
     assert user_can_access_endpoint(user, "admin.sales_import_detail", "POST")
 
 
+def test_unknown_endpoints_fail_closed_even_for_super_admin():
+    assert not user_can_access_endpoint(DummyUser(), "unregistered.endpoint")
+    assert not user_can_access_endpoint(
+        DummyUser(is_super_admin=True),
+        "unregistered.endpoint",
+    )
+
+
+def test_public_and_authenticated_baseline_endpoints_are_explicit():
+    anonymous = DummyUser(is_authenticated=False)
+    authenticated = DummyUser()
+
+    assert user_can_access_endpoint(anonymous, "auth.login")
+    assert not user_can_access_endpoint(anonymous, "auth.profile")
+    assert user_can_access_endpoint(authenticated, "auth.profile")
+
+
+def test_head_uses_get_permission_requirement():
+    user = DummyUser("items.view")
+
+    assert get_permission_requirement("item.view_items", "HEAD") == (
+        get_permission_requirement("item.view_items", "GET")
+    )
+    assert user_can_access_endpoint(user, "item.view_items", "HEAD")
+
+
+def test_event_sheet_mutations_require_manage_sales_permission():
+    report_user = DummyUser("events.reports")
+    count_manager = DummyUser("events.manage_sales")
+
+    assert user_can_access_endpoint(report_user, "event.stand_sheet", "GET")
+    assert not user_can_access_endpoint(
+        report_user, "event.stand_sheet", "POST"
+    )
+    assert user_can_access_endpoint(count_manager, "event.stand_sheet", "POST")
+    assert user_can_access_endpoint(report_user, "event.count_sheet", "GET")
+    assert not user_can_access_endpoint(
+        report_user, "event.count_sheet", "POST"
+    )
+    assert user_can_access_endpoint(count_manager, "event.count_sheet", "POST")
+
+
+def test_monthly_team_schedule_matches_weekly_view_access():
+    allowed_permissions = (
+        "schedules.view_team",
+        "schedules.edit_team",
+        "schedules.publish",
+        "schedules.view_labor",
+        "schedules.view_seen_status",
+        "schedules.self_schedule",
+    )
+
+    for permission in allowed_permissions:
+        user = DummyUser(permission)
+        assert user_can_access_endpoint(user, "schedule.team_schedule", "GET")
+        assert user_can_access_endpoint(
+            user,
+            "schedule.team_schedule_month",
+            "GET",
+        )
+
+    assert not user_can_access_endpoint(
+        DummyUser("schedules.view_self"),
+        "schedule.team_schedule_month",
+        "GET",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("schedules.view_team"),
+        "schedule.team_schedule_month",
+        "POST",
+    )
+
+
+def test_products_sold_report_requires_its_dedicated_permission():
+    assert not user_can_access_endpoint(
+        DummyUser("reports.product_sales"),
+        "report.products_sold_report",
+    )
+    assert not user_can_access_endpoint(
+        DummyUser("reports.product_stock_usage"),
+        "report.products_sold_report",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("reports.products_sold"),
+        "report.products_sold_report",
+    )
+
+
+def test_invoice_gl_permission_reaches_report_hub():
+    assert user_can_access_endpoint(
+        DummyUser("reports.invoice_gl_codes"),
+        "report.index",
+    )
+
+
 def test_default_landing_endpoint_prefers_first_accessible_route():
     app = Flask(__name__)
     app.view_functions.update(
@@ -386,50 +483,43 @@ def test_permission_categories_include_system_admin_section():
 
 
 def test_all_non_public_registered_endpoints_have_permission_rules(app):
-    exempt_endpoints = {
-        "admin.zerothreat",
-        "auth.login",
-        "auth.logout",
-        "auth.profile",
-        "auth.reset_request",
-        "auth.reset_token",
-        "auth.toggle_favorite",
-        "bootstrap.static",
-        "locations.scan_count_submission",
-        "locations.scan_eaten_submission",
-        "locations.scan_inventory_item_search",
-        "locations.scan_inventory_submission",
-        "locations.scan_spoilage_submission",
-        "mailgun.inbound_mailgun",
-        "menu.menu_feed",
-        "preferences.save_filter_preferences",
-        "security_txt",
-        "signage.player_heartbeat",
-        "signage.player_manifest",
-        "signage.player_page",
-        "signage.player_short_page",
-        "signage.signage_media_file",
-        "signage.tizen_activate",
-        "signage.tizen_launcher",
-        "static",
-        "transfer.public_transfer_request",
-        "transfer.public_transfer_request_item_search",
-        "transfer.public_transfer_request_item_units",
-    }
-    covered_methods = {"GET", "POST", "PUT", "PATCH", "DELETE"}
+    explicitly_classified = PUBLIC_ENDPOINTS | AUTHENTICATED_BASELINE_ENDPOINTS
+    registered_endpoints = {rule.endpoint for rule in app.url_map.iter_rules()}
 
-    missing = []
+    assert PUBLIC_ENDPOINTS.isdisjoint(AUTHENTICATED_BASELINE_ENDPOINTS)
+    assert explicitly_classified <= registered_endpoints
+
+    missing = set()
     for rule in app.url_map.iter_rules():
         endpoint = rule.endpoint
-        if endpoint in exempt_endpoints:
+        if endpoint in explicitly_classified:
             continue
-        if endpoint in ENDPOINT_PERMISSION_RULES:
-            continue
-        if any(
-            (endpoint, method) in ENDPOINT_METHOD_PERMISSION_RULES
-            for method in covered_methods
-        ):
-            continue
-        missing.append(endpoint)
+        for method in rule.methods - {"OPTIONS"}:
+            if get_permission_requirement(endpoint, method) is None:
+                missing.add((endpoint, method))
 
     assert sorted(missing) == []
+
+
+def test_runtime_hook_denies_unregistered_route_for_anonymous_and_admin(
+    client, app
+):
+    endpoint = "permission_test_unregistered"
+
+    def unregistered_view():
+        return "unexpected"
+
+    app.add_url_rule(
+        "/_permission-test/unregistered",
+        endpoint=endpoint,
+        view_func=unregistered_view,
+        methods=["GET"],
+    )
+
+    anonymous_response = client.get("/_permission-test/unregistered")
+    assert anonymous_response.status_code == 302
+    assert "/auth/login" in anonymous_response.headers["Location"]
+
+    login(client, "admin@example.com", "adminpass")
+    admin_response = client.get("/_permission-test/unregistered")
+    assert admin_response.status_code == 403

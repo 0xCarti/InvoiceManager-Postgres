@@ -13,7 +13,8 @@
             {% for conflict in terminal_sales_conflicts %}
             <div>
                 {{ conflict.location_name }} overlaps with
-                <a href="{{ url_for('event.view_event', event_id=conflict.event_id) }}">{{ conflict.event_name }}</a>
+                {% set conflict_event_url = safe_url_for('event.view_event', event_id=conflict.event_id) %}
+                {% if conflict_event_url %}<a href="{{ conflict_event_url }}">{{ conflict.event_name }}</a>{% else %}{{ conflict.event_name }}{% endif %}
                 on {{ conflict.overlap_start_date }}{% if conflict.overlap_start_date != conflict.overlap_end_date %} to {{ conflict.overlap_end_date }}{% endif %}.
             </div>
             {% endfor %}

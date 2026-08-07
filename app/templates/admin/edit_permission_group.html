@@ -91,7 +91,8 @@
                         </div>
                     </form>
                     {% else %}
-                    {% with permission_group_form=group_form, permission_categories=permission_categories, permissions_locked_message='You can view this group, but you do not have access to edit it.', can_manage_permissions=False %}
+                    {% set locked_message = 'This group contains permissions beyond your own access and can only be changed by a super admin.' if has_any_group_management_permission and not group_within_actor_ceiling else 'You can view this group, but you do not have access to edit it.' %}
+                    {% with permission_group_form=group_form, permission_categories=permission_categories, permissions_locked_message=locked_message, can_manage_permissions=False %}
                     {% include 'admin/_permission_group_permission_fields.html' %}
                     {% endwith %}
                     {% endif %}

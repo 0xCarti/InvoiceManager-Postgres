@@ -13,7 +13,7 @@
         </div>
         <div class="d-flex gap-2">
             <a href="{{ url_for('admin.users') }}" class="btn btn-outline-secondary">Back to Users</a>
-            {% if can_access_endpoint('admin.user_profile') %}
+            {% if can_edit_access and can_access_endpoint('admin.user_profile') %}
             <a href="{{ url_for('admin.user_profile', user_id=managed_user.id) }}" class="btn btn-outline-secondary">Profile</a>
             {% endif %}
         </div>
@@ -29,8 +29,8 @@
                     <div class="small text-muted mb-2">{{ managed_user.email }}</div>
                     {% endif %}
                     <div class="mb-2">
-                        <span class="badge {% if managed_user.active %}text-bg-success{% else %}text-bg-secondary{% endif %}">
-                            {{ 'Active' if managed_user.active else 'Inactive' }}
+                        <span class="badge {% if managed_user.active %}text-bg-success{% elif managed_user.is_invitation_pending %}text-bg-warning{% else %}text-bg-secondary{% endif %}">
+                            {{ 'Active' if managed_user.active else 'Invited' if managed_user.is_invitation_pending else 'Inactive' }}
                         </span>
                     </div>
                     <div>
@@ -47,7 +47,7 @@
             <div class="card h-100">
                 <div class="card-body">
                     <h3 class="h6 mb-3">Permission Groups</h3>
-                    {% if can_manage_users %}
+                    {% if can_manage_users and can_edit_access %}
                     <form method="post" class="vstack gap-3">
                         {{ access_form.hidden_tag() }}
                         <div>
@@ -71,6 +71,9 @@
                         </div>
                     </form>
                     {% else %}
+                    {% if can_manage_users and not can_edit_access %}
+                    <div class="alert alert-warning py-2">This account has access beyond your own and can only be changed by a super admin.</div>
+                    {% endif %}
                     <div class="mb-3">
                         {% if managed_user.permission_groups %}
                             {% for group in managed_user.permission_groups %}

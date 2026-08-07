@@ -48,6 +48,29 @@ def test_report_only_user_reaches_filtered_reports_hub(client, app):
     assert "Customer Invoice Report" not in reports_html
 
 
+def test_invoice_gl_report_permission_reaches_purchase_invoice_selection(
+    client, app
+):
+    email = _create_user_with_permissions(
+        app,
+        "invoice-gl-nav@example.com",
+        "reports.invoice_gl_codes",
+        "purchase_invoices.view",
+    )
+
+    with client:
+        login(client, email, "pass")
+        profile_response = client.get("/auth/profile")
+        reports_response = client.get("/reports")
+
+    assert profile_response.status_code == 200
+    assert 'data-nav-endpoint="report.index"' in profile_response.data.decode()
+    assert reports_response.status_code == 200
+    reports_html = reports_response.data.decode()
+    assert "Purchase Invoice GL Report" in reports_html
+    assert 'href="/purchase_invoices"' in reports_html
+
+
 def test_settings_only_user_reaches_filtered_administration_hub(client, app):
     email = _create_user_with_permissions(
         app,

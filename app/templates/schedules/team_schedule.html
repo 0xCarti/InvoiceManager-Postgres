@@ -300,19 +300,25 @@
     <div class="card app-card mb-3">
         <div class="card-body">
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
-                <div class="btn-group schedule-view-toggle" role="group" aria-label="Schedule view mode">
-                    <a
-                        class="btn btn-outline-primary {{ 'active' if view_mode == 'user' else '' }}"
-                        href="{{ url_for('schedule.team_schedule', department_id=selected_department_filter_value, week_start=schedule_week.week_start.isoformat() if schedule_week else None, user_id=selected_user_filter_value or None, view_mode='user') }}"
-                    >
-                        By User
-                    </a>
-                    <a
-                        class="btn btn-outline-primary {{ 'active' if view_mode == 'position' else '' }}"
-                        href="{{ url_for('schedule.team_schedule', department_id=selected_department_filter_value, week_start=schedule_week.week_start.isoformat() if schedule_week else None, view_mode='position', filter_event_id=selected_event_filter_value or None, filter_location_id=selected_location_filter_value or None) }}"
-                    >
-                        By Position
-                    </a>
+                <div class="d-flex flex-wrap gap-2">
+                    <div class="btn-group schedule-view-toggle" role="group" aria-label="Schedule period">
+                        <a class="btn btn-outline-primary active" aria-current="page" href="{{ url_for('schedule.team_schedule', department_id=selected_department_filter_value, week_start=schedule_week.week_start.isoformat() if schedule_week else None, user_id=(selected_user_filter_value or None) if view_mode == 'user' else None, view_mode=view_mode, filter_event_id=(selected_event_filter_value or None) if view_mode == 'position' else None, filter_location_id=(selected_location_filter_value or None) if view_mode == 'position' else None) }}">Week</a>
+                        <a class="btn btn-outline-primary" href="{{ url_for('schedule.team_schedule_month', department_id=selected_department_filter_value, month=schedule_week.week_start.isoformat() if schedule_week else None, user_id=(selected_user_filter_value or None) if view_mode == 'user' else None, view_mode=view_mode, filter_event_id=(selected_event_filter_value or None) if view_mode == 'position' else None, filter_location_id=(selected_location_filter_value or None) if view_mode == 'position' else None) }}">Month</a>
+                    </div>
+                    <div class="btn-group schedule-view-toggle" role="group" aria-label="Schedule grouping">
+                        <a
+                            class="btn btn-outline-primary {{ 'active' if view_mode == 'user' else '' }}"
+                            href="{{ url_for('schedule.team_schedule', department_id=selected_department_filter_value, week_start=schedule_week.week_start.isoformat() if schedule_week else None, user_id=selected_user_filter_value or None, view_mode='user') }}"
+                        >
+                            By User
+                        </a>
+                        <a
+                            class="btn btn-outline-primary {{ 'active' if view_mode == 'position' else '' }}"
+                            href="{{ url_for('schedule.team_schedule', department_id=selected_department_filter_value, week_start=schedule_week.week_start.isoformat() if schedule_week else None, view_mode='position', filter_event_id=selected_event_filter_value or None, filter_location_id=selected_location_filter_value or None) }}"
+                        >
+                            By Position
+                        </a>
+                    </div>
                 </div>
                 {% if view_mode == 'position' %}
                 <div class="text-muted small">

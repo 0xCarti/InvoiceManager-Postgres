@@ -70,6 +70,24 @@
             </div>
         </section>
         <section class="app-form-card">
+            <div class="app-page-header mb-3">
+                <div class="app-page-header-copy">
+                    <h3 class="h5 mb-1">Scheduling Defaults</h3>
+                    <p class="text-muted mb-0">Choose the first day shown on weekly and monthly team schedules. Existing shifts are kept and realigned to the new week boundaries.</p>
+                </div>
+            </div>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    {{ form.schedule_week_start_day.label(class='form-label') }}
+                    {{ form.schedule_week_start_day(class='form-select', disabled=not can_manage_settings) }}
+                    {% if form.schedule_week_start_day.errors %}
+                        <div class="text-danger small">{{ form.schedule_week_start_day.errors[0] }}</div>
+                    {% endif %}
+                    <div class="form-text">For example, Wednesday creates Wednesday-through-Tuesday schedule weeks.</div>
+                </div>
+            </div>
+        </section>
+        <section class="app-form-card">
             <h3>POS Sales Imports</h3>
             <p class="text-muted">
                 The app uses this lookback interval and the file received time in the default timezone to infer the business date for each imported POS sales file. For your current setup, use <strong>1 Day</strong>.

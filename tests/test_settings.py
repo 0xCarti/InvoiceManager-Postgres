@@ -28,6 +28,7 @@ def test_admin_can_update_settings(client, app):
                 "gst_number": "987654321",
                 "food_cost_tax_rate": "5",
                 "default_timezone": "US/Eastern",
+                "schedule_week_start_day": "2",
                 "auto_backup_enabled": "y",
                 "auto_backup_interval_value": "2",
                 "auto_backup_interval_unit": "week",
@@ -61,6 +62,7 @@ def test_admin_can_update_settings(client, app):
 
         assert DEFAULT_TIMEZONE == "US/Eastern"
         assert app.config["DEFAULT_TIMEZONE"] == "US/Eastern"
+        assert Setting.get_schedule_week_start_day() == 2
         auto_setting = Setting.query.filter_by(
             name="AUTO_BACKUP_ENABLED"
         ).first()
@@ -110,6 +112,7 @@ def test_admin_can_update_settings(client, app):
             and "POS sales import cadence" in activity
             and "POS sales auto approval" in activity
             and "food cost tax rate" in activity
+            and "schedule week start day" in activity
             for activity in activities
         )
 
@@ -156,6 +159,7 @@ def test_auto_backup_thread_uses_real_app(client, app, monkeypatch):
                 "gst_number": "",  # keep defaults minimal for this test
                 "food_cost_tax_rate": "0",
                 "default_timezone": "UTC",
+                "schedule_week_start_day": "0",
                 "auto_backup_enabled": "y",
                 "auto_backup_interval_value": "1",
                 "auto_backup_interval_unit": "day",
@@ -199,5 +203,29 @@ def test_settings_view_only_user_sees_read_only_page(client, app):
     assert response.status_code == 200
     assert b"You have view-only access to settings." in response.data
     assert b"Core Defaults" in response.data
+    assert b"Scheduling Defaults" in response.data
+    assert b"Schedule Week Starts On" in response.data
     assert b">Update<" not in response.data
     assert b"disabled" in response.data
+
+
+def test_schedule_week_start_setting_defaults_and_rejects_invalid_values(app):
+    with app.app_context():
+        Setting.query.filter_by(name=Setting.SCHEDULE_WEEK_START_DAY).delete()
+        db.session.commit()
+        assert Setting.get_schedule_week_start_day() == 0
+
+        setting = Setting(
+            name=Setting.SCHEDULE_WEEK_START_DAY, value="not-a-day"
+        )
+        db.session.add(setting)
+        db.session.commit()
+        assert Setting.get_schedule_week_start_day() == 0
+
+        setting.value = "9"
+        db.session.commit()
+        assert Setting.get_schedule_week_start_day() == 0
+
+        Setting.set_schedule_week_start_day(3)
+        db.session.commit()
+        assert Setting.get_schedule_week_start_day() == 3

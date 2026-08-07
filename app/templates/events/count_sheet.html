@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 
 {% block content %}
+{% set can_edit_count_sheet = can_access_endpoint('event.count_sheet', 'POST') %}
 <style>
     .inventory-count-shell {
         max-width: 58rem;
@@ -56,11 +57,19 @@
             </div>
         </div>
         <div class="d-flex gap-2 align-items-start">
-            <a class="btn btn-outline-secondary" href="{{ url_for('event.view_event', event_id=event.id) }}">Back to Event</a>
+            {% set event_url = safe_url_for('event.view_event', event_id=event.id) %}
+            {% if event_url %}
+            <a class="btn btn-outline-secondary" href="{{ event_url }}">Back to Event</a>
+            {% endif %}
             <button type="button" class="btn btn-outline-secondary" data-action="print">Print</button>
         </div>
     </div>
 
+    {% if not can_edit_count_sheet %}
+    <div class="alert alert-info" role="status">This count sheet is read only for your account.</div>
+    {% endif %}
+
+    {% if can_edit_count_sheet %}
     <div class="alert alert-info d-none" data-inventory-draft-prompt>
         <div class="fw-semibold mb-1">Continue where you left off?</div>
         <div class="small mb-3">Unsaved inventory counts were found on this device.</div>
@@ -71,9 +80,10 @@
     </div>
 
     <div class="small text-muted inventory-draft-status d-none" data-inventory-draft-status aria-live="polite"></div>
+    {% endif %}
 
     <form
-        method="post"
+        method="{{ 'post' if can_edit_count_sheet else 'get' }}"
         data-inventory-count-form="1"
         data-draft-key="invoice-manager-event-inventory-count:{{ event.id }}:{{ location.id }}:{{ operating_date.isoformat() if operating_date else event.start_date.isoformat() }}"
     >
@@ -93,6 +103,7 @@
                 maxlength="120"
                 required
                 data-inventory-draft-field="1"
+                {% if not can_edit_count_sheet %}readonly aria-readonly="true"{% endif %}
             >
         </div>
 
@@ -110,6 +121,7 @@
                             {% endif %}
                         </div>
                     </div>
+                    {% if can_edit_count_sheet %}
                     <button
                         type="button"
                         class="btn btn-outline-secondary btn-sm inventory-add-row"
@@ -117,6 +129,7 @@
                         aria-label="Add unit row for {{ entry.item.name }}"
                         title="Add unit row"
                     >+</button>
+                    {% endif %}
                 </div>
                 <div
                     class="d-grid gap-2"
@@ -131,6 +144,7 @@
                                 id="inventory_unit_{{ entry.item.id }}_0"
                                 name="inventory_unit_{{ entry.item.id }}_0"
                                 data-inventory-draft-field="1"
+                                {% if not can_edit_count_sheet %}disabled aria-disabled="true"{% endif %}
                             >
                                 {% for unit_option in entry.unit_options %}
                                 <option value="{{ unit_option.value }}">{{ unit_option.label }}</option>
@@ -154,9 +168,12 @@
                                 name="inventory_qty_{{ entry.item.id }}_0"
                                 value="{{ request.form.get('inventory_qty_' ~ entry.item.id ~ '_0', '') }}"
                                 placeholder="0"
+                                {% if not can_edit_count_sheet %}readonly aria-readonly="true"{% endif %}
                             >
                         </div>
+                        {% if can_edit_count_sheet %}
                         <button type="button" class="btn btn-outline-danger" data-inventory-remove-row="1" aria-label="Remove unit row" title="Remove unit row" disabled>&times;</button>
+                        {% endif %}
                     </div>
                 </div>
             </div>
@@ -166,15 +183,18 @@
         <div class="alert alert-danger">No inventory items are configured for this location yet.</div>
         {% endif %}
 
+        {% if can_edit_count_sheet %}
         <button type="submit" class="btn btn-primary btn-lg w-100" {% if not items %}disabled{% endif %}>
             Submit For Review
         </button>
+        {% endif %}
     </form>
 </div>
 {% endblock %}
 
 {% block scripts %}
 {{ super() }}
+{% if can_access_endpoint('event.count_sheet', 'POST') %}
 <script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function () {
     const form = document.querySelector('[data-inventory-count-form="1"]');
@@ -461,4 +481,5 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 });
 </script>
+{% endif %}
 {% endblock %}

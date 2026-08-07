@@ -1,0 +1,229 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style nonce="{{ csp_nonce }}">
+.schedule-month-grid {
+    table-layout: fixed;
+    min-width: 980px;
+}
+.schedule-month-grid th {
+    width: 14.285%;
+}
+.schedule-month-day {
+    height: 10rem;
+    vertical-align: top;
+}
+.schedule-month-day.is-outside-month {
+    background: var(--bs-tertiary-bg);
+    color: var(--bs-secondary-color);
+}
+.schedule-month-shift {
+    border-left: .25rem solid var(--bs-primary);
+    font-size: .78rem;
+    line-height: 1.25;
+}
+.schedule-month-shift.is-open {
+    border-left-color: var(--bs-warning);
+}
+@media (max-width: 767.98px) {
+    .schedule-month-desktop {
+        display: none;
+    }
+}
+@media (min-width: 768px) {
+    .schedule-month-mobile {
+        display: none;
+    }
+}
+</style>
+
+<div class="container-fluid px-3 px-lg-0 mobile-list-page app-page-shell">
+    {% include 'schedules/_schedule_tabs.html' %}
+
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+        <div>
+            <h1 class="h4 mb-1">Team Schedule</h1>
+            <div class="text-muted">
+                {{ month_label }}
+                {% if all_departments_mode %}
+                &middot; All departments
+                {% elif selected_department %}
+                &middot; {{ selected_department.name }}
+                {% endif %}
+            </div>
+        </div>
+        <span class="badge text-bg-light border align-self-center">Read-only monthly overview</span>
+    </div>
+
+    <div class="card app-card mb-3">
+        <div class="card-body">
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <div class="btn-group" role="group" aria-label="Schedule period">
+                    <a class="btn btn-outline-primary" href="{{ url_for('schedule.team_schedule', department_id=selected_department_filter_value, week_start=month_start.isoformat(), user_id=(selected_user_filter_value or None) if view_mode == 'user' else None, view_mode=view_mode, filter_event_id=(selected_event_filter_value or None) if view_mode == 'position' else None, filter_location_id=(selected_location_filter_value or None) if view_mode == 'position' else None) }}">Week</a>
+                    <a class="btn btn-outline-primary active" aria-current="page" href="{{ url_for('schedule.team_schedule_month', department_id=selected_department_filter_value, month=month_start.isoformat(), user_id=(selected_user_filter_value or None) if view_mode == 'user' else None, view_mode=view_mode, filter_event_id=(selected_event_filter_value or None) if view_mode == 'position' else None, filter_location_id=(selected_location_filter_value or None) if view_mode == 'position' else None) }}">Month</a>
+                </div>
+                <div class="btn-group" role="group" aria-label="Schedule grouping">
+                    <a class="btn btn-outline-primary {{ 'active' if view_mode == 'user' else '' }}" href="{{ url_for('schedule.team_schedule_month', department_id=selected_department_filter_value, month=month_start.isoformat(), user_id=selected_user_filter_value or None, view_mode='user') }}">By User</a>
+                    <a class="btn btn-outline-primary {{ 'active' if view_mode == 'position' else '' }}" href="{{ url_for('schedule.team_schedule_month', department_id=selected_department_filter_value, month=month_start.isoformat(), view_mode='position', filter_event_id=selected_event_filter_value or None, filter_location_id=selected_location_filter_value or None) }}">By Position</a>
+                </div>
+            </div>
+
+            <form method="get" class="row g-3 align-items-end" data-schedule-filter-form="1">
+                <input type="hidden" name="view_mode" value="{{ view_mode }}">
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label" for="month-department-filter">Department</label>
+                    <select id="month-department-filter" name="department_id" class="form-select" data-auto-submit-filter="1">
+                        {% if departments|length > 1 %}
+                        <option value="all" {% if all_departments_mode %}selected{% endif %}>All Departments</option>
+                        {% endif %}
+                        {% for department in departments %}
+                        <option value="{{ department.id }}" {% if not all_departments_mode and selected_department and department.id == selected_department.id %}selected{% endif %}>{{ department.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% if view_mode == 'user' %}
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label" for="month-user-filter">User</label>
+                    <select id="month-user-filter" name="user_id" class="form-select" data-auto-submit-filter="1">
+                        <option value="" {% if not selected_user_filter_value %}selected{% endif %}>All Users</option>
+                        {% for user in filter_users %}
+                        <option value="{{ user.id }}" {% if selected_user_filter_value == user.id|string %}selected{% endif %}>{{ user.display_label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% else %}
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label" for="month-event-filter">Event</label>
+                    <select id="month-event-filter" name="filter_event_id" class="form-select" data-auto-submit-filter="1">
+                        <option value="" {% if not selected_event_filter_value %}selected{% endif %}>All Events</option>
+                        {% for event in schedule_events %}
+                        <option value="{{ event.id }}" {% if selected_event_filter_value == event.id|string %}selected{% endif %}>{{ event.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label" for="month-location-filter">Location</label>
+                    <select id="month-location-filter" name="filter_location_id" class="form-select" data-auto-submit-filter="1" {% if not selected_event_filter_value %}disabled{% endif %}>
+                        <option value="" {% if not selected_location_filter_value %}selected{% endif %}>All Event Locations</option>
+                        {% for event_location in event_filter_locations %}
+                        <option value="{{ event_location.location_id }}" {% if selected_location_filter_value == event_location.location_id|string %}selected{% endif %}>{{ event_location.location.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+                <div class="col-12 col-md-4 col-xl-2">
+                    <label class="form-label" for="month-date-filter">Month</label>
+                    <input id="month-date-filter" type="date" name="month" class="form-control" value="{{ month_start.isoformat() }}">
+                </div>
+                <div class="col-12 d-flex flex-wrap gap-2">
+                    <a class="btn btn-outline-secondary" href="{{ url_for('schedule.team_schedule_month', department_id=selected_department_filter_value, month=previous_month.isoformat(), user_id=(selected_user_filter_value or None) if view_mode == 'user' else None, view_mode=view_mode, filter_event_id=(selected_event_filter_value or None) if view_mode == 'position' else None, filter_location_id=(selected_location_filter_value or None) if view_mode == 'position' else None) }}">Previous</a>
+                    <button type="submit" class="btn btn-primary">Go</button>
+                    <a class="btn btn-outline-secondary" href="{{ url_for('schedule.team_schedule_month', department_id=selected_department_filter_value, month=next_month.isoformat(), user_id=(selected_user_filter_value or None) if view_mode == 'user' else None, view_mode=view_mode, filter_event_id=(selected_event_filter_value or None) if view_mode == 'position' else None, filter_location_id=(selected_location_filter_value or None) if view_mode == 'position' else None) }}">Next</a>
+                    <a class="btn btn-outline-dark" href="{{ url_for('schedule.team_schedule_month', department_id=selected_department_filter_value, month=current_month.isoformat(), user_id=(selected_user_filter_value or None) if view_mode == 'user' else None, view_mode=view_mode, filter_event_id=(selected_event_filter_value or None) if view_mode == 'position' else None, filter_location_id=(selected_location_filter_value or None) if view_mode == 'position' else None) }}">Current Month</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {% if not departments %}
+    <div class="alert alert-warning">No scheduling departments are available for your account.</div>
+    {% else %}
+    <div class="row g-3 mb-3">
+        {% if can_view_labor %}
+        <div class="col-12 col-md-4">
+            <div class="card app-card h-100"><div class="card-body">
+                <div class="text-muted small">Scheduled Labor</div>
+                <div class="fs-4 fw-semibold">${{ '%.2f'|format(month_total_labor or 0) }}</div>
+            </div></div>
+        </div>
+        {% endif %}
+        <div class="col-6 col-md-4">
+            <div class="card app-card h-100"><div class="card-body">
+                <div class="text-muted small">Assigned Shifts</div>
+                <div class="fs-4 fw-semibold">{{ assigned_shift_count }}</div>
+            </div></div>
+        </div>
+        <div class="col-6 col-md-4">
+            <div class="card app-card h-100"><div class="card-body">
+                <div class="text-muted small">Open / Tradeboard</div>
+                <div class="fs-4 fw-semibold">{{ open_shift_count }}</div>
+            </div></div>
+        </div>
+    </div>
+
+    <div class="schedule-month-desktop table-responsive card app-card mb-3">
+        <table class="table table-bordered mb-0 schedule-month-grid">
+            <thead>
+                <tr>
+                    {% for day in calendar_weeks[0] %}
+                    <th class="text-center py-2">{{ day.strftime('%A') }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for week in calendar_weeks %}
+                <tr>
+                    {% for day in week %}
+                    <td class="schedule-month-day p-2 {{ 'is-outside-month' if day.month != month_start.month else '' }}">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <a class="fw-semibold text-decoration-none" href="{{ url_for('schedule.team_schedule', department_id=selected_department_filter_value, week_start=week_start_by_date[day].isoformat(), user_id=(selected_user_filter_value or None) if view_mode == 'user' else None, view_mode=view_mode, filter_event_id=(selected_event_filter_value or None) if view_mode == 'position' else None, filter_location_id=(selected_location_filter_value or None) if view_mode == 'position' else None) }}">{{ day.day }}</a>
+                            {% if shifts_by_date.get(day) %}
+                            <span class="badge text-bg-light border">{{ shifts_by_date.get(day)|length }}</span>
+                            {% endif %}
+                        </div>
+                        <div class="vstack gap-1">
+                            {% for shift in shifts_by_date.get(day, [])[:4] %}
+                            <div class="schedule-month-shift {{ 'is-open' if not shift.assigned_user else '' }} bg-body border rounded p-1">
+                                <div class="fw-semibold">{{ shift.start_time.strftime('%H:%M') }}&ndash;{{ shift.end_time.strftime('%H:%M') }}</div>
+                                <div>{{ shift.assigned_user.name_or_email if shift.assigned_user else 'Open shift' }}</div>
+                                <div class="text-muted">{{ shift.position.name }}{% if show_department_names %} &middot; {{ shift.position.department.name }}{% endif %}</div>
+                                {% if shift.event or shift.location %}
+                                <div class="text-muted">{{ shift.event.name if shift.event else '' }}{% if shift.event and shift.location %} &middot; {% endif %}{{ shift.location.name if shift.location else '' }}</div>
+                                {% endif %}
+                                {% if not shift.schedule_week.is_published %}<span class="badge text-bg-secondary">Draft</span>{% endif %}
+                            </div>
+                            {% endfor %}
+                            {% if shifts_by_date.get(day, [])|length > 4 %}
+                            <a class="small" href="{{ url_for('schedule.team_schedule', department_id=selected_department_filter_value, week_start=week_start_by_date[day].isoformat(), user_id=(selected_user_filter_value or None) if view_mode == 'user' else None, view_mode=view_mode, filter_event_id=(selected_event_filter_value or None) if view_mode == 'position' else None, filter_location_id=(selected_location_filter_value or None) if view_mode == 'position' else None) }}">+{{ shifts_by_date.get(day)|length - 4 }} more</a>
+                            {% endif %}
+                        </div>
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="schedule-month-mobile vstack gap-3">
+        {% for day_item in month_days %}
+        <section class="card app-card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <a class="fw-semibold text-decoration-none" href="{{ url_for('schedule.team_schedule', department_id=selected_department_filter_value, week_start=week_start_by_date[day_item.date].isoformat(), user_id=(selected_user_filter_value or None) if view_mode == 'user' else None, view_mode=view_mode, filter_event_id=(selected_event_filter_value or None) if view_mode == 'position' else None, filter_location_id=(selected_location_filter_value or None) if view_mode == 'position' else None) }}">{{ day_item.date.strftime('%A, %B %d') }}</a>
+                <span class="badge text-bg-light border">{{ day_item.shifts|length }}</span>
+            </div>
+            <div class="list-group list-group-flush">
+                {% for shift in day_item.shifts %}
+                <div class="list-group-item">
+                    <div class="d-flex justify-content-between gap-2">
+                        <div class="fw-semibold">{{ shift.start_time.strftime('%H:%M') }}&ndash;{{ shift.end_time.strftime('%H:%M') }}</div>
+                        {% if not shift.schedule_week.is_published %}<span class="badge text-bg-secondary">Draft</span>{% endif %}
+                    </div>
+                    <div>{{ shift.assigned_user.name_or_email if shift.assigned_user else 'Open shift' }}</div>
+                    <div class="small text-muted">{{ shift.position.name }}{% if show_department_names %} &middot; {{ shift.position.department.name }}{% endif %}</div>
+                    {% if shift.event or shift.location %}
+                    <div class="small text-muted">{{ shift.event.name if shift.event else '' }}{% if shift.event and shift.location %} &middot; {% endif %}{{ shift.location.name if shift.location else '' }}</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+        {% else %}
+        <div class="card app-card"><div class="card-body text-muted">No shifts match this month and filter.</div></div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='js/schedule_board.js') }}"></script>
+{% endblock %}

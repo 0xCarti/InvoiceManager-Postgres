@@ -17,6 +17,7 @@
         ('report.purchase_inventory_summary', 'Purchase Inventory Summary', 'Compare purchased quantities with inventory activity.'),
         ('report.inventory_variance_report', 'Inventory Variance Report', 'Review expected and actual inventory movement.'),
         ('report.inventory_expiry_report', 'Inventory Expiry Report', 'Find expired and soon-to-expire inventory.'),
+        ('purchase.view_purchase_invoices', 'Purchase Invoice GL Report', 'Choose a purchase invoice to review its GL-code allocation.', 'reports.invoice_gl_codes'),
         ('report.purchase_cost_forecast', 'Forecasted Stock Item Sales', 'Forecast stock demand and purchase costs.'),
         ('report.equipment_procurement_report', 'Equipment Procurement Report', 'Review equipment purchasing and intake.'),
     ]),
@@ -42,8 +43,10 @@
     <div class="row g-3">
         {% for group_label, links in report_groups %}
         {% set group_ns = namespace(has_visible=false) %}
-        {% for endpoint, label, description in links %}
-            {% if can_access_endpoint(endpoint, 'GET') %}
+        {% for link in links %}
+            {% set endpoint = link[0] %}
+            {% set required_permission = link[3] if (link|length) > 3 else none %}
+            {% if can_access_endpoint(endpoint, 'GET') and (not required_permission or has_permission(required_permission)) %}
                 {% set group_ns.has_visible = true %}
                 {% set page_ns.has_visible = true %}
             {% endif %}
@@ -55,8 +58,10 @@
                     <h2 class="h5 mb-0" id="report-group-{{ loop.index }}">{{ group_label }}</h2>
                 </div>
                 <div class="list-group list-group-flush">
-                    {% for endpoint, label, description in links %}
-                    {% if can_access_endpoint(endpoint, 'GET') %}
+                    {% for link in links %}
+                    {% set endpoint, label, description = link[0], link[1], link[2] %}
+                    {% set required_permission = link[3] if (link|length) > 3 else none %}
+                    {% if can_access_endpoint(endpoint, 'GET') and (not required_permission or has_permission(required_permission)) %}
                     <a class="list-group-item list-group-item-action py-3" href="{{ url_for(endpoint) }}">
                         <span class="d-block fw-semibold">{{ label }}</span>
                         <span class="d-block small text-muted mt-1">{{ description }}</span>

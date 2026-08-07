@@ -22,6 +22,7 @@ from wtforms import (
     HiddenField,
     IntegerField,
     PasswordField,
+    RadioField,
     SelectField,
     SelectMultipleField,
     StringField,
@@ -492,13 +493,19 @@ def load_signage_media_asset_choices(
     return choices
 
 
-def load_permission_group_choices(include_system: bool = True):
+def load_permission_group_choices(
+    include_system: bool = True,
+    *,
+    allowed_group_ids: set[int] | None = None,
+):
     """Return available permission group choices."""
     query = PermissionGroup.query.order_by(
         PermissionGroup.is_system.desc(), PermissionGroup.name
     )
     if not include_system:
         query = query.filter_by(is_system=False)
+    if allowed_group_ids is not None:
+        query = query.filter(PermissionGroup.id.in_(allowed_group_ids))
     return [(group.id, group.name) for group in query.all()]
 
 
@@ -1602,23 +1609,88 @@ class UserForm(FlaskForm):
     pass
 
 
+PASSWORD_MIN_LENGTH = 12
+PASSWORD_MAX_LENGTH = 128
+
+
+def _password_policy_validators():
+    return [
+        DataRequired(),
+        Length(
+            min=PASSWORD_MIN_LENGTH,
+            message=f"Password must be at least {PASSWORD_MIN_LENGTH} characters.",
+        ),
+        Length(
+            max=PASSWORD_MAX_LENGTH,
+            message=f"Password must be {PASSWORD_MAX_LENGTH} characters or fewer.",
+        ),
+    ]
+
+
 class InviteUserForm(FlaskForm):
-    email = StringField("Email", validators=[DataRequired(), Email()])
+    creation_method = RadioField(
+        "Account Setup",
+        choices=(
+            ("invite", "Email invitation"),
+            ("password", "Set password manually"),
+        ),
+        default="invite",
+        validators=[DataRequired()],
+    )
+    email = StringField(
+        "Email", validators=[DataRequired(), Email(), Length(max=120)]
+    )
     display_name = StringField(
-        "Display Name",
+        "Name",
         validators=[Optional(), Length(max=120)],
     )
+    password = PasswordField("Password")
+    confirm_password = PasswordField("Confirm Password")
     group_ids = SelectMultipleField(
         "Permission Groups",
         coerce=int,
         validators=[Optional()],
         render_kw={"size": 8},
     )
-    submit = SubmitField("Send Invite")
+    submit = SubmitField("Add User")
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, allowed_group_ids=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.group_ids.choices = load_permission_group_choices()
+        self.group_ids.choices = load_permission_group_choices(
+            allowed_group_ids=allowed_group_ids
+        )
+
+    def validate(self, extra_validators=None):
+        # Treat legacy submissions without the new selector as invitations.
+        self.creation_method.data = self.creation_method.data or "invite"
+        valid = super().validate(extra_validators=extra_validators)
+        if self.creation_method.data != "password":
+            return valid
+
+        password = self.password.data or ""
+        confirmation = self.confirm_password.data or ""
+        if not password:
+            self.password.errors.append(
+                "Password is required for manual setup."
+            )
+            valid = False
+        elif len(password) < PASSWORD_MIN_LENGTH:
+            self.password.errors.append(
+                f"Password must be at least {PASSWORD_MIN_LENGTH} characters."
+            )
+            valid = False
+        elif len(password) > PASSWORD_MAX_LENGTH:
+            self.password.errors.append(
+                f"Password must be {PASSWORD_MAX_LENGTH} characters or fewer."
+            )
+            valid = False
+        if not confirmation:
+            self.confirm_password.errors.append("Please confirm the password.")
+            valid = False
+        elif password != confirmation:
+            self.confirm_password.errors.append("Passwords must match.")
+            valid = False
+        return valid
 
 
 class UserAccessForm(FlaskForm):
@@ -1634,9 +1706,11 @@ class UserAccessForm(FlaskForm):
     )
     submit = SubmitField("Save Access")
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, allowed_group_ids=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.group_ids.choices = load_permission_group_choices()
+        self.group_ids.choices = load_permission_group_choices(
+            allowed_group_ids=allowed_group_ids
+        )
 
 
 class PermissionGroupForm(FlaskForm):
@@ -1699,7 +1773,9 @@ class ChangePasswordForm(FlaskForm):
     current_password = PasswordField(
         "Current Password", validators=[DataRequired()]
     )
-    new_password = PasswordField("New Password", validators=[DataRequired()])
+    new_password = PasswordField(
+        "New Password", validators=_password_policy_validators()
+    )
     confirm_password = PasswordField(
         "Confirm Password",
         validators=[
@@ -1711,7 +1787,9 @@ class ChangePasswordForm(FlaskForm):
 
 
 class SetPasswordForm(FlaskForm):
-    new_password = PasswordField("New Password", validators=[DataRequired()])
+    new_password = PasswordField(
+        "New Password", validators=_password_policy_validators()
+    )
     confirm_password = PasswordField(
         "Confirm Password",
         validators=[
@@ -3855,6 +3933,20 @@ class SettingsForm(FlaskForm):
         validators=[InputRequired(), NumberRange(min=0)],
     )
     default_timezone = SelectField("Default Timezone")
+    schedule_week_start_day = SelectField(
+        "Schedule Week Starts On",
+        coerce=int,
+        choices=[
+            (0, "Monday"),
+            (1, "Tuesday"),
+            (2, "Wednesday"),
+            (3, "Thursday"),
+            (4, "Friday"),
+            (5, "Saturday"),
+            (6, "Sunday"),
+        ],
+        validators=[InputRequired()],
+    )
     auto_backup_enabled = BooleanField("Enable Automatic Backups")
     auto_backup_interval_value = IntegerField(
         "Backup Interval",

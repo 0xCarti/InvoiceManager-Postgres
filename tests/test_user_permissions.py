@@ -242,8 +242,6 @@ def test_permission_group_create_form_can_copy_permissions_from_existing_groups(
         purchase_receive = Permission.query.filter_by(
             code="purchase_invoices.receive"
         ).first()
-        transfer_view = Permission.query.filter_by(code="transfers.view").first()
-
         base_group = PermissionGroup(
             name="Receiving Base",
             description="Starter permissions for receiving.",
@@ -413,6 +411,211 @@ def test_permissions_manager_can_open_permission_group_editor(client, app):
     assert b"You can review the group details here" in response.data
 
 
+def test_permissions_manager_cannot_expand_own_group_beyond_existing_access(
+    client, app
+):
+    with app.app_context():
+        permissions_manage = Permission.query.filter_by(
+            code="permissions.manage"
+        ).one()
+        permissions_view = Permission.query.filter_by(
+            code="permissions.view"
+        ).one()
+        settings_manage = Permission.query.filter_by(code="settings.manage").one()
+
+        editor_group = PermissionGroup(
+            name="Bounded Permission Editors",
+            description="May delegate only permissions already held.",
+        )
+        editor_group.permissions = [permissions_manage, permissions_view]
+        elevated_group = PermissionGroup(name="Elevated Settings Access")
+        elevated_group.permissions = [settings_manage]
+        editor = User(
+            email="bounded-permissions-editor@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        editor.permission_groups = [editor_group]
+        db.session.add_all([editor_group, elevated_group, editor])
+        db.session.commit()
+        editor_group_id = editor_group.id
+        elevated_group_id = elevated_group.id
+
+    with client:
+        login(client, "bounded-permissions-editor@example.com", "pass")
+        direct_escalation = client.post(
+            f"/controlpanel/permission-groups/{editor_group_id}",
+            data={
+                "group-name": "Bounded Permission Editors",
+                "group-description": "May delegate only permissions already held.",
+                "group-permissions": [
+                    "permissions.manage",
+                    "permissions.view",
+                    "settings.manage",
+                ],
+                "group-submit": "1",
+            },
+        )
+        inherited_escalation = client.post(
+            f"/controlpanel/permission-groups/{editor_group_id}",
+            data={
+                "group-name": "Bounded Permission Editors",
+                "group-description": "May delegate only permissions already held.",
+                "group-permissions": [
+                    "permissions.manage",
+                    "permissions.view",
+                ],
+                "group-inherited_group_ids": [str(elevated_group_id)],
+                "group-submit": "1",
+            },
+        )
+
+    assert direct_escalation.status_code == 403
+    assert inherited_escalation.status_code == 403
+    with app.app_context():
+        editor_group = db.session.get(PermissionGroup, editor_group_id)
+        assert {permission.code for permission in editor_group.permissions} == {
+            "permissions.manage",
+            "permissions.view",
+        }
+
+
+def test_permissions_manager_can_delegate_permissions_already_held(client, app):
+    with app.app_context():
+        permissions_manage = Permission.query.filter_by(
+            code="permissions.manage"
+        ).one()
+        permissions_view = Permission.query.filter_by(
+            code="permissions.view"
+        ).one()
+        editor_group = PermissionGroup(name="Scoped Permission Editors")
+        editor_group.permissions = [permissions_manage, permissions_view]
+        target_group = PermissionGroup(
+            name="Scoped Delegation Target",
+            description="Receives an in-scope delegated permission.",
+        )
+        editor = User(
+            email="scoped-permissions-editor@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        editor.permission_groups = [editor_group]
+        db.session.add_all([editor_group, target_group, editor])
+        db.session.commit()
+        target_group_id = target_group.id
+
+    with client:
+        login(client, "scoped-permissions-editor@example.com", "pass")
+        response = client.post(
+            f"/controlpanel/permission-groups/{target_group_id}",
+            data={
+                "group-name": "Scoped Delegation Target",
+                "group-description": "Receives an in-scope delegated permission.",
+                "group-permissions": ["permissions.view"],
+                "group-submit": "1",
+            },
+        )
+
+    assert response.status_code == 302
+    with app.app_context():
+        target_group = db.session.get(PermissionGroup, target_group_id)
+        assert {permission.code for permission in target_group.permissions} == {
+            "permissions.view"
+        }
+
+
+def test_delegated_managers_cannot_modify_groups_above_their_access_ceiling(
+    client, app
+):
+    with app.app_context():
+        permission_groups_manage = Permission.query.filter_by(
+            code="permission_groups.manage"
+        ).one()
+        permissions_manage = Permission.query.filter_by(
+            code="permissions.manage"
+        ).one()
+        permissions_view = Permission.query.filter_by(
+            code="permissions.view"
+        ).one()
+        settings_manage = Permission.query.filter_by(code="settings.manage").one()
+
+        manager_group = PermissionGroup(name="Bounded Group Managers")
+        manager_group.permissions = [
+            permission_groups_manage,
+            permissions_manage,
+            permissions_view,
+        ]
+        high_group = PermissionGroup(
+            name="High Privilege Operations",
+            description="Must remain under super-admin control.",
+        )
+        high_group.permissions = [settings_manage]
+        manager = User(
+            email="bounded-group-manager@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        manager.permission_groups = [manager_group]
+        db.session.add_all([manager_group, high_group, manager])
+        db.session.commit()
+        high_group_id = high_group.id
+
+    with client:
+        login(client, "bounded-group-manager@example.com", "pass")
+        list_response = client.get("/controlpanel/permission-groups")
+        detail_response = client.get(
+            f"/controlpanel/permission-groups/{high_group_id}"
+        )
+        strip_response = client.post(
+            f"/controlpanel/permission-groups/{high_group_id}",
+            data={
+                "group-name": "High Privilege Operations",
+                "group-description": "Must remain under super-admin control.",
+                "group-submit": "1",
+            },
+        )
+        rename_response = client.post(
+            f"/controlpanel/permission-groups/{high_group_id}",
+            data={
+                "group-name": "Disrupted Operations",
+                "group-description": "Must remain under super-admin control.",
+                "group-permissions": ["settings.manage"],
+                "group-submit": "1",
+            },
+        )
+        delete_response = client.post(
+            f"/controlpanel/permission-groups/{high_group_id}/delete",
+            data={"submit": "Delete"},
+        )
+
+    list_body = list_response.get_data(as_text=True)
+    detail_body = detail_response.get_data(as_text=True)
+    delete_action = f"/controlpanel/permission-groups/{high_group_id}/delete"
+
+    assert list_response.status_code == 200
+    assert "High Privilege Operations" in list_body
+    assert delete_action not in list_body
+    assert detail_response.status_code == 200
+    assert (
+        "This group contains permissions beyond your own access and can only be "
+        "changed by a super admin."
+    ) in detail_body
+    assert "Save Changes" not in detail_body
+    assert delete_action not in detail_body
+    assert strip_response.status_code == 403
+    assert rename_response.status_code == 403
+    assert delete_response.status_code == 403
+
+    with app.app_context():
+        high_group = db.session.get(PermissionGroup, high_group_id)
+        assert high_group is not None
+        assert high_group.name == "High Privilege Operations"
+        assert high_group.description == "Must remain under super-admin control."
+        assert {permission.code for permission in high_group.permissions} == {
+            "settings.manage"
+        }
+
+
 def test_permission_group_view_only_user_hides_manage_actions_and_cannot_mutate(
     client, app
 ):
@@ -542,6 +745,7 @@ def test_permissions_view_only_user_can_review_catalog_without_management_contro
     assert groups_response.status_code == 403
     assert update_response.status_code == 403
     assert delete_response.status_code == 403
+
 
 def test_import_page_hides_upload_actions_for_view_only_users(client, app):
     with app.app_context():

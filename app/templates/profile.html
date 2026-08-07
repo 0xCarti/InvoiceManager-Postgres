@@ -1,533 +1,298 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<style>
-    .profile-section-card {
-        --profile-card-padding: calc(var(--bs-spacer) * 1.5);
-    }
-
-    .profile-section-card .card-body {
-        padding: var(--profile-card-padding);
-    }
-
-    .profile-section-card .card-body > h3 {
-        margin-bottom: calc(var(--bs-spacer) * 1.125) !important;
-    }
-
-    .profile-form {
-        display: grid;
-        gap: calc(var(--bs-spacer) * 0.875);
-    }
-
-    .profile-field {
-        display: grid;
-        gap: calc(var(--bs-spacer) * 0.5);
-    }
-
-    .profile-feedback {
-        min-height: 1.05rem;
-        font-size: 0.78rem;
-        line-height: 1.05rem;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        margin-top: 0;
-    }
-
-    .profile-password-input-wrap {
-        position: relative;
-    }
-
-    .profile-password-input-wrap .form-control {
-        padding-right: 4.5rem;
-    }
-
-    .profile-password-toggle {
-        position: absolute;
-        right: 0.35rem;
-        top: 50%;
-        transform: translateY(-50%);
-        font-size: 0.72rem;
-        line-height: 1;
-        padding: 0.2rem 0.45rem;
-    }
-
-    .profile-actions {
-        margin-top: calc(var(--bs-spacer) * 0.25);
-        display: flex;
-        justify-content: flex-end;
-    }
-
-    .profile-actions .btn {
-        min-width: 11rem;
-    }
-
-    @media (max-width: 575.98px) {
-        .profile-feedback {
-            white-space: normal;
-            overflow: visible;
-            text-overflow: clip;
-        }
-
-        .profile-actions {
-            justify-content: stretch;
-        }
-
-        .profile-actions .btn {
-            width: 100%;
-            min-width: 0;
-        }
-
-        .profile-activity-header {
-            align-items: flex-start;
-        }
-    }
-
-    .profile-header {
-        margin-bottom: calc(var(--bs-spacer) * 0.75);
-    }
-
-    .profile-header-title {
-        margin-bottom: 0;
-        line-height: 1.2;
-    }
-
-    .profile-header-subtitle {
-        margin: 0;
-        font-size: 0.9rem;
-        line-height: 1.2;
-    }
-
-    .profile-activity-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: baseline;
-        gap: 0.5rem;
-        margin-bottom: 0.75rem;
-    }
-
-    .profile-activity-list {
-        max-height: 16.5rem;
-        overflow-y: auto;
+<style nonce="{{ csp_nonce }}">
+.profile-avatar {
+    width: 3.25rem;
+    height: 3.25rem;
+    border-radius: 1rem;
+    display: grid;
+    place-items: center;
+    color: var(--bs-primary-text-emphasis);
+    background: rgba(var(--bs-primary-rgb), .12);
+    font-size: 1.25rem;
+    font-weight: 700;
+    flex: 0 0 auto;
+}
+.profile-summary-list {
+    display: grid;
+    gap: .9rem;
+}
+.profile-summary-label {
+    display: block;
+    color: var(--bs-secondary-color);
+    font-size: .75rem;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    margin-bottom: .15rem;
+}
+.profile-tabs {
+    gap: .35rem;
+    border-bottom: 1px solid var(--bs-border-color);
+}
+.profile-tabs .nav-link {
+    border: 0;
+    border-bottom: 3px solid transparent;
+    border-radius: 0;
+    color: var(--bs-secondary-color);
+    padding: .75rem .9rem;
+}
+.profile-tabs .nav-link.active {
+    color: var(--bs-primary);
+    border-bottom-color: var(--bs-primary);
+    background: transparent;
+}
+.profile-form-grid {
+    display: grid;
+    gap: 1rem;
+}
+.profile-security-form {
+    max-width: 36rem;
+}
+.profile-password-wrap {
+    position: relative;
+}
+.profile-password-wrap .form-control {
+    padding-right: 4.75rem;
+}
+.profile-password-toggle {
+    position: absolute;
+    top: 50%;
+    right: .4rem;
+    transform: translateY(-50%);
+    padding: .2rem .55rem;
+    font-size: .75rem;
+}
+.profile-notification-group summary {
+    cursor: pointer;
+    list-style: none;
+}
+.profile-notification-group summary::-webkit-details-marker {
+    display: none;
+}
+.profile-notification-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 4rem 4rem;
+    gap: .75rem;
+    align-items: center;
+    padding: .75rem 0;
+    border-top: 1px solid var(--bs-border-color-translucent);
+}
+.profile-activity-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: .8rem 0;
+    border-bottom: 1px solid var(--bs-border-color-translucent);
+}
+.profile-activity-row:last-child {
+    border-bottom: 0;
+}
+@media (max-width: 575.98px) {
+    .profile-tabs {
+        flex-wrap: nowrap;
         overflow-x: auto;
-        border: 1px solid var(--bs-border-color-translucent);
-        border-radius: var(--bs-border-radius);
     }
-
-    .profile-activity-row {
-        padding: 0.55rem 0.75rem;
-        border-bottom: 1px solid var(--bs-border-color-translucent);
-    }
-
-    .profile-activity-row:last-child {
-        border-bottom: 0;
-    }
-
-    .profile-activity-link {
-        display: block;
-        text-decoration: none;
-    }
-
-    .profile-activity-main {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 0.5rem;
-        line-height: 1.2;
-    }
-
-    .profile-activity-meta {
-        margin-top: 0.15rem;
-        font-size: 0.78rem;
-        color: var(--bs-secondary-color);
-        line-height: 1.2;
-    }
-
-    .profile-activity-table {
-        margin-bottom: 0;
-        font-size: 0.88rem;
-    }
-
-    .profile-activity-table th,
-    .profile-activity-table td {
-        padding: 0.5rem 0.65rem;
-        vertical-align: middle;
-        line-height: 1.15;
+    .profile-tabs .nav-link {
         white-space: nowrap;
     }
-
-    .profile-activity-table th:last-child,
-    .profile-activity-table td:last-child {
-        text-align: right;
+    .profile-notification-row {
+        grid-template-columns: minmax(0, 1fr) 3.25rem 3.25rem;
+        gap: .4rem;
     }
-
-    .profile-notification-table {
-        margin-bottom: 0;
-    }
-
-    .profile-notification-table th,
-    .profile-notification-table td {
-        vertical-align: middle;
-    }
-
-    .profile-notification-table td:first-child {
-        font-weight: 500;
-    }
-
-    .profile-notification-check {
-        display: flex;
-        justify-content: center;
-        margin: 0;
-    }
+}
 </style>
+
 <div class="container mt-4 app-page-shell">
-    <div class="app-page-header profile-header">
-        <div class="app-page-header-copy">
-            <h1 class="h4 profile-header-title">User Profile</h1>
-            <p class="text-muted profile-header-subtitle">{{ user.email }}</p>
-        </div>
-    </div>
-
-    <div class="row g-3 g-lg-4">
-        <div class="col-12 col-lg-8">
-            <div class="vstack gap-3">
-                <div class="card profile-section-card">
-                    <div class="card-body">
-                        <h3 class="h5 mb-3">Account Security</h3>
-                        <form method="post" class="profile-form">
-                            {{ form.hidden_tag() }}
-                            {% if form.current_password %}
-                            <div class="form-group profile-field">
-                                {{ form.current_password.label(class_='form-label mb-0') }}
-                                <div class="profile-password-input-wrap" data-password-toggle-group>
-                                    {{ form.current_password(class_='form-control' + (' is-invalid' if password_submitted and form.current_password.errors else ''), data_password_input='true') }}
-                                    <button
-                                        type="button"
-                                        class="btn btn-outline-secondary profile-password-toggle"
-                                        data-password-toggle
-                                        aria-controls="{{ form.current_password.id }}"
-                                        aria-label="Toggle current password visibility"
-                                        aria-pressed="false"
-                                    >
-                                        Show
-                                    </button>
-                                </div>
-                                {% if password_submitted and form.current_password.errors %}
-                                <div class="profile-feedback text-danger">{{ form.current_password.errors[0] }}</div>
-                                {% else %}
-                                <div class="profile-feedback text-muted">Required to confirm this password change.</div>
-                                {% endif %}
-                            </div>
-                            {% endif %}
-                            <div class="form-group profile-field">
-                                {{ form.new_password.label(class_='form-label mb-0') }}
-                                <div class="profile-password-input-wrap" data-password-toggle-group>
-                                    {{ form.new_password(class_='form-control' + (' is-invalid' if password_submitted and form.new_password.errors else ''), data_password_input='true') }}
-                                    <button
-                                        type="button"
-                                        class="btn btn-outline-secondary profile-password-toggle"
-                                        data-password-toggle
-                                        aria-controls="{{ form.new_password.id }}"
-                                        aria-label="Toggle new password visibility"
-                                        aria-pressed="false"
-                                    >
-                                        Show
-                                    </button>
-                                </div>
-                                {% if password_submitted and form.new_password.errors %}
-                                <div class="profile-feedback text-danger">{{ form.new_password.errors[0] }}</div>
-                                {% else %}
-                                <div class="profile-feedback text-muted">Use a strong password you do not reuse elsewhere.</div>
-                                {% endif %}
-                            </div>
-                            <div class="form-group profile-field">
-                                {{ form.confirm_password.label(class_='form-label mb-0') }}
-                                <div class="profile-password-input-wrap" data-password-toggle-group>
-                                    {{ form.confirm_password(class_='form-control' + (' is-invalid' if password_submitted and form.confirm_password.errors else ''), data_password_input='true') }}
-                                    <button
-                                        type="button"
-                                        class="btn btn-outline-secondary profile-password-toggle"
-                                        data-password-toggle
-                                        aria-controls="{{ form.confirm_password.id }}"
-                                        aria-label="Toggle confirm password visibility"
-                                        aria-pressed="false"
-                                    >
-                                        Show
-                                    </button>
-                                </div>
-                                {% if password_submitted and form.confirm_password.errors %}
-                                <div class="profile-feedback text-danger">{{ form.confirm_password.errors[0] }}</div>
-                                {% elif status_messages.get('password') %}
-                                <div class="profile-feedback text-success">{{ status_messages.get('password')[1] }}</div>
-                                {% else %}
-                                <div class="profile-feedback text-muted">Must match the new password exactly.</div>
-                                {% endif %}
-                            </div>
-                            <div class="profile-actions">
-                                <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-
-                <div class="card profile-section-card">
-                    <div class="card-body">
-                        <h3 class="h5 mb-3">Preferences</h3>
-                        <form method="post" class="profile-form">
-                            {{ tz_form.hidden_tag() }}
-                            <div class="form-group profile-field">
-                                {{ tz_form.timezone.label(class_='form-label mb-0') }}
-                                {{ tz_form.timezone(class_='form-control' + (' is-invalid' if timezone_submitted and tz_form.timezone.errors else '')) }}
-                                {% if timezone_submitted and tz_form.timezone.errors %}
-                                <div class="profile-feedback text-danger">{{ tz_form.timezone.errors[0] }}</div>
-                                {% elif status_messages.get('timezone') %}
-                                <div class="profile-feedback text-success">{{ status_messages.get('timezone')[1] }}</div>
-                                {% else %}
-                                <div class="profile-feedback text-muted">Used for reports, timestamps, and schedule defaults.</div>
-                                {% endif %}
-                            </div>
-                            <div class="profile-actions">
-                                <button type="submit" class="btn btn-primary">{{ tz_form.submit.label.text }}</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-
-                <div class="card profile-section-card">
-                    <div class="card-body">
-                        <h3 class="h5 mb-3">Transfer Defaults</h3>
-                        <form method="post" class="profile-form">
-                            {{ transfer_defaults_form.hidden_tag() }}
-                            <div class="form-group profile-field">
-                                {{ transfer_defaults_form.default_transfer_from_location_id.label(class_='form-label mb-0') }}
-                                {{ transfer_defaults_form.default_transfer_from_location_id(class_='form-select' + (' is-invalid' if transfer_defaults_submitted and transfer_defaults_form.default_transfer_from_location_id.errors else '')) }}
-                                {% if transfer_defaults_submitted and transfer_defaults_form.default_transfer_from_location_id.errors %}
-                                <div class="profile-feedback text-danger">{{ transfer_defaults_form.default_transfer_from_location_id.errors[0] }}</div>
-                                {% elif status_messages.get('transfer_defaults') %}
-                                <div class="profile-feedback text-success">{{ status_messages.get('transfer_defaults')[1] }}</div>
-                                {% else %}
-                                <div class="profile-feedback text-muted">Used to prefill new transfer forms. You can still change the location on each transfer.</div>
-                                {% endif %}
-                            </div>
-                            <div class="profile-actions">
-                                <button type="submit" class="btn btn-primary">{{ transfer_defaults_form.submit.label.text }}</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-
-                <div class="card profile-section-card">
-                    <div class="card-body">
-                        <h3 class="h5 mb-3">Contact / Notifications</h3>
-                        <form method="post" class="profile-form">
-                            {{ notif_form.hidden_tag() }}
-                            <div class="form-group profile-field">
-                                {{ notif_form.phone_number.label(class_='form-label mb-0') }}
-                                {{ notif_form.phone_number(class_='form-control' + (' is-invalid' if notifications_submitted and notif_form.phone_number.errors else '')) }}
-                                {% if notifications_submitted and notif_form.phone_number.errors %}
-                                <div class="profile-feedback text-danger">{{ notif_form.phone_number.errors[0] }}</div>
-                                {% elif status_messages.get('notifications') %}
-                                <div class="profile-feedback text-success">{{ status_messages.get('notifications')[1] }}</div>
-                                {% else %}
-                                <div class="profile-feedback text-muted">Set this to enable text notifications for operational and schedule alerts.</div>
-                                {% endif %}
-                            </div>
-                            <hr class="my-2">
-                            <div class="small text-muted mb-2">Operational notifications</div>
-                            {% for group in operational_notification_groups %}
-                            <div class="border rounded p-3 mb-3">
-                                <div class="d-flex justify-content-between align-items-center mb-2 gap-2">
-                                    <div class="fw-semibold">{{ group.label }}</div>
-                                    <div class="small text-muted">{{ group.selected_count }} of {{ group.event_count }} enabled</div>
-                                </div>
-                                <div class="table-responsive">
-                                    <table class="table table-sm profile-notification-table mb-0">
-                                        <thead>
-                                            <tr>
-                                                <th scope="col">Notification</th>
-                                                <th scope="col" class="text-center">Email</th>
-                                                <th scope="col" class="text-center">Text</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {% for event_pref in group.events %}
-                                            <tr>
-                                                <td>
-                                                    <div class="fw-semibold">{{ event_pref.label }}</div>
-                                                    <div class="text-muted small">{{ event_pref.description }}</div>
-                                                </td>
-                                                <td class="text-center">
-                                                    <div class="form-check profile-notification-check">
-                                                        <input
-                                                            class="form-check-input"
-                                                            type="checkbox"
-                                                            name="{{ event_pref.email_input_name }}"
-                                                            id="{{ event_pref.email_input_id }}"
-                                                            aria-label="{{ event_pref.label }} email notification"
-                                                            {% if event_pref.email_enabled %}checked{% endif %}
-                                                        >
-                                                    </div>
-                                                </td>
-                                                <td class="text-center">
-                                                    <div class="form-check profile-notification-check">
-                                                        <input
-                                                            class="form-check-input"
-                                                            type="checkbox"
-                                                            name="{{ event_pref.text_input_name }}"
-                                                            id="{{ event_pref.text_input_id }}"
-                                                            aria-label="{{ event_pref.label }} text notification"
-                                                            {% if event_pref.text_enabled %}checked{% endif %}
-                                                        >
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                            {% endfor %}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                            {% endfor %}
-                            <hr class="my-2">
-                            <div class="small text-muted mb-2">Schedule notifications</div>
-                            <div class="table-responsive">
-                                <table class="table table-sm profile-notification-table">
-                                    <thead>
-                                        <tr>
-                                            <th scope="col">Category</th>
-                                            <th scope="col" class="text-center">Email</th>
-                                            <th scope="col" class="text-center">Text</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr>
-                                            <td>Schedule posted</td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_schedule_post_email(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_schedule_post_text(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                        <tr>
-                                            <td>Published shift changes</td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_schedule_changes_email(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_schedule_changes_text(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                        <tr>
-                                            <td>Tradeboard / open shifts</td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_tradeboard_email(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                            <td class="text-center">
-                                                <div class="form-check profile-notification-check">
-                                                    {{ notif_form.notify_tradeboard_text(class_='form-check-input') }}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div class="profile-actions">
-                                <button type="submit" class="btn btn-primary">{{ notif_form.submit.label.text }}</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
+    <header class="app-page-header">
+        <div class="d-flex align-items-center gap-3 min-w-0">
+            <div class="profile-avatar" aria-hidden="true">{{ (user.name_or_email or '?')[0]|upper }}</div>
+            <div class="min-w-0">
+                <h1 class="h3 mb-1 text-break">{{ user.name_or_email }}</h1>
+                {% if user.preferred_name %}<p class="text-muted mb-0 text-break">{{ user.email }}</p>{% endif %}
             </div>
         </div>
+        {% if is_admin_view %}
+        <div class="app-page-header-actions">
+            <a href="{{ url_for('admin.users') }}" class="btn btn-outline-secondary">Back to Users</a>
+            {% if can_access_endpoint('admin.user_access') %}
+            <a href="{{ url_for('admin.user_access', user_id=user.id) }}" class="btn btn-outline-primary">Manage Access</a>
+            {% endif %}
+        </div>
+        {% endif %}
+    </header>
 
-        <div class="col-12 col-lg-4">
-            <div class="vstack gap-3">
-                <div class="card profile-section-card">
-                    <div class="card-body">
-                        <div class="profile-activity-header">
-                            <h3 class="h5 mb-0">Transfers</h3>
-                            {% if transfers %}
-                            <a class="small" href="{{ url_for('transfer.view_transfers', user_id=user.id) }}">View all</a>
-                            {% endif %}
+    <div class="row g-4">
+        <aside class="col-12 col-lg-3">
+            <section class="app-card profile-summary-list" aria-label="Account summary">
+                <div>
+                    <span class="profile-summary-label">Status</span>
+                    <span class="badge {% if user.active %}text-bg-success{% elif user.is_invitation_pending %}text-bg-warning{% else %}text-bg-secondary{% endif %}">
+                        {{ 'Active' if user.active else 'Invited' if user.is_invitation_pending else 'Inactive' }}
+                    </span>
+                    {% if user.is_super_admin %}<span class="badge text-bg-dark">Super Admin</span>{% endif %}
+                </div>
+                <div>
+                    <span class="profile-summary-label">Last sign-in</span>
+                    <span>{{ user.last_login_at.strftime('%b %d, %Y at %H:%M') if user.last_login_at else 'Never' }}</span>
+                </div>
+                <div>
+                    <span class="profile-summary-label">Timezone</span>
+                    <span>{{ user.timezone or 'Application default' }}</span>
+                </div>
+                <div>
+                    <span class="profile-summary-label">Permission groups</span>
+                    {% if user.permission_groups %}
+                    <div class="d-flex flex-wrap gap-1">
+                        {% for group in user.permission_groups %}<span class="badge text-bg-light border text-dark">{{ group.name }}</span>{% endfor %}
+                    </div>
+                    {% else %}
+                    <span class="text-muted">No groups assigned</span>
+                    {% endif %}
+                </div>
+            </section>
+        </aside>
+
+        <div class="col-12 col-lg-9">
+            <ul class="nav profile-tabs mb-4" role="tablist">
+                <li class="nav-item" role="presentation"><button class="nav-link{% if active_profile_tab == 'preferences' %} active{% endif %}" id="preferences-tab" data-bs-toggle="tab" data-bs-target="#preferences-pane" type="button" role="tab" aria-controls="preferences-pane" aria-selected="{{ 'true' if active_profile_tab == 'preferences' else 'false' }}">Preferences</button></li>
+                <li class="nav-item" role="presentation"><button class="nav-link{% if active_profile_tab == 'notifications' %} active{% endif %}" id="notifications-tab" data-bs-toggle="tab" data-bs-target="#notifications-pane" type="button" role="tab" aria-controls="notifications-pane" aria-selected="{{ 'true' if active_profile_tab == 'notifications' else 'false' }}">Notifications</button></li>
+                <li class="nav-item" role="presentation"><button class="nav-link{% if active_profile_tab == 'security' %} active{% endif %}" id="security-tab" data-bs-toggle="tab" data-bs-target="#security-pane" type="button" role="tab" aria-controls="security-pane" aria-selected="{{ 'true' if active_profile_tab == 'security' else 'false' }}">Security</button></li>
+                {% if can_view_transfer_activity or can_view_invoice_activity %}
+                <li class="nav-item" role="presentation"><button class="nav-link{% if active_profile_tab == 'activity' %} active{% endif %}" id="activity-tab" data-bs-toggle="tab" data-bs-target="#activity-pane" type="button" role="tab" aria-controls="activity-pane" aria-selected="{{ 'true' if active_profile_tab == 'activity' else 'false' }}">Recent Activity</button></li>
+                {% endif %}
+            </ul>
+
+            <div class="tab-content">
+                <div class="tab-pane fade{% if active_profile_tab == 'preferences' %} show active{% endif %}" id="preferences-pane" role="tabpanel" aria-labelledby="preferences-tab" tabindex="0">
+                    <div class="row g-3">
+                        <div class="col-12 col-xl-6">
+                            <section class="app-form-card h-100">
+                                <h2 class="h5 mb-1">Timezone</h2>
+                                <p class="text-muted small mb-3">Controls timestamps, reports, and scheduling defaults.</p>
+                                <form method="post" class="profile-form-grid">
+                                    {{ tz_form.hidden_tag() }}
+                                    <div>
+                                        {{ tz_form.timezone.label(class_='form-label') }}
+                                        {{ tz_form.timezone(class_='form-control' + (' is-invalid' if timezone_submitted and tz_form.timezone.errors else '')) }}
+                                        {% for error in tz_form.timezone.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                                        {% if status_messages.get('timezone') %}<div class="text-success small mt-1">{{ status_messages.get('timezone')[1] }}</div>{% endif %}
+                                    </div>
+                                    <div class="text-end"><button type="submit" class="btn btn-primary">{{ tz_form.submit.label.text }}</button></div>
+                                </form>
+                            </section>
                         </div>
-                        <div class="profile-activity-list">
-                            {% for t in transfers %}
-                            <div class="profile-activity-row">
-                                <a class="profile-activity-link" href="{{ url_for('transfer.view_transfer', transfer_id=t.id) }}">
-                                    <div class="profile-activity-main">
-                                        <span class="fw-semibold">Transfer #{{ t.id }}</span>
-                                        <span class="badge text-bg-{{ 'success' if t.completed else 'secondary' }}">
-                                            {{ 'Completed' if t.completed else 'Open' }}
-                                        </span>
+                        <div class="col-12 col-xl-6">
+                            <section class="app-form-card h-100">
+                                <h2 class="h5 mb-1">Transfer Defaults</h2>
+                                <p class="text-muted small mb-3">Prefill a starting location on new transfer forms.</p>
+                                <form method="post" class="profile-form-grid">
+                                    {{ transfer_defaults_form.hidden_tag() }}
+                                    <div>
+                                        {{ transfer_defaults_form.default_transfer_from_location_id.label(class_='form-label') }}
+                                        {{ transfer_defaults_form.default_transfer_from_location_id(class_='form-select' + (' is-invalid' if transfer_defaults_submitted and transfer_defaults_form.default_transfer_from_location_id.errors else '')) }}
+                                        {% for error in transfer_defaults_form.default_transfer_from_location_id.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                                        {% if status_messages.get('transfer_defaults') %}<div class="text-success small mt-1">{{ status_messages.get('transfer_defaults')[1] }}</div>{% endif %}
                                     </div>
-                                    <div class="profile-activity-meta">
-                                        {{ t.from_location_name }} -> {{ t.to_location_name }}
-                                        {% if t.date_created %}
-                                        | {{ t.date_created.strftime('%Y-%m-%d') }}
-                                        {% endif %}
-                                    </div>
-                                </a>
-                            </div>
-                            {% else %}
-                            <div class="profile-activity-row text-muted">No transfers found.</div>
-                            {% endfor %}
+                                    <div class="text-end"><button type="submit" class="btn btn-primary">{{ transfer_defaults_form.submit.label.text }}</button></div>
+                                </form>
+                            </section>
                         </div>
                     </div>
                 </div>
 
-                <div class="card profile-section-card">
-                    <div class="card-body">
-                        <div class="profile-activity-header">
-                            <h3 class="h5 mb-0">Invoices</h3>
-                            {% if invoices %}
-                            <a class="small" href="{{ url_for('invoice.view_invoices', user_id=user.id) }}">View all</a>
-                            {% endif %}
+                <div class="tab-pane fade{% if active_profile_tab == 'notifications' %} show active{% endif %}" id="notifications-pane" role="tabpanel" aria-labelledby="notifications-tab" tabindex="0">
+                    <section class="app-form-card">
+                        <div class="mb-4">
+                            <h2 class="h5 mb-1">Notification Preferences</h2>
+                            <p class="text-muted small mb-0">Choose email or text delivery for the alerts relevant to this account.</p>
                         </div>
-                        <div class="profile-activity-list">
-                            <div class="table-responsive">
-                                <table class="table table-sm table-hover profile-activity-table mb-0">
-                                <thead class="table-light sticky-top">
-                                    <tr>
-                                        <th scope="col">ID</th>
-                                        <th scope="col">Date</th>
-                                        <th scope="col">Status</th>
-                                        <th scope="col">Amount</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                            {% for inv in invoices %}
-                                <tr>
-                                    <td>
-                                        <a href="{{ url_for('invoice.view_invoice', invoice_id=inv.id) }}">#{{ inv.id }}</a>
-                                    </td>
-                                    <td>{{ inv.date_created.strftime('%Y-%m-%d') if inv.date_created else '-' }}</td>
-                                    <td>
-                                        <span class="badge {{ inv.invoice_status_badge_class }}">
-                                            {{ inv.invoice_status_label }}
-                                        </span>
-                                    </td>
-                                    <td>${{ '%.2f'|format(inv.total) }}</td>
-                                </tr>
-                            {% else %}
-                                <tr>
-                                    <td colspan="4" class="text-muted">No invoices found.</td>
-                                </tr>
-                            {% endfor %}
-                                </tbody>
-                                </table>
+                        <form method="post" class="profile-form-grid">
+                            {{ notif_form.hidden_tag() }}
+                            <div>
+                                {{ notif_form.phone_number.label(class_='form-label') }}
+                                {{ notif_form.phone_number(class_='form-control' + (' is-invalid' if notifications_submitted and notif_form.phone_number.errors else ''), placeholder='Phone number for text alerts') }}
+                                {% for error in notif_form.phone_number.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                                {% if status_messages.get('notifications') %}<div class="text-success small mt-1">{{ status_messages.get('notifications')[1] }}</div>{% endif %}
                             </div>
-                        </div>
+
+                            {% for group in operational_notification_groups %}
+                            <details class="profile-notification-group border rounded-3 px-3" {% if loop.first %}open{% endif %}>
+                                <summary class="d-flex justify-content-between align-items-center gap-3 py-3">
+                                    <span class="fw-semibold">{{ group.label }}</span>
+                                    <span class="badge text-bg-light border">{{ group.selected_count }} enabled</span>
+                                </summary>
+                                <div class="profile-notification-row small fw-semibold text-muted"><span>Notification</span><span class="text-center">Email</span><span class="text-center">Text</span></div>
+                                {% for event_pref in group.events %}
+                                <div class="profile-notification-row">
+                                    <div><div class="fw-semibold">{{ event_pref.label }}</div><div class="small text-muted">{{ event_pref.description }}</div></div>
+                                    <div class="form-check d-flex justify-content-center"><input class="form-check-input" type="checkbox" name="{{ event_pref.email_input_name }}" id="{{ event_pref.email_input_id }}" aria-label="{{ event_pref.label }} email notification" {% if event_pref.email_enabled %}checked{% endif %}></div>
+                                    <div class="form-check d-flex justify-content-center"><input class="form-check-input" type="checkbox" name="{{ event_pref.text_input_name }}" id="{{ event_pref.text_input_id }}" aria-label="{{ event_pref.label }} text notification" {% if event_pref.text_enabled %}checked{% endif %}></div>
+                                </div>
+                                {% endfor %}
+                            </details>
+                            {% endfor %}
+
+                            <details class="profile-notification-group border rounded-3 px-3" open>
+                                <summary class="fw-semibold py-3">Scheduling</summary>
+                                {% set schedule_rows = [
+                                    ('Schedule posted', notif_form.notify_schedule_post_email, notif_form.notify_schedule_post_text),
+                                    ('Published shift changes', notif_form.notify_schedule_changes_email, notif_form.notify_schedule_changes_text),
+                                    ('Tradeboard / open shifts', notif_form.notify_tradeboard_email, notif_form.notify_tradeboard_text)
+                                ] %}
+                                <div class="profile-notification-row small fw-semibold text-muted"><span>Notification</span><span class="text-center">Email</span><span class="text-center">Text</span></div>
+                                {% for label, email_field, text_field in schedule_rows %}
+                                <div class="profile-notification-row"><span class="fw-semibold">{{ label }}</span><div class="form-check d-flex justify-content-center">{{ email_field(class_='form-check-input', aria_label=label ~ ' email notification') }}</div><div class="form-check d-flex justify-content-center">{{ text_field(class_='form-check-input', aria_label=label ~ ' text notification') }}</div></div>
+                                {% endfor %}
+                            </details>
+                            <div class="text-end"><button type="submit" class="btn btn-primary">{{ notif_form.submit.label.text }}</button></div>
+                        </form>
+                    </section>
+                </div>
+
+                <div class="tab-pane fade{% if active_profile_tab == 'security' %} show active{% endif %}" id="security-pane" role="tabpanel" aria-labelledby="security-tab" tabindex="0">
+                    <section class="app-form-card">
+                        <h2 class="h5 mb-1">Password</h2>
+                        <p class="text-muted small mb-4">{% if form.current_password %}Confirm the current password before choosing a new one.{% else %}Set a new password for this user. This action is recorded in the activity log.{% endif %}</p>
+                        <form method="post" class="profile-form-grid profile-security-form">
+                            {{ form.hidden_tag() }}
+                            {% if form.current_password %}
+                            <div>
+                                {{ form.current_password.label(class_='form-label') }}
+                                <div class="profile-password-wrap" data-password-toggle-group>{{ form.current_password(class_='form-control' + (' is-invalid' if password_submitted and form.current_password.errors else ''), autocomplete='current-password', data_password_input='true') }}<button type="button" class="btn btn-outline-secondary profile-password-toggle" data-password-toggle aria-controls="{{ form.current_password.id }}" aria-label="Toggle current password visibility" aria-pressed="false">Show</button></div>
+                                {% for error in form.current_password.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                            </div>
+                            {% endif %}
+                            <div>
+                                {{ form.new_password.label(class_='form-label') }}
+                                <div class="profile-password-wrap" data-password-toggle-group>{{ form.new_password(class_='form-control' + (' is-invalid' if password_submitted and form.new_password.errors else ''), autocomplete='new-password', data_password_input='true') }}<button type="button" class="btn btn-outline-secondary profile-password-toggle" data-password-toggle aria-controls="{{ form.new_password.id }}" aria-label="Toggle new password visibility" aria-pressed="false">Show</button></div>
+                                {% for error in form.new_password.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                                <div class="form-text">Use 12–128 characters.</div>
+                            </div>
+                            <div>
+                                {{ form.confirm_password.label(class_='form-label') }}
+                                <div class="profile-password-wrap" data-password-toggle-group>{{ form.confirm_password(class_='form-control' + (' is-invalid' if password_submitted and form.confirm_password.errors else ''), autocomplete='new-password', data_password_input='true') }}<button type="button" class="btn btn-outline-secondary profile-password-toggle" data-password-toggle aria-controls="{{ form.confirm_password.id }}" aria-label="Toggle confirm password visibility" aria-pressed="false">Show</button></div>
+                                {% for error in form.confirm_password.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                                {% if status_messages.get('password') %}<div class="text-success small mt-1">{{ status_messages.get('password')[1] }}</div>{% endif %}
+                            </div>
+                            <div><button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button></div>
+                        </form>
+                    </section>
+                </div>
+
+                {% if can_view_transfer_activity or can_view_invoice_activity %}
+                <div class="tab-pane fade{% if active_profile_tab == 'activity' %} show active{% endif %}" id="activity-pane" role="tabpanel" aria-labelledby="activity-tab" tabindex="0">
+                    <div class="row g-3">
+                        {% if can_view_transfer_activity %}
+                        <div class="col-12 col-xl-6"><section class="app-card h-100"><div class="d-flex justify-content-between align-items-center mb-2"><h2 class="h5 mb-0">Transfers</h2><a href="{{ url_for('transfer.view_transfers', user_id=user.id) }}" class="small">View all</a></div>{% for transfer in transfers %}<div class="profile-activity-row"><div><a class="fw-semibold" href="{{ url_for('transfer.view_transfer', transfer_id=transfer.id) }}">Transfer #{{ transfer.id }}</a><div class="small text-muted">{{ transfer.from_location_name }} &rarr; {{ transfer.to_location_name }}</div></div><span class="badge text-bg-{{ 'success' if transfer.completed else 'secondary' }}">{{ 'Completed' if transfer.completed else 'Open' }}</span></div>{% else %}<p class="text-muted mb-0 py-3">No transfers found.</p>{% endfor %}</section></div>
+                        {% endif %}
+                        {% if can_view_invoice_activity %}
+                        <div class="col-12 col-xl-6"><section class="app-card h-100"><div class="d-flex justify-content-between align-items-center mb-2"><h2 class="h5 mb-0">Invoices</h2><a href="{{ url_for('invoice.view_invoices', user_id=user.id) }}" class="small">View all</a></div>{% for invoice in invoices %}<div class="profile-activity-row"><div><a class="fw-semibold" href="{{ url_for('invoice.view_invoice', invoice_id=invoice.id) }}">Invoice #{{ invoice.id }}</a><div class="small text-muted">{{ invoice.date_created.strftime('%b %d, %Y') if invoice.date_created else 'No date' }}</div></div><div class="text-end"><span class="badge {{ invoice.invoice_status_badge_class }}">{{ invoice.invoice_status_label }}</span><div class="small mt-1">${{ '%.2f'|format(invoice.total) }}</div></div></div>{% else %}<p class="text-muted mb-0 py-3">No invoices found.</p>{% endfor %}</section></div>
+                        {% endif %}
                     </div>
                 </div>
+                {% endif %}
             </div>
         </div>
     </div>

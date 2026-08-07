@@ -51,7 +51,10 @@
             {% endif %}
         </div>
         <div class="text-md-end">
-            <a class="btn btn-secondary" href="{{ url_for('event.view_event', event_id=event.id) }}">Back to Event</a>
+            {% set event_url = safe_url_for('event.view_event', event_id=event.id) %}
+            {% if event_url %}
+            <a class="btn btn-secondary" href="{{ event_url }}">Back to Event</a>
+            {% endif %}
         </div>
     </div>
 

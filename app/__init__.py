@@ -25,6 +25,7 @@ from werkzeug.routing import BuildError
 from werkzeug.security import generate_password_hash
 
 from app.permissions import (
+    PUBLIC_ENDPOINTS,
     get_default_landing_endpoint,
     sync_permission_data,
     user_can_access_endpoint,
@@ -668,8 +669,6 @@ def create_app(args=None):
     Bootstrap(app)
     socketio = SocketIO(app)
 
-    from flask_login import current_user
-
     def _display_timezone():
         tz_name = getattr(current_user, "timezone", None)
         if not tz_name:
@@ -891,15 +890,20 @@ def create_app(args=None):
 
     @app.before_request
     def enforce_endpoint_permissions():
-        """Reject direct requests to endpoints the current user cannot access."""
+        """Centrally authenticate private routes and enforce their permissions."""
 
-        if not current_user.is_authenticated:
+        endpoint = request.endpoint
+        if endpoint is None:
             return
-        if not getattr(current_user, "active", False):
+        if current_user.is_authenticated and not getattr(current_user, "active", False):
             logout_user()
             flash("Your account is no longer active. Please contact an administrator.", "warning")
             return redirect(url_for("auth.login"))
-        if not user_can_access_endpoint(current_user, request.endpoint, request.method):
+        if endpoint in PUBLIC_ENDPOINTS:
+            return
+        if not current_user.is_authenticated:
+            return login_manager.unauthorized()
+        if not user_can_access_endpoint(current_user, endpoint, request.method):
             abort(403)
 
     @app.before_request

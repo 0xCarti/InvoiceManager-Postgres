@@ -317,6 +317,52 @@ PERMISSION_DEFINITIONS_BY_CODE = {
 }
 
 
+# These are the only routes that may be reached without an authenticated user.
+# Keep this list explicit so newly registered endpoints fail closed until their
+# access policy is deliberately classified.
+PUBLIC_ENDPOINTS: frozenset[str] = frozenset(
+    {
+        "admin.zerothreat",
+        "auth.login",
+        "auth.reset_request",
+        "auth.reset_token",
+        "bootstrap.static",
+        "locations.scan_count_submission",
+        "locations.scan_eaten_submission",
+        "locations.scan_inventory_item_search",
+        "locations.scan_inventory_submission",
+        "locations.scan_spoilage_submission",
+        "mailgun.inbound_mailgun",
+        "menu.menu_feed",
+        "security_txt",
+        "signage.player_heartbeat",
+        "signage.player_manifest",
+        "signage.player_page",
+        "signage.player_short_page",
+        "signage.signage_media_file",
+        "signage.tizen_activate",
+        "signage.tizen_launcher",
+        "static",
+        "transfer.public_transfer_request",
+        "transfer.public_transfer_request_item_search",
+        "transfer.public_transfer_request_item_units",
+    }
+)
+
+
+# These routes are available to every authenticated user and intentionally do
+# not require an application permission. They remain separate from public
+# routes so an omitted permission rule can never silently become anonymous.
+AUTHENTICATED_BASELINE_ENDPOINTS: frozenset[str] = frozenset(
+    {
+        "auth.logout",
+        "auth.profile",
+        "auth.toggle_favorite",
+        "preferences.save_filter_preferences",
+    }
+)
+
+
 ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "main.home": requirement(any_of=("dashboard.view",)),
     "main.metabase_redirect": requirement(any_of=("reports.metabase",)),
@@ -567,6 +613,7 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
             "reports.purchase_inventory_summary",
             "reports.inventory_variance",
             "reports.inventory_expiry",
+            "reports.invoice_gl_codes",
             "reports.product_sales",
             "reports.products_sold",
             "reports.product_stock_usage",
@@ -589,13 +636,7 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "report.inventory_expiry_report": requirement(any_of=("reports.inventory_expiry",)),
     "report.invoice_gl_code_report": requirement(any_of=("reports.invoice_gl_codes",)),
     "report.product_sales_report": requirement(any_of=("reports.product_sales",)),
-    "report.products_sold_report": requirement(
-        any_of=(
-            "reports.products_sold",
-            "reports.product_sales",
-            "reports.product_stock_usage",
-        )
-    ),
+    "report.products_sold_report": requirement(any_of=("reports.products_sold",)),
     "report.product_stock_usage_report": requirement(any_of=("reports.product_stock_usage",)),
     "report.product_recipe_report": requirement(any_of=("reports.product_recipe",)),
     "report.product_location_sales_report": requirement(any_of=("reports.product_location_sales",)),
@@ -627,11 +668,9 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "event.undo_confirm_event_location_day": requirement(
         any_of=("events.confirm_locations",)
     ),
-    "event.stand_sheet": requirement(any_of=("events.reports",)),
     "event.sustainability_dashboard": requirement(any_of=("events.reports",)),
     "event.sustainability_dashboard_print": requirement(any_of=("events.reports",)),
     "event.sustainability_dashboard_csv": requirement(any_of=("events.reports",)),
-    "event.count_sheet": requirement(any_of=("events.reports",)),
     "event.bulk_stand_sheets": requirement(any_of=("events.reports",)),
     "event.email_bulk_stand_sheets": requirement(any_of=("events.email_stand_sheets",)),
     "event.bulk_count_sheets": requirement(any_of=("events.reports",)),
@@ -776,6 +815,14 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
 
 
 ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] = {
+    ("event.stand_sheet", "GET"): requirement(
+        any_of=("events.reports", "events.manage_sales")
+    ),
+    ("event.stand_sheet", "POST"): requirement(any_of=("events.manage_sales",)),
+    ("event.count_sheet", "GET"): requirement(
+        any_of=("events.reports", "events.manage_sales")
+    ),
+    ("event.count_sheet", "POST"): requirement(any_of=("events.manage_sales",)),
     ("notes.entity_notes", "GET"): requirement(
         any_of=(
             "locations.view",
@@ -946,6 +993,16 @@ ENDPOINT_METHOD_PERMISSION_RULES: dict[tuple[str, str], PermissionRequirement] =
         )
     ),
     ("schedule.team_schedule", "GET"): requirement(
+        any_of=(
+            "schedules.view_team",
+            "schedules.edit_team",
+            "schedules.publish",
+            "schedules.view_labor",
+            "schedules.view_seen_status",
+            "schedules.self_schedule",
+        )
+    ),
+    ("schedule.team_schedule_month", "GET"): requirement(
         any_of=(
             "schedules.view_team",
             "schedules.edit_team",
@@ -1190,6 +1247,8 @@ def get_permission_requirement(
     if not endpoint:
         return None
     normalized_method = (method or "GET").upper()
+    if normalized_method == "HEAD":
+        normalized_method = "GET"
     return ENDPOINT_METHOD_PERMISSION_RULES.get(
         (endpoint, normalized_method)
     ) or ENDPOINT_PERMISSION_RULES.get(endpoint)
@@ -1206,18 +1265,22 @@ def _is_super_admin_user(user) -> bool:
 
 
 def user_can_access_endpoint(user, endpoint: str | None, method: str = "GET") -> bool:
-    if not endpoint or endpoint == "static":
+    if endpoint in PUBLIC_ENDPOINTS:
         return True
+
+    is_authenticated = bool(getattr(user, "is_authenticated", False))
+    if endpoint in AUTHENTICATED_BASELINE_ENDPOINTS:
+        return is_authenticated
+
+    if not endpoint or not is_authenticated:
+        return False
 
     requirement_to_check = get_permission_requirement(endpoint, method)
     if requirement_to_check is None:
-        return True
+        return False
 
     if _is_super_admin_user(user):
         return True
-
-    if not getattr(user, "is_authenticated", False):
-        return False
 
     if requirement_to_check.all_of and not all(
         user.has_permission(code) for code in requirement_to_check.all_of

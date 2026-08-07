@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 
 {% block content %}
+{% set can_edit_stand_sheet = can_access_endpoint('event.stand_sheet', 'POST') %}
 <style>
     .stand-sheet-table {
         font-size: 0.95rem;
@@ -110,7 +111,10 @@
     }
 </style>
 <div class="container mt-4">
-    <form method="post">
+    {% if not can_edit_stand_sheet %}
+    <div class="alert alert-info" role="status">This stand sheet is read only for your account.</div>
+    {% endif %}
+    <form method="{{ 'post' if can_edit_stand_sheet else 'get' }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         {% if operating_date %}
         <input type="hidden" name="operating_date" value="{{ operating_date.isoformat() }}"/>
@@ -160,26 +164,26 @@
                     {% endif %}
                 </td>
                 <td data-label="Pre-Event Count">
-                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="open_{{ entry.item.id }}" value="{% if entry.sheet_values.opening_count is not none %}{{ '%.4f'|format(entry.sheet_values.opening_count) }}{% endif %}">
+                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="open_{{ entry.item.id }}" value="{% if entry.sheet_values.opening_count is not none %}{{ '%.4f'|format(entry.sheet_values.opening_count) }}{% endif %}"{% if not can_edit_stand_sheet %} readonly aria-readonly="true"{% endif %}>
                 </td>
                 <td data-label="Transferred In">
-                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="in_{{ entry.item.id }}" value="{% if entry.sheet_values.transferred_in is not none %}{{ '%.4f'|format(entry.sheet_values.transferred_in) }}{% endif %}">
+                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="in_{{ entry.item.id }}" value="{% if entry.sheet_values.transferred_in is not none %}{{ '%.4f'|format(entry.sheet_values.transferred_in) }}{% endif %}"{% if not can_edit_stand_sheet %} readonly aria-readonly="true"{% endif %}>
                 </td>
                 <td data-label="Transferred Out">
-                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="out_{{ entry.item.id }}" value="{% if entry.sheet_values.transferred_out is not none %}{{ '%.4f'|format(entry.sheet_values.transferred_out) }}{% endif %}">
+                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="out_{{ entry.item.id }}" value="{% if entry.sheet_values.transferred_out is not none %}{{ '%.4f'|format(entry.sheet_values.transferred_out) }}{% endif %}"{% if not can_edit_stand_sheet %} readonly aria-readonly="true"{% endif %}>
                 </td>
                 <td data-label="Adjustments">
-                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control adjustments" name="adjust_{{ entry.item.id }}" value="{% if entry.sheet_values.adjustments is not none %}{{ '%.4f'|format(entry.sheet_values.adjustments) }}{% endif %}">
+                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control adjustments" name="adjust_{{ entry.item.id }}" value="{% if entry.sheet_values.adjustments is not none %}{{ '%.4f'|format(entry.sheet_values.adjustments) }}{% endif %}"{% if not can_edit_stand_sheet %} readonly aria-readonly="true"{% endif %}>
                 </td>
                 <td class="sales" data-label="Sales" data-sales="{{ '%.4f'|format(entry.sales) }}">{{ '%.2f'|format(entry.sales) }}</td>
                 <td data-label="Eaten">
-                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="eaten_{{ entry.item.id }}" value="{% if entry.sheet_values.eaten is not none %}{{ '%.4f'|format(entry.sheet_values.eaten) }}{% endif %}">
+                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="eaten_{{ entry.item.id }}" value="{% if entry.sheet_values.eaten is not none %}{{ '%.4f'|format(entry.sheet_values.eaten) }}{% endif %}"{% if not can_edit_stand_sheet %} readonly aria-readonly="true"{% endif %}>
                 </td>
                 <td data-label="Spoiled">
-                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="spoiled_{{ entry.item.id }}" value="{% if entry.sheet_values.spoiled is not none %}{{ '%.4f'|format(entry.sheet_values.spoiled) }}{% endif %}">
+                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="spoiled_{{ entry.item.id }}" value="{% if entry.sheet_values.spoiled is not none %}{{ '%.4f'|format(entry.sheet_values.spoiled) }}{% endif %}"{% if not can_edit_stand_sheet %} readonly aria-readonly="true"{% endif %}>
                 </td>
                 <td data-label="Closing Count">
-                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="close_{{ entry.item.id }}" value="{% if entry.sheet_values.closing_count is not none %}{{ '%.4f'|format(entry.sheet_values.closing_count) }}{% endif %}">
+                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="close_{{ entry.item.id }}" value="{% if entry.sheet_values.closing_count is not none %}{{ '%.4f'|format(entry.sheet_values.closing_count) }}{% endif %}"{% if not can_edit_stand_sheet %} readonly aria-readonly="true"{% endif %}>
                 </td>
                 <td class="variance" data-label="Variance">{% if entry.sheet %}{{ '%.2f'|format(variance) }}{% else %}0.00{% endif %}</td>
             </tr>
@@ -195,12 +199,15 @@
             name="notes"
             rows="4"
             placeholder="Add context about adjustments, transfers, or other changes"
+            {% if not can_edit_stand_sheet %}readonly aria-readonly="true"{% endif %}
         >{{- event_location.notes or '' -}}</textarea>
         <div class="form-text">
             Notes will be saved with the stand sheet and remain visible after the location is confirmed.
         </div>
     </div>
+    {% if can_edit_stand_sheet %}
     <button type="submit" class="btn btn-primary mt-3">Save</button>
+    {% endif %}
     </form>
 </div>
 <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='js/sticky_standsheet_headers.js') }}"></script>

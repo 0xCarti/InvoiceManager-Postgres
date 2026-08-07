@@ -95,12 +95,18 @@
                                 When their permission group allows an action, department managers can apply it to every member of that department. Other users are limited to themselves and people assigned to report directly to them. Auto-assign access is controlled separately.
                             </div>
                         </div>
+                        {% if can_change_primary %}
                         <div class="col-12">
                             <div class="form-check">
                                 {{ membership_form.is_primary(class_='form-check-input') }}
                                 {{ membership_form.is_primary.label(class_='form-check-label') }}
                             </div>
                         </div>
+                        {% else %}
+                        <div class="col-12 form-text">
+                            Primary department changes require access to all of this user&apos;s department memberships.
+                        </div>
+                        {% endif %}
                         <div class="col-12"><button type="submit" class="btn btn-primary">Add Membership</button></div>
                     </form>
                     {% else %}
@@ -113,7 +119,7 @@
                         <table class="table table-sm align-middle table-mobile-card">
                             <thead><tr><th>Department</th><th>Manage Department</th><th>Auto Assign</th><th>Supervisor</th><th></th></tr></thead>
                             <tbody>
-                                {% for membership in target_user.department_memberships %}
+                                {% for membership in visible_memberships %}
                                 <tr>
                                     <td class="mobile-card-primary">{{ membership.department.name }}{% if membership.is_primary %}<div class="small text-muted">Primary</div>{% endif %}</td>
                                     <td>
@@ -175,7 +181,7 @@
                                     {% endif %}
                                 </tr>
                                 {% else %}
-                                <tr><td colspan="5" class="text-muted">No department memberships.</td></tr>
+                                <tr><td colspan="5" class="text-muted">No department memberships in your management scope.</td></tr>
                                 {% endfor %}
                             </tbody>
                         </table>
@@ -203,7 +209,7 @@
                         <table class="table table-sm align-middle table-mobile-card">
                             <thead><tr><th>Position</th><th>Department</th><th>Priority</th><th></th></tr></thead>
                             <tbody>
-                                {% for eligibility in target_user.position_eligibilities %}
+                                {% for eligibility in visible_eligibilities %}
                                 <tr>
                                     <td class="mobile-card-primary">{{ eligibility.position.name }}</td>
                                     <td>{{ eligibility.position.department.name }}</td>
@@ -222,7 +228,7 @@
                                     {% endif %}
                                 </tr>
                                 {% else %}
-                                <tr><td colspan="4" class="text-muted">No positions assigned.</td></tr>
+                                <tr><td colspan="4" class="text-muted">No positions assigned in your management scope.</td></tr>
                                 {% endfor %}
                             </tbody>
                         </table>

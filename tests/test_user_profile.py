@@ -3,7 +3,16 @@ from flask import url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app import db
-from app.models import Customer, Invoice, Location, Product, Transfer, User
+from app.models import (
+    Customer,
+    Invoice,
+    Location,
+    Permission,
+    PermissionGroup,
+    Product,
+    Transfer,
+    User,
+)
 from tests.utils import login
 
 
@@ -27,8 +36,8 @@ def test_user_can_change_password(client, app):
             "/auth/profile",
             data={
                 "current_password": "oldpass",
-                "new_password": "newpass",
-                "confirm_password": "newpass",
+                "new_password": "new-profile-password",
+                "confirm_password": "new-profile-password",
             },
             follow_redirects=True,
         )
@@ -36,7 +45,7 @@ def test_user_can_change_password(client, app):
 
     with app.app_context():
         user = User.query.filter_by(email="profile@example.com").first()
-        assert check_password_hash(user.password, "newpass")
+        assert check_password_hash(user.password, "new-profile-password")
 
 
 def test_profile_page_renders_password_toggles(client, app):
@@ -53,7 +62,11 @@ def test_profile_page_renders_password_toggles(client, app):
     assert b'Toggle confirm password visibility' in response.data
     assert b'js/password_toggle.js' in response.data
     assert b'app-page-shell' in response.data
-    assert response.data.count(b'profile-section-card') >= 5
+    assert b'id="preferences-tab"' in response.data
+    assert b'id="notifications-tab"' in response.data
+    assert b'id="security-tab"' in response.data
+    assert b'<style nonce="' in response.data
+    assert b'id="activity-tab"' not in response.data
 
 
 def test_admin_view_and_change_user_password(client, app):
@@ -78,21 +91,28 @@ def test_admin_view_and_change_user_password(client, app):
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
     with client:
         login(client, admin_email, admin_pass)
-        resp = client.get(f"/user_profile/{user_id}", follow_redirects=True)
+        resp = client.get(
+            f"/user_profile/{user_id}?tab=activity", follow_redirects=True
+        )
         assert resp.status_code == 200
         assert b"INVX" in resp.data
         assert str(transfer_id).encode() in resp.data
+        assert b'nav-link active" id="activity-tab"' in resp.data
+        assert b'tab-pane fade show active" id="activity-pane"' in resp.data
 
         resp = client.post(
             f"/user_profile/{user_id}",
-            data={"new_password": "changed", "confirm_password": "changed"},
+            data={
+                "new_password": "changed-admin-password",
+                "confirm_password": "changed-admin-password",
+            },
             follow_redirects=True,
         )
         assert resp.status_code == 200
 
     with app.app_context():
         updated = db.session.get(User, user_id)
-        assert check_password_hash(updated.password, "changed")
+        assert check_password_hash(updated.password, "changed-admin-password")
 
 
 def test_admin_users_page_links_to_profile(client, app):
@@ -155,3 +175,119 @@ def test_user_can_set_default_transfer_from_location(client, app):
         assert user.default_transfer_from_location_id == location_id
 
 
+def test_user_password_policy_rejects_short_password(client, app):
+    create_user(app, "profile-password-policy@example.com")
+    with client:
+        login(client, "profile-password-policy@example.com", "oldpass")
+        response = client.post(
+            "/auth/profile",
+            data={
+                "current_password": "oldpass",
+                "new_password": "too-short",
+                "confirm_password": "too-short",
+            },
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"Password must be at least 12 characters." in response.data
+    with app.app_context():
+        user = User.query.filter_by(
+            email="profile-password-policy@example.com"
+        ).one()
+        assert check_password_hash(user.password, "oldpass")
+
+
+def test_profile_keeps_security_tab_active_for_password_error(client, app):
+    create_user(app, "profile-error-tab@example.com")
+    with client:
+        login(client, "profile-error-tab@example.com", "oldpass")
+        response = client.post(
+            "/auth/profile",
+            data={
+                "current_password": "wrong-password",
+                "new_password": "new-password",
+                "confirm_password": "new-password",
+            },
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b'nav-link active" id="security-tab"' in response.data
+    assert b'tab-pane fade show active" id="security-pane"' in response.data
+    assert b"Current password incorrect." in response.data
+
+
+def test_profile_keeps_notifications_tab_active_for_validation_error(
+    client, app
+):
+    create_user(app, "profile-notification-error@example.com")
+    with client:
+        login(client, "profile-notification-error@example.com", "oldpass")
+        response = client.post(
+            "/auth/profile",
+            data={"phone_number": "1" * 21},
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b'nav-link active" id="notifications-tab"' in response.data
+    assert (
+        b'tab-pane fade show active" id="notifications-pane"' in response.data
+    )
+
+
+def test_user_manager_profile_hides_activity_without_business_permissions(
+    client, app
+):
+    with app.app_context():
+        users_manage = Permission.query.filter_by(code="users.manage").one()
+        manager_group = PermissionGroup(name="Profile-only User Managers")
+        manager_group.permissions = [users_manage]
+        manager = User(
+            email="profile-manager@example.com",
+            password=generate_password_hash("manager-password"),
+            active=True,
+        )
+        manager.permission_groups = [manager_group]
+        target = User(
+            email="activity-target@example.com",
+            password=generate_password_hash("target-password"),
+            active=True,
+        )
+        secret_location = Location(name="Secret Activity Location")
+        customer = Customer(first_name="Secret", last_name="Customer")
+        product = Product(name="Secret Product", price=1.0, cost=0.5)
+        db.session.add_all(
+            [
+                manager_group,
+                manager,
+                target,
+                secret_location,
+                customer,
+                product,
+            ]
+        )
+        db.session.commit()
+        transfer = Transfer(
+            from_location_id=secret_location.id,
+            to_location_id=secret_location.id,
+            user_id=target.id,
+        )
+        invoice = Invoice(
+            id="SECRET-ACTIVITY-INVOICE",
+            user_id=target.id,
+            customer_id=customer.id,
+        )
+        db.session.add_all([transfer, invoice])
+        db.session.commit()
+        target_id = target.id
+
+    with client:
+        login(client, "profile-manager@example.com", "manager-password")
+        response = client.get(f"/user_profile/{target_id}")
+
+    assert response.status_code == 200
+    assert b'id="activity-tab"' not in response.data
+    assert b"SECRET-ACTIVITY-INVOICE" not in response.data
+    assert b"/transfers/view/" not in response.data

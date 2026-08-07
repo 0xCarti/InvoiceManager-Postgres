@@ -8,13 +8,25 @@
         min-height: 100%;
     }
 }
+.account-setup-option {
+    cursor: pointer;
+    border: 1px solid var(--bs-border-color);
+    border-radius: .75rem;
+    padding: .85rem 1rem;
+    height: 100%;
+}
+.account-setup-option:has(input:checked) {
+    border-color: var(--bs-primary);
+    background: rgba(var(--bs-primary-rgb), .06);
+    box-shadow: 0 0 0 .15rem rgba(var(--bs-primary-rgb), .1);
+}
 </style>
 <div class="container mt-5 mobile-list-page">
     {% set can_manage_users = has_permission('users.manage') %}
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-3">
         <div>
             <h2 class="mb-1">Manage Users</h2>
-            <p class="text-muted mb-0">Invite users, assign permission groups, and manage super-admin access.</p>
+            <p class="text-muted mb-0">Create accounts, invite users, and assign permission groups.</p>
         </div>
         {% if can_access_endpoint('admin.permission_groups') %}
         <div class="d-flex gap-2">
@@ -31,47 +43,90 @@
         <div class="card-header bg-light border-0 py-3">
             <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-start gap-3">
                 <div>
-                    <h3 class="h5 mb-1">Invite User</h3>
-                    <p class="text-muted mb-0">Send a setup email and pre-assign access before the user signs in.</p>
+                    <h3 class="h5 mb-1">Add User</h3>
+                    <p class="text-muted mb-0">Choose an emailed setup link or create an active account with a password.</p>
                 </div>
                 <div class="small text-muted">
-                    Re-sending a pending invite refreshes the setup link and updates its assigned groups.
+                    Manual-password accounts do not send any email.
                 </div>
             </div>
         </div>
         <div class="card-body">
             <form action="{{ url_for('admin.users') }}" method="post" class="row g-3 align-items-start">
                 {{ invite_form.hidden_tag() }}
-                <div class="col-12 col-xl-4">
+                <div class="col-12">
+                    <div class="row g-2" data-account-setup-options>
+                        {% for option in invite_form.creation_method %}
+                        <div class="col-12 col-md-6">
+                            <label class="account-setup-option d-flex align-items-start gap-2" for="{{ option.id }}">
+                                {{ option(class_='form-check-input mt-1') }}
+                                <span>
+                                    <span class="fw-semibold d-block">{{ option.label.text }}</span>
+                                    <span class="small text-muted">
+                                        {% if option.data == 'invite' %}
+                                        Email a one-hour setup link so the user can choose their password.
+                                        {% else %}
+                                        Activate the account now with a password you share securely.
+                                        {% endif %}
+                                    </span>
+                                </span>
+                            </label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% for error in invite_form.creation_method.errors %}
+                    <div class="invalid-feedback d-block">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-12 col-md-6">
                     {{ invite_form.email.label(class_='form-label') }}
                     {{ invite_form.email(class_='form-control' ~ (' is-invalid' if invite_form.email.errors else ''), placeholder='name@example.com', autocomplete='email') }}
                     {% for error in invite_form.email.errors %}
                     <div class="invalid-feedback d-block">{{ error }}</div>
                     {% endfor %}
-                    <div class="form-text">The invite email is sent to this address and used as the user login.</div>
+                    <div class="form-text">This address is used as the user login.</div>
                 </div>
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-12 col-md-6">
                     {{ invite_form.display_name.label(class_='form-label') }}
                     {{ invite_form.display_name(class_='form-control' ~ (' is-invalid' if invite_form.display_name.errors else ''), placeholder='Optional display name', autocomplete='name') }}
                     {% for error in invite_form.display_name.errors %}
                     <div class="invalid-feedback d-block">{{ error }}</div>
                     {% endfor %}
-                    <div class="form-text">Shown in user lists and pickers instead of the raw email when provided.</div>
+                    <div class="form-text">Shown in schedules, user lists, and pickers.</div>
                 </div>
-                <div class="col-12 col-xl-5">
+                <div class="col-12" data-manual-password-fields {% if invite_form.creation_method.data != 'password' %}hidden{% endif %}>
+                    <div class="row g-3">
+                        <div class="col-12 col-md-6">
+                            {{ invite_form.password.label(class_='form-label') }}
+                            {{ invite_form.password(class_='form-control' ~ (' is-invalid' if invite_form.password.errors else ''), autocomplete='new-password', data_password_input='true') }}
+                            {% for error in invite_form.password.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                            {% endfor %}
+                            <div class="form-text">Use at least 12 characters. The password is never emailed.</div>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            {{ invite_form.confirm_password.label(class_='form-label') }}
+                            {{ invite_form.confirm_password(class_='form-control' ~ (' is-invalid' if invite_form.confirm_password.errors else ''), autocomplete='new-password', data_password_input='true') }}
+                            {% for error in invite_form.confirm_password.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12">
                     {{ invite_form.group_ids.label(class_='form-label') }}
                     {{ invite_form.group_ids(class_='form-select' ~ (' is-invalid' if invite_form.group_ids.errors else ''), multiple=true) }}
                     {% for error in invite_form.group_ids.errors %}
                     <div class="invalid-feedback d-block">{{ error }}</div>
                     {% endfor %}
-                    <div class="form-text">Leave blank to invite the user with no permission groups until you assign access.</div>
+                    <div class="form-text">Leave blank to create the account without application access; groups can be assigned later.</div>
                 </div>
                 <div class="col-12">
                     <div class="border rounded-3 bg-light px-3 py-3 invite-submit-row d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
                         <div class="small text-muted">
-                            Users can be invited without access and updated later. Pending invites can also be re-sent from the list below.
+                            Invitations remain inactive until accepted. Manual-password accounts are active immediately.
                         </div>
-                        <button type="submit" class="btn btn-primary">{{ invite_form.submit.label.text }}</button>
+                        <button type="submit" class="btn btn-primary" data-add-user-submit>{{ 'Create User' if invite_form.creation_method.data == 'password' else 'Send Invite' }}</button>
                     </div>
                 </div>
             </form>
@@ -96,7 +151,9 @@
 
     <div class="d-md-none vstack gap-3">
         {% for user in users %}
-        {% set invite_pending = (not user.active and not user.last_login_at) %}
+        {% set invite_pending = user.is_invitation_pending %}
+        {% set can_manage_this_user = user.id in manageable_user_ids %}
+        {% set protection_reason = protected_user_action_reasons.get(user.id) %}
         <div class="card">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
@@ -124,62 +181,53 @@
                     {% endif %}
                 </div>
                 <div class="vstack gap-2">
-                    {% if can_manage_users %}
-                    {% if invite_pending %}
-                    <form action="{{ url_for('admin.users') }}" method="post">
-                        {{ form.hidden_tag() }}
-                        <input type="hidden" name="user_id" value="{{ user.id }}">
-                        <button type="submit" name="action" value="resend_invite" class="btn btn-primary btn-sm w-100">
-                            Re-send Invite
-                        </button>
-                    </form>
-                    <form action="{{ url_for('admin.delete_user', user_id=user.id) }}" method="post">
-                        {{ form.hidden_tag() }}
-                        <button type="submit" class="btn btn-danger btn-sm w-100"
-                                data-confirm-message="Delete this pending invite?">
-                            Delete Invite
-                        </button>
-                    </form>
-                    {% else %}
-                    <form action="{{ url_for('admin.users') }}" method="post">
-                        {{ form.hidden_tag() }}
-                        <input type="hidden" name="user_id" value="{{ user.id }}">
-                        <button type="submit" name="action" value="toggle_active" class="btn btn-primary btn-sm w-100"
-                                data-confirm-message="Are you sure you want to toggle the active status?">
-                            Toggle Active
-                        </button>
-                    </form>
-                    {% if current_user.is_super_admin %}
-                    <form action="{{ url_for('admin.users') }}" method="post">
-                        {{ form.hidden_tag() }}
-                        <input type="hidden" name="user_id" value="{{ user.id }}">
-                        <button type="submit" name="action" value="toggle_super_admin" class="btn btn-secondary btn-sm w-100"
-                                data-confirm-message="Are you sure you want to toggle super-admin access?">
-                            Toggle Super Admin
-                        </button>
-                    </form>
+                    {% if can_manage_users and can_manage_this_user %}
+                        {% if invite_pending %}
+                        <form action="{{ url_for('admin.users') }}" method="post">
+                            {{ form.hidden_tag() }}
+                            <input type="hidden" name="user_id" value="{{ user.id }}">
+                            <button type="submit" name="action" value="resend_invite" class="btn btn-primary btn-sm w-100">Re-send Invite</button>
+                        </form>
+                        <form action="{{ url_for('admin.delete_user', user_id=user.id) }}" method="post">
+                            {{ form.hidden_tag() }}
+                            <button type="submit" class="btn btn-danger btn-sm w-100" data-confirm-message="Delete this pending invite?">Delete Invite</button>
+                        </form>
+                        {% else %}
+                        {% if not protection_reason %}
+                        <form action="{{ url_for('admin.users') }}" method="post">
+                            {{ form.hidden_tag() }}
+                            <input type="hidden" name="user_id" value="{{ user.id }}">
+                            <button type="submit" name="action" value="toggle_active" class="btn btn-primary btn-sm w-100" data-confirm-message="Are you sure you want to toggle the active status?">Toggle Active</button>
+                        </form>
+                        {% endif %}
+                        {% if current_user.is_super_admin and user.id not in last_active_super_admin_ids %}
+                        <form action="{{ url_for('admin.users') }}" method="post">
+                            {{ form.hidden_tag() }}
+                            <input type="hidden" name="user_id" value="{{ user.id }}">
+                            <button type="submit" name="action" value="toggle_super_admin" class="btn btn-secondary btn-sm w-100" data-confirm-message="Are you sure you want to toggle super-admin access?">Toggle Super Admin</button>
+                        </form>
+                        {% endif %}
+                        {% if not protection_reason %}
+                        <form action="{{ url_for('admin.delete_user', user_id=user.id) }}" method="post">
+                            {{ form.hidden_tag() }}
+                            <button type="submit" class="btn btn-danger btn-sm w-100" data-confirm-message="Are you sure you want to archive this user?">Archive</button>
+                        </form>
+                        {% else %}
+                        <div class="small text-muted text-center">{{ protection_reason }} is protected.</div>
+                        {% endif %}
+                        <form action="{{ url_for('admin.users') }}" method="post">
+                            {{ form.hidden_tag() }}
+                            <input type="hidden" name="user_id" value="{{ user.id }}">
+                            <button type="submit" name="action" value="send_password_reset" class="btn btn-outline-secondary btn-sm w-100" data-confirm-message="Send a password reset email to {{ user.email }}?">Send Password Reset</button>
+                        </form>
+                        {% endif %}
+                    {% elif can_manage_users %}
+                    <div class="small text-muted text-center">A super admin is required to manage this account.</div>
                     {% endif %}
-                    <form action="{{ url_for('admin.delete_user', user_id=user.id) }}" method="post">
-                        {{ form.hidden_tag() }}
-                        <button type="submit" class="btn btn-danger btn-sm w-100"
-                                data-confirm-message="Are you sure you want to archive this user?">
-                            Archive
-                        </button>
-                    </form>
-                    <form action="{{ url_for('admin.users') }}" method="post">
-                        {{ form.hidden_tag() }}
-                        <input type="hidden" name="user_id" value="{{ user.id }}">
-                        <button type="submit" name="action" value="send_password_reset" class="btn btn-outline-secondary btn-sm w-100"
-                                data-confirm-message="Send a password reset email to {{ user.email }}?">
-                            Send Password Reset
-                        </button>
-                    </form>
-                    {% endif %}
-                    {% endif %}
-                    {% if can_access_endpoint('admin.user_access') %}
+                    {% if can_manage_this_user and can_access_endpoint('admin.user_access') %}
                     <a href="{{ url_for('admin.user_access', user_id=user.id) }}" class="btn btn-outline-primary btn-sm w-100">Access</a>
                     {% endif %}
-                    {% if can_access_endpoint('admin.user_profile') %}
+                    {% if can_manage_this_user and can_access_endpoint('admin.user_profile') %}
                     <a href="{{ url_for('admin.user_profile', user_id=user.id) }}" class="btn btn-info btn-sm w-100">View Profile</a>
                     {% endif %}
                 </div>
@@ -201,7 +249,9 @@
             </thead>
             <tbody>
             {% for user in users %}
-            {% set invite_pending = (not user.active and not user.last_login_at) %}
+            {% set invite_pending = user.is_invitation_pending %}
+            {% set can_manage_this_user = user.id in manageable_user_ids %}
+            {% set protection_reason = protected_user_action_reasons.get(user.id) %}
             <tr>
                 <td class="col-user-email">
                     <div class="fw-semibold">{{ user.name_or_email }}</div>
@@ -227,67 +277,58 @@
                     {% endif %}
                 </td>
                 <td class="col-user-actions">
-                    {% if can_manage_users %}
-                    {% if invite_pending %}
-                    <form action="{{ url_for('admin.users') }}" method="post" class="d-inline">
-                        {{ form.hidden_tag() }}
-                        <input type="hidden" name="user_id" value="{{ user.id }}">
-                        <button type="submit" name="action" value="resend_invite" class="btn btn-sm btn-primary">
-                            Re-send Invite
-                        </button>
-                    </form>
-                    <form action="{{ url_for('admin.delete_user', user_id=user.id) }}" method="post" class="d-inline">
-                        {{ form.hidden_tag() }}
-                        <button type="submit" class="btn btn-sm btn-danger"
-                                data-confirm-message="Delete this pending invite?">
-                            Delete Invite
-                        </button>
-                    </form>
-                    {% else %}
-                    <form action="{{ url_for('admin.users') }}" method="post" class="d-inline">
-                        {{ form.hidden_tag() }}
-                        <input type="hidden" name="user_id" value="{{ user.id }}">
-                        <button type="submit" name="action" value="toggle_active" class="btn btn-sm btn-primary"
-                                data-confirm-message="Are you sure you want to toggle the active status?">
-                            Toggle Active
-                        </button>
-                    </form>
-                    {% if current_user.is_super_admin %}
-                    <form action="{{ url_for('admin.users') }}" method="post" class="d-inline">
-                        {{ form.hidden_tag() }}
-                        <input type="hidden" name="user_id" value="{{ user.id }}">
-                        <button type="submit" name="action" value="toggle_super_admin" class="btn btn-sm btn-secondary"
-                                data-confirm-message="Are you sure you want to toggle super-admin access?">
-                            Toggle Super Admin
-                        </button>
-                    </form>
-                    {% endif %}
-                    <form action="{{ url_for('admin.delete_user', user_id=user.id) }}" method="post" class="d-inline">
-                        {{ form.hidden_tag() }}
-                        <button type="submit" class="btn btn-sm btn-danger"
-                                data-confirm-message="Are you sure you want to archive this user?">
-                            Archive
-                        </button>
-                    </form>
-                    <form action="{{ url_for('admin.users') }}" method="post" class="d-inline">
-                        {{ form.hidden_tag() }}
-                        <input type="hidden" name="user_id" value="{{ user.id }}">
-                        <button type="submit" name="action" value="send_password_reset" class="btn btn-sm btn-outline-secondary"
-                                data-confirm-message="Send a password reset email to {{ user.email }}?">
-                            Send Password Reset
-                        </button>
-                    </form>
-                    {% endif %}
+                    {% if can_manage_users and can_manage_this_user %}
+                        {% if invite_pending %}
+                        <form action="{{ url_for('admin.users') }}" method="post" class="d-inline">
+                            {{ form.hidden_tag() }}
+                            <input type="hidden" name="user_id" value="{{ user.id }}">
+                            <button type="submit" name="action" value="resend_invite" class="btn btn-sm btn-primary">Re-send Invite</button>
+                        </form>
+                        <form action="{{ url_for('admin.delete_user', user_id=user.id) }}" method="post" class="d-inline">
+                            {{ form.hidden_tag() }}
+                            <button type="submit" class="btn btn-sm btn-danger" data-confirm-message="Delete this pending invite?">Delete Invite</button>
+                        </form>
+                        {% else %}
+                        {% if not protection_reason %}
+                        <form action="{{ url_for('admin.users') }}" method="post" class="d-inline">
+                            {{ form.hidden_tag() }}
+                            <input type="hidden" name="user_id" value="{{ user.id }}">
+                            <button type="submit" name="action" value="toggle_active" class="btn btn-sm btn-primary" data-confirm-message="Are you sure you want to toggle the active status?">Toggle Active</button>
+                        </form>
+                        {% endif %}
+                        {% if current_user.is_super_admin and user.id not in last_active_super_admin_ids %}
+                        <form action="{{ url_for('admin.users') }}" method="post" class="d-inline">
+                            {{ form.hidden_tag() }}
+                            <input type="hidden" name="user_id" value="{{ user.id }}">
+                            <button type="submit" name="action" value="toggle_super_admin" class="btn btn-sm btn-secondary" data-confirm-message="Are you sure you want to toggle super-admin access?">Toggle Super Admin</button>
+                        </form>
+                        {% endif %}
+                        {% if not protection_reason %}
+                        <form action="{{ url_for('admin.delete_user', user_id=user.id) }}" method="post" class="d-inline">
+                            {{ form.hidden_tag() }}
+                            <button type="submit" class="btn btn-sm btn-danger" data-confirm-message="Are you sure you want to archive this user?">Archive</button>
+                        </form>
+                        {% else %}
+                        <span class="text-muted me-2">{{ protection_reason }} protected</span>
+                        {% endif %}
+                        <form action="{{ url_for('admin.users') }}" method="post" class="d-inline">
+                            {{ form.hidden_tag() }}
+                            <input type="hidden" name="user_id" value="{{ user.id }}">
+                            <button type="submit" name="action" value="send_password_reset" class="btn btn-sm btn-outline-secondary" data-confirm-message="Send a password reset email to {{ user.email }}?">Send Password Reset</button>
+                        </form>
+                        {% endif %}
+                    {% elif can_manage_users %}
+                    <span class="text-muted">Super admin required</span>
                     {% else %}
                     <span class="text-muted">Read only</span>
                     {% endif %}
                 </td>
                 <td class="col-user-profile">
                     <div class="d-flex flex-wrap gap-2">
-                        {% if can_access_endpoint('admin.user_access') %}
+                        {% if can_manage_this_user and can_access_endpoint('admin.user_access') %}
                         <a href="{{ url_for('admin.user_access', user_id=user.id) }}" class="btn btn-sm btn-outline-primary">Access</a>
                         {% endif %}
-                        {% if can_access_endpoint('admin.user_profile') %}
+                        {% if can_manage_this_user and can_access_endpoint('admin.user_profile') %}
                         <a href="{{ url_for('admin.user_profile', user_id=user.id) }}" class="btn btn-sm btn-info">View Profile</a>
                         {% endif %}
                     </div>
@@ -298,4 +339,25 @@
         </table>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('DOMContentLoaded', function () {
+    const methodInputs = document.querySelectorAll('input[name="creation_method"]');
+    const passwordFields = document.querySelector('[data-manual-password-fields]');
+    const submitButton = document.querySelector('[data-add-user-submit]');
+    const syncSetupMethod = function () {
+        const selected = document.querySelector('input[name="creation_method"]:checked');
+        const manual = selected && selected.value === 'password';
+        if (passwordFields) passwordFields.hidden = !manual;
+        if (submitButton) submitButton.textContent = manual ? 'Create User' : 'Send Invite';
+    };
+    methodInputs.forEach(function (input) {
+        input.addEventListener('change', syncSetupMethod);
+    });
+    syncSetupMethod();
+});
+</script>
+<script src="{{ url_for('static', filename='js/password_toggle.js') }}" defer></script>
 {% endblock %}

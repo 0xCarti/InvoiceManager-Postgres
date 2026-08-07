@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Iterable
 
-from flask import current_app
+from flask import current_app, has_app_context
+from sqlalchemy import text
 from sqlalchemy.orm import selectinload
 
 from app import db
@@ -28,6 +29,7 @@ from app.models import (
 from app.utils.activity import log_activity
 from app.utils.email import send_email
 from app.utils.sms import send_sms
+from app.utils.timezone import default_timezone_date
 
 
 MATERIAL_SHIFT_FIELDS = (
@@ -140,14 +142,293 @@ class AutoAssignResult:
     summary: str
 
 
-def normalize_week_start(value: date | str | None = None) -> date:
+SCHEDULE_WEEK_START_ADVISORY_LOCK_KEY = 0x5343484544554C45
+
+
+def _valid_week_start_day(value: object, default: int = 0) -> int:
+    try:
+        weekday = int(value)
+    except (TypeError, ValueError):
+        return default
+    return weekday if 0 <= weekday <= 6 else default
+
+
+def get_schedule_week_start_day() -> int:
+    """Return the configured Python weekday used to anchor schedule weeks."""
+
+    if not has_app_context():
+        return 0
+
+    setting_getter = getattr(Setting, "get_schedule_week_start_day", None)
+    if callable(setting_getter):
+        return _valid_week_start_day(setting_getter())
+
+    configured = current_app.config.get("SCHEDULE_WEEK_START_DAY")
+    if configured not in (None, ""):
+        return _valid_week_start_day(configured)
+
+    setting_name = getattr(
+        Setting,
+        "SCHEDULE_WEEK_START_DAY",
+        "SCHEDULE_WEEK_START_DAY",
+    )
+    setting = Setting.query.filter_by(name=setting_name).first()
+    return _valid_week_start_day(setting.value if setting is not None else None)
+
+
+def lock_schedule_week_start_setting() -> tuple[Setting, int]:
+    """Serialize schedule-boundary writes and return the locked singleton.
+
+    PostgreSQL uses a transaction-scoped advisory lock so serialization also
+    works before the singleton row exists. The row lock is retained as a
+    portable second layer; SQLite safely ignores ``FOR UPDATE`` and serializes
+    writes using its normal database locking behavior. The caller owns the
+    transaction and must commit or roll it back.
+    """
+
+    bind = db.session.get_bind()
+    if bind is not None and bind.dialect.name == "postgresql":
+        db.session.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_key)"),
+            {"lock_key": SCHEDULE_WEEK_START_ADVISORY_LOCK_KEY},
+        )
+
+    setting_name = getattr(
+        Setting,
+        "SCHEDULE_WEEK_START_DAY",
+        "SCHEDULE_WEEK_START_DAY",
+    )
+    setting = (
+        Setting.query.filter_by(name=setting_name)
+        .with_for_update()
+        .first()
+    )
+    default_weekday = _valid_week_start_day(
+        getattr(Setting, "DEFAULT_SCHEDULE_WEEK_START_DAY", 0)
+    )
+    if setting is None:
+        setting = Setting(name=setting_name, value=str(default_weekday))
+        db.session.add(setting)
+        db.session.flush()
+    return setting, _valid_week_start_day(setting.value, default_weekday)
+
+
+def normalize_week_start(
+    value: date | str | None = None,
+    *,
+    start_weekday: int | None = None,
+) -> date:
+    """Return the configured week boundary containing ``value``.
+
+    Python weekday values are used (Monday is 0 through Sunday as 6). Passing
+    ``start_weekday`` keeps data migrations and unit tests independent from the
+    live setting.
+    """
+
     if isinstance(value, str) and value.strip():
-        parsed = datetime.strptime(value.strip(), "%Y-%m-%d").date()
-        return parsed - timedelta(days=parsed.weekday())
-    if isinstance(value, date):
-        return value - timedelta(days=value.weekday())
-    today = date.today()
-    return today - timedelta(days=today.weekday())
+        anchor_date = datetime.strptime(value.strip(), "%Y-%m-%d").date()
+    elif isinstance(value, date):
+        anchor_date = value
+    else:
+        anchor_date = default_timezone_date() if has_app_context() else date.today()
+
+    configured_start = (
+        get_schedule_week_start_day()
+        if start_weekday is None
+        else _valid_week_start_day(start_weekday)
+    )
+    offset = (anchor_date.weekday() - configured_start) % 7
+    return anchor_date - timedelta(days=offset)
+
+
+def realign_schedule_weeks(new_start_weekday: int) -> dict[str, int]:
+    """Re-bucket stored schedule weeks around a new global start weekday.
+
+    The caller owns the transaction and must commit or roll it back. Published
+    target weeks remain published only when every source week contributing days
+    to that target was published. Mixed targets become drafts so draft shifts
+    can never become visible merely because the global boundary changed.
+    Existing shift audits and tradeboard claims remain attached to their shifts;
+    seen receipts are reset because the logical week/version changed.
+    """
+
+    normalized_start = _valid_week_start_day(new_start_weekday, default=-1)
+    if normalized_start == -1:
+        raise ValueError("Schedule week start day must be between 0 and 6.")
+
+    source_weeks = (
+        DepartmentScheduleWeek.query.options(
+            selectinload(DepartmentScheduleWeek.shifts),
+            selectinload(DepartmentScheduleWeek.receipts),
+        )
+        .order_by(
+            DepartmentScheduleWeek.department_id.asc(),
+            DepartmentScheduleWeek.week_start.asc(),
+        )
+        .with_for_update()
+        .all()
+    )
+    result = {
+        "source_weeks": len(source_weeks),
+        "target_weeks": 0,
+        "rebuilt_weeks": 0,
+        "weeks_removed": 0,
+        "shifts_moved": 0,
+        "moved_shifts": 0,
+        "receipts_reset": 0,
+        "draft_target_weeks": 0,
+    }
+    if not source_weeks or all(
+        schedule_week.week_start.weekday() == normalized_start
+        for schedule_week in source_weeks
+    ):
+        return result
+
+    weeks_by_key = {
+        (schedule_week.department_id, schedule_week.week_start): schedule_week
+        for schedule_week in source_weeks
+    }
+    contributors_by_key: dict[
+        tuple[int, date], dict[int, DepartmentScheduleWeek]
+    ] = defaultdict(dict)
+    shifts_by_key: dict[tuple[int, date], list[Shift]] = defaultdict(list)
+
+    for source_week in source_weeks:
+        for offset in range(7):
+            covered_date = source_week.week_start + timedelta(days=offset)
+            target_key = (
+                source_week.department_id,
+                normalize_week_start(
+                    covered_date,
+                    start_weekday=normalized_start,
+                ),
+            )
+            contributors_by_key[target_key][source_week.id] = source_week
+        for shift in list(source_week.shifts):
+            target_key = (
+                source_week.department_id,
+                normalize_week_start(
+                    shift.shift_date,
+                    start_weekday=normalized_start,
+                ),
+            )
+            contributors_by_key[target_key][source_week.id] = source_week
+            shifts_by_key[target_key].append(shift)
+
+    source_metadata = {
+        schedule_week.id: {
+            "is_published": bool(schedule_week.is_published),
+            "current_version": int(schedule_week.current_version or 0),
+            "published_at": schedule_week.published_at,
+            "published_by_id": schedule_week.published_by_id,
+            "updated_at": schedule_week.updated_at,
+            "created_at": schedule_week.created_at,
+        }
+        for schedule_week in source_weeks
+    }
+    target_weeks: dict[tuple[int, date], DepartmentScheduleWeek] = {}
+    for target_key in sorted(contributors_by_key):
+        target_week = weeks_by_key.get(target_key)
+        if target_week is None:
+            target_week = DepartmentScheduleWeek(
+                department_id=target_key[0],
+                week_start=target_key[1],
+            )
+            db.session.add(target_week)
+        target_weeks[target_key] = target_week
+    db.session.flush()
+
+    target_objects = set(target_weeks.values())
+    receipts_to_reset = {
+        receipt.id: receipt
+        for schedule_week in source_weeks
+        for receipt in list(schedule_week.receipts)
+    }
+    for target_week in target_objects:
+        target_week.receipts.clear()
+    result["receipts_reset"] = len(receipts_to_reset)
+
+    for target_key, target_week in target_weeks.items():
+        contributor_ids = list(contributors_by_key[target_key])
+        contributor_metadata = [
+            source_metadata[source_id] for source_id in contributor_ids
+        ]
+        target_shifts = shifts_by_key.get(target_key, [])
+        source_versions = [
+            int(metadata["current_version"] or 0)
+            for metadata in contributor_metadata
+        ]
+        shift_versions = [int(shift.live_version or 0) for shift in target_shifts]
+        target_week.current_version = max(source_versions + shift_versions + [0]) + 1
+        target_week.is_published = bool(contributor_metadata) and all(
+            bool(metadata["is_published"])
+            for metadata in contributor_metadata
+        )
+        if target_week.is_published:
+            published_metadata = [
+                metadata
+                for metadata in contributor_metadata
+                if metadata["published_at"] is not None
+            ]
+            latest_metadata = max(
+                published_metadata or contributor_metadata,
+                key=lambda metadata: (
+                    metadata["published_at"]
+                    or metadata["updated_at"]
+                    or metadata["created_at"]
+                ),
+            )
+            target_week.published_at = latest_metadata["published_at"]
+            target_week.published_by_id = latest_metadata["published_by_id"]
+            target_week.unpublished_at = None
+        else:
+            target_week.is_published = False
+            target_week.published_at = None
+            target_week.published_by_id = None
+            target_week.unpublished_at = datetime.utcnow()
+            result["draft_target_weeks"] += 1
+
+        for shift in target_shifts:
+            if shift.schedule_week is not target_week:
+                shift.schedule_week = target_week
+                result["shifts_moved"] += 1
+                result["moved_shifts"] += 1
+            shift.live_version = target_week.current_version
+
+    db.session.flush()
+
+    for source_week in source_weeks:
+        if source_week in target_objects:
+            continue
+        db.session.delete(source_week)
+        result["weeks_removed"] += 1
+
+    result["target_weeks"] = len(target_weeks)
+    result["rebuilt_weeks"] = len(target_weeks)
+    return result
+
+
+def update_schedule_week_start_day(
+    new_start_weekday: int,
+) -> tuple[bool, dict[str, int]]:
+    """Atomically realign schedule rows and update their global boundary.
+
+    The schedule setting is serialized before its current value is read. Week
+    rows are rebuilt while that lock is held, and the singleton value is then
+    updated in the same transaction. The caller owns commit and rollback.
+    """
+
+    normalized_start = _valid_week_start_day(new_start_weekday, default=-1)
+    if normalized_start == -1:
+        raise ValueError("Schedule week start day must be between 0 and 6.")
+
+    setting, current_start = lock_schedule_week_start_setting()
+    if current_start == normalized_start:
+        return False, {}
+
+    result = realign_schedule_weeks(normalized_start)
+    setting.value = str(normalized_start)
+    return True, result
 
 
 def iter_week_dates(week_start: date) -> list[date]:
@@ -164,11 +445,19 @@ def format_week_label(week_start: date) -> str:
 def get_or_create_schedule_week(
     department_id: int, week_start: date
 ) -> DepartmentScheduleWeek:
-    week_start = normalize_week_start(week_start)
-    schedule_week = DepartmentScheduleWeek.query.filter_by(
-        department_id=department_id,
-        week_start=week_start,
-    ).first()
+    _, configured_start = lock_schedule_week_start_setting()
+    week_start = normalize_week_start(
+        week_start,
+        start_weekday=configured_start,
+    )
+    schedule_week = (
+        DepartmentScheduleWeek.query.filter_by(
+            department_id=department_id,
+            week_start=week_start,
+        )
+        .with_for_update()
+        .first()
+    )
     if schedule_week is None:
         schedule_week = DepartmentScheduleWeek(
             department_id=department_id,

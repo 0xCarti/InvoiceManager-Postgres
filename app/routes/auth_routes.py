@@ -178,8 +178,39 @@ def _redirect_to_default_landing(user=None):
     return redirect(url_for(get_default_landing_endpoint(resolved_user)))
 
 
-def _super_admin_count() -> int:
-    return User.query.filter_by(is_admin=True).count()
+def _active_super_admin_count() -> int:
+    return User.query.filter_by(is_admin=True, active=True).count()
+
+
+def _locked_active_super_admin_ids() -> set[int]:
+    """Lock and return the active super-admin set for invariant mutations.
+
+    PostgreSQL holds these row locks until the surrounding transaction ends,
+    serializing concurrent attempts to deactivate, demote, or archive active
+    super admins.  SQLite safely ignores ``FOR UPDATE`` while preserving the
+    same functional behavior in tests.
+    """
+
+    active_super_admins = (
+        User.query.filter_by(is_admin=True, active=True)
+        .order_by(User.id.asc())
+        .populate_existing()
+        .with_for_update()
+        .all()
+    )
+    return {admin.id for admin in active_super_admins}
+
+
+def _is_last_active_super_admin(user: User, *, lock: bool = False) -> bool:
+    if not (user.is_super_admin and user.active):
+        return False
+    if lock:
+        active_super_admin_ids = _locked_active_super_admin_ids()
+        return bool(
+            user.id in active_super_admin_ids
+            and len(active_super_admin_ids) <= 1
+        )
+    return bool(_active_super_admin_count() <= 1)
 
 
 def _permission_input_id(input_prefix: str, value: str) -> str:
@@ -303,6 +334,39 @@ def _resolve_permission_group_codes(
     return selected_codes, inherited_groups
 
 
+def _ensure_actor_can_delegate_permission_codes(
+    effective_codes: set[str],
+    *,
+    actor_codes: set[str] | None,
+) -> None:
+    """Keep delegated permission management within the actor's own ceiling."""
+
+    if current_user.is_super_admin:
+        return
+    if actor_codes is None or not effective_codes.issubset(actor_codes):
+        abort(403)
+
+
+def _actor_can_control_permission_group(
+    group: PermissionGroup,
+    *,
+    actor_codes: set[str] | None = None,
+) -> bool:
+    """Return whether a delegated actor may mutate this group's authority."""
+
+    if current_user.is_super_admin:
+        return True
+    effective_actor_codes = (
+        set(current_user.get_permission_codes())
+        if actor_codes is None
+        else actor_codes
+    )
+    group_codes = {
+        permission.code for permission in group.permissions if permission.code
+    }
+    return group_codes.issubset(effective_actor_codes)
+
+
 def _assign_permission_groups_to_user(user: User, group_ids: list[int] | None) -> None:
     selected_ids = sorted({int(group_id) for group_id in (group_ids or [])})
     groups = (
@@ -314,6 +378,34 @@ def _assign_permission_groups_to_user(user: User, group_ids: list[int] | None) -
     )
     user.permission_groups = groups
     user.invalidate_permission_cache()
+
+
+def _manageable_permission_group_ids() -> set[int] | None:
+    """Return groups the actor may assign, or ``None`` for a super admin."""
+    if current_user.is_super_admin:
+        return None
+    actor_codes = current_user.get_permission_codes()
+    groups = PermissionGroup.query.options(
+        selectinload(PermissionGroup.permissions)
+    ).all()
+    return {
+        group.id
+        for group in groups
+        if {permission.code for permission in group.permissions}.issubset(
+            actor_codes
+        )
+    }
+
+
+def _actor_can_manage_user(user: User) -> bool:
+    """Prevent delegated user managers from changing more-privileged accounts."""
+    if current_user.is_super_admin:
+        return True
+    if user.is_super_admin:
+        return False
+    return user.get_permission_codes().issubset(
+        current_user.get_permission_codes()
+    )
 
 
 def _cleanup_restored_user_favorites() -> int:
@@ -598,11 +690,7 @@ def _find_permission_group_by_name(
 
 
 def _is_pending_invited_user(user: User | None) -> bool:
-    return bool(
-        user is not None
-        and not user.active
-        and user.last_login_at is None
-    )
+    return bool(user is not None and user.is_invitation_pending)
 
 
 def _reset_user_invitation(
@@ -612,6 +700,7 @@ def _reset_user_invitation(
 ) -> None:
     user.password = generate_password_hash(os.urandom(16).hex())
     user.active = False
+    user.invitation_pending = True
     user.last_active_at = None
     if group_ids is not None:
         _assign_permission_groups_to_user(user, group_ids)
@@ -946,8 +1035,9 @@ def reset_token(token):
     form = SetPasswordForm()
     if form.validate_on_submit():
         user.password = generate_password_hash(form.new_password.data)
-        if not user.active and user.last_login_at is None:
+        if user.is_invitation_pending:
             user.active = True
+            user.invitation_pending = False
         db.session.commit()
         flash("Password updated.", "success")
         return redirect(url_for("auth.login"))
@@ -1030,15 +1120,40 @@ def profile():
             url_for("auth.profile", notifications_status="updated")
         )
 
+    can_view_transfer_activity = current_user.can_access_endpoint(
+        "transfer.view_transfers", "GET"
+    )
+    can_view_invoice_activity = current_user.can_access_endpoint(
+        "invoice.view_invoices", "GET"
+    )
+    requested_profile_tab = request.args.get("tab")
+    if password_submitted or "password" in status_messages:
+        active_profile_tab = "security"
+    elif notifications_submitted or "notifications" in status_messages:
+        active_profile_tab = "notifications"
+    elif requested_profile_tab == "activity" and (
+        can_view_transfer_activity or can_view_invoice_activity
+    ):
+        active_profile_tab = "activity"
+    elif requested_profile_tab in {"preferences", "notifications", "security"}:
+        active_profile_tab = requested_profile_tab
+    else:
+        active_profile_tab = "preferences"
     transfers = (
         Transfer.query.filter_by(user_id=current_user.id)
         .order_by(Transfer.date_created.desc(), Transfer.id.desc())
+        .limit(8)
         .all()
+        if can_view_transfer_activity
+        else []
     )
     invoices = (
         Invoice.query.filter_by(user_id=current_user.id)
         .order_by(Invoice.date_created.desc(), Invoice.id.desc())
+        .limit(8)
         .all()
+        if can_view_invoice_activity
+        else []
     )
     return render_template(
         "profile.html",
@@ -1055,6 +1170,10 @@ def profile():
         timezone_submitted=timezone_submitted,
         transfer_defaults_submitted=transfer_defaults_submitted,
         notifications_submitted=notifications_submitted,
+        active_profile_tab=active_profile_tab,
+        is_admin_view=False,
+        can_view_transfer_activity=can_view_transfer_activity,
+        can_view_invoice_activity=can_view_invoice_activity,
         transfers=transfers,
         invoices=invoices,
     )
@@ -1085,6 +1204,10 @@ def user_profile(user_id):
     user = db.session.get(User, user_id)
     if user is None:
         abort(404)
+    if user.id == current_user.id:
+        return redirect(url_for("auth.profile"))
+    if not _actor_can_manage_user(user):
+        abort(403)
 
     form = SetPasswordForm()
     tz_form = TimezoneForm(timezone=user.timezone or "")
@@ -1117,7 +1240,11 @@ def user_profile(user_id):
 
     if password_submitted and form.validate_on_submit():
         user.password = generate_password_hash(form.new_password.data)
+        if user.is_invitation_pending:
+            user.invitation_pending = False
+            user.active = True
         db.session.commit()
+        log_activity(f"Changed password for user {user.id}")
         return redirect(
             url_for(
                 "admin.user_profile", user_id=user_id, password_status="updated"
@@ -1157,15 +1284,40 @@ def user_profile(user_id):
             )
         )
 
+    can_view_transfer_activity = current_user.can_access_endpoint(
+        "transfer.view_transfers", "GET"
+    )
+    can_view_invoice_activity = current_user.can_access_endpoint(
+        "invoice.view_invoices", "GET"
+    )
+    requested_profile_tab = request.args.get("tab")
+    if password_submitted or "password" in status_messages:
+        active_profile_tab = "security"
+    elif notifications_submitted or "notifications" in status_messages:
+        active_profile_tab = "notifications"
+    elif requested_profile_tab == "activity" and (
+        can_view_transfer_activity or can_view_invoice_activity
+    ):
+        active_profile_tab = "activity"
+    elif requested_profile_tab in {"preferences", "notifications", "security"}:
+        active_profile_tab = requested_profile_tab
+    else:
+        active_profile_tab = "preferences"
     transfers = (
         Transfer.query.filter_by(user_id=user.id)
         .order_by(Transfer.date_created.desc(), Transfer.id.desc())
+        .limit(8)
         .all()
+        if can_view_transfer_activity
+        else []
     )
     invoices = (
         Invoice.query.filter_by(user_id=user.id)
         .order_by(Invoice.date_created.desc(), Invoice.id.desc())
+        .limit(8)
         .all()
+        if can_view_invoice_activity
+        else []
     )
     return render_template(
         "profile.html",
@@ -1180,6 +1332,10 @@ def user_profile(user_id):
         timezone_submitted=timezone_submitted,
         transfer_defaults_submitted=transfer_defaults_submitted,
         notifications_submitted=notifications_submitted,
+        active_profile_tab=active_profile_tab,
+        is_admin_view=True,
+        can_view_transfer_activity=can_view_transfer_activity,
+        can_view_invoice_activity=can_view_invoice_activity,
         transfers=transfers,
         invoices=invoices,
     )
@@ -1196,6 +1352,14 @@ def activate_user(user_id):
     user = db.session.get(User, user_id)
     if user is None:
         abort(404)
+    if not _actor_can_manage_user(user):
+        abort(403)
+    if user.is_invitation_pending:
+        flash(
+            "Pending invites must be accepted from the setup email or converted to a manual-password account.",
+            "warning",
+        )
+        return redirect(url_for("admin.users"))
     user.active = True
     db.session.commit()
     log_activity(f"Activated user {user_id}")
@@ -1223,11 +1387,28 @@ def index():
 @login_required
 def users():
     """Admin interface for managing users."""
-    users = User.query.options(selectinload(User.permission_groups)).all()
+    users = User.query.options(
+        selectinload(User.permission_groups).selectinload(
+            PermissionGroup.permissions
+        )
+    ).all()
     users = sorted(users, key=lambda user: (user.sort_key, user.email.casefold()))
 
     form = UserForm()
-    invite_form = InviteUserForm()
+    manageable_group_ids = _manageable_permission_group_ids()
+    manageable_user_ids = {
+        user.id for user in users if _actor_can_manage_user(user)
+    }
+    protected_user_action_reasons = {}
+    last_active_super_admin_ids = set()
+    for user in users:
+        if _is_last_active_super_admin(user):
+            last_active_super_admin_ids.add(user.id)
+        if user.id == current_user.id:
+            protected_user_action_reasons[user.id] = "Current account"
+        elif user.id in last_active_super_admin_ids:
+            protected_user_action_reasons[user.id] = "Last active super admin"
+    invite_form = InviteUserForm(allowed_group_ids=manageable_group_ids)
 
     invite_submitted = request.method == "POST" and (
         invite_form.submit.name in request.form or "email" in request.form
@@ -1236,18 +1417,37 @@ def users():
         if invite_form.validate_on_submit():
             email = _normalize_email(invite_form.email.data)
             display_name = _normalize_display_name(invite_form.display_name.data)
+            creation_method = invite_form.creation_method.data
             existing = _find_user_by_email(email)
             if existing:
                 if _is_pending_invited_user(existing):
+                    if not _actor_can_manage_user(existing):
+                        abort(403)
                     existing.display_name = display_name or None
-                    _reset_user_invitation(
-                        existing, group_ids=invite_form.group_ids.data
-                    )
-                    _deliver_user_invitation(
-                        existing,
-                        success_message="Invitation re-sent.",
-                        activity_message=f"Re-sent invite to user {email}",
-                    )
+                    if creation_method == "password":
+                        existing.password = generate_password_hash(
+                            invite_form.password.data
+                        )
+                        existing.active = True
+                        existing.invitation_pending = False
+                        existing.last_active_at = None
+                        _assign_permission_groups_to_user(
+                            existing, invite_form.group_ids.data
+                        )
+                        db.session.commit()
+                        log_activity(
+                            f"Converted pending invite to manual account for {email}"
+                        )
+                        flash("User created with a manual password.", "success")
+                    else:
+                        _reset_user_invitation(
+                            existing, group_ids=invite_form.group_ids.data
+                        )
+                        _deliver_user_invitation(
+                            existing,
+                            success_message="Invitation re-sent.",
+                            activity_message=f"Re-sent invite to user {email}",
+                        )
                 else:
                     flash(
                         "User already exists. Use password reset if they need a new setup email.",
@@ -1257,31 +1457,49 @@ def users():
                 new_user = User(
                     email=email,
                     display_name=display_name or None,
-                    password="",
-                    active=False,
+                    password=(
+                        generate_password_hash(invite_form.password.data)
+                        if creation_method == "password"
+                        else ""
+                    ),
+                    active=creation_method == "password",
+                    invitation_pending=False,
                     is_admin=False,
                 )
-                _reset_user_invitation(new_user, group_ids=invite_form.group_ids.data)
                 db.session.add(new_user)
-                invitation_sent = _deliver_user_invitation(
-                    new_user,
-                    success_message="Invitation sent.",
-                    activity_message=f"Invited user {email}",
-                )
-                if invitation_sent:
-                    notify_users_for_event(
-                        event_key="user_invited",
-                        subject=f"User invited: {email}",
-                        body=f"{current_user.email} invited {email} to InvoiceManager.",
-                        sms_body=f"User invited: {email}",
-                        exclude_user_ids={current_user.id},
+                if creation_method == "password":
+                    _assign_permission_groups_to_user(
+                        new_user, invite_form.group_ids.data
                     )
+                    db.session.commit()
+                    log_activity(f"Created manual-password user {email}")
+                    flash("User created with a manual password.", "success")
+                else:
+                    _reset_user_invitation(
+                        new_user, group_ids=invite_form.group_ids.data
+                    )
+                    invitation_sent = _deliver_user_invitation(
+                        new_user,
+                        success_message="Invitation sent.",
+                        activity_message=f"Invited user {email}",
+                    )
+                    if invitation_sent:
+                        notify_users_for_event(
+                            event_key="user_invited",
+                            subject=f"User invited: {email}",
+                            body=f"{current_user.email} invited {email} to InvoiceManager.",
+                            sms_body=f"User invited: {email}",
+                            exclude_user_ids={current_user.id},
+                        )
             return redirect(url_for("admin.users"))
         return render_template(
             "admin/view_users.html",
             users=users,
             form=form,
             invite_form=invite_form,
+            manageable_user_ids=manageable_user_ids,
+            protected_user_action_reasons=protected_user_action_reasons,
+            last_active_super_admin_ids=last_active_super_admin_ids,
         )
 
     if request.method == "POST" and request.form.get("action"):
@@ -1294,6 +1512,8 @@ def users():
 
         user = db.session.get(User, user_id)
         if user:
+            if not _actor_can_manage_user(user):
+                abort(403)
             notification_payload = None
             notification_event_key = None
             if action == "toggle_active":
@@ -1302,6 +1522,13 @@ def users():
                         "Pending invites cannot be activated manually. Re-send or delete the invite instead.",
                         "warning",
                     )
+                    return redirect(url_for("admin.users"))
+                if user.id == current_user.id and user.active:
+                    flash("You cannot deactivate your own account.", "danger")
+                    return redirect(url_for("admin.users"))
+                if _is_last_active_super_admin(user, lock=True):
+                    db.session.rollback()
+                    flash("At least one active super admin is required.", "danger")
                     return redirect(url_for("admin.users"))
                 user.active = not user.active
                 if not user.active:
@@ -1357,8 +1584,9 @@ def users():
             elif action == "toggle_super_admin":
                 if not current_user.is_super_admin:
                     abort(403)
-                if user.is_super_admin and _super_admin_count() <= 1:
-                    flash("At least one super admin is required.", "danger")
+                if _is_last_active_super_admin(user, lock=True):
+                    db.session.rollback()
+                    flash("At least one active super admin is required.", "danger")
                     return redirect(url_for("admin.users"))
                 user.is_admin = not user.is_admin
                 user.invalidate_permission_cache()
@@ -1395,6 +1623,9 @@ def users():
         users=users,
         form=form,
         invite_form=invite_form,
+        manageable_user_ids=manageable_user_ids,
+        protected_user_action_reasons=protected_user_action_reasons,
+        last_active_super_admin_ids=last_active_super_admin_ids,
     )
 
 
@@ -1410,13 +1641,21 @@ def user_access(user_id):
     if user is None:
         abort(404)
 
-    access_form = UserAccessForm(prefix="access")
+    can_edit_access = _actor_can_manage_user(user)
+    if not can_edit_access:
+        abort(403)
+    access_form = UserAccessForm(
+        prefix="access",
+        allowed_group_ids=_manageable_permission_group_ids(),
+    )
     if request.method == "GET":
         access_form.display_name.data = user.display_name or ""
         access_form.group_ids.data = [
             group.id for group in user.permission_groups
         ]
     elif request.method == "POST":
+        if not can_edit_access:
+            abort(403)
         if access_form.validate_on_submit():
             user.display_name = (
                 _normalize_display_name(access_form.display_name.data) or None
@@ -1438,6 +1677,7 @@ def user_access(user_id):
         "admin/user_access.html",
         managed_user=user,
         access_form=access_form,
+        can_edit_access=can_edit_access,
     )
 
 
@@ -1448,8 +1688,14 @@ def delete_user(user_id):
     user_to_delete = db.session.get(User, user_id)
     if user_to_delete is None:
         abort(404)
-    if user_to_delete.is_super_admin and _super_admin_count() <= 1:
-        flash("At least one super admin is required.", "danger")
+    if not _actor_can_manage_user(user_to_delete):
+        abort(403)
+    if user_to_delete.id == current_user.id:
+        flash("You cannot archive your own account.", "danger")
+        return redirect(url_for("admin.users"))
+    if _is_last_active_super_admin(user_to_delete, lock=True):
+        db.session.rollback()
+        flash("At least one active super admin is required.", "danger")
         return redirect(url_for("admin.users"))
     if _is_pending_invited_user(user_to_delete):
         invite_email = user_to_delete.email
@@ -1493,6 +1739,18 @@ def permission_groups():
     )
     can_manage_groups = current_user.has_permission("permission_groups.manage")
     can_manage_permissions = current_user.has_permission("permissions.manage")
+    actor_permission_codes = (
+        None
+        if current_user.is_super_admin
+        else set(current_user.get_permission_codes())
+    )
+    manageable_group_ids = {
+        group.id
+        for group in groups
+        if _actor_can_control_permission_group(
+            group, actor_codes=actor_permission_codes
+        )
+    }
     delete_form = DeleteForm()
 
     return render_template(
@@ -1500,6 +1758,7 @@ def permission_groups():
         groups=groups,
         can_manage_groups=can_manage_groups,
         can_manage_permissions=can_manage_permissions,
+        manageable_group_ids=manageable_group_ids,
         delete_form=delete_form,
     )
 
@@ -1513,6 +1772,11 @@ def create_permission_group():
 
     create_form = PermissionGroupForm(prefix="create")
     can_manage_permissions = current_user.has_permission("permissions.manage")
+    actor_permission_codes = (
+        None
+        if current_user.is_super_admin
+        else set(current_user.get_permission_codes())
+    )
 
     if request.method == "POST" and create_form.submit.name in request.form:
         posted_permission_codes = {
@@ -1548,6 +1812,10 @@ def create_permission_group():
                 effective_codes, _ = _resolve_permission_group_codes(
                     posted_permission_codes,
                     create_form.inherited_group_ids.data,
+                )
+                _ensure_actor_can_delegate_permission_codes(
+                    effective_codes,
+                    actor_codes=actor_permission_codes,
                 )
                 group.permissions = _load_permissions_by_codes(effective_codes)
             db.session.add(group)
@@ -1596,8 +1864,27 @@ def edit_permission_group(group_id):
         abort(404)
 
     group_form = PermissionGroupForm(prefix="group", obj=group, exclude_group_id=group.id)
-    can_manage_group = current_user.has_permission("permission_groups.manage")
-    can_manage_permissions = current_user.has_permission("permissions.manage")
+    has_manage_group_permission = current_user.has_permission(
+        "permission_groups.manage"
+    )
+    has_manage_permissions_permission = current_user.has_permission(
+        "permissions.manage"
+    )
+    actor_permission_codes = (
+        None
+        if current_user.is_super_admin
+        else set(current_user.get_permission_codes())
+    )
+    group_within_actor_ceiling = _actor_can_control_permission_group(
+        group,
+        actor_codes=actor_permission_codes,
+    )
+    can_manage_group = (
+        has_manage_group_permission and group_within_actor_ceiling
+    )
+    can_manage_permissions = (
+        has_manage_permissions_permission and group_within_actor_ceiling
+    )
     can_update_group = can_manage_group or can_manage_permissions
     existing_codes = [permission.code for permission in group.permissions]
 
@@ -1660,6 +1947,10 @@ def edit_permission_group(group_id):
                     group_form.inherited_group_ids.data,
                     exclude_group_id=group.id,
                 )
+                _ensure_actor_can_delegate_permission_codes(
+                    effective_codes,
+                    actor_codes=actor_permission_codes,
+                )
                 group.permissions = _load_permissions_by_codes(effective_codes)
             db.session.commit()
             log_activity(f"Updated permission group {group.name}")
@@ -1686,6 +1977,10 @@ def edit_permission_group(group_id):
         can_manage_group=can_manage_group,
         can_manage_permissions=can_manage_permissions,
         can_update_group=can_update_group,
+        group_within_actor_ceiling=group_within_actor_ceiling,
+        has_any_group_management_permission=(
+            has_manage_group_permission or has_manage_permissions_permission
+        ),
     )
 
 
@@ -1706,6 +2001,8 @@ def delete_permission_group(group_id):
     group = db.session.get(PermissionGroup, group_id)
     if group is None:
         abort(404)
+    if not _actor_can_control_permission_group(group):
+        abort(403)
     if group.is_system:
         flash("System permission groups cannot be deleted.", "warning")
         return redirect(url_for("admin.permission_groups"))
@@ -2467,6 +2764,10 @@ def settings():
         tz_setting = Setting(name="DEFAULT_TIMEZONE", value="UTC")
         db.session.add(tz_setting)
 
+    from app.services.schedule_service import lock_schedule_week_start_setting
+
+    schedule_week_start_setting, _ = lock_schedule_week_start_setting()
+
     auto_setting = Setting.query.filter_by(name="AUTO_BACKUP_ENABLED").first()
     if auto_setting is None:
         auto_setting = Setting(name="AUTO_BACKUP_ENABLED", value="0")
@@ -2539,6 +2840,7 @@ def settings():
         "gst_number": gst_setting.value or "",
         "food_cost_tax_rate": Setting.get_food_cost_tax_rate(),
         "default_timezone": default_timezone,
+        "schedule_week_start_day": Setting.get_schedule_week_start_day(),
         "auto_backup_enabled": auto_setting.value == "1",
         "auto_backup_interval": (
             int(interval_value_setting.value),
@@ -2566,6 +2868,7 @@ def settings():
     form = SettingsForm(
         gst_number=gst_setting.value,
         default_timezone=default_timezone,
+        schedule_week_start_day=Setting.get_schedule_week_start_day(),
         auto_backup_enabled=auto_setting.value == "1",
         auto_backup_interval_value=int(interval_value_setting.value),
         auto_backup_interval_unit=interval_unit_setting.value,
@@ -2626,6 +2929,7 @@ def settings():
         new_default_timezone = normalize_timezone_name(
             form.default_timezone.data or "UTC"
         )
+        new_schedule_week_start_day = form.schedule_week_start_day.data
         new_auto_backup_enabled = bool(form.auto_backup_enabled.data)
         new_auto_backup_interval = (
             form.auto_backup_interval_value.data,
@@ -2644,6 +2948,12 @@ def settings():
             if form.retail_pop_price.data is None
             else format(form.retail_pop_price.data, ".2f")
         )
+
+        from app.services.schedule_service import update_schedule_week_start_day
+
+        schedule_week_start_changed, schedule_realign_stats = (
+            update_schedule_week_start_day(new_schedule_week_start_day)
+        )
         changed_settings: list[str] = []
         if settings_snapshot["gst_number"] != new_gst_number:
             changed_settings.append("GST")
@@ -2651,6 +2961,8 @@ def settings():
             changed_settings.append("food cost tax rate")
         if settings_snapshot["default_timezone"] != new_default_timezone:
             changed_settings.append("default timezone")
+        if schedule_week_start_changed:
+            changed_settings.append("schedule week start day")
         if settings_snapshot["auto_backup_enabled"] != new_auto_backup_enabled:
             changed_settings.append("auto backup enabled")
         if settings_snapshot["auto_backup_interval"] != new_auto_backup_interval:
@@ -2744,6 +3056,16 @@ def settings():
                 "Updated settings: "
                 + ", ".join(dict.fromkeys(changed_settings))
             )
+        if schedule_realign_stats:
+            moved_shifts = schedule_realign_stats.get("moved_shifts", 0)
+            rebuilt_weeks = schedule_realign_stats.get("rebuilt_weeks", 0)
+            if moved_shifts or rebuilt_weeks:
+                flash(
+                    "Schedule weeks were realigned: "
+                    f"{moved_shifts} shift(s) across "
+                    f"{rebuilt_weeks} week record(s).",
+                    "info",
+                )
         flash("Settings updated.", "success")
         return redirect(url_for("admin.settings"))
 

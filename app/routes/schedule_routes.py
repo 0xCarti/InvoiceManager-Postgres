@@ -53,6 +53,7 @@ from app.services.schedule_service import (
     find_overlapping_shift,
     format_week_label,
     get_or_create_schedule_week,
+    get_schedule_week_start_day,
     get_visible_departments,
     get_visible_schedule_users,
     legacy_role_for_department_access,
@@ -74,7 +75,7 @@ from app.services.schedule_service import (
 )
 from app.utils.filter_state import get_filter_defaults
 from app.utils.pagination import PAGINATION_SIZES, build_pagination_args, get_per_page
-from app.utils.timezone import get_default_timezone
+from app.utils.timezone import default_timezone_date, get_default_timezone
 
 
 schedule = Blueprint("schedule", __name__)
@@ -147,7 +148,8 @@ def _expand_template_entry_date(
     if template.span == ScheduleTemplate.SPAN_WEEK:
         if entry.weekday is None:
             return None
-        return anchor + timedelta(days=entry.weekday)
+        weekday_offset = (entry.weekday - anchor.weekday()) % 7
+        return anchor + timedelta(days=weekday_offset)
     if template.span == ScheduleTemplate.SPAN_MONTH:
         if entry.day_of_month is None:
             return None
@@ -488,6 +490,28 @@ def _add_months(value: date_cls, months: int) -> date_cls:
     return value.replace(year=year, month=month, day=1)
 
 
+def _month_calendar_rows(
+    month_start: date_cls,
+    *,
+    start_weekday: int,
+) -> tuple[date_cls, date_cls, list[list[date_cls]]]:
+    month_end = _add_months(month_start, 1) - timedelta(days=1)
+    grid_start = normalize_week_start(
+        month_start,
+        start_weekday=start_weekday,
+    )
+    grid_end = normalize_week_start(
+        month_end,
+        start_weekday=start_weekday,
+    ) + timedelta(days=6)
+    dates = [
+        grid_start + timedelta(days=offset)
+        for offset in range((grid_end - grid_start).days + 1)
+    ]
+    rows = [dates[offset : offset + 7] for offset in range(0, len(dates), 7)]
+    return grid_start, grid_end, rows
+
+
 def _my_schedule_period(value) -> str:
     normalized = str(value or "").strip().lower()
     valid_periods = {period for period, _label in MY_SCHEDULE_PERIOD_CHOICES}
@@ -624,19 +648,35 @@ def _parse_schedule_view_mode(value) -> str:
     return SCHEDULE_VIEW_USER
 
 
-def _load_schedule_events_for_week(week_start) -> list[Event]:
-    normalized_week_start = normalize_week_start(week_start)
-    week_end = normalized_week_start + timedelta(days=6)
+def _schedule_weekday_offset_choices(week_start: date_cls) -> list[tuple[int, str]]:
+    return [
+        (offset, (week_start + timedelta(days=offset)).strftime("%a"))
+        for offset in range(7)
+    ]
+
+
+def _load_schedule_events_for_range(
+    range_start: date_cls,
+    range_end: date_cls,
+) -> list[Event]:
     return (
         Event.query.options(
             selectinload(Event.locations).selectinload(EventLocation.location),
         )
         .filter(
-            Event.start_date <= week_end,
-            Event.end_date >= normalized_week_start,
+            Event.start_date <= range_end,
+            Event.end_date >= range_start,
         )
         .order_by(Event.start_date.asc(), Event.name.asc())
         .all()
+    )
+
+
+def _load_schedule_events_for_week(week_start) -> list[Event]:
+    normalized_week_start = normalize_week_start(week_start)
+    return _load_schedule_events_for_range(
+        normalized_week_start,
+        normalized_week_start + timedelta(days=6),
     )
 
 
@@ -1214,6 +1254,9 @@ def team_schedule():
             department_choices=shift_department_choices,
             position_choices=shift_position_choices,
         )
+        shift_form.target_days.choices = _schedule_weekday_offset_choices(
+            schedule_week.week_start
+        )
         schedule_user_position_map_by_department = (
             _build_schedule_user_position_map_by_department(
                 shift_assignable_users,
@@ -1492,7 +1535,10 @@ def team_schedule():
                     if not selected_weekdays:
                         if shift_form.shift_date.data in context["week_dates"]:
                             selected_weekdays = [
-                                (shift_form.shift_date.data.weekday()) % 7
+                                (
+                                    shift_form.shift_date.data
+                                    - schedule_week.week_start
+                                ).days
                             ]
                         else:
                             shift_form.target_days.errors.append(
@@ -1936,8 +1982,8 @@ def team_schedule():
         selected_department is not None
         and schedule_week.is_published
         and any(
-        membership.department_id == selected_department.id
-        for membership in current_user.department_memberships
+            membership.department_id == selected_department.id
+            for membership in current_user.department_memberships
         )
     ):
         mark_schedule_week_seen(current_user, [schedule_week])
@@ -1992,6 +2038,259 @@ def team_schedule():
         auto_assign_action_label=auto_assign_action_label,
         can_publish_selected_scope=can_publish_selected_scope,
         publish_action_label=publish_action_label,
+    )
+
+
+@schedule.route("/schedules/month", methods=["GET"])
+@login_required
+def team_schedule_month():
+    """Show a read-only monthly overview of the scoped team schedule."""
+
+    can_team_access, can_self_schedule = _team_schedule_access_mode()
+    visible_departments = get_visible_departments(
+        current_user,
+        require_team_access=can_team_access or can_self_schedule,
+    )
+    requested_department_filter = _resolve_team_schedule_department_filter(
+        visible_departments,
+        request.args.get("department_id"),
+        scope="schedule.team_schedule",
+    )
+    all_departments_mode = requested_department_filter == ALL_DEPARTMENTS_VALUE
+    selected_department = (
+        None
+        if all_departments_mode
+        else _select_department(
+            visible_departments,
+            (
+                requested_department_filter
+                if isinstance(requested_department_filter, int)
+                else None
+            ),
+        )
+    )
+    selected_departments = (
+        visible_departments
+        if all_departments_mode
+        else ([selected_department] if selected_department is not None else [])
+    )
+    selected_department_filter_value = (
+        ALL_DEPARTMENTS_VALUE
+        if all_departments_mode
+        else (
+            str(selected_department.id)
+            if selected_department is not None
+            else ""
+        )
+    )
+
+    schedule_today = default_timezone_date()
+    anchor_date = _parse_iso_date(
+        request.args.get("month")
+        or request.args.get("start_date")
+        or request.args.get("week_start"),
+        schedule_today,
+    )
+    month_start = _month_start(anchor_date)
+    month_end = _add_months(month_start, 1) - timedelta(days=1)
+    configured_start_weekday = get_schedule_week_start_day()
+    grid_start, grid_end, calendar_weeks = _month_calendar_rows(
+        month_start,
+        start_weekday=configured_start_weekday,
+    )
+    calendar_dates = [day for week in calendar_weeks for day in week]
+    week_start_by_date = {
+        day: normalize_week_start(
+            day,
+            start_weekday=configured_start_weekday,
+        )
+        for day in calendar_dates
+    }
+
+    include_self_only = not can_team_access and can_self_schedule
+    filter_users = _build_team_schedule_filter_users(
+        selected_departments,
+        include_self_only=include_self_only,
+    )
+    view_mode = _parse_schedule_view_mode(request.args.get("view_mode"))
+    requested_user_id = (
+        _parse_int(request.args.get("user_id"))
+        if view_mode == SCHEDULE_VIEW_USER
+        else None
+    )
+    visible_users, selected_user_id = _filter_schedule_users(
+        filter_users,
+        requested_user_id,
+    )
+    if view_mode != SCHEDULE_VIEW_USER:
+        selected_user_id = None
+
+    schedule_events = _load_schedule_events_for_range(grid_start, grid_end)
+    selected_filter_event = _select_schedule_event(
+        schedule_events,
+        _parse_int(request.args.get("filter_event_id")),
+    )
+    event_filter_locations = _sorted_event_locations(selected_filter_event)
+    requested_filter_location_id = _parse_int(
+        request.args.get("filter_location_id")
+    )
+    selected_filter_location_id = None
+    if requested_filter_location_id and any(
+        event_location.location_id == requested_filter_location_id
+        for event_location in event_filter_locations
+    ):
+        selected_filter_location_id = requested_filter_location_id
+
+    schedule_weeks: list[DepartmentScheduleWeek] = []
+    shifts: list[Shift] = []
+    selected_department_ids = [
+        department.id for department in selected_departments
+    ]
+    if selected_department_ids:
+        schedule_weeks = (
+            DepartmentScheduleWeek.query.options(
+                selectinload(DepartmentScheduleWeek.receipts),
+            )
+            .filter(
+                DepartmentScheduleWeek.department_id.in_(
+                    selected_department_ids
+                ),
+                DepartmentScheduleWeek.week_start
+                >= grid_start - timedelta(days=6),
+                DepartmentScheduleWeek.week_start <= grid_end,
+            )
+            .order_by(
+                DepartmentScheduleWeek.week_start.asc(),
+                DepartmentScheduleWeek.department_id.asc(),
+            )
+            .all()
+        )
+        if schedule_weeks:
+            shifts = (
+                Shift.query.options(
+                    selectinload(Shift.schedule_week),
+                    selectinload(Shift.position).selectinload(
+                        ShiftPosition.department
+                    ),
+                    selectinload(Shift.assigned_user),
+                    selectinload(Shift.location),
+                    selectinload(Shift.event),
+                )
+                .filter(
+                    Shift.schedule_week_id.in_(
+                        [schedule_week.id for schedule_week in schedule_weeks]
+                    ),
+                    Shift.shift_date >= grid_start,
+                    Shift.shift_date <= grid_end,
+                )
+                .order_by(
+                    Shift.shift_date.asc(),
+                    Shift.start_time.asc(),
+                    Shift.id.asc(),
+                )
+                .all()
+            )
+
+    visible_user_ids = {user.id for user in visible_users}
+    shifts = [
+        shift
+        for shift in shifts
+        if shift.assigned_user_id is None
+        or shift.assigned_user_id in visible_user_ids
+    ]
+    if view_mode == SCHEDULE_VIEW_POSITION:
+        shifts = _filter_shifts_for_position_view(
+            shifts,
+            week_dates=calendar_dates,
+            visible_user_ids=visible_user_ids,
+            selected_event_id=(
+                selected_filter_event.id if selected_filter_event else None
+            ),
+            selected_location_id=selected_filter_location_id,
+        )
+
+    membership_department_ids = {
+        membership.department_id
+        for membership in current_user.department_memberships
+    }
+    seen_weeks = [
+        schedule_week
+        for schedule_week in schedule_weeks
+        if schedule_week.is_published
+        and schedule_week.department_id in membership_department_ids
+    ]
+    if seen_weeks:
+        mark_schedule_week_seen(current_user, seen_weeks)
+        db.session.commit()
+
+    shifts_by_date: dict[date_cls, list[Shift]] = defaultdict(list)
+    for shift in shifts:
+        shifts_by_date[shift.shift_date].append(shift)
+
+    month_shifts = [
+        shift
+        for shift in shifts
+        if month_start <= shift.shift_date <= month_end
+    ]
+    month_days = [
+        {
+            "date": shift_date,
+            "shifts": shifts_by_date[shift_date],
+        }
+        for shift_date in sorted(shifts_by_date)
+        if month_start <= shift_date <= month_end
+    ]
+    assigned_shift_count = sum(
+        1
+        for shift in month_shifts
+        if shift.assignment_mode == Shift.ASSIGNMENT_ASSIGNED
+        and shift.assigned_user_id is not None
+    )
+    open_shift_count = len(month_shifts) - assigned_shift_count
+    can_view_labor = current_user.has_permission("schedules.view_labor")
+    month_total_labor = (
+        sum(
+            float(shift.paid_hours or 0.0)
+            * float(shift.hourly_rate_snapshot or 0.0)
+            for shift in month_shifts
+        )
+        if can_view_labor
+        else None
+    )
+
+    return render_template(
+        "schedules/team_schedule_month.html",
+        departments=visible_departments,
+        selected_department=selected_department,
+        selected_department_filter_value=selected_department_filter_value,
+        all_departments_mode=all_departments_mode,
+        show_department_names=all_departments_mode,
+        filter_users=filter_users,
+        visible_users=visible_users,
+        selected_user_filter_value=str(selected_user_id or ""),
+        view_mode=view_mode,
+        month_start=month_start,
+        month_end=month_end,
+        month_label=month_start.strftime("%B %Y"),
+        previous_month=_add_months(month_start, -1),
+        next_month=_add_months(month_start, 1),
+        current_month=_month_start(schedule_today),
+        calendar_weeks=calendar_weeks,
+        week_start_by_date=week_start_by_date,
+        shifts_by_date=shifts_by_date,
+        month_days=month_days,
+        schedule_events=schedule_events,
+        selected_event_filter_value=str(
+            selected_filter_event.id if selected_filter_event else ""
+        ),
+        event_filter_locations=event_filter_locations,
+        selected_location_filter_value=str(selected_filter_location_id or ""),
+        assigned_shift_count=assigned_shift_count,
+        open_shift_count=open_shift_count,
+        month_total_labor=month_total_labor,
+        can_view_labor=can_view_labor,
+        can_team_access=can_team_access,
+        can_self_schedule=can_self_schedule,
     )
 
 
@@ -3401,6 +3700,118 @@ def user_settings(user_id: int):
     eligibility_form = UserPositionEligibilityForm(prefix="eligibility")
     action_form = CSRFOnlyForm(prefix="usersettings")
 
+    has_manage_setup_permission = current_user.has_permission(
+        "schedules.manage_setup"
+    )
+    is_super_admin = bool(getattr(current_user, "is_super_admin", False))
+    if is_super_admin:
+        managed_departments = Department.query.order_by(Department.name.asc()).all()
+    else:
+        managed_departments = _managed_schedule_departments(current_user)
+    managed_department_ids = {
+        department.id for department in managed_departments
+    }
+    target_department_ids = {
+        membership.department_id
+        for membership in target_user.department_memberships
+    }
+    has_managed_target_scope = bool(
+        is_super_admin or managed_department_ids.intersection(target_department_ids)
+    )
+    can_manage_setup = bool(
+        has_manage_setup_permission
+        and managed_department_ids
+        and has_managed_target_scope
+    )
+    can_manage_pay_rates = bool(
+        current_user.has_permission("schedules.manage_pay_rates")
+        and has_managed_target_scope
+    )
+    addable_departments = [
+        department for department in managed_departments if department.active
+    ]
+    addable_department_ids = {
+        department.id for department in addable_departments
+    }
+    visible_memberships = sorted(
+        [
+            membership
+            for membership in target_user.department_memberships
+            if membership.department_id in managed_department_ids
+        ],
+        key=lambda membership: membership.department.name.casefold(),
+    )
+    visible_eligibilities = sorted(
+        [
+            eligibility
+            for eligibility in target_user.position_eligibilities
+            if eligibility.position.department_id in managed_department_ids
+        ],
+        key=lambda eligibility: (
+            eligibility.position.department.name.casefold(),
+            eligibility.position.name.casefold(),
+        ),
+    )
+    can_change_primary = bool(
+        can_manage_setup
+        and all(
+            membership.department_id in managed_department_ids
+            for membership in target_user.department_memberships
+        )
+    )
+
+    membership_form.department_id.choices = [
+        (department.id, department.name) for department in addable_departments
+    ]
+    selected_membership_department_id = _parse_int(
+        request.form.get("membership-department_id")
+    )
+    if selected_membership_department_id not in addable_department_ids:
+        selected_membership_department_id = (
+            addable_departments[0].id if addable_departments else None
+        )
+    supervisor_choices = [(0, "No direct supervisor")]
+    if selected_membership_department_id is not None:
+        supervisor_memberships = (
+            UserDepartmentMembership.query.options(
+                selectinload(UserDepartmentMembership.user)
+            )
+            .join(User, UserDepartmentMembership.user_id == User.id)
+            .filter(
+                UserDepartmentMembership.department_id
+                == selected_membership_department_id,
+                User.active.is_(True),
+            )
+            .all()
+        )
+        supervisor_users = sorted(
+            {
+                supervisor_membership.user_id: supervisor_membership.user
+                for supervisor_membership in supervisor_memberships
+            }.values(),
+            key=lambda user: (user.sort_key, user.email.casefold()),
+        )
+        supervisor_choices.extend(
+            (user.id, user.display_label) for user in supervisor_users
+        )
+    membership_form.reports_to_user_id.choices = supervisor_choices
+    eligibility_form.position_id.choices = [
+        (position.id, f"{position.department.name} - {position.name}")
+        for position in ShiftPosition.query.options(
+            selectinload(ShiftPosition.department)
+        )
+        .filter(
+            ShiftPosition.department_id.in_(managed_department_ids),
+            ShiftPosition.active.is_(True),
+        )
+        .order_by(
+            ShiftPosition.department_id.asc(),
+            ShiftPosition.sort_order.asc(),
+            ShiftPosition.name.asc(),
+        )
+        .all()
+    ] if managed_department_ids else []
+
     if request.method == "GET":
         profile_form.hourly_rate.data = target_user.hourly_rate
         profile_form.desired_weekly_hours.data = target_user.desired_weekly_hours
@@ -3411,19 +3822,20 @@ def user_settings(user_id: int):
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()
         if action == "save_profile":
-            if not current_user.has_any_permission(
-                "schedules.manage_pay_rates", "schedules.manage_setup"
-            ):
+            if not can_manage_pay_rates and not can_manage_setup:
                 abort(403)
             if profile_form.validate_on_submit():
-                target_user.hourly_rate = float(profile_form.hourly_rate.data or 0.0)
-                target_user.desired_weekly_hours = float(
-                    profile_form.desired_weekly_hours.data or 0.0
-                )
-                target_user.max_weekly_hours = float(
-                    profile_form.max_weekly_hours.data or 0.0
-                )
-                if current_user.has_permission("schedules.manage_setup"):
+                if can_manage_pay_rates:
+                    target_user.hourly_rate = float(
+                        profile_form.hourly_rate.data or 0.0
+                    )
+                    target_user.desired_weekly_hours = float(
+                        profile_form.desired_weekly_hours.data or 0.0
+                    )
+                    target_user.max_weekly_hours = float(
+                        profile_form.max_weekly_hours.data or 0.0
+                    )
+                if can_manage_setup:
                     target_user.schedule_enabled = bool(
                         profile_form.schedule_enabled.data
                     )
@@ -3434,9 +3846,35 @@ def user_settings(user_id: int):
                 flash("Scheduling settings saved.", "success")
                 return redirect(url_for("schedule.user_settings", user_id=user_id))
         elif action == "add_membership":
-            if not current_user.has_permission("schedules.manage_setup"):
+            if not can_manage_setup:
+                abort(403)
+            if membership_form.department_id.data not in addable_department_ids:
                 abort(403)
             if membership_form.validate_on_submit():
+                reports_to_user_id = _parse_int(
+                    membership_form.reports_to_user_id.data
+                )
+                if reports_to_user_id is not None:
+                    supervisor_membership = (
+                        UserDepartmentMembership.query.join(
+                            User,
+                            UserDepartmentMembership.user_id == User.id,
+                        )
+                        .filter(
+                            UserDepartmentMembership.user_id
+                            == reports_to_user_id,
+                            UserDepartmentMembership.department_id
+                            == membership_form.department_id.data,
+                            User.active.is_(True),
+                        )
+                        .first()
+                    )
+                    if supervisor_membership is None:
+                        membership_form.reports_to_user_id.errors.append(
+                            "Supervisor must be an active member of that department."
+                        )
+                if membership_form.is_primary.data and not can_change_primary:
+                    abort(403)
                 existing = UserDepartmentMembership.query.filter_by(
                     user_id=target_user.id,
                     department_id=membership_form.department_id.data,
@@ -3445,7 +3883,7 @@ def user_settings(user_id: int):
                     membership_form.department_id.errors.append(
                         "User is already in that department."
                     )
-                else:
+                elif not membership_form.errors:
                     if membership_form.is_primary.data:
                         for membership in target_user.department_memberships:
                             membership.is_primary = False
@@ -3462,9 +3900,7 @@ def user_settings(user_id: int):
                                 membership_form.can_manage_department.data
                             ),
                             can_auto_assign=bool(membership_form.can_auto_assign.data),
-                            reports_to_user_id=_parse_int(
-                                membership_form.reports_to_user_id.data
-                            ),
+                            reports_to_user_id=reports_to_user_id,
                             is_primary=bool(membership_form.is_primary.data),
                         )
                     )
@@ -3472,7 +3908,7 @@ def user_settings(user_id: int):
                     flash("Department membership added.", "success")
                     return redirect(url_for("schedule.user_settings", user_id=user_id))
         elif action == "update_membership_access":
-            if not current_user.has_permission("schedules.manage_setup"):
+            if not can_manage_setup:
                 abort(403)
             membership = db.session.get(
                 UserDepartmentMembership,
@@ -3480,6 +3916,8 @@ def user_settings(user_id: int):
             )
             if membership is None or membership.user_id != target_user.id:
                 abort(404)
+            if membership.department_id not in managed_department_ids:
+                abort(403)
             can_manage_department = _parse_checkbox(
                 request.form.get("can_manage_department")
             )
@@ -3495,7 +3933,7 @@ def user_settings(user_id: int):
             flash("Department membership updated.", "success")
             return redirect(url_for("schedule.user_settings", user_id=user_id))
         elif action == "remove_membership":
-            if not current_user.has_permission("schedules.manage_setup"):
+            if not can_manage_setup:
                 abort(403)
             membership = db.session.get(
                 UserDepartmentMembership,
@@ -3503,15 +3941,26 @@ def user_settings(user_id: int):
             )
             if membership is None or membership.user_id != target_user.id:
                 abort(404)
+            if membership.department_id not in managed_department_ids:
+                abort(403)
             db.session.delete(membership)
             db.session.commit()
             flash("Department membership removed.", "success")
             return redirect(url_for("schedule.user_settings", user_id=user_id))
         elif action == "add_eligibility":
-            if not current_user.has_permission("schedules.manage_setup"):
+            if not can_manage_setup:
+                abort(403)
+            requested_position = db.session.get(
+                ShiftPosition,
+                eligibility_form.position_id.data,
+            )
+            if (
+                requested_position is not None
+                and requested_position.department_id not in managed_department_ids
+            ):
                 abort(403)
             if eligibility_form.validate_on_submit():
-                position = db.session.get(ShiftPosition, eligibility_form.position_id.data)
+                position = requested_position
                 if position is None:
                     eligibility_form.position_id.errors.append("Position not found.")
                 elif not any(
@@ -3543,7 +3992,7 @@ def user_settings(user_id: int):
                         flash("Position eligibility added.", "success")
                         return redirect(url_for("schedule.user_settings", user_id=user_id))
         elif action == "remove_eligibility":
-            if not current_user.has_permission("schedules.manage_setup"):
+            if not can_manage_setup:
                 abort(403)
             eligibility = db.session.get(
                 UserPositionEligibility,
@@ -3551,6 +4000,8 @@ def user_settings(user_id: int):
             )
             if eligibility is None or eligibility.user_id != target_user.id:
                 abort(404)
+            if eligibility.position.department_id not in managed_department_ids:
+                abort(403)
             db.session.delete(eligibility)
             db.session.commit()
             flash("Position eligibility removed.", "success")
@@ -3563,8 +4014,9 @@ def user_settings(user_id: int):
         membership_form=membership_form,
         eligibility_form=eligibility_form,
         action_form=action_form,
-        can_manage_setup=current_user.has_permission("schedules.manage_setup"),
-        can_manage_pay_rates=current_user.has_permission(
-            "schedules.manage_pay_rates"
-        ),
+        visible_memberships=visible_memberships,
+        visible_eligibilities=visible_eligibilities,
+        can_manage_setup=can_manage_setup,
+        can_change_primary=can_change_primary,
+        can_manage_pay_rates=can_manage_pay_rates,
     )
