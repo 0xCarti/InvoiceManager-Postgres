@@ -21,14 +21,17 @@ def _prepare_items(app):
         return user.email
 
 
-def test_items_page_includes_forecast_report_link(client, app):
+def test_purchase_orders_page_owns_forecast_report_link(client, app):
     email = _prepare_items(app)
 
     with client:
         login(client, email, "pass")
 
-        resp = client.get("/items")
+        items_response = client.get("/items")
+        purchase_orders_response = client.get("/purchase_orders")
 
-        assert resp.status_code == 200
-        assert b"/reports/purchase-cost-forecast" in resp.data
-        assert b"Forecasted Stock Item Sales" in resp.data
+        assert items_response.status_code == 200
+        assert b"/reports/purchase-cost-forecast" not in items_response.data
+        assert purchase_orders_response.status_code == 200
+        assert b"/reports/purchase-cost-forecast" in purchase_orders_response.data
+        assert b"Forecast Purchase Costs" in purchase_orders_response.data

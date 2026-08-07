@@ -13,10 +13,7 @@
 {% set can_select_products = can_bulk_update_products or can_bulk_set_cost or can_bulk_archive_products %}
 {% set can_product_reports = namespace(
     recipe=can_access_endpoint('report.product_recipe_report', 'GET'),
-    sales=can_access_endpoint('report.product_sales_report', 'GET'),
-    products_sold=can_access_endpoint('report.products_sold_report', 'GET'),
-    stock=can_access_endpoint('report.product_stock_usage_report', 'GET'),
-    forecast=can_access_endpoint('report.department_sales_forecast', 'GET')
+    location_sales=can_access_endpoint('report.product_location_sales_report', 'GET')
 ) %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
@@ -94,7 +91,7 @@
             </ul>
         </div>
         <div class="dropdown">
-            {% if can_product_reports.recipe or can_product_reports.sales or can_product_reports.products_sold or can_product_reports.stock or can_product_reports.forecast %}
+            {% if can_product_reports.recipe or can_product_reports.location_sales %}
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                 Reports
             </button>
@@ -102,17 +99,8 @@
                 {% if can_product_reports.recipe %}
                 <li><a class="dropdown-item" href="{{ url_for('report.product_recipe_report') }}">Recipe Report</a></li>
                 {% endif %}
-                {% if can_product_reports.sales %}
-                <li><a class="dropdown-item" href="{{ url_for('report.product_sales_report') }}">Revenue Report</a></li>
-                {% endif %}
-                {% if can_product_reports.products_sold %}
-                <li><a class="dropdown-item" href="{{ url_for('report.products_sold_report') }}">Products Sold Report</a></li>
-                {% endif %}
-                {% if can_product_reports.stock %}
-                <li><a class="dropdown-item" href="{{ url_for('report.product_stock_usage_report') }}">Stock Usage Report</a></li>
-                {% endif %}
-                {% if can_product_reports.forecast %}
-                <li><a class="dropdown-item" href="{{ url_for('report.department_sales_forecast') }}">Department Sales Forecast</a></li>
+                {% if can_product_reports.location_sales %}
+                <li><a class="dropdown-item" href="{{ url_for('report.product_location_sales_report') }}">Product Location Sales Report</a></li>
                 {% endif %}
             </ul>
             {% endif %}

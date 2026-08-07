@@ -70,7 +70,7 @@ def test_profile_favorite_toggle_is_keyboard_accessible(client, app):
     assert 'aria-label="Toggle favorite for Profile"' in html
 
 
-def test_sidebar_menu_search_includes_report_destinations(client, app):
+def test_sidebar_menu_search_uses_reports_hub_instead_of_report_rows(client, app):
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass = os.getenv("ADMIN_PASS", "adminpass")
 
@@ -83,9 +83,15 @@ def test_sidebar_menu_search_includes_report_destinations(client, app):
     assert 'id="sidebarMenuSearch"' in html
     assert "Search menu..." in html
     assert "No matches found" in html
-    assert (
-        'data-nav-endpoint="report.customer_invoice_report"' in html
-    )
+    assert 'data-nav-endpoint="report.index"' in html
+    assert 'data-nav-endpoint="report.customer_invoice_report"' not in html
+
+    reports_response = client.get("/reports")
+    assert reports_response.status_code == 200
+    reports_html = reports_response.data.decode()
+    assert "Customer Invoice Report" in reports_html
+    assert "Product Location Sales Report" in reports_html
+    assert "Event Spoilage Report" in reports_html
 
 
 def test_sidebar_menu_search_includes_admin_destinations_for_admins(
@@ -100,10 +106,34 @@ def test_sidebar_menu_search_includes_admin_destinations_for_admins(
 
     assert response.status_code == 200
     html = response.data.decode()
-    assert "System/Admin" in html
-    assert 'data-nav-endpoint="admin.users"' in html
-    assert "/favorite/admin.users" in html
-    assert 'aria-label="Toggle favorite for Control Panel"' in html
+    assert "Administration" in html
+    assert 'data-nav-endpoint="admin.index"' in html
+    assert 'data-nav-endpoint="admin.users"' not in html
+    assert "/favorite/admin.index" in html
+    assert 'aria-label="Toggle favorite for Administration"' in html
+
+    admin_response = client.get("/controlpanel")
+    assert admin_response.status_code == 200
+    admin_html = admin_response.data.decode()
+    assert "Users" in admin_html
+    assert "Data Imports" in admin_html
+    assert "System Info" in admin_html
+
+
+def test_sidebar_limits_super_admin_to_primary_module_destinations(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.get("/")
+
+    assert response.status_code == 200
+    html = response.data.decode()
+    assert html.count('data-nav-endpoint="') == 19
+    assert "Equipment Intake" not in html
+    assert "Equipment Maintenance" not in html
+    assert 'data-nav-endpoint="communication.messages"' not in html
 
 
 def test_favorite_toggle_requires_post_and_updates_state(client, app):

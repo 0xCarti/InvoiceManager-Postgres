@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Administration{% endblock %}
+
+{% block content %}
+{% set admin_groups = [
+    ('People and Access', [
+        ('admin.users', 'Users', 'Invite users, manage accounts, and review access.'),
+        ('admin.permission_groups', 'Permission Groups', 'Create reusable role and permission groups.'),
+        ('admin.permission_catalog', 'Permissions', 'Review the permission catalog and assignments.'),
+    ]),
+    ('Data and Integrations', [
+        ('admin.import_page', 'Data Imports', 'Import supported application data files.'),
+        ('admin.sales_imports', 'Sales Import Review', 'Review and resolve staged POS sales imports.'),
+        ('admin.vendor_item_aliases', 'Vendor Item Aliases', 'Manage vendor-specific item mappings.'),
+        ('admin.terminal_sales_mappings', 'Terminal Sales Mappings', 'Review terminal and location mappings.'),
+    ]),
+    ('System', [
+        ('admin.settings', 'Settings', 'Manage application defaults and integrations.'),
+        ('admin.backups', 'Backups', 'Create, download, and restore database backups.'),
+        ('admin.activity_logs', 'Activity Logs', 'Review recorded user and system activity.'),
+        ('admin.system_info', 'System Info', 'Inspect runtime and environment information.'),
+    ]),
+] %}
+
+<div class="container mt-5 app-page-shell">
+    <div class="app-page-header mb-4">
+        <div class="app-page-header-copy">
+            <h1 class="h2 mb-1">Administration</h1>
+            <p class="text-muted mb-0">Open the control-panel tool you need.</p>
+        </div>
+    </div>
+
+    {% set page_ns = namespace(has_visible=false) %}
+    <div class="row g-3">
+        {% for group_label, links in admin_groups %}
+        {% set group_ns = namespace(has_visible=false) %}
+        {% for endpoint, label, description in links %}
+            {% if can_access_endpoint(endpoint, 'GET') %}
+                {% set group_ns.has_visible = true %}
+                {% set page_ns.has_visible = true %}
+            {% endif %}
+        {% endfor %}
+        {% if group_ns.has_visible %}
+        <section class="col-12 col-lg-4" aria-labelledby="admin-group-{{ loop.index }}">
+            <div class="card h-100 shadow-sm">
+                <div class="card-header bg-body-tertiary">
+                    <h2 class="h5 mb-0" id="admin-group-{{ loop.index }}">{{ group_label }}</h2>
+                </div>
+                <div class="list-group list-group-flush">
+                    {% for endpoint, label, description in links %}
+                    {% if can_access_endpoint(endpoint, 'GET') %}
+                    <a class="list-group-item list-group-item-action py-3" href="{{ url_for(endpoint) }}">
+                        <span class="d-block fw-semibold">{{ label }}</span>
+                        <span class="d-block small text-muted mt-1">{{ description }}</span>
+                    </a>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+        </section>
+        {% endif %}
+        {% endfor %}
+    </div>
+
+    {% if not page_ns.has_visible %}
+    <div class="alert alert-info mb-0">No administration tools are available for your account.</div>
+    {% endif %}
+</div>
+{% endblock %}

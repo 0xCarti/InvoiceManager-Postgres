@@ -88,6 +88,13 @@ _CENT = Decimal("0.01")
 _invoice_gl_code_rows = invoice_gl_code_rows
 
 
+@report.route("/reports")
+@login_required
+def index():
+    """Show the reports the current user is allowed to run."""
+    return render_template("report_index.html")
+
+
 def _inventory_expiry_state(lot: InventoryExpiryLot, today=None) -> str:
     today = today or datetime.utcnow().date()
     if lot.expiry_date is None:

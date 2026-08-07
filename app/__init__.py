@@ -264,6 +264,8 @@ NAV_LINKS = {
     "menu.view_menus": "Menus",
     "signage.view_displays": "Displays",
     "signage.view_playlists": "Playlists",
+    "signage.view_board_templates": "Board Templates",
+    "signage.view_signage_media_assets": "Media Library",
     "product.view_products": "Products",
     "product.view_product": "View Product",
     "spoilage.view_spoilage": "Spoilage",
@@ -273,7 +275,22 @@ NAV_LINKS = {
     "customer.view_customers": "Customers",
     "vendor.view_vendors": "Vendors",
     "invoice.view_invoices": "Invoices",
+    "report.index": "Reports",
+    "report.customer_invoice_report": "Customer Invoice Report",
+    "report.received_invoice_report": "Received Invoice Report",
     "report.inventory_expiry_report": "Inventory Expiry Report",
+    "report.purchase_inventory_summary": "Purchase Inventory Summary",
+    "report.inventory_variance_report": "Inventory Variance Report",
+    "report.product_sales_report": "Revenue Report",
+    "report.products_sold_report": "Products Sold Report",
+    "report.product_stock_usage_report": "Stock Usage Report",
+    "report.department_sales_forecast": "Department Sales Forecast",
+    "report.product_recipe_report": "Recipe Report",
+    "report.product_location_sales_report": "Product Location Sales Report",
+    "report.event_terminal_sales_report": "Event Terminal Sales Report",
+    "report.event_spoilage_report": "Event Spoilage Report",
+    "report.purchase_cost_forecast": "Forecasted Stock Item Sales",
+    "report.equipment_procurement_report": "Equipment Procurement Report",
     "event.view_events": "Events",
     "schedule.team_schedule": "Team Schedule",
     "schedule.my_schedule": "My Schedule",
@@ -284,6 +301,7 @@ NAV_LINKS = {
     "schedule.setup": "Scheduling Setup",
     "communication.center": "Communications",
     "communication.messages": "Messages",
+    "admin.index": "Administration",
     "admin.users": "Control Panel",
     "admin.backups": "Backups",
     "admin.settings": "Settings",
@@ -294,27 +312,32 @@ NAV_LINKS = {
     "admin.vendor_item_aliases": "Vendor Item Aliases",
     "admin.permission_groups": "Permission Groups",
     "admin.permission_catalog": "Permissions",
+    "admin.terminal_sales_mappings": "Terminal Sales Mappings",
 }
 
 NAV_GROUPS = (
     (
         "Scheduling",
         (
-            ("schedule.team_schedule", "Team Schedule"),
-            ("schedule.my_schedule", "My Schedule"),
-            ("schedule.availability", "Availability"),
-            ("schedule.time_off", "Time Off"),
-            ("schedule.tradeboard", "Tradeboard"),
-            ("schedule.templates", "Schedule Templates"),
-            ("schedule.setup", "Scheduling Setup"),
+            (
+                (
+                    "schedule.team_schedule",
+                    "schedule.my_schedule",
+                    "schedule.availability",
+                    "schedule.time_off",
+                    "schedule.tradeboard",
+                    "schedule.templates",
+                    "schedule.setup",
+                ),
+                "Scheduling",
+            ),
         ),
         False,
     ),
     (
-        "Communication",
+        "Communications",
         (
             ("communication.center", "Communications"),
-            ("communication.messages", "Messages"),
         ),
         False,
     ),
@@ -340,20 +363,25 @@ NAV_GROUPS = (
         "Catalog",
         (
             ("item.view_items", "Items"),
-            ("equipment.view_equipment", "Equipment"),
-            ("equipment.view_equipment_intake", "Equipment Intake"),
-            ("equipment.view_equipment_maintenance", "Equipment Maintenance"),
             ("product.view_products", "Products"),
+            ("equipment.view_equipment", "Equipment"),
             ("menu.view_menus", "Menus"),
             ("locations.view_locations", "Locations"),
         ),
         False,
     ),
     (
-        "Signage",
+        "Digital Signage",
         (
-            ("signage.view_displays", "Displays"),
-            ("signage.view_playlists", "Playlists"),
+            (
+                (
+                    "signage.view_displays",
+                    "signage.view_playlists",
+                    "signage.view_board_templates",
+                    "signage.view_signage_media_assets",
+                ),
+                "Digital Signage",
+            ),
         ),
         False,
     ),
@@ -369,37 +397,14 @@ NAV_GROUPS = (
     (
         "Reports",
         (
-            ("report.customer_invoice_report", "Customer Invoice Report"),
-            ("report.received_invoice_report", "Received Invoice Report"),
-            ("report.inventory_expiry_report", "Inventory Expiry Report"),
-            ("report.purchase_inventory_summary", "Purchase Inventory Summary"),
-            ("report.inventory_variance_report", "Inventory Variance Report"),
-            ("report.product_sales_report", "Revenue Report"),
-            ("report.products_sold_report", "Products Sold Report"),
-            ("report.product_stock_usage_report", "Stock Usage Report"),
-            ("report.department_sales_forecast", "Department Sales Forecast"),
-            ("report.product_recipe_report", "Recipe Report"),
-            ("report.product_location_sales_report", "Product Location Sales Report"),
-            ("report.event_terminal_sales_report", "Event Terminal Sales Report"),
-            ("report.event_spoilage_report", "Event Spoilage Report"),
-            ("report.purchase_cost_forecast", "Forecasted Stock Item Sales"),
-            ("report.equipment_procurement_report", "Equipment Procurement Report"),
-            ("report.customer_invoice_report", "Vendor Invoices Report"),
+            ("report.index", "Reports"),
         ),
         False,
     ),
     (
-        "System/Admin",
+        "Administration",
         (
-            ("admin.users", "Control Panel"),
-            ("admin.settings", "Settings"),
-            ("admin.backups", "Backups"),
-            ("admin.import_page", "Data Imports"),
-            ("admin.sales_imports", "Sales Import Review"),
-            ("admin.activity_logs", "Activity Logs"),
-            ("admin.vendor_item_aliases", "Vendor Item Aliases"),
-            ("admin.permission_groups", "Permission Groups"),
-            ("admin.permission_catalog", "Permissions"),
+            ("admin.index", "Administration"),
         ),
         True,
     ),
@@ -722,16 +727,58 @@ def create_app(args=None):
                 return []
             visible_groups = []
             for label, links, _admin_only in NAV_GROUPS:
-                visible_links = [
-                    (endpoint, link_label)
-                    for endpoint, link_label in links
-                    if current_user.can_access_endpoint(endpoint, "GET")
-                ]
+                visible_links = []
+                for endpoint_or_candidates, link_label in links:
+                    candidates = (
+                        (endpoint_or_candidates,)
+                        if isinstance(endpoint_or_candidates, str)
+                        else endpoint_or_candidates
+                    )
+                    endpoint = next(
+                        (
+                            candidate
+                            for candidate in candidates
+                            if current_user.can_access_endpoint(candidate, "GET")
+                        ),
+                        None,
+                    )
+                    if endpoint:
+                        visible_links.append((endpoint, link_label))
                 if visible_links:
                     visible_groups.append((label, visible_links))
             return visible_groups
 
-        return {"GROUPED_NAV_LINKS": grouped_nav_links}
+        def nav_link_is_active(endpoint):
+            current_endpoint = request.endpoint or ""
+            if not endpoint or not current_endpoint:
+                return False
+            if current_endpoint == endpoint:
+                return True
+
+            endpoint_namespace = endpoint.partition(".")[0]
+            current_namespace = current_endpoint.partition(".")[0]
+            if endpoint_namespace != current_namespace:
+                return False
+
+            if endpoint_namespace != "purchase":
+                return True
+
+            purchase_invoice_endpoints = {
+                "purchase.view_purchase_invoices",
+                "purchase.view_purchase_invoice",
+                "purchase.legacy_purchase_invoice_report",
+                "purchase.reverse_purchase_invoice",
+            }
+            if endpoint == "purchase.view_purchase_invoices":
+                return current_endpoint in purchase_invoice_endpoints
+            if endpoint == "purchase.view_purchase_orders":
+                return current_endpoint not in purchase_invoice_endpoints
+            return False
+
+        return {
+            "GROUPED_NAV_LINKS": grouped_nav_links,
+            "nav_link_is_active": nav_link_is_active,
+        }
 
     @app.context_processor
     def inject_permission_helpers():

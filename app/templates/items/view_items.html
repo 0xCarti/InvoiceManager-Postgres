@@ -11,7 +11,7 @@
 {% set can_recipe_cost_calculator = can_access_endpoint('item.recipe_cost_calculator', 'GET') %}
 {% set can_bulk_delete_items = can_access_endpoint('item.bulk_delete_items', 'POST') %}
 {% set can_find_duplicate_items = can_access_endpoint('item.duplicate_items', 'GET') %}
-{% set can_purchase_cost_forecast = can_access_endpoint('report.purchase_cost_forecast', 'GET') %}
+{% set can_inventory_expiry_report = can_access_endpoint('report.inventory_expiry_report', 'GET') %}
 {% set can_select_items = can_bulk_update_items or can_bulk_delete_items %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
@@ -87,12 +87,12 @@
             </ul>
         </div>
         <div class="dropdown">
-            {% if can_purchase_cost_forecast %}
+            {% if can_inventory_expiry_report %}
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                 Reports
             </button>
             <ul class="dropdown-menu dropdown-menu-end">
-                <li><a class="dropdown-item" href="{{ url_for('report.purchase_cost_forecast') }}">Forecasted Stock Item Sales</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('report.inventory_expiry_report') }}">Inventory Expiry Report</a></li>
             </ul>
             {% endif %}
         </div>

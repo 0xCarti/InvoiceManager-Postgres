@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Reports{% endblock %}
+
+{% block content %}
+{% set report_groups = [
+    ('Sales', [
+        ('report.customer_invoice_report', 'Customer Invoice Report', 'Review customer invoices for a date range and payment status.'),
+        ('report.product_sales_report', 'Revenue Report', 'Analyze product revenue and sales totals.'),
+        ('report.products_sold_report', 'Products Sold Report', 'Review quantities sold by product.'),
+        ('report.product_stock_usage_report', 'Stock Usage Report', 'See the stock consumed by product sales.'),
+        ('report.department_sales_forecast', 'Department Sales Forecast', 'Forecast department sales from imported POS data.'),
+        ('report.product_location_sales_report', 'Product Location Sales Report', 'Compare product sales across locations.'),
+    ]),
+    ('Purchasing and Inventory', [
+        ('report.received_invoice_report', 'Received Invoice Report', 'Summarize purchase invoices received within a date range.'),
+        ('report.purchase_inventory_summary', 'Purchase Inventory Summary', 'Compare purchased quantities with inventory activity.'),
+        ('report.inventory_variance_report', 'Inventory Variance Report', 'Review expected and actual inventory movement.'),
+        ('report.inventory_expiry_report', 'Inventory Expiry Report', 'Find expired and soon-to-expire inventory.'),
+        ('report.purchase_cost_forecast', 'Forecasted Stock Item Sales', 'Forecast stock demand and purchase costs.'),
+        ('report.equipment_procurement_report', 'Equipment Procurement Report', 'Review equipment purchasing and intake.'),
+    ]),
+    ('Products and Events', [
+        ('report.product_recipe_report', 'Recipe Report', 'Inspect recipe composition and cost.'),
+        ('report.event_terminal_sales_report', 'Event Terminal Sales Report', 'Review terminal sales recorded for events.'),
+        ('report.event_spoilage_report', 'Event Spoilage Report', 'Analyze spoilage by event and location.'),
+    ]),
+    ('Analytics', [
+        ('main.metabase_redirect', 'Metabase Analytics', 'Open the interactive analytics workspace.'),
+    ]),
+] %}
+
+<div class="container mt-5 app-page-shell">
+    <div class="app-page-header mb-4">
+        <div class="app-page-header-copy">
+            <h1 class="h2 mb-1">Reports</h1>
+            <p class="text-muted mb-0">Choose a report by the work area it supports.</p>
+        </div>
+    </div>
+
+    {% set page_ns = namespace(has_visible=false) %}
+    <div class="row g-3">
+        {% for group_label, links in report_groups %}
+        {% set group_ns = namespace(has_visible=false) %}
+        {% for endpoint, label, description in links %}
+            {% if can_access_endpoint(endpoint, 'GET') %}
+                {% set group_ns.has_visible = true %}
+                {% set page_ns.has_visible = true %}
+            {% endif %}
+        {% endfor %}
+        {% if group_ns.has_visible %}
+        <section class="col-12 col-lg-6" aria-labelledby="report-group-{{ loop.index }}">
+            <div class="card h-100 shadow-sm">
+                <div class="card-header bg-body-tertiary">
+                    <h2 class="h5 mb-0" id="report-group-{{ loop.index }}">{{ group_label }}</h2>
+                </div>
+                <div class="list-group list-group-flush">
+                    {% for endpoint, label, description in links %}
+                    {% if can_access_endpoint(endpoint, 'GET') %}
+                    <a class="list-group-item list-group-item-action py-3" href="{{ url_for(endpoint) }}">
+                        <span class="d-block fw-semibold">{{ label }}</span>
+                        <span class="d-block small text-muted mt-1">{{ description }}</span>
+                    </a>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+        </section>
+        {% endif %}
+        {% endfor %}
+    </div>
+
+    {% if not page_ns.has_visible %}
+    <div class="alert alert-info mb-0">No reports are available for your account.</div>
+    {% endif %}
+</div>
+{% endblock %}

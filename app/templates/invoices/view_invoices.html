@@ -13,13 +13,12 @@
 {% set can_download_invoice_pdf = can_access_endpoint('invoice.download_invoices_pdf', 'POST') %}
 {% set can_delete_invoices = can_access_endpoint('invoice.delete_invoice', 'POST') %}
 {% set can_view_customer_invoice_report = can_access_endpoint('report.customer_invoice_report') %}
-{% set can_view_inventory_variance_report = can_access_endpoint('report.inventory_variance_report') %}
 {% set can_view_product_sales_report = can_access_endpoint('report.product_sales_report') %}
 {% set can_view_products_sold_report = can_access_endpoint('report.products_sold_report') %}
 {% set can_view_product_stock_usage_report = can_access_endpoint('report.product_stock_usage_report') %}
 {% set can_view_department_sales_forecast = can_access_endpoint('report.department_sales_forecast') %}
 {% set can_create_customers = can_access_endpoint('customer.create_customer_modal') %}
-{% set has_invoice_reports = can_view_customer_invoice_report or can_view_inventory_variance_report or can_view_product_sales_report or can_view_products_sold_report or can_view_product_stock_usage_report or can_view_department_sales_forecast %}
+{% set has_invoice_reports = can_view_customer_invoice_report or can_view_product_sales_report or can_view_products_sold_report or can_view_product_stock_usage_report or can_view_department_sales_forecast %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .mobile-list-page .mobile-toolbar,
@@ -160,9 +159,6 @@
             <ul class="dropdown-menu dropdown-menu-end">
                 {% if can_view_customer_invoice_report %}
                 <li><a class="dropdown-item" href="{{ url_for('report.customer_invoice_report') }}">Customer Invoice Report</a></li>
-                {% endif %}
-                {% if can_view_inventory_variance_report %}
-                <li><a class="dropdown-item" href="{{ url_for('report.inventory_variance_report') }}">Inventory Variance Report</a></li>
                 {% endif %}
                 {% if can_view_product_sales_report %}
                 <li><a class="dropdown-item" href="{{ url_for('report.product_sales_report') }}">Revenue Report</a></li>

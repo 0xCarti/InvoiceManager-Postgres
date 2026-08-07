@@ -3,7 +3,9 @@
 {% from 'macros/filter_modal.html' import filter_modal %}
 {% block content %}
 {% set can_create_events = can_access_endpoint('event.create_event_ajax', 'POST') %}
-{% set can_view_event_report = can_access_endpoint('report.event_terminal_sales_report') %}
+{% set can_view_event_terminal_sales_report = can_access_endpoint('report.event_terminal_sales_report') %}
+{% set can_view_event_spoilage_report = can_access_endpoint('report.event_spoilage_report') %}
+{% set can_view_event_reports = can_view_event_terminal_sales_report or can_view_event_spoilage_report %}
 <style>
 @media (max-width: 767.98px) {
     #events-table thead {
@@ -73,13 +75,18 @@
             <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#filterModal">Filter</button></li>
         </ul>
     </div>
-    {% if can_view_event_report %}
+    {% if can_view_event_reports %}
     <div class="dropdown">
         <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
             Reports
         </button>
         <ul class="dropdown-menu dropdown-menu-end">
+            {% if can_view_event_terminal_sales_report %}
             <li><a class="dropdown-item" href="{{ url_for('report.event_terminal_sales_report') }}">Event Terminal Sales Report</a></li>
+            {% endif %}
+            {% if can_view_event_spoilage_report %}
+            <li><a class="dropdown-item" href="{{ url_for('report.event_spoilage_report') }}">Event Spoilage Report</a></li>
+            {% endif %}
         </ul>
     </div>
     {% endif %}

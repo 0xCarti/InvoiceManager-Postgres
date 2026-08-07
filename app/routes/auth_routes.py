@@ -1212,6 +1212,13 @@ def activate_user(user_id):
     )  # Redirect to the user control panel
 
 
+@admin.route("/controlpanel")
+@login_required
+def index():
+    """Show the administration tools available to the current user."""
+    return render_template("admin/index.html")
+
+
 @admin.route("/controlpanel/users", methods=["GET", "POST"])
 @login_required
 def users():
