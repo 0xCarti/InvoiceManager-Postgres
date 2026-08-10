@@ -128,6 +128,28 @@ def test_vendor_alias_resolution_template_and_script_wire_dynamic_unit_options()
     assert "populateUnits(unitSelect, event.target.value);" in script_content
 
 
+def test_vendor_alias_quick_create_keeps_imported_purchase_units_editable():
+    modal_content = (
+        ROOT / "app/templates/purchase_orders/_create_item_modal.html"
+    ).read_text(encoding="utf-8")
+    script_content = (
+        ROOT / "app/static/js/vendor_alias_resolution.js"
+    ).read_text(encoding="utf-8")
+
+    assert "Imported purchase units are suggestions." in modal_content
+    assert "imported_unit_suggestions = true" in (
+        ROOT / "app/templates/purchase_orders/resolve_vendor_items.html"
+    ).read_text(encoding="utf-8")
+    assert "factor: 1," in script_content
+    assert "name: importedUnitName," in script_content
+    assert "factor: importedUnitFactor," in script_content
+    assert (
+        "importedUnitName: numericBaseQuantity ? sizeText || packSizeText : ''"
+        in script_content
+    )
+    assert "baseFactor: normalizedBaseFactor" not in script_content
+
+
 def test_receive_invoice_template_shows_inline_deposit_field():
     content = (
         ROOT / "app/templates/purchase_orders/receive_invoice.html"

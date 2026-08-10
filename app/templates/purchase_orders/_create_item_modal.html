@@ -31,7 +31,11 @@
                         <label class="form-label">Units of Measure</label>
                         <div id="new-item-units" class="d-flex flex-column gap-2"></div>
                         <button type="button" id="add-new-item-unit" class="btn btn-outline-secondary btn-sm mt-2">Add Unit</button>
+                        {% if imported_unit_suggestions|default(false) %}
+                        <div class="form-text">Imported purchase units are suggestions. You can rename them, correct their ratios, and choose the defaults for receiving and transfers.</div>
+                        {% else %}
                         <div class="form-text">Configure unit conversions and choose the defaults for receiving and transfers.</div>
+                        {% endif %}
                     </div>
                 </div>
                 <div class="modal-footer">

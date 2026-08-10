@@ -352,23 +352,39 @@ function initVendorAliasResolution(config) {
         newItemUnitIndex = 0;
         const baseName =
             options.baseName || (baseUnitSelect ? baseUnitSelect.value || '' : 'Each');
-        const baseFactor =
-            options.baseFactor !== undefined && options.baseFactor !== null
-                ? options.baseFactor
-                : 1;
+        const importedUnitName = (options.importedUnitName || '').trim();
+        const importedUnitFactor = Number(options.importedUnitFactor);
+        const hasImportedUnit =
+            Boolean(importedUnitName) &&
+            Number.isFinite(importedUnitFactor) &&
+            importedUnitFactor > 0;
+        const caseFactor = Number(options.caseFactor);
+        const hasCaseUnit = Number.isFinite(caseFactor) && caseFactor > 1;
+
+        // The canonical base unit is always 1:1. File-derived package sizes
+        // belong in separate rows so their names and ratios remain editable.
         appendNewItemUnitRow({
             name: baseName,
-            factor: baseFactor,
-            receivingDefault: true,
+            factor: 1,
+            receivingDefault: !hasImportedUnit && !hasCaseUnit,
             transferDefault: true,
             isBase: true,
         });
 
-        if (options.caseFactor && Number(options.caseFactor) > 1) {
+        if (hasImportedUnit) {
+            appendNewItemUnitRow({
+                name: importedUnitName,
+                factor: importedUnitFactor,
+                receivingDefault: !hasCaseUnit,
+                transferDefault: false,
+            });
+        }
+
+        if (hasCaseUnit) {
             appendNewItemUnitRow({
                 name: options.caseName || 'Case',
-                factor: Number(options.caseFactor),
-                receivingDefault: false,
+                factor: caseFactor,
+                receivingDefault: true,
                 transferDefault: false,
             });
         }
@@ -409,7 +425,6 @@ function initVendorAliasResolution(config) {
             baseUnit && Number.isFinite(Number(baseQuantity)) && Number(baseQuantity) > 0
                 ? Number(baseQuantity)
                 : null;
-        const normalizedBaseFactor = numericBaseQuantity || 1;
 
         if (baseUnitSelect) {
             const currentValue = baseUnitSelect.value;
@@ -429,7 +444,8 @@ function initVendorAliasResolution(config) {
                 : null;
         resetNewItemUnitRows({
             baseName,
-            baseFactor: normalizedBaseFactor,
+            importedUnitName: numericBaseQuantity ? sizeText || packSizeText : '',
+            importedUnitFactor: numericBaseQuantity,
             caseFactor,
         });
     }
