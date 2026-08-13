@@ -6,10 +6,12 @@ from app import db
 from app.models import (
     Event,
     EventLocation,
+    EventLocationOperatingDay,
     Item,
     ItemUnit,
     Location,
     LocationCountSubmission,
+    LocationCountSubmissionRow,
     LocationStandItem,
     Menu,
     Product,
@@ -130,10 +132,22 @@ def test_inventory_event_redirects_stand_sheets_to_count_sheets(client, app):
         )
         loc = Location(name="Inventory Route Stand")
         old_item = Item(name="Old Menu Cup", base_unit="each")
-        old_unit = ItemUnit(item=old_item, name="Case of 12", factor=12)
+        old_unit = ItemUnit(
+            item=old_item,
+            name="Case of 12",
+            factor=12,
+            receiving_default=True,
+            transfer_default=True,
+        )
         old_product = Product(name="Old Coffee", price=2.0, cost=1.0)
         current_item = Item(name="Current Menu Lid", base_unit="each")
-        current_unit = ItemUnit(item=current_item, name="Sleeve of 50", factor=50)
+        current_unit = ItemUnit(
+            item=current_item,
+            name="Sleeve of 50",
+            factor=50,
+            receiving_default=True,
+            transfer_default=True,
+        )
         current_product = Product(name="Current Coffee", price=3.0, cost=1.5)
         old_menu = Menu(name="Old Inventory Menu")
         current_menu = Menu(name="Current Inventory Menu")
@@ -161,20 +175,31 @@ def test_inventory_event_redirects_stand_sheets_to_count_sheets(client, app):
                     item_id=old_item.id,
                     unit_id=old_unit.id,
                     quantity=1,
-                    countable=True,
+                    countable=False,
                 ),
                 ProductRecipeItem(
                     product_id=current_product.id,
                     item_id=current_item.id,
                     unit_id=current_unit.id,
                     quantity=1,
-                    countable=True,
+                    countable=False,
                 ),
             ]
         )
         set_location_menu(loc, old_menu)
         db.session.flush()
         set_location_menu(loc, current_menu)
+        db.session.flush()
+        old_record = LocationStandItem.query.filter_by(
+            location_id=loc.id,
+            item_id=old_item.id,
+        ).one()
+        current_record = LocationStandItem.query.filter_by(
+            location_id=loc.id,
+            item_id=current_item.id,
+        ).one()
+        assert old_record.countable is False
+        assert current_record.countable is False
         event = Event(
             name="Inventory Route Event",
             start_date=date(2023, 1, 1),
@@ -210,10 +235,112 @@ def test_inventory_event_redirects_stand_sheets_to_count_sheets(client, app):
 
         bulk_count_response = client.get(f"/events/{event_id}/count_sheets")
         assert bulk_count_response.status_code == 200
+        assert b"Count Sheet Report - Inventory Route Event" in bulk_count_response.data
+        assert b"Export CSV" in bulk_count_response.data
+        assert b"Receiving Count" in bulk_count_response.data
+        assert b"Receiving Unit" in bulk_count_response.data
+        assert b"Transfer Count" in bulk_count_response.data
+        assert b"Transfer Unit" in bulk_count_response.data
+        assert b"Base Count" in bulk_count_response.data
+        assert b"Base Unit" in bulk_count_response.data
         assert b"Old Menu Cup" in bulk_count_response.data
         assert b"Current Menu Lid" in bulk_count_response.data
         assert b"Case of 12" in bulk_count_response.data
         assert b"Sleeve of 50" in bulk_count_response.data
+        assert bulk_count_response.data.count(b"Old Menu Cup") == 1
+
+        bulk_count_csv_response = client.get(f"/events/{event_id}/count_sheets.csv")
+        assert bulk_count_csv_response.status_code == 200
+        assert bulk_count_csv_response.headers["Content-Type"].startswith("text/csv")
+        csv_body = bulk_count_csv_response.data.decode()
+        assert (
+            "Location,Item Name,Receiving Count,Receiving Unit,"
+            "Transfer Count,Transfer Unit,Base Count,Base Unit"
+        ) in csv_body
+        assert "Inventory Route Stand,Old Menu Cup,,Case of 12 (12 Each),,Case of 12 (12 Each),,Each" in csv_body
+        assert "Inventory Route Stand,Current Menu Lid,,Sleeve of 50 (50 Each),,Sleeve of 50 (50 Each),,Each" in csv_body
+
+
+def test_inventory_count_sheet_skips_removed_previous_menu_items(client, app):
+    with app.app_context():
+        user = User(
+            email="inventory-removed-previous@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        loc = Location(name="Removed Previous Menu Stand")
+        old_item = Item(name="Removed Old Sauce", base_unit="each")
+        old_unit = ItemUnit(item=old_item, name="Jug", factor=1)
+        old_product = Product(name="Old Sauce Product", price=2.0, cost=1.0)
+        current_item = Item(name="Current Sauce Cup", base_unit="each")
+        current_unit = ItemUnit(item=current_item, name="Sleeve", factor=1)
+        current_product = Product(name="Current Sauce Product", price=3.0, cost=1.5)
+        old_menu = Menu(name="Removed Previous Menu")
+        current_menu = Menu(name="Removed Current Menu")
+        old_menu.products.append(old_product)
+        current_menu.products.append(current_product)
+        db.session.add_all(
+            [
+                user,
+                loc,
+                old_item,
+                old_unit,
+                old_product,
+                current_item,
+                current_unit,
+                current_product,
+                old_menu,
+                current_menu,
+            ]
+        )
+        db.session.flush()
+        db.session.add_all(
+            [
+                ProductRecipeItem(
+                    product_id=old_product.id,
+                    item_id=old_item.id,
+                    unit_id=old_unit.id,
+                    quantity=1,
+                    countable=False,
+                ),
+                ProductRecipeItem(
+                    product_id=current_product.id,
+                    item_id=current_item.id,
+                    unit_id=current_unit.id,
+                    quantity=1,
+                    countable=False,
+                ),
+            ]
+        )
+        set_location_menu(loc, old_menu)
+        db.session.flush()
+        set_location_menu(loc, current_menu)
+        db.session.flush()
+        old_record = LocationStandItem.query.filter_by(
+            location_id=loc.id,
+            item_id=old_item.id,
+        ).one()
+        old_record.active = False
+        event = Event(
+            name="Removed Previous Inventory",
+            start_date=date(2023, 1, 1),
+            end_date=date(2023, 1, 2),
+            event_type="inventory",
+        )
+        event_location = EventLocation(event=event, location=loc)
+        db.session.add_all([event, event_location])
+        db.session.commit()
+        _grant_event_permissions(user)
+        event_id = event.id
+        location_id = loc.id
+
+    with client:
+        login(client, "inventory-removed-previous@example.com", "pass")
+        response = client.get(f"/events/{event_id}/count_sheet/{location_id}")
+
+    assert response.status_code == 200
+    assert b"Current Sauce Cup" in response.data
+    assert b"Removed Old Sauce" not in response.data
 
 
 def test_inventory_count_sheet_allows_location_in_open_regular_event(client, app):
@@ -271,6 +398,312 @@ def test_inventory_count_sheet_allows_location_in_open_regular_event(client, app
         assert response.status_code == 200
         assert b"Inventory Count Sheet" in response.data
         assert b"still assigned to open event" not in response.data
+
+
+def test_inventory_count_sheet_can_search_and_submit_added_item(client, app):
+    with app.app_context():
+        user = User(
+            email="inventory-countsheet-add@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        loc = Location(name="Inventory Countsheet Add Stand")
+        configured_item = Item(name="Configured Countsheet Cup", base_unit="each")
+        missing_item = Item(name="Missing Countsheet Lid", base_unit="each")
+        event = Event(
+            name="Monthly Countsheet Add Inventory",
+            start_date=date(2026, 5, 1),
+            end_date=date(2026, 5, 1),
+            event_type="inventory",
+        )
+        db.session.add_all([user, loc, configured_item, missing_item, event])
+        db.session.flush()
+        configured_unit = ItemUnit(
+            item_id=configured_item.id,
+            name="each",
+            factor=1,
+        )
+        missing_unit = ItemUnit(
+            item_id=missing_item.id,
+            name="each",
+            factor=1,
+        )
+        db.session.add_all(
+            [
+                configured_unit,
+                missing_unit,
+                LocationStandItem(
+                    location_id=loc.id,
+                    item_id=configured_item.id,
+                    expected_count=4,
+                ),
+                EventLocation(
+                    event_id=event.id,
+                    location_id=loc.id,
+                ),
+            ]
+        )
+        db.session.commit()
+        _grant_event_permissions(user)
+        event_id = event.id
+        location_id = loc.id
+        configured_item_id = configured_item.id
+        missing_item_id = missing_item.id
+        missing_unit_id = missing_unit.id
+
+    with client:
+        login(client, "inventory-countsheet-add@example.com", "pass")
+        response = client.get(f"/events/{event_id}/count_sheet/{location_id}")
+
+        assert response.status_code == 200
+        assert b'data-inventory-filter-input="1"' in response.data
+        assert b'data-inventory-filter-clear="1"' in response.data
+        assert b'data-inventory-add-search="1"' in response.data
+        assert b"data-inventory-item-search-url=" in response.data
+        assert b'inputmode="numeric"' in response.data
+        assert b'pattern="[0-9]*"' in response.data
+        assert b'data-inventory-quantity-entry="1"' in response.data
+        assert b'data-native-numeric="1"' in response.data
+        assert b'inputmode="decimal"' not in response.data
+        assert f'data-inventory-item-id="{configured_item_id}"'.encode() in response.data
+        assert b"Missing Countsheet Lid" not in response.data
+
+        short_search = client.get(
+            f"/events/{event_id}/count_sheet/{location_id}/items/search?q=M"
+        )
+        assert short_search.status_code == 200
+        assert short_search.get_json()["items"] == []
+        assert "Type at least 2 characters" in short_search.get_json()["message"]
+
+        search_response = client.get(
+            f"/events/{event_id}/count_sheet/{location_id}/items/search?q=Missing"
+        )
+        assert search_response.status_code == 200
+        search_payload = search_response.get_json()
+        assert [item["id"] for item in search_payload["items"]] == [missing_item_id]
+
+        post_response = client.post(
+            f"/events/{event_id}/count_sheet/{location_id}",
+            data={
+                "submitted_name": "Inventory Counter",
+                f"inventory_unit_{missing_item_id}_0": str(missing_unit_id),
+                f"inventory_qty_{missing_item_id}_0": "3",
+            },
+            follow_redirects=True,
+        )
+        assert post_response.status_code == 200
+        assert b"Inventory count submitted for manager review." in post_response.data
+
+    with app.app_context():
+        submission = LocationCountSubmission.query.order_by(
+            LocationCountSubmission.id.desc()
+        ).first()
+        assert submission is not None
+        assert submission.submission_type == LocationCountSubmission.TYPE_INVENTORY
+        assert submission.rows[0].item_id == missing_item_id
+        assert submission.rows[0].count_value == 3
+
+
+def test_inventory_count_sheet_shows_approved_counts_for_selected_day(client, app):
+    first_day = date(2026, 6, 1)
+    second_day = date(2026, 6, 2)
+    with app.app_context():
+        user = User(
+            email="inventory-approved-display@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        loc = Location(name="Approved Display Stand")
+        item = Item(name="Approved Display Cup", base_unit="each")
+        added_item = Item(name="Approved Added Napkin", base_unit="each")
+        event = Event(
+            name="Approved Display Inventory",
+            start_date=first_day,
+            end_date=second_day,
+            event_type="inventory",
+        )
+        db.session.add_all([user, loc, item, added_item, event])
+        db.session.flush()
+        unit = ItemUnit(item_id=item.id, name="each", factor=1)
+        added_unit = ItemUnit(item_id=added_item.id, name="each", factor=1)
+        event_location = EventLocation(event_id=event.id, location_id=loc.id)
+        db.session.add_all(
+            [
+                unit,
+                added_unit,
+                LocationStandItem(
+                    location_id=loc.id,
+                    item_id=item.id,
+                    expected_count=5,
+                ),
+                event_location,
+            ]
+        )
+        db.session.flush()
+        first_operating_day = EventLocationOperatingDay(
+            event_location_id=event_location.id,
+            operating_date=first_day,
+        )
+        second_operating_day = EventLocationOperatingDay(
+            event_location_id=event_location.id,
+            operating_date=second_day,
+        )
+        db.session.add_all([first_operating_day, second_operating_day])
+        db.session.flush()
+
+        first_submission = LocationCountSubmission(
+            source_location_id=loc.id,
+            location_id=loc.id,
+            event_location_id=event_location.id,
+            event_operating_day_id=first_operating_day.id,
+            submission_type=LocationCountSubmission.TYPE_INVENTORY,
+            submitted_name="Day One",
+            submission_date=first_day,
+            status=LocationCountSubmission.STATUS_APPROVED,
+            approval_mode=LocationCountSubmission.APPROVAL_MODE_ADD,
+        )
+        second_submission = LocationCountSubmission(
+            source_location_id=loc.id,
+            location_id=loc.id,
+            event_location_id=event_location.id,
+            event_operating_day_id=second_operating_day.id,
+            submission_type=LocationCountSubmission.TYPE_INVENTORY,
+            submitted_name="Day Two",
+            submission_date=second_day,
+            status=LocationCountSubmission.STATUS_APPROVED,
+            approval_mode=LocationCountSubmission.APPROVAL_MODE_ADD,
+        )
+        db.session.add_all([first_submission, second_submission])
+        db.session.flush()
+        db.session.add_all(
+            [
+                LocationCountSubmissionRow(
+                    submission_id=first_submission.id,
+                    item_id=item.id,
+                    count_value=2,
+                    submitted_count_value=2,
+                    parse_index=0,
+                ),
+                LocationCountSubmissionRow(
+                    submission_id=second_submission.id,
+                    item_id=item.id,
+                    count_value=7,
+                    submitted_count_value=7,
+                    parse_index=0,
+                ),
+                LocationCountSubmissionRow(
+                    submission_id=second_submission.id,
+                    item_id=added_item.id,
+                    count_value=3,
+                    submitted_count_value=3,
+                    parse_index=1,
+                ),
+            ]
+        )
+        db.session.commit()
+        _grant_event_permissions(user)
+        event_id = event.id
+        location_id = loc.id
+
+    with client:
+        login(client, "inventory-approved-display@example.com", "pass")
+        first_response = client.get(
+            f"/events/{event_id}/count_sheet/{location_id}"
+            f"?operating_date={first_day.isoformat()}"
+        )
+        second_response = client.get(
+            f"/events/{event_id}/count_sheet/{location_id}"
+            f"?operating_date={second_day.isoformat()}"
+        )
+
+    assert first_response.status_code == 200
+    assert b"Approved Display Cup" in first_response.data
+    assert b"Expected" in first_response.data
+    assert b"Approved" in first_response.data
+    assert b"Qty Var" in first_response.data
+    assert b"Cost Var" in first_response.data
+    assert b"2.0000" in first_response.data
+    assert b"7.0000" not in first_response.data
+    assert b"Approved Added Napkin" not in first_response.data
+
+    assert second_response.status_code == 200
+    assert b"Approved Display Cup" in second_response.data
+    assert b"7.0000" in second_response.data
+    assert b"Approved Added Napkin" in second_response.data
+    assert b"3.0000" in second_response.data
+
+
+def test_inventory_count_sheet_does_not_resurrect_removed_approved_item(client, app):
+    count_day = date(2026, 6, 3)
+    with app.app_context():
+        user = User(
+            email="inventory-approved-removed@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        loc = Location(name="Approved Removed Stand")
+        item = Item(name="Approved Removed Cup", base_unit="each")
+        event = Event(
+            name="Approved Removed Inventory",
+            start_date=count_day,
+            end_date=count_day,
+            event_type="inventory",
+        )
+        db.session.add_all([user, loc, item, event])
+        db.session.flush()
+        unit = ItemUnit(item_id=item.id, name="each", factor=1)
+        location_item = LocationStandItem(
+            location_id=loc.id,
+            item_id=item.id,
+            expected_count=5,
+            active=False,
+        )
+        event_location = EventLocation(event_id=event.id, location_id=loc.id)
+        db.session.add_all([unit, location_item, event_location])
+        db.session.flush()
+        operating_day = EventLocationOperatingDay(
+            event_location_id=event_location.id,
+            operating_date=count_day,
+        )
+        db.session.add(operating_day)
+        db.session.flush()
+        submission = LocationCountSubmission(
+            source_location_id=loc.id,
+            location_id=loc.id,
+            event_location_id=event_location.id,
+            event_operating_day_id=operating_day.id,
+            submission_type=LocationCountSubmission.TYPE_INVENTORY,
+            submitted_name="Approved Counter",
+            submission_date=count_day,
+            status=LocationCountSubmission.STATUS_APPROVED,
+            approval_mode=LocationCountSubmission.APPROVAL_MODE_ADD,
+        )
+        db.session.add(submission)
+        db.session.flush()
+        db.session.add(
+            LocationCountSubmissionRow(
+                submission_id=submission.id,
+                item_id=item.id,
+                count_value=6,
+                submitted_count_value=6,
+                expected_count_value=5,
+                parse_index=0,
+            )
+        )
+        db.session.commit()
+        _grant_event_permissions(user)
+        event_id = event.id
+        location_id = loc.id
+
+    with client:
+        login(client, "inventory-approved-removed@example.com", "pass")
+        response = client.get(
+            f"/events/{event_id}/count_sheet/{location_id}"
+            f"?operating_date={count_day.isoformat()}"
+        )
+
+    assert response.status_code == 200
+    assert b"Approved Removed Cup" not in response.data
 
 
 def test_inventory_count_sheet_uses_requested_operating_date(client, app):

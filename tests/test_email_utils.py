@@ -37,6 +37,7 @@ def test_send_email_uses_app_config_over_env(monkeypatch, app):
         "SMTP_PASSWORD",
         "SMTP_SENDER",
         "SMTP_USE_TLS",
+        "SMTP_USE_SSL",
         "SMTP_TIMEOUT_SECONDS",
     ):
         monkeypatch.delenv(key, raising=False)
@@ -88,6 +89,7 @@ def test_send_email_raises_configuration_error_when_missing_settings(monkeypatch
         "SMTP_PASSWORD",
         "SMTP_SENDER",
         "SMTP_USE_TLS",
+        "SMTP_USE_SSL",
         "SMTP_TIMEOUT_SECONDS",
     ):
         monkeypatch.delenv(key, raising=False)
@@ -113,6 +115,7 @@ def test_send_email_raises_configuration_error_when_timeout_is_invalid(monkeypat
         "SMTP_PASSWORD",
         "SMTP_SENDER",
         "SMTP_USE_TLS",
+        "SMTP_USE_SSL",
         "SMTP_TIMEOUT_SECONDS",
     ):
         monkeypatch.delenv(key, raising=False)
@@ -134,3 +137,91 @@ def test_send_email_raises_configuration_error_when_timeout_is_invalid(monkeypat
             )
 
     assert excinfo.value.missing_settings == ["SMTP_TIMEOUT_SECONDS"]
+
+
+def test_send_email_uses_implicit_ssl(monkeypatch, app):
+    for key in (
+        "SMTP_HOST",
+        "SMTP_PORT",
+        "SMTP_USERNAME",
+        "SMTP_PASSWORD",
+        "SMTP_SENDER",
+        "SMTP_USE_TLS",
+        "SMTP_USE_SSL",
+        "SMTP_TIMEOUT_SECONDS",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    with app.app_context():
+        app.config.update(
+            {
+                "SMTP_HOST": "smtp.mailgun.org",
+                "SMTP_PORT": 465,
+                "SMTP_USERNAME": "smtp-user",
+                "SMTP_PASSWORD": "smtp-pass",
+                "SMTP_SENDER": "sender@example.com",
+                "SMTP_USE_TLS": False,
+                "SMTP_USE_SSL": True,
+            }
+        )
+
+        dummy = DummySMTP("", 0)
+
+        def fake_smtp_ssl(host, port, timeout=None):
+            dummy.host = host
+            dummy.port = port
+            dummy.timeout = timeout
+            return dummy
+
+        monkeypatch.setattr(email_utils.smtplib, "SMTP_SSL", fake_smtp_ssl)
+        monkeypatch.setattr(
+            email_utils.smtplib,
+            "SMTP",
+            lambda *args, **kwargs: pytest.fail("Plain SMTP should not be used"),
+        )
+
+        email_utils.send_email(
+            to_address="dest@example.com",
+            subject="Subject",
+            body="Body",
+        )
+
+        assert dummy.host == "smtp.mailgun.org"
+        assert dummy.port == 465
+        assert dummy.started_tls is False
+        assert dummy.login_args == ("smtp-user", "smtp-pass")
+        assert dummy.sent_message["From"] == "sender@example.com"
+
+
+def test_send_email_rejects_conflicting_tls_modes(monkeypatch, app):
+    for key in (
+        "SMTP_HOST",
+        "SMTP_PORT",
+        "SMTP_USERNAME",
+        "SMTP_PASSWORD",
+        "SMTP_SENDER",
+        "SMTP_USE_TLS",
+        "SMTP_USE_SSL",
+        "SMTP_TIMEOUT_SECONDS",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    with app.app_context():
+        app.config.update(
+            {
+                "SMTP_HOST": "smtp.mailgun.org",
+                "SMTP_PORT": 465,
+                "SMTP_SENDER": "sender@example.com",
+                "SMTP_USE_TLS": True,
+                "SMTP_USE_SSL": True,
+            }
+        )
+
+        with pytest.raises(email_utils.SMTPConfigurationError) as excinfo:
+            email_utils.send_email(
+                to_address="dest@example.com",
+                subject="Subject",
+                body="Body",
+            )
+
+    assert excinfo.value.missing_settings == ["SMTP_USE_TLS/SMTP_USE_SSL"]

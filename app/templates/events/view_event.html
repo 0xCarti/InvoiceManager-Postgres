@@ -8,10 +8,10 @@
 {% set can_view_closed_event_report = can_access_endpoint('event.closed_event_report') %}
 {% set can_view_count_sheets = can_access_endpoint('event.bulk_count_sheets') %}
 {% set can_view_inventory_report = can_access_endpoint('event.inventory_report') %}
+{% set can_view_inventory_comparison_report = can_access_endpoint('event.inventory_comparison_report') %}
 {% set can_upload_sales = can_access_endpoint('event.upload_terminal_sales') %}
 {% set can_close_event = can_access_endpoint('event.close_event', 'POST') %}
 {% set can_view_stand_sheet = can_access_endpoint('event.stand_sheet') %}
-{% set can_view_scan_counts = can_access_endpoint('event.scan_counts') %}
 {% set can_add_terminal_sale = can_access_endpoint('event.add_terminal_sale') %}
 {% set can_confirm_event_days = can_access_endpoint('event.confirm_event_location_day', 'POST') %}
 {% set can_undo_confirm_event_days = can_access_endpoint('event.undo_confirm_event_location_day', 'POST') %}
@@ -19,7 +19,75 @@
 {% set can_download_event_documents = can_access_endpoint('event.download_event_document') %}
 {% set can_delete_event_documents = can_access_endpoint('event.delete_event_document_file', 'POST') %}
 {% set can_review_count_submissions = can_access_endpoint('locations.count_submissions', 'GET') %}
-{% set show_reports_menu = (event.closed and can_view_closed_event_report) or (is_inventory_event and (can_view_count_sheets or can_view_inventory_report)) %}
+{% if is_inventory_event %}
+    {% set report_count = (1 if can_view_count_sheets else 0) + (1 if can_view_inventory_report else 0) + (1 if can_view_inventory_comparison_report else 0) %}
+{% else %}
+    {% set has_stand_sheet_report = can_view_stand_sheets or can_email_stand_sheets %}
+    {% set report_count = (1 if has_stand_sheet_report else 0) + (1 if can_view_closed_event_report else 0) %}
+{% endif %}
+<style nonce="{{ csp_nonce }}">
+    .event-section-shell,
+    .event-section-shell > .tab-content,
+    .event-section-shell .tab-pane {
+        min-width: 0;
+    }
+
+    .event-section-tabs .nav-link {
+        min-height: 2.75rem;
+        white-space: nowrap;
+    }
+
+    .event-day-tabs-scroll {
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: thin;
+    }
+
+    .event-day-tabs-scroll #event-day-tabs {
+        width: max-content;
+        min-width: 100%;
+        flex-wrap: nowrap;
+    }
+
+    .event-day-tabs-scroll #event-day-tabs .nav-item {
+        flex: 0 0 auto;
+    }
+
+    .event-report-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+
+    @media (max-width: 767.98px) {
+        .event-section-tabs {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .event-section-tabs .nav-item,
+        .event-section-tabs .nav-link {
+            min-width: 0;
+            width: 100%;
+        }
+
+        .event-section-tabs .nav-link {
+            padding-inline: 0.4rem;
+        }
+
+        .event-report-row > .mobile-actions {
+            width: 100%;
+        }
+    }
+
+    @media (max-width: 430px) {
+        .event-section-tab-count {
+            display: none;
+        }
+    }
+</style>
 <div class="container mt-4 app-page-shell">
     <div class="app-page-header">
         <div class="app-page-header-copy">
@@ -29,6 +97,16 @@
         <div class="app-page-header-actions">
             {% if can_access_endpoint('event.edit_event') %}
             <a class="btn btn-outline-secondary" href="{{ url_for('event.edit_event', event_id=event.id) }}">Edit Event</a>
+            {% endif %}
+            {% if not event.closed and can_close_event %}
+                {% if unconfirmed_count == 0 %}
+                <form method="post" action="{{ url_for('event.close_event', event_id=event.id) }}" class="d-inline m-0">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-danger">Close Event</button>
+                </form>
+                {% else %}
+                <button type="button" class="btn btn-danger" disabled title="All locations must be confirmed before closing this event.">Close Event</button>
+                {% endif %}
             {% endif %}
         </div>
     </div>
@@ -45,6 +123,7 @@
             <div class="text-muted small">Type</div>
             <div class="fw-semibold">{{ event_type_label }}</div>
         </div>
+        {% if not is_inventory_event %}
         <div class="app-metric-card">
             <div class="text-muted small">Estimated Sales</div>
             <div class="fw-semibold">{% if event.estimated_sales is not none %}${{ '{:,.2f}'.format(event.estimated_sales) }}{% else %}Not set{% endif %}</div>
@@ -57,8 +136,9 @@
             <div class="text-muted small">Physical vs Terminal Variance</div>
             <div class="fw-semibold">{% if physical_terminal_variance is not none %}${{ '{:,.2f}'.format(physical_terminal_variance) }}{% else %}Not available{% endif %}</div>
         </div>
+        {% endif %}
     </div>
-    {% if terminal_sales_conflicts %}
+    {% if not is_inventory_event and terminal_sales_conflicts %}
     <div class="alert alert-warning" role="alert">
         <div class="fw-semibold mb-1">Terminal sales assignment conflict</div>
         <div class="mb-2">{{ terminal_sales_conflict_guidance }}</div>
@@ -71,172 +151,89 @@
         {% endfor %}
     </div>
     {% endif %}
-    <div class="mobile-toolbar app-toolbar-panel">
-        {% if not event.closed and can_add_location %}
-        <a class="btn btn-primary" href="{{ url_for('event.add_location', event_id=event.id) }}">Add Location</a>
-        {% endif %}
-        {% if is_inventory_event and can_view_count_sheets %}
-        <a class="btn btn-outline-secondary" href="{{ url_for('event.bulk_count_sheets', event_id=event.id) }}">Count Sheets</a>
-        {% elif can_view_stand_sheets %}
-        <a class="btn btn-outline-secondary" href="{{ url_for('event.bulk_stand_sheets', event_id=event.id) }}">Stand Sheets</a>
-        {% endif %}
-        {% if not is_inventory_event and can_email_stand_sheets %}
-        <button
-            type="button"
-            class="btn btn-outline-secondary"
-            data-email-stand-sheet
-            data-email-action="{{ url_for('event.email_bulk_stand_sheets', event_id=event.id) }}"
-            data-email-label="all stand sheets for {{ event.name }}"
-            data-email-success="Stand sheets emailed successfully."
-            data-location-ids="{{ event.locations | map(attribute='location_id') | join(',') }}"
-        >
-            Email Stand Sheets
-        </button>
-        {% endif %}
-        {% if show_reports_menu %}
-        <div class="dropdown">
-            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                Reports
-            </button>
-            <ul class="dropdown-menu dropdown-menu-end">
-                {% if event.closed and can_view_closed_event_report %}
-                <li><a class="dropdown-item" href="{{ url_for('event.closed_event_report', event_id=event.id) }}">Closed Event Report</a></li>
-                {% endif %}
-                {% if is_inventory_event and can_view_count_sheets %}
-                <li><a class="dropdown-item" href="{{ url_for('event.bulk_count_sheets', event_id=event.id) }}">Count Sheets</a></li>
-                {% endif %}
-                {% if is_inventory_event and can_view_inventory_report %}
-                <li><a class="dropdown-item" href="{{ url_for('event.inventory_report', event_id=event.id) }}">Summary Source 18</a></li>
-                {% endif %}
-            </ul>
-        </div>
-        {% endif %}
-        {% if not event.closed and can_upload_sales %}
-        <a class="btn btn-outline-secondary" href="{{ url_for('event.upload_terminal_sales', event_id=event.id) }}">Upload Sales</a>
-        {% endif %}
-    {% if not event.closed and can_close_event %}
-        {% if unconfirmed_count == 0 %}
-        <form method="post" action="{{ url_for('event.close_event', event_id=event.id) }}" class="d-inline">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-danger">Close Event</button>
-        </form>
-        {% else %}
-        <button type="button" class="btn btn-danger" disabled title="All locations must be confirmed before closing this event.">Close Event</button>
-        {% endif %}
-        {% endif %}
-    </div>
-    <div class="card shadow-sm border-0 mb-4" id="event-documents">
-        <div class="card-body">
-            <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 mb-3">
-                <div>
-                    <h5 class="mb-1">Documents</h5>
-                    <p class="text-muted mb-0">Upload menus, floor plans, and other event files so the management team can access them from the event page.</p>
-                </div>
-                <div class="text-muted small">
-                    {{ event_documents|length }} file{% if event_documents|length != 1 %}s{% endif %}
-                </div>
-            </div>
-            {% if can_upload_event_documents %}
-            <form
-                method="post"
-                action="{{ url_for('event.upload_event_document', event_id=event.id) }}"
-                enctype="multipart/form-data"
-                class="row g-3 align-items-end mb-4"
-                data-event-document-form="1"
+    <section class="event-section-shell" aria-label="Event workspace">
+        <ul class="nav nav-tabs nav-fill event-section-tabs" id="event-section-tabs" role="tablist" aria-label="Event sections">
+            <li class="nav-item" role="presentation">
+                <button
+                    class="nav-link active"
+                    id="event-locations-tab"
+                    data-bs-toggle="tab"
+                    data-bs-target="#event-locations"
+                    data-event-section-tab="1"
+                    type="button"
+                    role="tab"
+                    aria-controls="event-locations"
+                    aria-selected="true"
+                >
+                    Locations
+                    <span class="badge rounded-pill text-bg-light border text-dark event-section-tab-count">{{ event.locations|length }}</span>
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button
+                    class="nav-link"
+                    id="event-documents-tab"
+                    data-bs-toggle="tab"
+                    data-bs-target="#event-documents"
+                    data-event-section-tab="1"
+                    type="button"
+                    role="tab"
+                    aria-controls="event-documents"
+                    aria-selected="false"
+                >
+                    Documents
+                    <span class="badge rounded-pill text-bg-light border text-dark event-section-tab-count">{{ event_documents|length }}</span>
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button
+                    class="nav-link"
+                    id="event-reports-tab"
+                    data-bs-toggle="tab"
+                    data-bs-target="#event-reports"
+                    data-event-section-tab="1"
+                    type="button"
+                    role="tab"
+                    aria-controls="event-reports"
+                    aria-selected="false"
+                >
+                    Reports
+                    <span class="badge rounded-pill text-bg-light border text-dark event-section-tab-count">{{ report_count }}</span>
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content" id="event-section-tab-content">
+            <section
+                class="tab-pane fade show active pt-3"
+                id="event-locations"
+                role="tabpanel"
+                aria-labelledby="event-locations-tab"
             >
-                {{ document_upload_form.hidden_tag() }}
-                <div class="col-12 col-lg-4">
-                    <label for="{{ document_upload_form.file.id }}" class="form-label">Document File</label>
-                    {{ document_upload_form.file(class='form-control', accept=event_document_accept) }}
+                {% if (not event.closed and can_add_location) or (not is_inventory_event and not event.closed and can_upload_sales) %}
+                <div class="mobile-toolbar app-toolbar-panel mb-4">
+                    {% if not event.closed and can_add_location %}
+                    <a class="btn btn-primary" href="{{ url_for('event.add_location', event_id=event.id) }}">Add Location</a>
+                    {% endif %}
+                    {% if not is_inventory_event and not event.closed and can_upload_sales %}
+                    <a class="btn btn-outline-secondary" href="{{ url_for('event.upload_terminal_sales', event_id=event.id) }}">Upload Sales</a>
+                    {% endif %}
                 </div>
-                <div class="col-12 col-lg-4">
-                    <label for="{{ document_upload_form.name.id }}" class="form-label">Document Name</label>
-                    {{ document_upload_form.name(class='form-control', data_event_document_name='1') }}
-                </div>
-                <div class="col-12 col-lg-2">
-                    <div class="form-check mb-2">
-                        {{ document_upload_form.use_current_filename(class='form-check-input', data_event_document_toggle='1') }}
-                        <label class="form-check-label" for="{{ document_upload_form.use_current_filename.id }}">
-                            Use current filename
-                        </label>
-                    </div>
-                </div>
-                <div class="col-12 col-lg-2 d-grid">
-                    {{ document_upload_form.submit(class='btn btn-primary') }}
-                </div>
-            </form>
-            {% endif %}
-            {% if event_documents %}
-            <div class="table-responsive mobile-table-wrap">
-                <table class="table table-sm align-middle mb-0">
-                    <thead>
-                        <tr>
-                            <th scope="col">Document</th>
-                            <th scope="col">Uploaded By</th>
-                            <th scope="col">Added</th>
-                            <th scope="col">Size</th>
-                            <th scope="col" class="text-end">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for document in event_documents %}
-                        <tr>
-                            <td class="text-break">
-                                <div class="fw-semibold">{{ document.display_name }}</div>
-                                {% if document.name %}
-                                <div class="small text-muted">Original file: {{ document.original_filename }}</div>
-                                {% endif %}
-                            </td>
-                            <td class="small text-muted">
-                                {% if document.uploader %}
-                                {{ document.uploader.display_name or document.uploader.email }}
-                                {% else %}
-                                Unknown
-                                {% endif %}
-                            </td>
-                            <td class="small text-muted">{{ document.created_at.strftime('%Y-%m-%d %I:%M %p') }}</td>
-                            <td class="small text-muted">{{ '{:.1f}'.format((document.file_size_bytes or 0) / 1024) }} KB</td>
-                            <td>
-                                <div class="d-flex justify-content-end flex-wrap gap-2">
-                                    {% if can_download_event_documents %}
-                                    <a
-                                        class="btn btn-sm btn-outline-secondary"
-                                        href="{{ url_for('event.download_event_document', event_id=event.id, document_id=document.id) }}"
-                                    >
-                                        Download
-                                    </a>
-                                    {% endif %}
-                                    {% if can_delete_event_documents %}
-                                    <form
-                                        method="post"
-                                        action="{{ url_for('event.delete_event_document_file', event_id=event.id, document_id=document.id) }}"
-                                        class="d-inline"
-                                    >
-                                        {{ document_action_form.hidden_tag() }}
-                                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-                                    </form>
-                                    {% endif %}
-                                </div>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="text-muted small">No documents have been uploaded for this event yet.</div>
-            {% endif %}
-        </div>
-    </div>
+                {% endif %}
         {% if event_day_summaries %}
         <div class="mb-4">
             <div class="d-flex flex-column flex-lg-row justify-content-between gap-2 mb-2">
                 <div>
-                    <h5 class="mb-1">Event Days</h5>
+                    <h5 class="mb-1">Locations by Open Day</h5>
+                    {% if is_inventory_event %}
+                    <p class="text-muted mb-0">Review daily inventory count workflow by the day the location is open.</p>
+                    {% else %}
                     <p class="text-muted mb-0">Review daily openings, closings, and sales by the day the location was open.</p>
+                    {% endif %}
                 </div>
             </div>
-            <ul class="nav nav-tabs" id="event-day-tabs" role="tablist">
+            <div class="event-day-tabs-scroll">
+            <ul class="nav nav-tabs" id="event-day-tabs" role="tablist" aria-label="Open days">
                 {% for day in event_day_summaries %}
                 <li class="nav-item" role="presentation">
                     <button
@@ -254,6 +251,7 @@
                 </li>
                 {% endfor %}
             </ul>
+            </div>
             <div class="tab-content border border-top-0 rounded-bottom p-3" id="event-day-tab-content">
                 {% for day in event_day_summaries %}
                 <div
@@ -270,9 +268,11 @@
                                 <tr>
                                     <th scope="col">Location</th>
                                     <th scope="col">Day Status</th>
+                                    {% if not is_inventory_event %}
                                     <th scope="col">Opening</th>
                                     <th scope="col">Closing</th>
                                     <th scope="col">Sales</th>
+                                    {% endif %}
                                     <th scope="col" class="text-end">Actions</th>
                                 </tr>
                             </thead>
@@ -287,6 +287,7 @@
                                         <span class="badge text-bg-light border text-dark">Open</span>
                                         {% endif %}
                                     </td>
+                                    {% if not is_inventory_event %}
                                     <td>
                                         <span class="badge {% if entry.opening_status == 'approved' %}text-bg-success{% elif entry.opening_status == 'pending' %}text-bg-warning{% elif entry.opening_status == 'rejected' %}text-bg-danger{% else %}text-bg-light border text-dark{% endif %}">
                                             {{ entry.opening_status|title }}
@@ -311,12 +312,13 @@
                                         <span class="badge text-bg-light border text-dark">Missing</span>
                                         {% endif %}
                                     </td>
+                                    {% endif %}
                                     <td class="text-end">
                                         <div class="d-flex flex-wrap justify-content-end gap-2">
-                                            {% if can_review_count_submissions %}
+                                            {% if not is_inventory_event and can_review_count_submissions %}
                                             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('locations.count_submissions', event_location_id=entry.event_location.id, submission_date=day.date.isoformat()) }}">Counts</a>
                                             {% endif %}
-                                            {% if can_add_terminal_sale %}
+                                            {% if not is_inventory_event and can_add_terminal_sale %}
                                             <a class="btn btn-sm btn-outline-primary" href="{{ url_for('event.add_terminal_sale', event_id=event.id, el_id=entry.event_location.id) }}">Sales</a>
                                             {% endif %}
                                             {% if not is_inventory_event and can_view_stand_sheet %}
@@ -328,8 +330,8 @@
                                             {% if is_inventory_event and entry.location %}
                                             <a class="btn btn-sm btn-outline-primary" href="{{ url_for('locations.scan_inventory_submission', token=entry.location.count_qr_token, event_id=event.id, operating_date=day.date.isoformat()) }}">Public Inventory</a>
                                             {% endif %}
-                                            {% if is_inventory_event and can_view_scan_counts %}
-                                            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.scan_counts', event_id=event.id, location_id=entry.event_location.location_id, operating_date=day.date.isoformat()) }}">Scan Counts</a>
+                                            {% if is_inventory_event and can_review_count_submissions %}
+                                            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('locations.count_submissions', event_location_id=entry.event_location.id, submission_date=day.date.isoformat(), status='pending', submission_type='inventory') }}">Review Counts</a>
                                             {% endif %}
                                             {% if not is_inventory_event and entry.location and can_email_stand_sheets %}
                                             <a
@@ -378,7 +380,216 @@
                 {% endfor %}
             </div>
         </div>
+        {% else %}
+        <div class="text-muted py-4">No open days have been configured for this event.</div>
         {% endif %}
+            </section>
+
+            <section
+                class="tab-pane fade pt-3"
+                id="event-documents"
+                role="tabpanel"
+                aria-labelledby="event-documents-tab"
+            >
+                <div class="card shadow-sm border-0 mb-4">
+                    <div class="card-body">
+                        <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 mb-3">
+                            <div>
+                                <h5 class="mb-1">Documents</h5>
+                                <p class="text-muted mb-0">Upload menus, floor plans, and other event files so the management team can access them from the event page.</p>
+                            </div>
+                            <div class="text-muted small">
+                                {{ event_documents|length }} file{% if event_documents|length != 1 %}s{% endif %}
+                            </div>
+                        </div>
+                        {% if can_upload_event_documents %}
+                        <form
+                            method="post"
+                            action="{{ url_for('event.upload_event_document', event_id=event.id) }}"
+                            enctype="multipart/form-data"
+                            class="row g-3 align-items-end mb-4"
+                            data-event-document-form="1"
+                        >
+                            {{ document_upload_form.hidden_tag() }}
+                            <div class="col-12 col-lg-4">
+                                <label for="{{ document_upload_form.file.id }}" class="form-label">Document File</label>
+                                {{ document_upload_form.file(class='form-control', accept=event_document_accept) }}
+                            </div>
+                            <div class="col-12 col-lg-4">
+                                <label for="{{ document_upload_form.name.id }}" class="form-label">Document Name</label>
+                                {{ document_upload_form.name(class='form-control', data_event_document_name='1') }}
+                            </div>
+                            <div class="col-12 col-lg-2">
+                                <div class="form-check mb-2">
+                                    {{ document_upload_form.use_current_filename(class='form-check-input', data_event_document_toggle='1') }}
+                                    <label class="form-check-label" for="{{ document_upload_form.use_current_filename.id }}">
+                                        Use current filename
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-12 col-lg-2 d-grid">
+                                {{ document_upload_form.submit(class='btn btn-primary') }}
+                            </div>
+                        </form>
+                        {% endif %}
+                        {% if event_documents %}
+                        <div class="table-responsive mobile-table-wrap">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Document</th>
+                                        <th scope="col">Uploaded By</th>
+                                        <th scope="col">Added</th>
+                                        <th scope="col">Size</th>
+                                        <th scope="col" class="text-end">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for document in event_documents %}
+                                    <tr>
+                                        <td class="text-break">
+                                            <div class="fw-semibold">{{ document.display_name }}</div>
+                                            {% if document.name %}
+                                            <div class="small text-muted">Original file: {{ document.original_filename }}</div>
+                                            {% endif %}
+                                        </td>
+                                        <td class="small text-muted">
+                                            {% if document.uploader %}
+                                            {{ document.uploader.display_name or document.uploader.email }}
+                                            {% else %}
+                                            Unknown
+                                            {% endif %}
+                                        </td>
+                                        <td class="small text-muted">{{ document.created_at.strftime('%Y-%m-%d %I:%M %p') }}</td>
+                                        <td class="small text-muted">{{ '{:.1f}'.format((document.file_size_bytes or 0) / 1024) }} KB</td>
+                                        <td>
+                                            <div class="d-flex justify-content-end flex-wrap gap-2">
+                                                {% if can_download_event_documents %}
+                                                <a
+                                                    class="btn btn-sm btn-outline-secondary"
+                                                    href="{{ url_for('event.download_event_document', event_id=event.id, document_id=document.id) }}"
+                                                >
+                                                    Download
+                                                </a>
+                                                {% endif %}
+                                                {% if can_delete_event_documents %}
+                                                <form
+                                                    method="post"
+                                                    action="{{ url_for('event.delete_event_document_file', event_id=event.id, document_id=document.id) }}"
+                                                    class="d-inline"
+                                                >
+                                                    {{ document_action_form.hidden_tag() }}
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                                </form>
+                                                {% endif %}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="text-muted small">No documents have been uploaded for this event yet.</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </section>
+
+            <section
+                class="tab-pane fade pt-3"
+                id="event-reports"
+                role="tabpanel"
+                aria-labelledby="event-reports-tab"
+            >
+                <div class="card shadow-sm border-0 mb-4">
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <h5 class="mb-1">Reports</h5>
+                            <p class="text-muted mb-0">Open or distribute reports available for this event.</p>
+                        </div>
+
+                        {% if report_count %}
+                        <div class="list-group list-group-flush event-report-list">
+                            {% if not is_inventory_event and has_stand_sheet_report %}
+                            <div class="list-group-item px-0 event-report-row">
+                                <div>
+                                    <div class="fw-semibold">Stand Sheets</div>
+                                    <div class="small text-muted">Printable stand sheets for every event location.</div>
+                                </div>
+                                <div class="mobile-actions">
+                                    {% if can_email_stand_sheets %}
+                                    <button
+                                        type="button"
+                                        class="btn btn-sm btn-outline-secondary"
+                                        data-email-stand-sheet
+                                        data-email-action="{{ url_for('event.email_bulk_stand_sheets', event_id=event.id) }}"
+                                        data-email-label="all stand sheets for {{ event.name }}"
+                                        data-email-success="Stand sheets emailed successfully."
+                                        data-location-ids="{{ event.locations | map(attribute='location_id') | join(',') }}"
+                                    >
+                                        Email
+                                    </button>
+                                    {% endif %}
+                                    {% if can_view_stand_sheets %}
+                                    <a class="btn btn-sm btn-primary" href="{{ url_for('event.bulk_stand_sheets', event_id=event.id) }}">Open</a>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+
+                            {% if not is_inventory_event and can_view_closed_event_report %}
+                            <div class="list-group-item px-0 event-report-row">
+                                <div>
+                                    <div class="fw-semibold">Closed Event Report</div>
+                                    <div class="small text-muted">Confirmed sales, physical-versus-terminal variance, and location results.</div>
+                                </div>
+                                {% if event.closed %}
+                                <a class="btn btn-sm btn-primary" href="{{ url_for('event.closed_event_report', event_id=event.id) }}">Open</a>
+                                {% else %}
+                                <button class="btn btn-sm btn-outline-secondary" type="button" disabled>Available After Close</button>
+                                {% endif %}
+                            </div>
+                            {% endif %}
+
+                            {% if is_inventory_event and can_view_count_sheets %}
+                            <div class="list-group-item px-0 event-report-row">
+                                <div>
+                                    <div class="fw-semibold">Count Sheet Report</div>
+                                    <div class="small text-muted">Printable count sheets for all inventory locations.</div>
+                                </div>
+                                <a class="btn btn-sm btn-primary" href="{{ url_for('event.bulk_count_sheets', event_id=event.id) }}">Open</a>
+                            </div>
+                            {% endif %}
+
+                            {% if is_inventory_event and can_view_inventory_report %}
+                            <div class="list-group-item px-0 event-report-row">
+                                <div>
+                                    <div class="fw-semibold">Summary Source 18</div>
+                                    <div class="small text-muted">Inventory summary report for this event.</div>
+                                </div>
+                                <a class="btn btn-sm btn-primary" href="{{ url_for('event.inventory_report', event_id=event.id) }}">Open</a>
+                            </div>
+                            {% endif %}
+
+                            {% if is_inventory_event and can_view_inventory_comparison_report %}
+                            <div class="list-group-item px-0 event-report-row">
+                                <div>
+                                    <div class="fw-semibold">Inventory Comparison</div>
+                                    <div class="small text-muted">Compare this inventory event with the previous inventory event.</div>
+                                </div>
+                                <a class="btn btn-sm btn-primary" href="{{ url_for('event.inventory_comparison_report', event_id=event.id) }}">Open</a>
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% else %}
+                        <div class="text-muted">No reports are available with your current permissions.</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </section>
+        </div>
+    </section>
 </div>
 {% if not is_inventory_event and can_email_stand_sheets %}
 {% include 'shared/email_stand_sheet_modal.html' %}
@@ -386,6 +597,33 @@
 {% endblock %}
 {% block scripts %}
     {{ super() }}
+    <script nonce="{{ csp_nonce }}">
+        document.addEventListener('DOMContentLoaded', function () {
+            const tabs = Array.from(
+                document.querySelectorAll('#event-section-tabs button[data-event-section-tab="1"]')
+            );
+            const hash = window.location.hash;
+            const targetTab = tabs.find(function (button) {
+                return button.getAttribute('data-bs-target') === hash;
+            });
+
+            tabs.forEach(function (button) {
+                button.addEventListener('shown.bs.tab', function (event) {
+                    const target = event.target.getAttribute('data-bs-target');
+                    if (target) {
+                        history.replaceState(null, '', target);
+                    }
+                });
+            });
+
+            if (targetTab && window.bootstrap?.Tab) {
+                bootstrap.Tab.getOrCreateInstance(targetTab).show();
+                window.requestAnimationFrame(function () {
+                    document.querySelector('.event-section-shell')?.scrollIntoView({ block: 'start' });
+                });
+            }
+        });
+    </script>
     {% if not is_inventory_event and can_email_stand_sheets %}
     <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='js/stand_sheet_email.js') }}"></script>
     {% endif %}

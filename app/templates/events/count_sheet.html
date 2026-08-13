@@ -35,6 +35,44 @@
         min-height: 1.25rem;
     }
 
+    .inventory-filtered-out {
+        display: none !important;
+    }
+
+    .inventory-add-results {
+        max-height: 16rem;
+        overflow-y: auto;
+    }
+
+    .inventory-count-stats {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.35rem 0.75rem;
+        margin-top: 0.65rem;
+    }
+
+    .inventory-count-stat {
+        color: #6c757d;
+    }
+
+    .inventory-count-stat strong {
+        display: block;
+        color: #212529;
+        font-weight: 600;
+    }
+
+    .inventory-count-stat.inventory-variance-positive strong {
+        color: #0f5132;
+    }
+
+    .inventory-count-stat.inventory-variance-negative strong {
+        color: #842029;
+    }
+
+    .inventory-count-stat.inventory-variance-pending strong {
+        color: #6c757d;
+    }
+
     @media (max-width: 767.98px) {
         .inventory-count-shell {
             padding-left: 0.85rem;
@@ -42,7 +80,20 @@
         }
 
         .inventory-unit-row {
-            grid-template-columns: 1fr;
+            grid-template-columns: minmax(0, 1fr) minmax(4.75rem, 6rem) 2.25rem;
+            gap: 0.45rem;
+        }
+
+        .inventory-unit-row .form-select,
+        .inventory-unit-row .form-control {
+            min-width: 0;
+        }
+
+        .inventory-unit-row [data-inventory-remove-row] {
+            width: 2.25rem;
+            height: 2.375rem;
+            padding-left: 0;
+            padding-right: 0;
         }
     }
 </style>
@@ -86,6 +137,7 @@
         method="{{ 'post' if can_edit_count_sheet else 'get' }}"
         data-inventory-count-form="1"
         data-draft-key="invoice-manager-event-inventory-count:{{ event.id }}:{{ location.id }}:{{ operating_date.isoformat() if operating_date else event.start_date.isoformat() }}"
+        data-inventory-item-search-url="{{ inventory_item_search_url or '' }}"
     >
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         {% if operating_date %}
@@ -107,18 +159,87 @@
             >
         </div>
 
+        <div class="mb-4" data-inventory-tools="1">
+            <label class="form-label" for="inventory-item-filter">Search Items</label>
+            <div class="input-group mb-2">
+                <input
+                    type="search"
+                    class="form-control"
+                    id="inventory-item-filter"
+                    placeholder="Search by name or unit"
+                    autocomplete="off"
+                    data-inventory-filter-input="1"
+                >
+                <button type="button" class="btn btn-outline-secondary" data-inventory-filter-clear="1">
+                    Clear
+                </button>
+            </div>
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <div class="btn-group btn-group-sm" role="group" aria-label="Inventory item filter">
+                    <button type="button" class="btn btn-primary" data-inventory-status-filter="all">All</button>
+                    <button type="button" class="btn btn-outline-secondary" data-inventory-status-filter="counted">Counted</button>
+                    <button type="button" class="btn btn-outline-secondary" data-inventory-status-filter="uncounted">Uncounted</button>
+                </div>
+                <div class="small text-muted" data-inventory-progress aria-live="polite"></div>
+            </div>
+            <div class="small text-muted mt-1" data-inventory-visible-count aria-live="polite"></div>
+        </div>
+
+        {% if can_edit_count_sheet %}
+        <div class="border rounded p-3 mb-4" data-inventory-add-panel="1">
+            <label class="form-label" for="inventory-add-item-search">Add Item</label>
+            <input
+                type="search"
+                class="form-control"
+                id="inventory-add-item-search"
+                placeholder="Search item master"
+                autocomplete="off"
+                data-inventory-add-search="1"
+            >
+            <div class="list-group inventory-add-results mt-2 d-none" data-inventory-add-results="1"></div>
+            <div class="small text-muted mt-2" data-inventory-add-status aria-live="polite">
+                Add an existing item if it is physically present but missing from this location.
+            </div>
+        </div>
+        {% endif %}
+
         {% if items %}
-        <div class="mb-4">
+        <div class="mb-4" data-inventory-list="1">
             {% for entry in items %}
-            <div class="inventory-count-item p-3">
+            <div
+                class="inventory-count-item p-3"
+                data-inventory-card="1"
+                data-inventory-item-id="{{ entry.item.id }}"
+                data-inventory-initial="1"
+                data-inventory-search-text="{{ (entry.item.name ~ ' ' ~ (entry.item.upc or '') ~ ' ' ~ (entry.item.barcode_values|join(' ')) ~ ' ' ~ (entry.base_unit or '') ~ ' ' ~ (entry.base_unit_label or ''))|lower }}"
+                data-inventory-expected-count="{{ entry.expected_count or 0 }}"
+                data-inventory-approved-count="{% if entry.approved_count is not none %}{{ entry.approved_count }}{% endif %}"
+                data-inventory-item-cost="{{ entry.item_cost or 0 }}"
+                data-inventory-base-unit-label="{{ entry.base_unit_label or entry.base_unit }}"
+            >
                 <div class="d-flex justify-content-between gap-3 align-items-start mb-2">
-                    <div>
+                    <div class="flex-grow-1">
                         <div class="fw-semibold">{{ entry.item.name }}</div>
                         <div class="small text-muted">
                             {{ entry.base_unit_label or entry.base_unit }}
-                            {% if entry.expected_count %}
-                            | current expected {{ '%.4f'|format(entry.expected_count) }}
-                            {% endif %}
+                        </div>
+                        <div class="inventory-count-stats small" data-inventory-stats="1">
+                            <span class="inventory-count-stat">
+                                Expected
+                                <strong data-inventory-expected-display>{{ '%.4f'|format(entry.expected_count or 0) }}</strong>
+                            </span>
+                            <span class="inventory-count-stat">
+                                <span data-inventory-counted-label>{% if entry.approved_count is not none %}Approved{% else %}Counted{% endif %}</span>
+                                <strong data-inventory-counted-display>{% if entry.approved_count is not none %}{{ '%.4f'|format(entry.approved_count) }}{% else %}Not counted{% endif %}</strong>
+                            </span>
+                            <span class="inventory-count-stat inventory-variance-pending" data-inventory-variance-stat>
+                                Qty Var
+                                <strong data-inventory-variance-display>Pending</strong>
+                            </span>
+                            <span class="inventory-count-stat inventory-variance-pending" data-inventory-cost-variance-stat>
+                                Cost Var
+                                <strong data-inventory-cost-variance-display>Pending</strong>
+                            </span>
                         </div>
                     </div>
                     {% if can_edit_count_sheet %}
@@ -147,22 +268,26 @@
                                 {% if not can_edit_count_sheet %}disabled aria-disabled="true"{% endif %}
                             >
                                 {% for unit_option in entry.unit_options %}
-                                <option value="{{ unit_option.value }}">{{ unit_option.label }}</option>
+                                <option value="{{ unit_option.value }}" data-unit-factor="{{ unit_option.factor }}">{{ unit_option.label }}</option>
                                 {% endfor %}
                             </select>
                         </div>
                         <div>
                             <label class="form-label small mb-1" for="inventory_qty_{{ entry.item.id }}_0">Qty</label>
                             <input
-                                type="number"
-                                step="any"
-                                min="0"
-                                inputmode="text"
+                                type="text"
+                                inputmode="numeric"
+                                pattern="[0-9]*"
                                 enterkeyhint="next"
                                 autocomplete="off"
+                                autocorrect="off"
+                                autocapitalize="off"
+                                spellcheck="false"
                                 data-inventory-count-entry="1"
+                                data-inventory-quantity-entry="1"
                                 data-inventory-draft-field="1"
                                 data-numeric-input="1"
+                                data-native-numeric="1"
                                 class="form-control"
                                 id="inventory_qty_{{ entry.item.id }}_0"
                                 name="inventory_qty_{{ entry.item.id }}_0"
@@ -180,11 +305,17 @@
             {% endfor %}
         </div>
         {% else %}
-        <div class="alert alert-danger">No inventory items are configured for this location yet.</div>
+        <div class="mb-4" data-inventory-list="1"></div>
+        <div class="alert alert-danger" data-inventory-empty-config="1">
+            No inventory items are configured for this location yet.{% if can_edit_count_sheet %} Use Add Item to count an existing item from the item master.{% endif %}
+        </div>
         {% endif %}
+        <div class="alert alert-info d-none" data-inventory-no-results="1">
+            No items match the current filter.
+        </div>
 
         {% if can_edit_count_sheet %}
-        <button type="submit" class="btn btn-primary btn-lg w-100" {% if not items %}disabled{% endif %}>
+        <button type="submit" class="btn btn-primary btn-lg w-100" data-inventory-submit="1" {% if not items %}disabled{% endif %}>
             Submit For Review
         </button>
         {% endif %}
@@ -203,12 +334,28 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     const draftKey = form.dataset.draftKey || '';
+    const inventoryItemSearchUrl = form.dataset.inventoryItemSearchUrl || '';
     const draftPrompt = document.querySelector('[data-inventory-draft-prompt]');
     const resumeButton = document.querySelector('[data-inventory-draft-resume="1"]');
     const discardButton = document.querySelector('[data-inventory-draft-discard="1"]');
     const draftStatus = document.querySelector('[data-inventory-draft-status]');
+    const filterInput = document.querySelector('[data-inventory-filter-input]');
+    const filterClear = document.querySelector('[data-inventory-filter-clear]');
+    const noResults = document.querySelector('[data-inventory-no-results]');
+    const progress = document.querySelector('[data-inventory-progress]');
+    const visibleCount = document.querySelector('[data-inventory-visible-count]');
+    const addSearch = document.querySelector('[data-inventory-add-search]');
+    const addResults = document.querySelector('[data-inventory-add-results]');
+    const addStatus = document.querySelector('[data-inventory-add-status]');
+    const emptyConfig = document.querySelector('[data-inventory-empty-config]');
+    const inventoryList = document.querySelector('[data-inventory-list]');
+    const submitButton = document.querySelector('[data-inventory-submit]');
+    const inventoryCatalogById = {};
     let canUseLocalStorage = true;
     let pendingDraft = null;
+    let statusFilter = 'all';
+    let addSearchTimer = null;
+    let addSearchRequestId = 0;
 
     try {
         const probeKey = draftKey + ':probe';
@@ -224,6 +371,16 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function countInputs() {
         return Array.from(document.querySelectorAll('[data-inventory-count-entry="1"]'));
+    }
+
+    function inventoryCards() {
+        return Array.from(document.querySelectorAll('[data-inventory-card="1"]'));
+    }
+
+    function visibleCountInputs() {
+        return countInputs().filter(function (input) {
+            return !input.closest('.inventory-filtered-out');
+        });
     }
 
     function setDraftStatus(message) {
@@ -262,6 +419,473 @@ document.addEventListener('DOMContentLoaded', function () {
         }, 0);
     }
 
+    function escapeHtml(value) {
+        return String(value || '').replace(/[&<>"']/g, function (character) {
+            return {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;',
+            }[character];
+        });
+    }
+
+    function normalizeSearchText(value) {
+        return String(value || '').trim().toLowerCase();
+    }
+
+    function sanitizeQuantityInput(input) {
+        if (!input) {
+            return;
+        }
+        const currentValue = input.value || '';
+        const sanitizedValue = currentValue.replace(/\D+/g, '');
+        if (currentValue !== sanitizedValue) {
+            input.value = sanitizedValue;
+        }
+    }
+
+    function parseInventoryNumber(value, fallback) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    function formatInventoryQuantity(value) {
+        if (!Number.isFinite(value)) {
+            return '0';
+        }
+        const rounded = Number(value.toFixed(4));
+        return rounded.toLocaleString(undefined, {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 4,
+        });
+    }
+
+    function formatInventoryQuantityWithUnit(value, unitLabel, signed) {
+        const prefix = signed && value > 0 ? '+' : '';
+        return prefix + formatInventoryQuantity(value) + (unitLabel ? ' ' + unitLabel : '');
+    }
+
+    function formatInventoryCurrency(value) {
+        if (!Number.isFinite(value)) {
+            return '$0.00';
+        }
+        const prefix = value > 0 ? '+' : value < 0 ? '-' : '';
+        return prefix + '$' + Math.abs(value).toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        });
+    }
+
+    function selectedUnitFactor(input) {
+        const row = input ? input.closest('[data-inventory-row]') : null;
+        const select = row ? row.querySelector('select') : null;
+        const selectedOption = select ? select.options[select.selectedIndex] : null;
+        const factor = parseInventoryNumber(
+            selectedOption ? selectedOption.dataset.unitFactor : '',
+            1
+        );
+        return factor > 0 ? factor : 1;
+    }
+
+    function countedBaseQuantity(card) {
+        let hasCount = false;
+        let total = 0;
+        Array.from(card.querySelectorAll('[data-inventory-count-entry="1"]')).forEach(function (input) {
+            const rawValue = (input.value || '').trim();
+            if (rawValue === '') {
+                return;
+            }
+            const quantity = parseInventoryNumber(rawValue, 0);
+            hasCount = true;
+            total += quantity * selectedUnitFactor(input);
+        });
+        return {
+            hasCount: hasCount,
+            total: total,
+        };
+    }
+
+    function updateVarianceState(element, value) {
+        if (!element) {
+            return;
+        }
+        element.classList.remove(
+            'inventory-variance-positive',
+            'inventory-variance-negative',
+            'inventory-variance-pending'
+        );
+        if (value === null) {
+            element.classList.add('inventory-variance-pending');
+        } else if (value > 0) {
+            element.classList.add('inventory-variance-positive');
+        } else if (value < 0) {
+            element.classList.add('inventory-variance-negative');
+        }
+    }
+
+    function approvedCountForCard(card) {
+        const rawValue = (card.dataset.inventoryApprovedCount || '').trim();
+        if (rawValue === '') {
+            return null;
+        }
+        return parseInventoryNumber(rawValue, null);
+    }
+
+    function updateInventoryCardStats(card) {
+        const expected = parseInventoryNumber(card.dataset.inventoryExpectedCount, 0);
+        const approved = approvedCountForCard(card);
+        const counted = countedBaseQuantity(card);
+        const itemCost = parseInventoryNumber(card.dataset.inventoryItemCost, 0);
+        const unitLabel = card.dataset.inventoryBaseUnitLabel || '';
+        const displayCount = counted.hasCount ? counted.total : approved;
+        const hasDisplayCount = displayCount !== null;
+        const variance = hasDisplayCount ? displayCount - expected : null;
+        const costVariance = variance === null ? null : variance * itemCost;
+        const expectedDisplay = card.querySelector('[data-inventory-expected-display]');
+        const countedLabel = card.querySelector('[data-inventory-counted-label]');
+        const countedDisplay = card.querySelector('[data-inventory-counted-display]');
+        const varianceDisplay = card.querySelector('[data-inventory-variance-display]');
+        const costVarianceDisplay = card.querySelector('[data-inventory-cost-variance-display]');
+        const varianceStat = card.querySelector('[data-inventory-variance-stat]');
+        const costVarianceStat = card.querySelector('[data-inventory-cost-variance-stat]');
+
+        if (expectedDisplay) {
+            expectedDisplay.textContent = formatInventoryQuantityWithUnit(expected, unitLabel, false);
+        }
+        if (countedLabel) {
+            countedLabel.textContent = counted.hasCount ? 'Counted' : approved !== null ? 'Approved' : 'Counted';
+        }
+        if (countedDisplay) {
+            countedDisplay.textContent = hasDisplayCount
+                ? formatInventoryQuantityWithUnit(displayCount, unitLabel, false)
+                : 'Not counted';
+        }
+        if (varianceDisplay) {
+            varianceDisplay.textContent = variance === null
+                ? 'Pending'
+                : formatInventoryQuantityWithUnit(variance, unitLabel, true);
+        }
+        if (costVarianceDisplay) {
+            costVarianceDisplay.textContent = costVariance === null
+                ? 'Pending'
+                : formatInventoryCurrency(costVariance);
+        }
+        updateVarianceState(varianceStat, variance);
+        updateVarianceState(costVarianceStat, costVariance);
+    }
+
+    function cardHasCount(card) {
+        return Array.from(card.querySelectorAll('[data-inventory-count-entry="1"]')).some(function (input) {
+            return (input.value || '').trim() !== '';
+        });
+    }
+
+    function addedInventoryItemIds() {
+        return inventoryCards()
+            .filter(function (card) {
+                return card.dataset.inventoryInitial !== '1';
+            })
+            .map(function (card) {
+                return card.dataset.inventoryItemId;
+            })
+            .filter(Boolean);
+    }
+
+    function refreshSubmitState() {
+        if (submitButton) {
+            submitButton.disabled = inventoryCards().length === 0;
+        }
+        if (emptyConfig) {
+            emptyConfig.classList.toggle('d-none', inventoryCards().length > 0);
+        }
+    }
+
+    function applyInventoryFilters() {
+        const query = normalizeSearchText(filterInput ? filterInput.value : '');
+        let visible = 0;
+        let counted = 0;
+        const cards = inventoryCards();
+        cards.forEach(function (card) {
+            updateInventoryCardStats(card);
+            const isCounted = cardHasCount(card);
+            if (isCounted) {
+                counted += 1;
+            }
+            const matchesText = !query || (card.dataset.inventorySearchText || '').indexOf(query) !== -1;
+            const matchesStatus = statusFilter === 'all'
+                || (statusFilter === 'counted' && isCounted)
+                || (statusFilter === 'uncounted' && !isCounted);
+            const show = matchesText && matchesStatus;
+            card.classList.toggle('inventory-filtered-out', !show);
+            if (show) {
+                visible += 1;
+            }
+        });
+        if (noResults) {
+            noResults.classList.toggle('d-none', visible > 0 || cards.length === 0);
+        }
+        if (progress) {
+            progress.textContent = counted + ' of ' + cards.length + ' item' + (cards.length === 1 ? '' : 's') + ' counted';
+        }
+        if (visibleCount) {
+            visibleCount.textContent = query || statusFilter !== 'all'
+                ? visible + ' item' + (visible === 1 ? '' : 's') + ' shown'
+                : '';
+        }
+        document.querySelectorAll('[data-inventory-status-filter]').forEach(function (button) {
+            const active = (button.dataset.inventoryStatusFilter || 'all') === statusFilter;
+            button.classList.toggle('btn-primary', active);
+            button.classList.toggle('btn-outline-secondary', !active);
+        });
+        refreshSubmitState();
+    }
+
+    function fetchInventoryItems(params) {
+        if (!inventoryItemSearchUrl) {
+            return Promise.reject(new Error('Item search is not available for this count sheet.'));
+        }
+        const url = new URL(inventoryItemSearchUrl, window.location.origin);
+        Object.keys(params || {}).forEach(function (key) {
+            if (params[key] !== undefined && params[key] !== null && params[key] !== '') {
+                url.searchParams.set(key, params[key]);
+            }
+        });
+        return fetch(url.toString(), {
+            headers: {
+                Accept: 'application/json',
+            },
+        }).then(function (response) {
+            return response.json().catch(function () {
+                return {};
+            }).then(function (payload) {
+                if (!response.ok) {
+                    throw new Error(payload.message || 'Item search failed.');
+                }
+                (payload.items || []).forEach(function (item) {
+                    inventoryCatalogById[String(item.id)] = item;
+                });
+                return payload;
+            });
+        });
+    }
+
+    function unitOptionsHtml(item) {
+        return (item.unit_options || []).map(function (option) {
+            return '<option value="' + escapeHtml(option.value) + '" data-unit-factor="' + escapeHtml(option.factor || 1) + '">' + escapeHtml(option.label) + '</option>';
+        }).join('');
+    }
+
+    function inventoryStatsHtml(item, baseUnitLabel) {
+        const expected = parseInventoryNumber(item.expected_count, 0);
+        const approved = item.approved_count === undefined || item.approved_count === null
+            ? null
+            : parseInventoryNumber(item.approved_count, null);
+        return [
+            '<div class="inventory-count-stats small" data-inventory-stats="1">',
+                '<span class="inventory-count-stat">',
+                    'Expected',
+                    '<strong data-inventory-expected-display>' + escapeHtml(formatInventoryQuantityWithUnit(expected, baseUnitLabel, false)) + '</strong>',
+                '</span>',
+                '<span class="inventory-count-stat">',
+                    '<span data-inventory-counted-label>' + (approved === null ? 'Counted' : 'Approved') + '</span>',
+                    '<strong data-inventory-counted-display>' + escapeHtml(approved === null ? 'Not counted' : formatInventoryQuantityWithUnit(approved, baseUnitLabel, false)) + '</strong>',
+                '</span>',
+                '<span class="inventory-count-stat inventory-variance-pending" data-inventory-variance-stat>',
+                    'Qty Var',
+                    '<strong data-inventory-variance-display>Pending</strong>',
+                '</span>',
+                '<span class="inventory-count-stat inventory-variance-pending" data-inventory-cost-variance-stat>',
+                    'Cost Var',
+                    '<strong data-inventory-cost-variance-display>Pending</strong>',
+                '</span>',
+            '</div>',
+        ].join('');
+    }
+
+    function createInventoryItemCard(item) {
+        const baseUnitLabel = item.base_unit_label || item.base_unit || '';
+        const card = document.createElement('div');
+        card.className = 'inventory-count-item p-3';
+        card.dataset.inventoryCard = '1';
+        card.dataset.inventoryItemId = String(item.id);
+        card.dataset.inventoryExpectedCount = String(item.expected_count || 0);
+        card.dataset.inventoryApprovedCount = item.approved_count === undefined || item.approved_count === null ? '' : String(item.approved_count);
+        card.dataset.inventoryItemCost = String(item.item_cost || 0);
+        card.dataset.inventoryBaseUnitLabel = baseUnitLabel;
+        card.dataset.inventorySearchText = item.search_text || normalizeSearchText([
+            item.name,
+            item.upc,
+            item.base_unit,
+            baseUnitLabel,
+        ].filter(Boolean).join(' '));
+        card.innerHTML = [
+            '<div class="d-flex justify-content-between gap-3 align-items-start mb-2">',
+                '<div class="flex-grow-1">',
+                    '<div class="fw-semibold">' + escapeHtml(item.name) + '</div>',
+                    '<div class="small text-muted">' + escapeHtml(baseUnitLabel) + '</div>',
+                    inventoryStatsHtml(item, baseUnitLabel),
+                '</div>',
+                '<button type="button" class="btn btn-outline-secondary btn-sm inventory-add-row" data-inventory-add-row="' + escapeHtml(item.id) + '" aria-label="Add unit row for ' + escapeHtml(item.name) + '" title="Add unit row">+</button>',
+            '</div>',
+            '<div class="d-grid gap-2" data-inventory-item="' + escapeHtml(item.id) + '" data-next-row-index="1">',
+                '<div class="inventory-unit-row" data-inventory-row="0">',
+                    '<div>',
+                        '<label class="form-label small mb-1" for="inventory_unit_' + escapeHtml(item.id) + '_0">Unit</label>',
+                        '<select class="form-select" id="inventory_unit_' + escapeHtml(item.id) + '_0" name="inventory_unit_' + escapeHtml(item.id) + '_0" data-inventory-draft-field="1">',
+                            unitOptionsHtml(item),
+                        '</select>',
+                    '</div>',
+                    '<div>',
+                        '<label class="form-label small mb-1" for="inventory_qty_' + escapeHtml(item.id) + '_0">Qty</label>',
+                        '<input type="text" inputmode="numeric" pattern="[0-9]*" enterkeyhint="next" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-inventory-count-entry="1" data-inventory-quantity-entry="1" data-inventory-draft-field="1" data-numeric-input="1" data-native-numeric="1" class="form-control" id="inventory_qty_' + escapeHtml(item.id) + '_0" name="inventory_qty_' + escapeHtml(item.id) + '_0" value="" placeholder="0">',
+                    '</div>',
+                    '<button type="button" class="btn btn-outline-danger" data-inventory-remove-row="1" aria-label="Remove unit row" title="Remove unit row" disabled>&times;</button>',
+                '</div>',
+            '</div>',
+        ].join('');
+        return card;
+    }
+
+    function findInventoryCard(itemId) {
+        return inventoryCards().find(function (card) {
+            return String(card.dataset.inventoryItemId || '') === String(itemId);
+        });
+    }
+
+    function addInventoryItemById(itemId, options) {
+        options = options || {};
+        const existingCard = findInventoryCard(itemId);
+        if (existingCard) {
+            existingCard.classList.remove('inventory-filtered-out');
+            if (options.focus !== false) {
+                focusInput(existingCard.querySelector('[data-inventory-count-entry="1"]'));
+            }
+            if (addStatus) {
+                addStatus.textContent = 'That item is already on the count page.';
+            }
+            applyInventoryFilters();
+            return existingCard;
+        }
+        const item = inventoryCatalogById[String(itemId)];
+        if (!item) {
+            if (options.fetch === false) {
+                if (addStatus) {
+                    addStatus.textContent = 'That item is no longer available.';
+                }
+                return null;
+            }
+            fetchInventoryItems({ ids: itemId })
+                .then(function () {
+                    addInventoryItemById(itemId, Object.assign({}, options, { fetch: false }));
+                })
+                .catch(function (error) {
+                    if (addStatus) {
+                        addStatus.textContent = error.message || 'Item search failed.';
+                    }
+                });
+            return null;
+        }
+        if (!inventoryList) {
+            return null;
+        }
+        const card = createInventoryItemCard(item);
+        inventoryList.appendChild(card);
+        bindFields();
+        applyInventoryFilters();
+        if (options.save !== false) {
+            saveDraft();
+        }
+        if (options.focus !== false) {
+            focusInput(card.querySelector('[data-inventory-count-entry="1"]'));
+        }
+        if (addStatus) {
+            addStatus.textContent = item.name + ' added to this inventory count.';
+        }
+        return card;
+    }
+
+    function renderInventoryAddResults() {
+        if (!addSearch || !addResults) {
+            return;
+        }
+        const query = normalizeSearchText(addSearch.value);
+        addResults.innerHTML = '';
+        if (addSearchTimer) {
+            window.clearTimeout(addSearchTimer);
+            addSearchTimer = null;
+        }
+        const requestId = ++addSearchRequestId;
+        if (!query) {
+            addResults.classList.add('d-none');
+            if (addStatus) {
+                addStatus.textContent = 'Add an existing item if it is physically present but missing from this location.';
+            }
+            return;
+        }
+        if (query.length < 2) {
+            addResults.classList.add('d-none');
+            if (addStatus) {
+                addStatus.textContent = 'Type at least 2 characters to search item master.';
+            }
+            return;
+        }
+        if (addStatus) {
+            addStatus.textContent = 'Searching item master...';
+        }
+        addSearchTimer = window.setTimeout(function () {
+            fetchInventoryItems({ q: query })
+                .then(function (payload) {
+                    if (requestId !== addSearchRequestId) {
+                        return;
+                    }
+                    const existingIds = new Set(inventoryCards().map(function (card) {
+                        return String(card.dataset.inventoryItemId || '');
+                    }));
+                    const matches = (payload.items || []).filter(function (item) {
+                        return !existingIds.has(String(item.id));
+                    });
+                    addResults.innerHTML = '';
+                    if (!matches.length) {
+                        const existingMatch = inventoryCards().some(function (card) {
+                            return (card.dataset.inventorySearchText || '').indexOf(query) !== -1;
+                        });
+                        addResults.classList.add('d-none');
+                        if (addStatus) {
+                            addStatus.textContent = existingMatch
+                                ? 'Matching item is already on the count page.'
+                                : (payload.message || 'No item master matches found.');
+                        }
+                        return;
+                    }
+                    matches.forEach(function (item) {
+                        const button = document.createElement('button');
+                        const meta = [item.upc, item.base_unit_label || item.base_unit].filter(Boolean).join(' | ');
+                        button.type = 'button';
+                        button.className = 'list-group-item list-group-item-action';
+                        button.dataset.inventoryAddItemId = String(item.id);
+                        button.innerHTML = '<div class="fw-semibold">' + escapeHtml(item.name) + '</div>'
+                            + (meta ? '<div class="small text-muted">' + escapeHtml(meta) + '</div>' : '');
+                        addResults.appendChild(button);
+                    });
+                    addResults.classList.remove('d-none');
+                    if (addStatus) {
+                        addStatus.textContent = matches.length + ' item' + (matches.length === 1 ? '' : 's') + ' found.';
+                    }
+                })
+                .catch(function (error) {
+                    if (requestId !== addSearchRequestId) {
+                        return;
+                    }
+                    addResults.classList.add('d-none');
+                    if (addStatus) {
+                        addStatus.textContent = error.message || 'Item search failed.';
+                    }
+                });
+        }, 150);
+    }
+
     function updateRemoveButtons(container) {
         const rows = Array.from(container.querySelectorAll('[data-inventory-row]'));
         rows.forEach(function (row) {
@@ -287,6 +911,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 row.remove();
                 updateRemoveButtons(container);
                 saveDraft();
+                applyInventoryFilters();
             });
         }
     }
@@ -326,6 +951,7 @@ document.addEventListener('DOMContentLoaded', function () {
         container.dataset.nextRowIndex = String(Math.max(Number(container.dataset.nextRowIndex || '1'), rowIndex + 1));
         bindRow(row);
         updateRemoveButtons(container);
+        applyInventoryFilters();
         return row;
     }
 
@@ -334,7 +960,11 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!match) {
             return;
         }
-        const container = document.querySelector('[data-inventory-item="' + match[1] + '"]');
+        let container = document.querySelector('[data-inventory-item="' + match[1] + '"]');
+        if (!container) {
+            addInventoryItemById(match[1], { focus: false, save: false, fetch: false });
+            container = document.querySelector('[data-inventory-item="' + match[1] + '"]');
+        }
         if (!container || container.querySelector('[data-inventory-row="' + match[2] + '"]')) {
             return;
         }
@@ -357,14 +987,16 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
         const values = collectDraftValues();
-        if (Object.keys(values).length === 0) {
+        const addedIds = addedInventoryItemIds();
+        if (Object.keys(values).length === 0 && addedIds.length === 0) {
             window.localStorage.removeItem(draftKey);
             setDraftStatus('');
             return;
         }
         const payload = {
-            version: 1,
+            version: 2,
             values: values,
+            addedInventoryItemIds: addedIds,
             updatedAt: new Date().toISOString(),
         };
         try {
@@ -388,22 +1020,78 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    function inventoryItemIdsFromDraft(draft) {
+        const itemIds = new Set((draft.addedInventoryItemIds || []).map(String));
+        Object.keys(draft.values || {}).forEach(function (fieldName) {
+            const match = /^inventory_(?:qty|unit)_(\d+)_/.exec(fieldName || '');
+            if (match) {
+                itemIds.add(match[1]);
+            }
+        });
+        return Array.from(itemIds);
+    }
+
+    function ensureDraftInventoryItems(draft) {
+        const missingIds = inventoryItemIdsFromDraft(draft).filter(function (itemId) {
+            return !findInventoryCard(itemId) && !inventoryCatalogById[String(itemId)];
+        });
+        if (!missingIds.length) {
+            return Promise.resolve();
+        }
+        setDraftStatus('Restoring saved draft...');
+        return fetchInventoryItems({ ids: missingIds.join(',') }).catch(function () {
+            setDraftStatus('Some saved draft items are no longer available.');
+        });
+    }
+
     function restoreDraft(draft) {
         if (!draft || !draft.values) {
             return;
         }
-        Object.keys(draft.values).forEach(ensureRowForField);
-        fields().forEach(function (field) {
-            field.value = draft.values[field.name] || '';
+        ensureDraftInventoryItems(draft).then(function () {
+            (draft.addedInventoryItemIds || []).forEach(function (itemId) {
+                addInventoryItemById(itemId, { focus: false, save: false, fetch: false });
+            });
+            Object.keys(draft.values || {}).forEach(ensureRowForField);
+            fields().forEach(function (field) {
+                field.value = draft.values[field.name] || '';
+                if (field.matches('[data-inventory-quantity-entry="1"]')) {
+                    sanitizeQuantityInput(field);
+                }
+            });
+            if (draftPrompt) {
+                draftPrompt.classList.add('d-none');
+            }
+            setDraftStatus('Draft restored from ' + formatSavedTime(draft.updatedAt) + '.');
+            applyInventoryFilters();
+            renderInventoryAddResults();
+            const firstEmpty = visibleCountInputs().find(function (input) {
+                return !(input.value || '').trim();
+            });
+            focusInput(firstEmpty || visibleCountInputs()[0] || countInputs()[0]);
         });
-        if (draftPrompt) {
-            draftPrompt.classList.add('d-none');
-        }
-        setDraftStatus('Draft restored from ' + formatSavedTime(draft.updatedAt) + '.');
-        const firstEmpty = countInputs().find(function (input) {
-            return !(input.value || '').trim();
+    }
+
+    function bindAddRowButtons() {
+        document.querySelectorAll('[data-inventory-add-row]').forEach(function (button) {
+            if (button.dataset.inventoryAddBound === '1') {
+                return;
+            }
+            button.dataset.inventoryAddBound = '1';
+            button.addEventListener('click', function () {
+                const itemId = button.getAttribute('data-inventory-add-row');
+                const container = document.querySelector('[data-inventory-item="' + itemId + '"]');
+                if (!container) {
+                    return;
+                }
+                const row = createRow(container, Number(container.dataset.nextRowIndex || '1'));
+                bindFields();
+                if (row) {
+                    focusInput(row.querySelector('[data-inventory-count-entry="1"]'));
+                }
+                saveDraft();
+            });
         });
-        focusInput(firstEmpty || countInputs()[0]);
     }
 
     function bindFields() {
@@ -412,46 +1100,93 @@ document.addEventListener('DOMContentLoaded', function () {
                 return;
             }
             field.dataset.inventoryDraftBound = '1';
-            field.addEventListener('change', saveDraft);
-            field.addEventListener('focusout', saveDraft);
+            field.addEventListener('change', function () {
+                saveDraft();
+                applyInventoryFilters();
+            });
+            field.addEventListener('focusout', function () {
+                saveDraft();
+                applyInventoryFilters();
+            });
         });
         countInputs().forEach(function (input) {
             if (input.dataset.inventoryKeyBound === '1') {
                 return;
             }
             input.dataset.inventoryKeyBound = '1';
+            sanitizeQuantityInput(input);
+            input.addEventListener('input', function () {
+                sanitizeQuantityInput(input);
+                applyInventoryFilters();
+            });
             input.addEventListener('keydown', function (event) {
                 if (event.key !== 'Enter') {
                     return;
                 }
                 event.preventDefault();
-                const inputs = countInputs();
+                const inputs = visibleCountInputs();
                 const next = inputs[inputs.indexOf(input) + 1];
                 if (next) {
                     focusInput(next);
+                } else if (submitButton) {
+                    submitButton.focus();
                 }
             });
         });
         document.querySelectorAll('[data-inventory-row]').forEach(bindRow);
+        bindAddRowButtons();
     }
 
     bindFields();
+    applyInventoryFilters();
 
-    document.querySelectorAll('[data-inventory-add-row]').forEach(function (button) {
+    if (filterInput) {
+        filterInput.addEventListener('input', applyInventoryFilters);
+    }
+    if (filterClear) {
+        filterClear.addEventListener('click', function () {
+            if (filterInput) {
+                filterInput.value = '';
+                filterInput.focus();
+            }
+            applyInventoryFilters();
+        });
+    }
+    document.querySelectorAll('[data-inventory-status-filter]').forEach(function (button) {
         button.addEventListener('click', function () {
-            const itemId = button.getAttribute('data-inventory-add-row');
-            const container = document.querySelector('[data-inventory-item="' + itemId + '"]');
-            if (!container) {
-                return;
-            }
-            const row = createRow(container, Number(container.dataset.nextRowIndex || '1'));
-            bindFields();
-            if (row) {
-                focusInput(row.querySelector('[data-inventory-count-entry="1"]'));
-            }
-            saveDraft();
+            statusFilter = button.dataset.inventoryStatusFilter || 'all';
+            applyInventoryFilters();
         });
     });
+    if (addSearch) {
+        addSearch.addEventListener('input', renderInventoryAddResults);
+        addSearch.addEventListener('keydown', function (event) {
+            if (event.key !== 'Enter' || !addResults) {
+                return;
+            }
+            const firstResult = addResults.querySelector('[data-inventory-add-item-id]');
+            if (!firstResult) {
+                return;
+            }
+            event.preventDefault();
+            addInventoryItemById(firstResult.dataset.inventoryAddItemId);
+            addSearch.value = '';
+            renderInventoryAddResults();
+        });
+    }
+    if (addResults) {
+        addResults.addEventListener('click', function (event) {
+            const button = event.target.closest('[data-inventory-add-item-id]');
+            if (!button) {
+                return;
+            }
+            addInventoryItemById(button.dataset.inventoryAddItemId);
+            if (addSearch) {
+                addSearch.value = '';
+            }
+            renderInventoryAddResults();
+        });
+    }
 
     if (resumeButton) {
         resumeButton.addEventListener('click', function () {
@@ -476,7 +1211,14 @@ document.addEventListener('DOMContentLoaded', function () {
     window.addEventListener('pagehide', saveDraft);
 
     pendingDraft = readDraft();
-    if (pendingDraft && pendingDraft.values && draftPrompt && Object.keys(pendingDraft.values).length) {
+    if (
+        pendingDraft
+        && draftPrompt
+        && (
+            (pendingDraft.values && Object.keys(pendingDraft.values).length)
+            || (pendingDraft.addedInventoryItemIds || []).length
+        )
+    ) {
         draftPrompt.classList.remove('d-none');
     }
 });

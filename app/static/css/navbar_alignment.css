@@ -1,0 +1,106 @@
+/* Compact, left-to-right alignment for the application header. */
+
+.app-topbar {
+    --app-topbar-control-size: 2.75rem;
+    min-height: 3.75rem;
+}
+
+.app-topbar .app-topbar-row {
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.app-topbar .app-topbar-control {
+    box-sizing: border-box;
+    display: inline-flex;
+    flex: 0 0 var(--app-topbar-control-size);
+    align-items: center;
+    justify-content: center;
+    width: var(--app-topbar-control-size);
+    min-width: var(--app-topbar-control-size);
+    height: var(--app-topbar-control-size);
+    min-height: var(--app-topbar-control-size);
+    margin: 0;
+    padding: 0;
+    line-height: 1;
+    border-radius: 0.375rem;
+}
+
+.app-topbar .app-topbar-control .navbar-toggler-icon {
+    display: block;
+    width: 1.35rem;
+    height: 1.35rem;
+    background-size: 100% 100%;
+}
+
+.app-topbar-home-icon {
+    display: block;
+    width: 1.35rem;
+    height: 1.35rem;
+}
+
+.app-topbar-favorite-icon {
+    display: block;
+    font-size: 1.25rem;
+    line-height: 1;
+}
+
+.app-topbar .app-topbar-favorites {
+    flex: 1 1 auto;
+    align-items: center;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+}
+
+.app-topbar .app-topbar-favorites > .navbar-nav {
+    width: max-content;
+    min-width: max-content;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.25rem;
+    margin-right: 0 !important;
+}
+
+.app-topbar .app-topbar-favorites .nav-item {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    height: var(--app-topbar-control-size);
+    margin-right: 0;
+}
+
+.app-topbar .app-topbar-favorites .nav-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--app-topbar-control-size);
+    padding: 0 0.75rem;
+    line-height: 1.2;
+    white-space: nowrap;
+    border-radius: 0.375rem;
+}
+
+.app-topbar .app-topbar-control:focus-visible,
+.app-topbar .app-topbar-favorites .nav-link:focus-visible {
+    outline: 2px solid var(--bs-primary);
+    outline-offset: -2px;
+}
+
+#navbarNav .offcanvas-body .nav-favorite-toggle {
+    width: 2.25rem;
+    min-width: 2.25rem;
+    min-height: 2.25rem;
+}
+
+@media (max-width: 991.98px) {
+    #navbarNav .offcanvas-body .nav-favorite-toggle {
+        width: 2.75rem;
+        min-width: 2.75rem;
+        min-height: 2.75rem;
+    }
+}

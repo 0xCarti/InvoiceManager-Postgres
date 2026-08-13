@@ -88,6 +88,7 @@ item = Blueprint("item", __name__)
 # CSV and plain text files are allowed and uploads are capped at 1MB
 ALLOWED_IMPORT_EXTENSIONS = {".csv", ".txt"}
 MAX_IMPORT_SIZE = 1 * 1024 * 1024  # 1 MB
+MAX_SELECTED_ITEM_ROWS = 500
 
 
 def _safe_next_url(raw_value: str | None) -> str | None:
@@ -561,6 +562,63 @@ def _parse_selected_ids(raw_value: str) -> list[int]:
 
 def _render_item_bulk_form(form: BulkItemUpdateForm):
     return render_template("items/bulk_update_form.html", form=form)
+
+
+@item.route("/items/selected-rows")
+@login_required
+def selected_item_rows():
+    """Return table rows for selected inventory items across paginated pages."""
+
+    selected_ids: list[int] = []
+    seen_ids: set[int] = set()
+    raw_values = request.args.getlist("ids") or request.args.getlist("id")
+    for raw_value in raw_values:
+        for chunk in str(raw_value or "").split(","):
+            try:
+                item_id = int(chunk.strip())
+            except (TypeError, ValueError):
+                continue
+            if item_id <= 0 or item_id in seen_ids:
+                continue
+            seen_ids.add(item_id)
+            selected_ids.append(item_id)
+            if len(selected_ids) >= MAX_SELECTED_ITEM_ROWS:
+                break
+        if len(selected_ids) >= MAX_SELECTED_ITEM_ROWS:
+            break
+
+    if not selected_ids:
+        return jsonify({"rows": [], "missing_ids": []})
+
+    items = (
+        Item.query.options(
+            selectinload(Item.units),
+            selectinload(Item.purchase_gl_code),
+            selectinload(Item.gl_code_rel),
+        )
+        .filter(Item.id.in_(selected_ids))
+        .all()
+    )
+    item_last_received_map = _load_item_last_received_map([item.id for item in items])
+    for item_obj in items:
+        item_obj.last_purchase_received_date = item_last_received_map.get(item_obj.id)
+
+    items_by_id = {item_obj.id: item_obj for item_obj in items}
+    rows = []
+    missing_ids = []
+    for item_id in selected_ids:
+        item_obj = items_by_id.get(item_id)
+        if item_obj is None:
+            missing_ids.append(item_id)
+            continue
+        rows.append(
+            {
+                "id": item_obj.id,
+                "html": render_template("items/_item_row.html", item=item_obj),
+            }
+        )
+
+    return jsonify({"rows": rows, "missing_ids": missing_ids})
 
 
 @item.route("/items/bulk-update", methods=["GET", "POST"])

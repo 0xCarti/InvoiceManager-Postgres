@@ -49,6 +49,9 @@
         margin: 0 !important;
     }
 }
+.item-selection-filter-hidden {
+    display: none !important;
+}
 </style>
 <div class="container mt-5 mobile-list-page app-page-shell">
     <div class="app-page-header">
@@ -265,8 +268,25 @@
         {% endif %}
     </div>
     {% endif %}
+    {% if can_select_items %}
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3" data-item-selection-toolbar="1">
+        <div class="btn-group btn-group-sm" role="group" aria-label="Item selection filter">
+            <input type="radio" class="btn-check" name="item_selection_filter" id="item-selection-filter-all" value="all" data-item-selection-filter="1" checked>
+            <label class="btn btn-outline-secondary" for="item-selection-filter-all">All</label>
+            <input type="radio" class="btn-check" name="item_selection_filter" id="item-selection-filter-selected" value="selected" data-item-selection-filter="1">
+            <label class="btn btn-outline-secondary" for="item-selection-filter-selected">Selected</label>
+            <input type="radio" class="btn-check" name="item_selection_filter" id="item-selection-filter-unselected" value="unselected" data-item-selection-filter="1">
+            <label class="btn btn-outline-secondary" for="item-selection-filter-unselected">Not selected</label>
+        </div>
+        <span class="small text-muted" data-item-selection-count aria-live="polite">0 selected</span>
+        <span class="small text-muted" data-item-selection-status aria-live="polite"></span>
+    </div>
+    {% endif %}
     <form id="bulk-delete-form" action="{{ url_for('item.bulk_delete_items') }}" method="post">
         {{ bulk_delete_form.hidden_tag() }}
+        {% if can_select_items %}
+        <div data-item-selection-hidden-inputs="1"></div>
+        {% endif %}
         <div class="table-responsive mobile-table-wrap">
         <table class="table sortable table-mobile-card" id="itemsTable">
             <thead>
@@ -329,41 +349,316 @@
         </form>
     </div>
 </div>
-<script src="{{ url_for('static', filename='js/html5-qrcode.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/item_form.js') }}"></script>
 <script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function() {
     const selectAll = document.getElementById('select-all');
-    function updateBulkButtonState() {
-        const bulkButton = document.getElementById('bulkEditItemsBtn');
-        const bulkDeleteButton = document.getElementById('bulkDeleteItemsBtn');
-        const selectedCount = document.querySelectorAll('input[name="item_ids"]:checked').length;
-        if (bulkButton) {
-            bulkButton.disabled = selectedCount === 0;
-        }
-        if (bulkDeleteButton) {
-            bulkDeleteButton.disabled = selectedCount === 0;
+    const selectionStorageKey = 'im.viewItems.selectedItemIds.' + {{ current_user.get_id() | tojson }};
+    const selectedRowsUrl = {{ (url_for('item.selected_item_rows') if can_select_items else '') | tojson }};
+    const itemsTableBody = document.querySelector('#itemsTable tbody');
+    const selectionCount = document.querySelector('[data-item-selection-count]');
+    const selectionStatus = document.querySelector('[data-item-selection-status]');
+    const selectionHiddenInputs = document.querySelector('[data-item-selection-hidden-inputs]');
+    const selectionFilters = Array.from(document.querySelectorAll('[data-item-selection-filter]'));
+    const selectedItemIds = new Set(loadStoredSelection());
+    let selectedRowsRequestId = 0;
+
+    function normalizeItemId(value) {
+        const itemId = String(value || '').trim();
+        return /^\d+$/.test(itemId) && itemId !== '0' ? itemId : '';
+    }
+
+    function sortedSelectedItemIds() {
+        return Array.from(selectedItemIds).sort(function(a, b) {
+            return Number(a) - Number(b);
+        });
+    }
+
+    function loadStoredSelection() {
+        try {
+            const rawValue = window.sessionStorage.getItem(selectionStorageKey);
+            const parsedValue = rawValue ? JSON.parse(rawValue) : [];
+            if (!Array.isArray(parsedValue)) {
+                return [];
+            }
+            return parsedValue.map(normalizeItemId).filter(Boolean);
+        } catch (error) {
+            return [];
         }
     }
 
+    function persistSelection() {
+        try {
+            if (selectedItemIds.size === 0) {
+                window.sessionStorage.removeItem(selectionStorageKey);
+                return;
+            }
+            window.sessionStorage.setItem(
+                selectionStorageKey,
+                JSON.stringify(sortedSelectedItemIds())
+            );
+        } catch (error) {
+            // Browser storage can be blocked; the current page still works.
+        }
+    }
+
+    function itemCheckboxes() {
+        return Array.from(document.querySelectorAll('input[type="checkbox"][name="item_ids"][data-item-select="1"]'));
+    }
+
+    function itemRows() {
+        return Array.from(document.querySelectorAll('[data-item-row="1"]'));
+    }
+
+    function setSelectionStatus(message) {
+        if (selectionStatus) {
+            selectionStatus.textContent = message || '';
+        }
+    }
+
+    function currentSelectionFilter() {
+        const checkedFilter = selectionFilters.find(function(input) {
+            return input.checked;
+        });
+        return checkedFilter ? checkedFilter.value : 'all';
+    }
+
+    function rowMatchesSelectionFilter(row) {
+        const itemId = normalizeItemId(row.dataset.itemId);
+        const isSelected = itemId && selectedItemIds.has(itemId);
+        const filterValue = currentSelectionFilter();
+        if (filterValue === 'selected') {
+            return isSelected;
+        }
+        if (filterValue === 'unselected') {
+            return !isSelected;
+        }
+        return true;
+    }
+
+    function visibleItemCheckboxes() {
+        return itemCheckboxes().filter(function(checkbox) {
+            const row = checkbox.closest('[data-item-row="1"]');
+            return !row || !row.classList.contains('item-selection-filter-hidden');
+        });
+    }
+
+    function syncCheckboxesFromSelection() {
+        itemCheckboxes().forEach(function(checkbox) {
+            const itemId = normalizeItemId(checkbox.value);
+            checkbox.checked = itemId && selectedItemIds.has(itemId);
+        });
+    }
+
+    function syncHiddenSelectionInputs() {
+        if (!selectionHiddenInputs) {
+            return;
+        }
+        const pageItemIds = new Set(
+            itemCheckboxes().map(function(checkbox) {
+                return normalizeItemId(checkbox.value);
+            }).filter(Boolean)
+        );
+        selectionHiddenInputs.innerHTML = '';
+        sortedSelectedItemIds().forEach(function(itemId) {
+            if (pageItemIds.has(itemId)) {
+                return;
+            }
+            const hiddenInput = document.createElement('input');
+            hiddenInput.type = 'hidden';
+            hiddenInput.name = 'item_ids';
+            hiddenInput.value = itemId;
+            hiddenInput.dataset.itemSelectionHiddenInput = '1';
+            selectionHiddenInputs.appendChild(hiddenInput);
+        });
+    }
+
+    function applySelectionFilter() {
+        itemRows().forEach(function(row) {
+            row.classList.toggle('item-selection-filter-hidden', !rowMatchesSelectionFilter(row));
+        });
+    }
+
+    function removeFetchedSelectionRows() {
+        document.querySelectorAll('[data-selection-fetched-row="1"]').forEach(function(row) {
+            row.remove();
+        });
+    }
+
+    function appendFetchedSelectionRows(rows) {
+        if (!itemsTableBody) {
+            return;
+        }
+        const template = document.createElement('template');
+        (rows || []).forEach(function(row) {
+            if (!row || !row.id || !row.html) {
+                return;
+            }
+            if (document.getElementById('item-row-' + row.id)) {
+                return;
+            }
+            template.innerHTML = row.html.trim();
+            const renderedRow = template.content.firstElementChild;
+            if (!renderedRow) {
+                return;
+            }
+            renderedRow.dataset.selectionFetchedRow = '1';
+            itemsTableBody.appendChild(renderedRow);
+            template.innerHTML = '';
+        });
+    }
+
+    function missingSelectedItemIds() {
+        return sortedSelectedItemIds().filter(function(itemId) {
+            return !document.getElementById('item-row-' + itemId);
+        });
+    }
+
+    function loadMissingSelectedRows() {
+        if (currentSelectionFilter() !== 'selected' || !selectedRowsUrl) {
+            return;
+        }
+        const missingIds = missingSelectedItemIds();
+        if (!missingIds.length) {
+            setSelectionStatus('');
+            return;
+        }
+
+        const requestId = ++selectedRowsRequestId;
+        const url = new URL(selectedRowsUrl, window.location.href);
+        missingIds.forEach(function(itemId) {
+            url.searchParams.append('ids', itemId);
+        });
+        setSelectionStatus('Loading selected items...');
+
+        window.fetch(url.toString(), {
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+            .then(function(response) {
+                return response.json().catch(function() {
+                    return {};
+                }).then(function(payload) {
+                    if (!response.ok) {
+                        throw new Error(payload.message || 'Selected items could not be loaded.');
+                    }
+                    return payload;
+                });
+            })
+            .then(function(payload) {
+                if (requestId !== selectedRowsRequestId) {
+                    return;
+                }
+                (payload.missing_ids || []).forEach(function(itemId) {
+                    selectedItemIds.delete(String(itemId));
+                });
+                if ((payload.missing_ids || []).length) {
+                    persistSelection();
+                }
+                appendFetchedSelectionRows(payload.rows || []);
+                syncCheckboxesFromSelection();
+                applySelectionFilter();
+                updateBulkButtonState();
+                setSelectionStatus('');
+            })
+            .catch(function() {
+                if (requestId === selectedRowsRequestId) {
+                    setSelectionStatus('Some selected items could not be loaded.');
+                }
+            });
+    }
+
+    function updateSelectAllState() {
+        if (!selectAll) {
+            return;
+        }
+        const visibleCheckboxes = visibleItemCheckboxes();
+        const visibleSelectedCount = visibleCheckboxes.filter(function(checkbox) {
+            const itemId = normalizeItemId(checkbox.value);
+            return itemId && selectedItemIds.has(itemId);
+        }).length;
+        selectAll.disabled = visibleCheckboxes.length === 0;
+        selectAll.checked = visibleCheckboxes.length > 0 && visibleSelectedCount === visibleCheckboxes.length;
+        selectAll.indeterminate = visibleSelectedCount > 0 && visibleSelectedCount < visibleCheckboxes.length;
+    }
+
+    function updateBulkButtonState() {
+        const bulkButton = document.getElementById('bulkEditItemsBtn');
+        const bulkDeleteButton = document.getElementById('bulkDeleteItemsBtn');
+        const selectedCountValue = selectedItemIds.size;
+        if (bulkButton) {
+            bulkButton.disabled = selectedCountValue === 0;
+        }
+        if (bulkDeleteButton) {
+            bulkDeleteButton.disabled = selectedCountValue === 0;
+        }
+        if (selectionCount) {
+            selectionCount.textContent = selectedCountValue + ' selected';
+        }
+        syncHiddenSelectionInputs();
+        updateSelectAllState();
+    }
+
+    function setItemSelected(itemId, isSelected) {
+        const normalizedItemId = normalizeItemId(itemId);
+        if (!normalizedItemId) {
+            return;
+        }
+        if (isSelected) {
+            selectedItemIds.add(normalizedItemId);
+        } else {
+            selectedItemIds.delete(normalizedItemId);
+        }
+        persistSelection();
+    }
+
+    function refreshSelectionState() {
+        syncCheckboxesFromSelection();
+        if (currentSelectionFilter() !== 'selected' || selectedItemIds.size === 0) {
+            selectedRowsRequestId += 1;
+            removeFetchedSelectionRows();
+            setSelectionStatus('');
+        }
+        applySelectionFilter();
+        updateBulkButtonState();
+        loadMissingSelectedRows();
+    }
+
     window.updateItemBulkButtonState = updateBulkButtonState;
+    window.ItemSelection = {
+        getSelectedIds: sortedSelectedItemIds,
+        refresh: refreshSelectionState
+    };
 
     if (selectAll) {
         selectAll.addEventListener('click', function() {
-            document.querySelectorAll('input[type="checkbox"][name="item_ids"]').forEach(function(checkbox) {
+            visibleItemCheckboxes().forEach(function(checkbox) {
                 checkbox.checked = selectAll.checked;
+                setItemSelected(checkbox.value, selectAll.checked);
             });
-            updateBulkButtonState();
+            refreshSelectionState();
         });
     }
 
     document.addEventListener('change', function(event) {
-        if (event.target && event.target.matches('input[name="item_ids"]')) {
-            updateBulkButtonState();
+        if (event.target && event.target.matches('input[name="item_ids"][data-item-select="1"]')) {
+            setItemSelected(event.target.value, event.target.checked);
+            refreshSelectionState();
         }
     });
 
-    updateBulkButtonState();
+    selectionFilters.forEach(function(input) {
+        input.addEventListener('change', refreshSelectionState);
+    });
+
+    const bulkDeleteForm = document.getElementById('bulk-delete-form');
+    if (bulkDeleteForm) {
+        bulkDeleteForm.addEventListener('submit', syncHiddenSelectionInputs);
+    }
+
+    refreshSelectionState();
 });
 </script>
     {% if can_create_items or can_edit_items or can_copy_items %}
@@ -483,6 +778,9 @@ function bindItemForm(actionUrl) {
                     } else {
                         document.querySelector('#itemsTable tbody').insertAdjacentHTML('beforeend', data.row_html);
                     }
+                    if (window.ItemSelection && typeof window.ItemSelection.refresh === 'function') {
+                        window.ItemSelection.refresh();
+                    }
                 }
                 bootstrap.Modal.getInstance(itemModalEl).hide();
             } else if (data.form_html) {
@@ -556,6 +854,9 @@ const itemBulkModalUrl = itemBulkModalEl ? itemBulkModalEl.getAttribute('data-ur
 const bulkEditItemsBtn = document.getElementById('bulkEditItemsBtn');
 
 function getSelectedItemIds() {
+    if (window.ItemSelection && typeof window.ItemSelection.getSelectedIds === 'function') {
+        return window.ItemSelection.getSelectedIds();
+    }
     return Array.from(document.querySelectorAll('input[name="item_ids"]:checked')).map((cb) => cb.value);
 }
 
@@ -591,7 +892,9 @@ function bindBulkItemForm() {
                             }
                         });
                     }
-                    if (typeof window.updateItemBulkButtonState === 'function') {
+                    if (window.ItemSelection && typeof window.ItemSelection.refresh === 'function') {
+                        window.ItemSelection.refresh();
+                    } else if (typeof window.updateItemBulkButtonState === 'function') {
                         window.updateItemBulkButtonState();
                     }
                     bootstrap.Modal.getOrCreateInstance(itemBulkModalEl).hide();

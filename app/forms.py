@@ -3855,14 +3855,6 @@ class UpdateOpeningCountsForm(FlaskForm):
     submit = SubmitField("Update Opening Counts")
 
 
-class ScanCountForm(FlaskForm):
-    upc = StringField("Barcode", validators=[DataRequired(), Length(max=32)])
-    quantity = DecimalField(
-        "Quantity", validators=[InputRequired()], default=1
-    )
-    submit = SubmitField("Add Count")
-
-
 class ConfirmForm(FlaskForm):
     """Generic confirmation form used for warnings."""
 

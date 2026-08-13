@@ -1,0 +1,78 @@
+/* Shared alignment contracts for application action rows. */
+
+@media (min-width: 768px) {
+    :is(
+        .app-page-header-actions,
+        .app-form-actions,
+        .app-row-actions,
+        .mobile-actions,
+        .mobile-inline-actions,
+        .mobile-toolbar.app-toolbar-panel,
+        .asset-page-actions,
+        .intake-batch-actions,
+        .maintenance-issue-actions,
+        .location-detail-actions,
+        .count-submission-detail-actions,
+        .communications-hero-actions,
+        .communications-bulletin-row-actions,
+        .messages-page-actions,
+        .messages-actions,
+        .sales-import-header-actions,
+        .sales-import-card-actions,
+        .schedule-page-actions,
+        .schedule-filter-actions,
+        .schedule-template-toolbar,
+        .dashboard-header-actions,
+        .dashboard-card-actions,
+        .duplicate-group-actions,
+        .catalog-page-actions,
+        .profile-actions
+    ) {
+        align-items: center;
+    }
+
+    :is(
+        .app-page-header-actions,
+        .app-form-actions,
+        .app-row-actions,
+        .mobile-actions,
+        .mobile-inline-actions,
+        .mobile-toolbar.app-toolbar-panel,
+        .asset-page-actions,
+        .intake-batch-actions,
+        .maintenance-issue-actions,
+        .location-detail-actions,
+        .count-submission-detail-actions,
+        .communications-hero-actions,
+        .communications-bulletin-row-actions,
+        .messages-page-actions,
+        .messages-actions,
+        .sales-import-header-actions,
+        .sales-import-card-actions,
+        .schedule-page-actions,
+        .schedule-filter-actions,
+        .schedule-template-toolbar,
+        .dashboard-header-actions,
+        .dashboard-card-actions,
+        .duplicate-group-actions,
+        .catalog-page-actions,
+        .profile-actions
+    ) > form {
+        display: inline-flex;
+        align-items: center;
+        align-self: center;
+        margin: 0;
+    }
+
+    .table-responsive td .app-row-actions,
+    .table-responsive th .app-row-actions {
+        flex-wrap: nowrap;
+    }
+
+    .col-user-actions > form.d-inline {
+        display: inline-flex !important;
+        align-items: center;
+        margin: 0.15rem 0.35rem 0.15rem 0;
+        vertical-align: middle;
+    }
+}

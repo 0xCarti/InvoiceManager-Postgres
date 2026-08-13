@@ -278,7 +278,7 @@
                     </div>
                 </div>
             {% endif %}
-            <div class="d-flex align-items-center mb-3">
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
                 <button type="submit" class="btn btn-primary" name="action" value="next_location" {% if unresolved_total > 0 %}disabled{% endif %}>
                     {% if remaining_locations > 0 %}
                         Next Location
@@ -287,13 +287,13 @@
                     {% endif %}
                 </button>
                 <button type="submit"
-                        class="btn btn-outline-secondary ms-2"
+                        class="btn btn-outline-secondary"
                         name="action"
                         value="back_to_mapping">
                     Back to Mapping
                 </button>
                 {% if unresolved_total > 0 %}
-                    <span class="ms-3 text-danger">Resolve all issues above to continue.</span>
+                    <span class="text-danger">Resolve all issues above to continue.</span>
                 {% endif %}
             </div>
             <a href="{{ url_for('event.upload_terminal_sales', event_id=event.id) }}" class="btn btn-link">Start Over</a>
@@ -346,11 +346,11 @@
                     {% endif %}
                 </div>
             </div>
-            <div class="d-flex align-items-center mb-3">
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
                 <button type="submit" class="btn btn-primary" name="action" value="finish">
                     Finish Import
                 </button>
-                <a href="{{ url_for('event.upload_terminal_sales', event_id=event.id) }}" class="btn btn-link ms-2">
+                <a href="{{ url_for('event.upload_terminal_sales', event_id=event.id) }}" class="btn btn-link">
                     Start Over
                 </a>
             </div>
@@ -727,13 +727,13 @@
                         {% endfor %}
                     </div>
                 </div>
-                <div class="d-flex flex-wrap align-items-center">
+                <div class="d-flex flex-wrap align-items-center gap-2">
                     {% if wizard_stage == 'locations' %}
                         <button type="submit" class="btn btn-primary" name="navigate" value="next">
                             Next: Match Products
                         </button>
                         <a href="{{ url_for('event.upload_terminal_sales', event_id=event.id) }}"
-                           class="btn btn-outline-secondary ms-2">
+                           class="btn btn-outline-secondary">
                             Start Over
                         </a>
                     {% else %}
@@ -744,13 +744,13 @@
                             Back to Locations
                         </button>
                         <button type="submit"
-                                class="btn btn-primary ms-2"
+                                class="btn btn-primary"
                                 name="navigate"
                                 value="finish">
                             Next: Assign Menus
                         </button>
                         <a href="{{ url_for('event.upload_terminal_sales', event_id=event.id) }}"
-                           class="btn btn-link ms-2">
+                           class="btn btn-link">
                             Start Over
                         </a>
                     {% endif %}

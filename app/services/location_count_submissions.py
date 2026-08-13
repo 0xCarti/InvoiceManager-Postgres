@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import date as date_cls, datetime as datetime_cls, timedelta
 
 from flask import current_app
+from sqlalchemy import or_
 from sqlalchemy.orm import selectinload
 
 from app import db
@@ -15,6 +16,7 @@ from app.models import (
     EventLocationOperatingDay,
     EventStandSheetItem,
     Item,
+    ItemBarcode,
     Location,
     LocationCountSubmission,
     LocationCountSubmissionRow,
@@ -27,13 +29,17 @@ from app.utils.menu_assignments import (
     get_location_drift_recipe_item_ids,
     sync_location_stand_items,
 )
-from app.utils.text import normalize_name_for_sorting
+from app.utils.text import build_text_match_predicate, normalize_name_for_sorting
 from app.utils.units import (
     DEFAULT_BASE_UNIT_CONVERSIONS,
     convert_quantity_for_reporting,
     convert_report_value_to_base,
     get_unit_label,
 )
+
+INVENTORY_ITEM_SEARCH_MIN_LENGTH = 2
+INVENTORY_ITEM_SEARCH_LIMIT = 12
+INVENTORY_ITEM_LOOKUP_LIMIT = 50
 
 
 def _conversion_mapping() -> dict[str, str]:
@@ -615,10 +621,45 @@ def build_inventory_unit_options(item: Item) -> list[dict]:
     return options
 
 
+def build_inventory_print_unit_labels(item: Item) -> dict[str, str]:
+    """Return the default unit labels used by printable count sheets."""
+
+    base_unit = item.base_unit
+    base_label = get_unit_label(base_unit) or base_unit or "Base Unit"
+
+    def unit_label(unit) -> str:
+        if unit is None:
+            return "Not set"
+        name = unit.name or f"Unit #{unit.id}"
+        try:
+            factor = float(unit.factor or 0.0)
+        except (TypeError, ValueError):
+            factor = 0.0
+        if factor > 0 and base_label:
+            return f"{name} ({_format_quantity(factor)} {base_label})"
+        return name
+
+    receiving_unit = next(
+        (unit for unit in item.units or [] if unit.receiving_default),
+        None,
+    )
+    transfer_unit = next(
+        (unit for unit in item.units or [] if unit.transfer_default),
+        None,
+    )
+
+    return {
+        "receiving_unit_label": unit_label(receiving_unit),
+        "transfer_unit_label": unit_label(transfer_unit),
+        "base_unit_label": base_label,
+    }
+
+
 def build_inventory_count_item_entry(
     item: Item,
     *,
     expected_count: float = 0.0,
+    approved_count: float | None = None,
 ) -> dict:
     """Return one inventory count entry for an item."""
 
@@ -627,28 +668,172 @@ def build_inventory_count_item_entry(
         "base_unit": item.base_unit,
         "base_unit_label": get_unit_label(item.base_unit),
         "expected_count": float(expected_count or 0.0),
+        "approved_count": approved_count,
+        "item_cost": float(item.cost or 0.0),
         "unit_options": build_inventory_unit_options(item),
     }
 
 
-def build_location_inventory_count_item_entries(location: Location) -> list[dict]:
-    """Return active, countable stock items for an inventory event count sheet."""
+def _inventory_item_id_from_field_name(field_name: str) -> int | None:
+    for prefix in ("inventory_qty_", "inventory_unit_"):
+        if not field_name.startswith(prefix):
+            continue
+        remainder = field_name[len(prefix):]
+        item_id_text = remainder.split("_", 1)[0]
+        try:
+            return int(item_id_text)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def posted_inventory_item_ids(form_data) -> set[int]:
+    item_ids: set[int] = set()
+    for field_name in form_data.keys():
+        item_id = _inventory_item_id_from_field_name(field_name)
+        if item_id is not None:
+            item_ids.add(item_id)
+    return item_ids
+
+
+def extend_inventory_entries_with_posted_items(
+    item_entries: list[dict],
+    form_data,
+) -> list[dict]:
+    existing_item_ids = {entry["item"].id for entry in item_entries}
+    extra_item_ids = sorted(posted_inventory_item_ids(form_data) - existing_item_ids)
+    if not extra_item_ids:
+        return item_entries
+
+    extra_items = (
+        Item.query.options(
+            selectinload(Item.units),
+            selectinload(Item.barcode_aliases),
+        )
+        .filter(Item.archived.is_(False), Item.id.in_(extra_item_ids))
+        .order_by(Item.name.asc())
+        .all()
+    )
+    return item_entries + [
+        build_inventory_count_item_entry(item) for item in extra_items
+    ]
+
+
+def inventory_item_search_text(item: Item, base_unit_label: str | None) -> str:
+    parts = [
+        item.name or "",
+        item.upc or "",
+        item.base_unit or "",
+        base_unit_label or "",
+    ]
+    parts.extend(item.barcode_values)
+    return " ".join(part for part in parts if part).casefold()
+
+
+def inventory_item_search_payload(item: Item) -> dict:
+    entry = build_inventory_count_item_entry(item)
+    base_unit_label = entry.get("base_unit_label") or entry.get("base_unit")
+    return {
+        "id": item.id,
+        "name": item.name,
+        "upc": item.upc or "",
+        "base_unit": item.base_unit or "",
+        "base_unit_label": base_unit_label or "",
+        "expected_count": 0.0,
+        "item_cost": float(item.cost or 0.0),
+        "unit_options": entry["unit_options"],
+        "search_text": inventory_item_search_text(item, base_unit_label),
+    }
+
+
+def parse_inventory_item_ids(raw_value: str | None) -> list[int]:
+    item_ids: list[int] = []
+    for value in (raw_value or "").split(","):
+        value = value.strip()
+        if not value:
+            continue
+        try:
+            item_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if item_id > 0 and item_id not in item_ids:
+            item_ids.append(item_id)
+        if len(item_ids) >= INVENTORY_ITEM_LOOKUP_LIMIT:
+            break
+    return item_ids
+
+
+def query_inventory_item_search(
+    *,
+    search_term: str,
+    item_ids: list[int],
+) -> list[Item]:
+    query = Item.query.options(
+        selectinload(Item.units),
+        selectinload(Item.barcode_aliases),
+    ).filter(Item.archived.is_(False))
+
+    if item_ids:
+        return (
+            query.filter(Item.id.in_(item_ids))
+            .order_by(Item.name.asc())
+            .limit(INVENTORY_ITEM_LOOKUP_LIMIT)
+            .all()
+        )
+
+    if len(search_term) < INVENTORY_ITEM_SEARCH_MIN_LENGTH:
+        return []
+
+    return (
+        query.filter(
+            or_(
+                build_text_match_predicate(Item.name, search_term, "contains"),
+                Item.upc == search_term,
+                Item.barcode_aliases.any(ItemBarcode.code == search_term),
+            )
+        )
+        .order_by(Item.name.asc())
+        .limit(INVENTORY_ITEM_SEARCH_LIMIT)
+        .all()
+    )
+
+
+def build_location_inventory_count_item_entries(
+    location: Location,
+    *,
+    approved_counts_by_item_id: dict[int, float] | None = None,
+) -> list[dict]:
+    """Return active stock items for an inventory event count sheet."""
 
     sync_location_stand_items(location, remove_missing=False)
     db.session.flush()
 
     records = (
         LocationStandItem.query.join(Item)
-        .options(selectinload(LocationStandItem.item).selectinload(Item.units))
+        .options(
+            selectinload(LocationStandItem.item).selectinload(Item.units),
+            selectinload(LocationStandItem.item).selectinload(Item.barcode_aliases),
+        )
         .filter(
             LocationStandItem.location_id == location.id,
             LocationStandItem.active.is_(True),
-            LocationStandItem.countable.is_(True),
             Item.archived.is_(False),
         )
         .order_by(Item.name.asc())
         .all()
     )
+    suppressed_item_ids = {
+        item_id
+        for (item_id,) in LocationStandItem.query.with_entities(
+            LocationStandItem.item_id
+        )
+        .filter(
+            LocationStandItem.location_id == location.id,
+            LocationStandItem.active.is_(False),
+        )
+        .all()
+        if item_id is not None
+    }
 
     entries: list[dict] = []
     for record in records:
@@ -660,6 +845,41 @@ def build_location_inventory_count_item_entries(location: Location) -> list[dict
                 item,
                 expected_count=record.expected_count,
             )
+        )
+
+    approved_counts_by_item_id = approved_counts_by_item_id or {}
+    existing_item_ids = {entry["item"].id for entry in entries}
+    approved_extra_item_ids = sorted(
+        item_id
+        for item_id in approved_counts_by_item_id
+        if item_id not in existing_item_ids and item_id not in suppressed_item_ids
+    )
+    if approved_extra_item_ids:
+        approved_extra_items = (
+            Item.query.options(
+                selectinload(Item.units),
+                selectinload(Item.barcode_aliases),
+            )
+            .filter(
+                Item.archived.is_(False),
+                Item.id.in_(approved_extra_item_ids),
+            )
+            .order_by(Item.name.asc())
+            .all()
+        )
+        entries.extend(
+            build_inventory_count_item_entry(item)
+            for item in approved_extra_items
+        )
+
+    for entry in entries:
+        item_id = entry["item"].id
+        if item_id in approved_counts_by_item_id:
+            entry["approved_count"] = float(approved_counts_by_item_id[item_id] or 0.0)
+
+    if approved_extra_item_ids:
+        entries.sort(
+            key=lambda entry: normalize_name_for_sorting(entry["item"].name or "")
         )
     return entries
 
@@ -734,6 +954,7 @@ def parse_inventory_count_submission_rows(
                 "item_id": item_id,
                 "count_value": total_count,
                 "submitted_count_value": total_count,
+                "expected_count_value": float(entry.get("expected_count") or 0.0),
                 "unit_breakdown": breakdown,
             }
         )
@@ -842,9 +1063,49 @@ def _roll_up_submission_rows(
                 totals_by_item_id[row.item_id] = row_value
             else:
                 totals_by_item_id[row.item_id] = (
-                    totals_by_item_id.get(row.item_id, 0.0) + row_value
-                )
+                totals_by_item_id.get(row.item_id, 0.0) + row_value
+            )
     return totals_by_item_id
+
+
+def approved_inventory_count_totals_for_event_day(
+    event_location_id: int | None,
+    event_operating_day_id: int | None,
+) -> dict[int, float]:
+    """Return approved inventory totals for one event-location operating day."""
+
+    if not event_location_id or not event_operating_day_id:
+        return {}
+
+    approved_submissions = (
+        LocationCountSubmission.query.options(
+            selectinload(LocationCountSubmission.rows).selectinload(
+                LocationCountSubmissionRow.item
+            )
+        )
+        .filter(
+            LocationCountSubmission.event_location_id == event_location_id,
+            LocationCountSubmission.event_operating_day_id == event_operating_day_id,
+            LocationCountSubmission.status == LocationCountSubmission.STATUS_APPROVED,
+            LocationCountSubmission.submission_type
+            == LocationCountSubmission.TYPE_INVENTORY,
+        )
+        .all()
+    )
+    if not approved_submissions:
+        return {}
+
+    approved_submissions.sort(
+        key=lambda submission: (
+            submission.submission_date,
+            submission.reviewed_at or submission.submitted_at or datetime_cls.min,
+            submission.id,
+        )
+    )
+    return _roll_up_submission_rows(
+        approved_submissions,
+        whole_sheet_overwrite=True,
+    )
 
 
 def _approved_submission_item_ids_for_type(

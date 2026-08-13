@@ -67,7 +67,20 @@
         }
 
     .inventory-unit-row {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr) minmax(4.75rem, 6rem) 2.25rem;
+        gap: 0.45rem;
+    }
+
+    .inventory-unit-row .form-select,
+    .inventory-unit-row .form-control {
+        min-width: 0;
+    }
+
+    .inventory-unit-row [data-inventory-remove-row] {
+        width: 2.25rem;
+        height: 2.375rem;
+        padding-left: 0;
+        padding-right: 0;
     }
 }
 </style>
@@ -182,7 +195,7 @@
                             type="search"
                             class="form-control"
                             id="inventory-item-filter"
-                            placeholder="Search by name, barcode, or unit"
+                            placeholder="Search by name or unit"
                             autocomplete="off"
                             data-inventory-filter-input="1"
                         >
@@ -273,13 +286,16 @@
                                 <div>
                                     <label class="form-label small mb-1" for="inventory_qty_{{ entry.item.id }}_0">Qty</label>
                                     <input
-                                        type="number"
-                                        step="any"
-                                        min="0"
-                                        inputmode="decimal"
+                                        type="text"
+                                        inputmode="numeric"
+                                        pattern="[0-9]*"
                                         enterkeyhint="next"
                                         autocomplete="off"
+                                        autocorrect="off"
+                                        autocapitalize="off"
+                                        spellcheck="false"
                                         data-count-entry="1"
+                                        data-inventory-quantity-entry="1"
                                         data-count-draft-field="1"
                                         data-native-numeric="1"
                                         class="form-control"
@@ -318,7 +334,7 @@
                 {% else %}
                 <div class="mb-4" data-inventory-list="1"></div>
                 <div class="alert alert-danger mb-4" data-inventory-empty-config="1">
-                    No countable items are configured for this location yet.
+                    No inventory items are configured for this location yet.
                     {% if selected_type == 'inventory' %}
                     Use Add Item to count an existing item from the item master.
                     {% endif %}
@@ -601,6 +617,17 @@ document.addEventListener('DOMContentLoaded', function () {
         return String(value || '').trim().toLowerCase();
     }
 
+    function sanitizeQuantityInput(input) {
+        if (!input) {
+            return;
+        }
+        const currentValue = input.value || '';
+        const sanitizedValue = currentValue.replace(/\D+/g, '');
+        if (currentValue !== sanitizedValue) {
+            input.value = sanitizedValue;
+        }
+    }
+
     function cacheInventoryItems(items) {
         (items || []).forEach(function (item) {
             inventoryCatalogById[String(item.id)] = item;
@@ -717,6 +744,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function createInventoryItemCard(item, added) {
+        const baseUnitLabel = item.base_unit_label || item.base_unit || '';
         const card = document.createElement('div');
         card.className = 'public-count-item p-3';
         card.dataset.inventoryCard = '1';
@@ -729,14 +757,14 @@ document.addEventListener('DOMContentLoaded', function () {
                 item.upc,
                 (item.barcode_values || []).join(' '),
                 item.base_unit,
-                item.base_unit_label,
+                baseUnitLabel,
             ].join(' ')
         );
         card.innerHTML = [
             '<div class="d-flex justify-content-between gap-3 align-items-start mb-2">',
                 '<div>',
                     '<div class="fw-semibold">' + escapeHtml(item.name) + '</div>',
-                    '<div class="small text-muted">' + escapeHtml(item.base_unit_label || item.base_unit || '') + '</div>',
+                    '<div class="small text-muted">' + escapeHtml(baseUnitLabel) + '</div>',
                 '</div>',
                 '<button type="button" class="btn btn-outline-secondary btn-sm inventory-add-row" data-inventory-add-row="' + escapeHtml(item.id) + '" aria-label="Add unit row for ' + escapeHtml(item.name) + '" title="Add unit row">+</button>',
             '</div>',
@@ -751,7 +779,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     '</div>',
                     '<div>',
                         '<label class="form-label small mb-1" for="inventory_qty_' + escapeHtml(item.id) + '_0">Qty</label>',
-                        '<input type="number" step="any" min="0" inputmode="decimal" enterkeyhint="next" autocomplete="off" data-count-entry="1" data-count-draft-field="1" data-native-numeric="1" class="form-control" id="inventory_qty_' + escapeHtml(item.id) + '_0" name="inventory_qty_' + escapeHtml(item.id) + '_0" value="" placeholder="0">',
+                        '<input type="text" inputmode="numeric" pattern="[0-9]*" enterkeyhint="next" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-count-entry="1" data-inventory-quantity-entry="1" data-count-draft-field="1" data-native-numeric="1" class="form-control" id="inventory_qty_' + escapeHtml(item.id) + '_0" name="inventory_qty_' + escapeHtml(item.id) + '_0" value="" placeholder="0">',
                     '</div>',
                     '<button type="button" class="btn btn-outline-danger" data-inventory-remove-row="1" aria-label="Remove unit row" title="Remove unit row" disabled>&times;</button>',
                 '</div>',
@@ -1049,6 +1077,9 @@ document.addEventListener('DOMContentLoaded', function () {
             draftFields.forEach(function (field) {
                 if (draft.counts && Object.prototype.hasOwnProperty.call(draft.counts, field.name)) {
                     field.value = draft.counts[field.name];
+                    if (field.matches('[data-inventory-quantity-entry="1"]')) {
+                        sanitizeQuantityInput(field);
+                    }
                 }
             });
             hideDraftPrompt();
@@ -1081,7 +1112,13 @@ document.addEventListener('DOMContentLoaded', function () {
             applyInventoryFilters();
         });
 
+        if (input.matches('[data-inventory-quantity-entry="1"]')) {
+            sanitizeQuantityInput(input);
+        }
         input.addEventListener('input', function () {
+            if (input.matches('[data-inventory-quantity-entry="1"]')) {
+                sanitizeQuantityInput(input);
+            }
             applyInventoryFilters();
         });
 

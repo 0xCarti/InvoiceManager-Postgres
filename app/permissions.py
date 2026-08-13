@@ -398,6 +398,7 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "transfer.generate_report": requirement(any_of=("transfers.report",)),
     "transfer.view_report": requirement(any_of=("transfers.report",)),
     "item.view_items": requirement(any_of=("items.view",)),
+    "item.selected_item_rows": requirement(any_of=("items.view",)),
     "item.recipe_cost_calculator": requirement(any_of=("items.view",)),
     "item.view_item": requirement(any_of=("items.view",)),
     "item.add_item": requirement(any_of=("items.create",)),
@@ -658,7 +659,6 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "event.update_opening_counts": requirement(any_of=("events.manage_locations",)),
     "event.add_location": requirement(any_of=("events.manage_locations",)),
     "event.add_terminal_sale": requirement(any_of=("events.manage_sales",)),
-    "event.scan_counts": requirement(any_of=("events.manage_sales",)),
     "event.upload_terminal_sales": requirement(any_of=("events.manage_sales",)),
     "event.confirm_location": requirement(any_of=("events.confirm_locations",)),
     "event.undo_confirm_location": requirement(any_of=("events.confirm_locations",)),
@@ -671,11 +671,20 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "event.sustainability_dashboard": requirement(any_of=("events.reports",)),
     "event.sustainability_dashboard_print": requirement(any_of=("events.reports",)),
     "event.sustainability_dashboard_csv": requirement(any_of=("events.reports",)),
+    "event.count_sheet_item_search": requirement(
+        any_of=("events.reports", "events.manage_sales")
+    ),
     "event.bulk_stand_sheets": requirement(any_of=("events.reports",)),
     "event.email_bulk_stand_sheets": requirement(any_of=("events.email_stand_sheets",)),
     "event.bulk_count_sheets": requirement(any_of=("events.reports",)),
+    "event.bulk_count_sheets_csv": requirement(any_of=("events.reports",)),
     "event.close_event": requirement(any_of=("events.close",)),
     "event.inventory_report": requirement(any_of=("events.reports",)),
+    "event.inventory_report_csv": requirement(any_of=("events.reports",)),
+    "event.inventory_comparison_report": requirement(any_of=("events.reports",)),
+    "event.inventory_comparison_report_csv": requirement(
+        any_of=("events.reports",)
+    ),
     "schedule.team_schedule": requirement(
         any_of=(
             "schedules.view_team",

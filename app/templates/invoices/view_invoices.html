@@ -235,7 +235,7 @@
                     {% if can_show_invoice_action_menu %}
                     <div class="dropdown d-inline">
                         <button
-                            class="btn btn-outline-secondary dropdown-toggle"
+                            class="btn btn-outline-secondary btn-sm dropdown-toggle"
                             type="button"
                             id="invoice-actions-{{ invoice.id }}"
                             data-bs-toggle="dropdown"
@@ -508,7 +508,7 @@ $(document).ready(function(){
         const actionMenu = (statusAction || deleteAction) ? `
                 <div class="dropdown d-inline">
                     <button
-                        class="btn btn-outline-secondary dropdown-toggle"
+                        class="btn btn-outline-secondary btn-sm dropdown-toggle"
                         type="button"
                         id="invoice-actions-${inv.id}"
                         data-bs-toggle="dropdown"
@@ -544,9 +544,11 @@ $(document).ready(function(){
                 <span class="badge ${statusBadgeClass}">${statusLabel}</span>
             </td>
             <td class="col-invoice-actions">
-                <a href="${invoiceUrlFromTemplate(viewInvoiceUrlTemplate, inv.id)}" class="btn btn-primary mr-2">View</a>
-                ${editButton}
-                ${actionMenu}
+                <div class="mobile-actions mobile-card-actions">
+                    <a href="${invoiceUrlFromTemplate(viewInvoiceUrlTemplate, inv.id)}" class="btn btn-primary btn-sm">View</a>
+                    ${editButton}
+                    ${actionMenu}
+                </div>
             </td>
             </tr>`;
             tbody.append(row);

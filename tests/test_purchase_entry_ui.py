@@ -22,7 +22,7 @@ def test_purchase_order_templates_expose_fast_add_actions():
     for content in (create_content, edit_content):
         assert content.count('data-role="purchase-order-add-item"') >= 2
         assert (
-            "Name search keeps you in item entry. Barcode scans jump to Qty, then back to the next scan row."
+            "Name search keeps you in item entry."
             in content
         )
 

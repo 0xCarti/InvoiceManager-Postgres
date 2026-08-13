@@ -1,9 +1,12 @@
+from datetime import date
+
 from werkzeug.security import generate_password_hash
 
 from app import db
 from app.models import (
     Event,
     EventLocation,
+    EventStandSheetItem,
     GLCode,
     Item,
     ItemUnit,
@@ -22,7 +25,7 @@ from tests.utils import extract_csrf_token
 from tests.utils import login
 
 
-def test_inventory_report_variance(client, app):
+def test_inventory_report_summarizes_by_gl_code_only(client, app):
     with app.app_context():
         user = User(
             email="inv@example.com",
@@ -123,9 +126,251 @@ def test_inventory_report_variance(client, app):
             db.session.commit()
         resp = client.get(f"/events/{eid}/inventory_report")
         assert resp.status_code == 200
-        assert b"-1" in resp.data
+        assert b"Summary Source 18 - InvEvent" in resp.data
+        assert b"Export CSV" in resp.data
         assert b"500000" in resp.data
-        assert b"Summary Source 18" in resp.data
+        assert b"Beverage" in resp.data
+        assert b"4.0000" in resp.data
+        assert b"4.00" in resp.data
+        assert b"Pepsi" not in resp.data
+        assert b"InvLoc" not in resp.data
+        assert b"Expected" not in resp.data
+        assert b"Variance" not in resp.data
+
+        csv_resp = client.get(f"/events/{eid}/inventory_report.csv")
+        assert csv_resp.status_code == 200
+        assert csv_resp.headers["Content-Type"].startswith("text/csv")
+        csv_body = csv_resp.data.decode()
+        assert "GL Code,GL Code Description,Total Quantity,Total Cost" in csv_body
+        assert "500000,Beverage,4.0000,4.00" in csv_body
+        assert "Grand Total,,4.0000,4.00" in csv_body
+        assert "Pepsi" not in csv_body
+
+
+def test_inventory_report_sorts_and_totals_gl_codes(client, app):
+    with app.app_context():
+        user = User(
+            email="inventory-summary-sort@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        location = Location(name="Hidden Summary Location")
+        gl_100 = GLCode(code="100000", description="Food")
+        gl_500 = GLCode(code="500000", description="Beverage")
+        item_a = Item(
+            name="Hidden GL Item A",
+            base_unit="each",
+            cost=1.5,
+            purchase_gl_code=gl_100,
+        )
+        item_b = Item(
+            name="Hidden GL Item B",
+            base_unit="each",
+            cost=3.0,
+            purchase_gl_code=gl_500,
+        )
+        item_c = Item(
+            name="Hidden GL Item C",
+            base_unit="each",
+            cost=2.0,
+            purchase_gl_code=gl_100,
+        )
+        item_unassigned = Item(
+            name="Hidden Unassigned Item",
+            base_unit="each",
+            cost=1.0,
+        )
+        event = Event(
+            name="Sorted Summary Inventory",
+            start_date=date(2026, 3, 31),
+            end_date=date(2026, 3, 31),
+            event_type="inventory",
+        )
+        db.session.add_all(
+            [
+                user,
+                location,
+                gl_100,
+                gl_500,
+                item_a,
+                item_b,
+                item_c,
+                item_unassigned,
+                event,
+            ]
+        )
+        db.session.flush()
+        event_location = EventLocation(event=event, location=location)
+        db.session.add(event_location)
+        db.session.flush()
+        db.session.add_all(
+            [
+                EventStandSheetItem(
+                    event_location_id=event_location.id,
+                    item_id=item_b.id,
+                    closing_count=2,
+                    item_cost_snapshot=3.0,
+                ),
+                EventStandSheetItem(
+                    event_location_id=event_location.id,
+                    item_id=item_a.id,
+                    closing_count=4,
+                    item_cost_snapshot=1.5,
+                ),
+                EventStandSheetItem(
+                    event_location_id=event_location.id,
+                    item_id=item_unassigned.id,
+                    closing_count=7,
+                    item_cost_snapshot=1.0,
+                ),
+                EventStandSheetItem(
+                    event_location_id=event_location.id,
+                    item_id=item_c.id,
+                    closing_count=1,
+                    item_cost_snapshot=2.0,
+                ),
+            ]
+        )
+        db.session.commit()
+        grant_event_permissions(user)
+        event_id = event.id
+
+    with client:
+        login(client, "inventory-summary-sort@example.com", "pass")
+        resp = client.get(f"/events/{event_id}/inventory_report")
+
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert body.index("100000") < body.index("500000") < body.index("Unassigned")
+    assert body.count("100000") == 1
+    assert "Food" in body
+    assert "Beverage" in body
+    assert "5.0000" in body
+    assert "8.00" in body
+    assert "2.0000" in body
+    assert "6.00" in body
+    assert "7.0000" in body
+    assert "7.00" in body
+    assert "14.0000" in body
+    assert "21.00" in body
+    assert "Hidden Summary Location" not in body
+    assert "Hidden GL Item A" not in body
+    assert "Hidden GL Item B" not in body
+    assert "Hidden GL Item C" not in body
+    assert "Hidden Unassigned Item" not in body
+
+
+def test_inventory_comparison_report_compares_previous_inventory_event(client, app):
+    with app.app_context():
+        user = User(
+            email="inventory-comparison@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        location = Location(name="Inventory Comparison Location")
+        gl = GLCode(code="501800", description="Inventory Food")
+        item = Item(
+            name="Comparison Pretzel",
+            base_unit="each",
+            cost=2.0,
+            purchase_gl_code=gl,
+        )
+        current_only = Item(
+            name="Comparison Current Only",
+            base_unit="each",
+            cost=3.0,
+            purchase_gl_code=gl,
+        )
+        previous_event = Event(
+            name="Previous Inventory",
+            start_date=date(2026, 1, 31),
+            end_date=date(2026, 1, 31),
+            event_type="inventory",
+        )
+        current_event = Event(
+            name="Current Inventory",
+            start_date=date(2026, 2, 28),
+            end_date=date(2026, 2, 28),
+            event_type="inventory",
+        )
+        db.session.add_all(
+            [user, location, gl, item, current_only, previous_event, current_event]
+        )
+        db.session.flush()
+        previous_location = EventLocation(
+            event_id=previous_event.id,
+            location_id=location.id,
+        )
+        current_location = EventLocation(
+            event_id=current_event.id,
+            location_id=location.id,
+        )
+        db.session.add_all([previous_location, current_location])
+        db.session.flush()
+        db.session.add_all(
+            [
+                EventStandSheetItem(
+                    event_location_id=previous_location.id,
+                    item_id=item.id,
+                    closing_count=5,
+                    item_name_snapshot="Comparison Pretzel",
+                    item_base_unit_snapshot="each",
+                    item_cost_snapshot=2.0,
+                ),
+                EventStandSheetItem(
+                    event_location_id=current_location.id,
+                    item_id=item.id,
+                    closing_count=8,
+                    item_name_snapshot="Comparison Pretzel",
+                    item_base_unit_snapshot="each",
+                    item_cost_snapshot=2.0,
+                ),
+                EventStandSheetItem(
+                    event_location_id=current_location.id,
+                    item_id=current_only.id,
+                    closing_count=4,
+                    item_name_snapshot="Comparison Current Only",
+                    item_base_unit_snapshot="each",
+                    item_cost_snapshot=3.0,
+                ),
+            ]
+        )
+        db.session.commit()
+        grant_event_permissions(user)
+        event_id = current_event.id
+
+    with client:
+        login(client, "inventory-comparison@example.com", "pass")
+        resp = client.get(f"/events/{event_id}/inventory_comparison_report")
+
+    assert resp.status_code == 200
+    assert b"Inventory Comparison - Current Inventory" in resp.data
+    assert b"Export CSV" in resp.data
+    assert b"Compared with Previous Inventory" in resp.data
+    assert b"Comparison Pretzel" in resp.data
+    assert b"5.0000" in resp.data
+    assert b"8.0000" in resp.data
+    assert b"+3.0000" in resp.data
+    assert b"$10.00" in resp.data
+    assert b"$16.00" in resp.data
+    assert b"+6.00" in resp.data
+    assert b"Comparison Current Only" in resp.data
+    assert b"$12.00" in resp.data
+
+    with client:
+        login(client, "inventory-comparison@example.com", "pass")
+        csv_resp = client.get(
+            f"/events/{event_id}/inventory_comparison_report.csv"
+        )
+    assert csv_resp.status_code == 200
+    assert csv_resp.headers["Content-Type"].startswith("text/csv")
+    csv_body = csv_resp.data.decode()
+    assert (
+        "Item,Base Unit,GL Code,Previous Quantity,Current Quantity,"
+        "Quantity Change,Previous Cost,Current Cost,Cost Change"
+    ) in csv_body
+    assert "Comparison Pretzel,each,501800,5.0000,8.0000,+3.0000,10.00,16.00,+6.00" in csv_body
+    assert "Totals,,,5.0000,12.0000,+7.0000,10.00,28.00,+18.00" in csv_body
 
 
 def test_inventory_close_updates_counts(client, app):

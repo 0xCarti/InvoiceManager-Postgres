@@ -33,6 +33,7 @@ def _get_smtp_config():
     password = _value("SMTP_PASSWORD") or ""
     sender = (_value("SMTP_SENDER") or "").strip()
     use_tls_raw = _value("SMTP_USE_TLS", False)
+    use_ssl_raw = _value("SMTP_USE_SSL", False)
     timeout_raw = _value("SMTP_TIMEOUT_SECONDS", 10)
 
     missing = []
@@ -59,6 +60,13 @@ def _get_smtp_config():
         use_tls = use_tls_raw
     else:
         use_tls = str(use_tls_raw).lower() in ("1", "true", "yes", "on")
+    if isinstance(use_ssl_raw, bool):
+        use_ssl = use_ssl_raw
+    else:
+        use_ssl = str(use_ssl_raw).lower() in ("1", "true", "yes", "on")
+
+    if use_tls and use_ssl:
+        raise SMTPConfigurationError(["SMTP_USE_TLS/SMTP_USE_SSL"])
 
     return {
         "host": host,
@@ -67,6 +75,7 @@ def _get_smtp_config():
         "password": password,
         "from_address": sender or username,
         "use_tls": use_tls,
+        "use_ssl": use_ssl,
         "timeout_seconds": timeout_seconds,
     }
 
@@ -100,7 +109,8 @@ def send_email(
                 filename=filename,
             )
 
-    with smtplib.SMTP(
+    smtp_class = smtplib.SMTP_SSL if smtp_config["use_ssl"] else smtplib.SMTP
+    with smtp_class(
         smtp_config["host"],
         smtp_config["port"],
         timeout=smtp_config["timeout_seconds"],

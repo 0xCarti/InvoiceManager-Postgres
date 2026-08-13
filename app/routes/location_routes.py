@@ -33,7 +33,6 @@ from app.models import (
     EventLocationOperatingDay,
     GLCode,
     Item,
-    ItemBarcode,
     LocationCountSubmission,
     LocationCountSubmissionRow,
     Location,
@@ -51,17 +50,22 @@ from app.services.location_count_labels import (
     render_location_transfer_sign_pdf,
 )
 from app.services.location_count_submissions import (
-    build_inventory_count_item_entry,
     build_location_count_item_entries,
     build_location_inventory_count_item_entries,
     build_submission_row_entries,
     choose_auto_matched_event_location,
     event_operating_day_for_submission,
     expected_opening_counts_for_event_day,
+    extend_inventory_entries_with_posted_items,
+    inventory_item_search_payload,
+    INVENTORY_ITEM_SEARCH_LIMIT,
+    INVENTORY_ITEM_SEARCH_MIN_LENGTH,
     list_event_location_candidates,
     opening_submission_exists,
     parse_inventory_count_submission_rows,
+    parse_inventory_item_ids,
     parse_submission_count_value,
+    query_inventory_item_search,
     sync_event_location_counts_from_approved_submissions,
 )
 from app.services.pdf import render_stand_sheet_pdf
@@ -97,11 +101,6 @@ from app.utils.timezone import default_timezone_date
 location = Blueprint("locations", __name__)
 
 _RECENT_PUBLIC_SUBMISSION_DUPLICATE_WINDOW = timedelta(minutes=5)
-_PUBLIC_INVENTORY_ITEM_SEARCH_MIN_LENGTH = 2
-_PUBLIC_INVENTORY_ITEM_SEARCH_LIMIT = 12
-_PUBLIC_INVENTORY_ITEM_LOOKUP_LIMIT = 50
-
-
 def _notify_location_activity(
     location_obj: Location,
     *,
@@ -204,6 +203,35 @@ def _protected_location_item_ids(location_obj: Location) -> set[int]:
     """Return item ids that cannot be removed from the location."""
 
     return get_recipe_item_ids(get_authoritative_location_products(location_obj))
+
+
+def _location_item_has_inventory_submission_rows(
+    location_id: int,
+    item_id: int,
+    *,
+    statuses: tuple[str, ...],
+) -> bool:
+    """Return whether an item has inventory submission rows for a location."""
+
+    return (
+        db.session.query(LocationCountSubmissionRow.id)
+        .join(
+            LocationCountSubmission,
+            LocationCountSubmission.id == LocationCountSubmissionRow.submission_id,
+        )
+        .filter(
+            LocationCountSubmissionRow.item_id == item_id,
+            LocationCountSubmission.submission_type
+            == LocationCountSubmission.TYPE_INVENTORY,
+            LocationCountSubmission.status.in_(statuses),
+            or_(
+                LocationCountSubmission.source_location_id == location_id,
+                LocationCountSubmission.location_id == location_id,
+            ),
+        )
+        .first()
+        is not None
+    )
 
 
 def _location_items_redirect(location_id: int, page: str | None, per_page: str | None):
@@ -595,128 +623,6 @@ def _resolve_public_inventory_event_location(
     return event_location, operating_day, None
 
 
-def _inventory_item_id_from_field_name(field_name: str) -> int | None:
-    for prefix in ("inventory_qty_", "inventory_unit_"):
-        if not field_name.startswith(prefix):
-            continue
-        remainder = field_name[len(prefix):]
-        item_id_text = remainder.split("_", 1)[0]
-        try:
-            return int(item_id_text)
-        except (TypeError, ValueError):
-            return None
-    return None
-
-
-def _posted_inventory_item_ids(form_data) -> set[int]:
-    item_ids: set[int] = set()
-    for field_name in form_data.keys():
-        item_id = _inventory_item_id_from_field_name(field_name)
-        if item_id is not None:
-            item_ids.add(item_id)
-    return item_ids
-
-
-def _extend_inventory_entries_with_posted_items(
-    item_entries: list[dict],
-    form_data,
-) -> list[dict]:
-    existing_item_ids = {entry["item"].id for entry in item_entries}
-    extra_item_ids = sorted(_posted_inventory_item_ids(form_data) - existing_item_ids)
-    if not extra_item_ids:
-        return item_entries
-
-    extra_items = (
-        Item.query.options(
-            selectinload(Item.units),
-            selectinload(Item.barcode_aliases),
-        )
-        .filter(Item.archived.is_(False), Item.id.in_(extra_item_ids))
-        .order_by(Item.name.asc())
-        .all()
-    )
-    return item_entries + [
-        build_inventory_count_item_entry(item) for item in extra_items
-    ]
-
-
-def _inventory_item_search_text(item: Item, base_unit_label: str | None) -> str:
-    parts = [
-        item.name or "",
-        item.upc or "",
-        item.base_unit or "",
-        base_unit_label or "",
-    ]
-    parts.extend(item.barcode_values)
-    return " ".join(part for part in parts if part).casefold()
-
-
-def _public_inventory_item_payload(item: Item) -> dict:
-    entry = build_inventory_count_item_entry(item)
-    base_unit_label = entry.get("base_unit_label") or entry.get("base_unit")
-    return {
-        "id": item.id,
-        "name": item.name,
-        "upc": item.upc or "",
-        "base_unit": item.base_unit or "",
-        "base_unit_label": base_unit_label or "",
-        "unit_options": entry["unit_options"],
-        "search_text": _inventory_item_search_text(item, base_unit_label),
-    }
-
-
-def _parse_public_inventory_item_ids(raw_value: str | None) -> list[int]:
-    item_ids: list[int] = []
-    for value in (raw_value or "").split(","):
-        value = value.strip()
-        if not value:
-            continue
-        try:
-            item_id = int(value)
-        except (TypeError, ValueError):
-            continue
-        if item_id > 0 and item_id not in item_ids:
-            item_ids.append(item_id)
-        if len(item_ids) >= _PUBLIC_INVENTORY_ITEM_LOOKUP_LIMIT:
-            break
-    return item_ids
-
-
-def _query_public_inventory_items(
-    *,
-    search_term: str,
-    item_ids: list[int],
-) -> list[Item]:
-    query = Item.query.options(
-        selectinload(Item.units),
-        selectinload(Item.barcode_aliases),
-    ).filter(Item.archived.is_(False))
-
-    if item_ids:
-        return (
-            query.filter(Item.id.in_(item_ids))
-            .order_by(Item.name.asc())
-            .limit(_PUBLIC_INVENTORY_ITEM_LOOKUP_LIMIT)
-            .all()
-        )
-
-    if len(search_term) < _PUBLIC_INVENTORY_ITEM_SEARCH_MIN_LENGTH:
-        return []
-
-    return (
-        query.filter(
-            or_(
-                build_text_match_predicate(Item.name, search_term, "contains"),
-                Item.upc == search_term,
-                Item.barcode_aliases.any(ItemBarcode.code == search_term),
-            )
-        )
-        .order_by(Item.name.asc())
-        .limit(_PUBLIC_INVENTORY_ITEM_SEARCH_LIMIT)
-        .all()
-    )
-
-
 def _handle_public_location_submission(
     token: str,
     *,
@@ -833,7 +739,7 @@ def _handle_public_location_submission(
     if selected_type == LocationCountSubmission.TYPE_INVENTORY:
         items = build_location_inventory_count_item_entries(location_obj)
         if request.method == "POST":
-            items = _extend_inventory_entries_with_posted_items(
+            items = extend_inventory_entries_with_posted_items(
                 items,
                 request.form,
             )
@@ -888,7 +794,7 @@ def _handle_public_location_submission(
                 "danger",
             )
         elif not items:
-            flash("No countable items are configured for this location.", "danger")
+            flash("No inventory items are configured for this location.", "danger")
         else:
             if selected_type == LocationCountSubmission.TYPE_INVENTORY:
                 requested_rows = parse_inventory_count_submission_rows(
@@ -966,6 +872,7 @@ def _handle_public_location_submission(
                             item_id=row_data["item_id"],
                             count_value=row_data["count_value"],
                             submitted_count_value=row_data["submitted_count_value"],
+                            expected_count_value=row_data.get("expected_count_value"),
                             unit_breakdown=row_data.get("unit_breakdown"),
                             parse_index=row_data["parse_index"],
                         )
@@ -1585,23 +1492,23 @@ def scan_inventory_item_search(token: str, event_id: int):
     search_term = normalize_request_text_filter(
         request.args.get("q") or request.args.get("term")
     )
-    item_ids = _parse_public_inventory_item_ids(request.args.get("ids"))
-    items = _query_public_inventory_items(
+    item_ids = parse_inventory_item_ids(request.args.get("ids"))
+    items = query_inventory_item_search(
         search_term=search_term,
         item_ids=item_ids,
     )
     message = ""
-    if not item_ids and len(search_term) < _PUBLIC_INVENTORY_ITEM_SEARCH_MIN_LENGTH:
+    if not item_ids and len(search_term) < INVENTORY_ITEM_SEARCH_MIN_LENGTH:
         message = (
-            f"Type at least {_PUBLIC_INVENTORY_ITEM_SEARCH_MIN_LENGTH} characters "
+            f"Type at least {INVENTORY_ITEM_SEARCH_MIN_LENGTH} characters "
             "to search item master."
         )
 
     return jsonify(
         {
-            "items": [_public_inventory_item_payload(item) for item in items],
-            "limit": _PUBLIC_INVENTORY_ITEM_SEARCH_LIMIT,
-            "min_query_length": _PUBLIC_INVENTORY_ITEM_SEARCH_MIN_LENGTH,
+            "items": [inventory_item_search_payload(item) for item in items],
+            "limit": INVENTORY_ITEM_SEARCH_LIMIT,
+            "min_query_length": INVENTORY_ITEM_SEARCH_MIN_LENGTH,
             "message": message,
         }
     )
@@ -2479,7 +2386,15 @@ def delete_location_item(location_id: int, item_id: int):
         return _location_items_redirect(location_id, page, per_page)
 
     item_name = record.item.name
-    if record.recipe_backed:
+    has_inventory_submission_rows = _location_item_has_inventory_submission_rows(
+        location_id,
+        item_id,
+        statuses=(
+            LocationCountSubmission.STATUS_PENDING,
+            LocationCountSubmission.STATUS_APPROVED,
+        ),
+    )
+    if record.recipe_backed or has_inventory_submission_rows:
         record.active = False
     else:
         db.session.delete(record)

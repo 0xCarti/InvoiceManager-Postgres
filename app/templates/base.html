@@ -510,24 +510,30 @@
     </style>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile-responsive.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/item_search_selects.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/navbar_alignment.css', v='20260806a') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/ui_alignment.css', v='20260805a') }}">
 </head>
 
 <body class="{% if current_user.is_authenticated %}has-auth-sidebar{% endif %}{% if request.endpoint and request.endpoint.startswith('report.') %} report-page{% endif %}{% if is_report_result_request() %} report-result-tab{% endif %}">
-    <nav class="navbar navbar-light bg-light">
-        <div class="container-fluid">
-            <button class="navbar-toggler me-2" id="sidebarMenuToggle" type="button" data-bs-toggle="offcanvas" data-bs-target="#navbarNav"
+    <nav class="navbar navbar-light bg-light app-topbar">
+        <div class="container-fluid app-topbar-row">
+            <button class="navbar-toggler app-topbar-control" id="sidebarMenuToggle" type="button" data-bs-toggle="offcanvas" data-bs-target="#navbarNav"
                 aria-controls="navbarNav" aria-label="Toggle navigation">
                 <span class="navbar-toggler-icon"></span>
             </button>
-            <a class="navbar-icon-btn me-2" href="{{ default_home_url() }}" aria-label="Dashboard home">
-                <span aria-hidden="true">&#8962;</span>
+            <a class="navbar-icon-btn app-topbar-control" href="{{ default_home_url() }}" aria-label="Dashboard home">
+                <svg class="app-topbar-home-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                    <path d="M3 11.5 12 4l9 7.5"></path>
+                    <path d="M5.5 10.5V20h13v-9.5"></path>
+                    <path d="M9.5 20v-6h5v6"></path>
+                </svg>
             </a>
             {% if current_user.is_authenticated %}
-            <button class="navbar-toggler d-md-none me-2" type="button" data-bs-toggle="offcanvas"
+            <button class="navbar-toggler d-md-none app-topbar-control" type="button" data-bs-toggle="offcanvas"
                 data-bs-target="#favoritesNav" aria-controls="favoritesNav" aria-label="Toggle favorites">
-                &#9733;
+                <span class="app-topbar-favorite-icon" aria-hidden="true">&#9733;</span>
             </button>
-            <div class="d-none d-md-block">
+            <div class="d-none d-md-flex app-topbar-favorites">
             <ul class="navbar-nav flex-row me-auto">
                 {% for fav in current_user.get_favorites() %}
                 {% set label = NAV_LINKS.get(fav, fav.split('.')[-1].replace('_', ' ').title()) %}

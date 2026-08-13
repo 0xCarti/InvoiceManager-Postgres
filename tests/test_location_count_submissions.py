@@ -1,6 +1,8 @@
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
+from werkzeug.security import generate_password_hash
+
 from app import db
 from app.models import (
     Event,
@@ -13,6 +15,7 @@ from app.models import (
     LocationCountSubmission,
     LocationCountSubmissionRow,
     LocationStandItem,
+    User,
 )
 from app.services.location_count_submissions import (
     sync_event_location_counts_from_approved_submissions,
@@ -235,7 +238,7 @@ def test_public_count_submission_auto_switches_to_inventory_for_inventory_event(
     with app.app_context():
         suffix = uuid4().hex[:8]
         location = Location(name=f"Inventory QR Stand {suffix}")
-        item = Item(name=f"Inventory QR Cup {suffix}", base_unit="each")
+        item = Item(name=f"Inventory QR Cup {suffix}", base_unit="each", cost=2.5)
         db.session.add_all([location, item])
         db.session.flush()
         unit = ItemUnit(item_id=item.id, name="Case of 12", factor=12)
@@ -246,7 +249,7 @@ def test_public_count_submission_auto_switches_to_inventory_for_inventory_event(
                     location_id=location.id,
                     item_id=item.id,
                     countable=True,
-                    expected_count=0.0,
+                    expected_count=5.0,
                 ),
             ]
         )
@@ -274,6 +277,10 @@ def test_public_count_submission_auto_switches_to_inventory_for_inventory_event(
     assert b"Submit Inventory Count" in response.data
     assert f"inventory_unit_{item_id}_0".encode() in response.data
     assert f"inventory_qty_{item_id}_0".encode() in response.data
+    assert b'inputmode="numeric"' in response.data
+    assert b'pattern="[0-9]*"' in response.data
+    assert b'data-inventory-quantity-entry="1"' in response.data
+    assert b'inputmode="decimal"' not in response.data
     assert b"Case of 12" in response.data
 
     response = client.post(
@@ -307,6 +314,108 @@ def test_public_count_submission_auto_switches_to_inventory_for_inventory_event(
         assert submission.rows[0].count_value == 24.0
         assert submission.rows[0].unit_breakdown[0]["quantity"] == 2.0
         assert submission.rows[0].unit_breakdown[0]["base_quantity"] == 24.0
+        assert submission.rows[0].expected_count_value == 5.0
+
+
+def test_removed_inventory_item_hides_from_public_page_but_keeps_pending_submission(
+    client, app
+):
+    today = date.today()
+    with app.app_context():
+        suffix = uuid4().hex[:8]
+        admin = User(
+            email=f"inventory-delete-{suffix}@example.com",
+            password=generate_password_hash("pass"),
+            is_admin=True,
+            active=True,
+        )
+        location = Location(name=f"Inventory Delete Stand {suffix}")
+        item = Item(name=f"Inventory Delete Cup {suffix}", base_unit="each", cost=1.5)
+        event = Event(
+            name=f"Inventory Delete Event {suffix}",
+            start_date=today,
+            end_date=today,
+            event_type="inventory",
+        )
+        db.session.add_all([admin, location, item, event])
+        db.session.flush()
+        unit = ItemUnit(item_id=item.id, name="each", factor=1)
+        event_location = EventLocation(event_id=event.id, location_id=location.id)
+        db.session.add_all(
+            [
+                unit,
+                event_location,
+                LocationStandItem(
+                    location_id=location.id,
+                    item_id=item.id,
+                    countable=True,
+                    expected_count=5.0,
+                ),
+            ]
+        )
+        db.session.flush()
+        operating_day = EventLocationOperatingDay(
+            event_location_id=event_location.id,
+            operating_date=today,
+        )
+        db.session.add(operating_day)
+        db.session.commit()
+        token = location.count_qr_token
+        location_id = location.id
+        item_id = item.id
+        unit_id = unit.id
+        event_id = event.id
+
+    inventory_url = (
+        f"/locations/scan/{token}/inventory/{event_id}"
+        f"?operating_date={today.isoformat()}"
+    )
+
+    response = client.get(inventory_url)
+    assert response.status_code == 200
+    assert f"Inventory Delete Cup {suffix}".encode() in response.data
+
+    response = client.post(
+        inventory_url,
+        data={
+            "submitted_name": "Inventory Counter",
+            f"inventory_unit_{item_id}_0": str(unit_id),
+            f"inventory_qty_{item_id}_0": "4",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        submission = LocationCountSubmission.query.one()
+        assert submission.status == LocationCountSubmission.STATUS_PENDING
+        assert submission.rows[0].item_id == item_id
+        assert submission.rows[0].count_value == 4.0
+        assert submission.rows[0].expected_count_value == 5.0
+
+    with client:
+        login(client, f"inventory-delete-{suffix}@example.com", "pass")
+        delete_response = client.post(
+            f"/locations/{location_id}/items/{item_id}/delete",
+            data={"submit": "Delete"},
+            follow_redirects=True,
+        )
+    assert delete_response.status_code == 200
+    assert b"Item removed from location" in delete_response.data
+
+    public_after_delete = client.get(inventory_url)
+    assert public_after_delete.status_code == 200
+    assert f"Inventory Delete Cup {suffix}".encode() not in public_after_delete.data
+
+    with app.app_context():
+        submission = LocationCountSubmission.query.one()
+        assert submission.status == LocationCountSubmission.STATUS_PENDING
+        assert submission.rows[0].item_id == item_id
+        record = LocationStandItem.query.filter_by(
+            location_id=location_id,
+            item_id=item_id,
+        ).one()
+        assert record.active is False
 
 
 def test_public_inventory_count_can_add_catalog_item(client, app):

@@ -332,6 +332,56 @@ def test_bulk_delete_items_archives_selected_rows(client, app):
         )
 
 
+def test_view_items_renders_persistent_selection_controls(client, app):
+    with app.app_context():
+        item = Item(name="Selection Persist Test Item", base_unit="each", archived=False)
+        db.session.add(item)
+        db.session.commit()
+
+    login_admin(client, app)
+    response = client.get("/items", follow_redirects=True)
+    assert response.status_code == 200
+
+    html = response.get_data(as_text=True)
+    assert 'data-item-selection-toolbar="1"' in html
+    assert 'data-item-selection-filter="1"' in html
+    assert 'value="selected" data-item-selection-filter="1"' in html
+    assert 'value="unselected" data-item-selection-filter="1"' in html
+    assert 'data-item-selection-hidden-inputs="1"' in html
+    assert 'data-item-selection-count' in html
+    assert 'data-item-selection-status' in html
+    assert "data-item-selection-clear" not in html
+    assert "Clear Selection" not in html
+    assert 'data-item-select="1"' in html
+    assert 'data-item-row="1"' in html
+    assert "/items/selected-rows" in html
+    assert 'window.ItemSelection' in html
+
+
+def test_selected_item_rows_returns_rows_for_cross_page_selection(client, app):
+    with app.app_context():
+        item1 = Item(name="Selected Rows Alpha", base_unit="each", archived=False)
+        item2 = Item(name="Selected Rows Bravo", base_unit="case", archived=False)
+        db.session.add_all([item1, item2])
+        db.session.commit()
+        item1_id = item1.id
+        item2_id = item2.id
+
+    login_admin(client, app)
+    response = client.get(
+        f"/items/selected-rows?ids={item2_id}&ids=bad&ids={item1_id}&ids=999999"
+    )
+    assert response.status_code == 200
+
+    payload = response.get_json()
+    assert [row["id"] for row in payload["rows"]] == [item2_id, item1_id]
+    assert payload["missing_ids"] == [999999]
+    assert 'data-item-row="1"' in payload["rows"][0]["html"]
+    assert 'data-item-select="1"' in payload["rows"][0]["html"]
+    assert "Selected Rows Bravo" in payload["rows"][0]["html"]
+    assert "Selected Rows Alpha" in payload["rows"][1]["html"]
+
+
 def test_duplicate_items_page_groups_similar_names_with_last_received(client, app):
     with app.app_context():
         receiver = User(

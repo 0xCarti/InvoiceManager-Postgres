@@ -12,6 +12,7 @@ from app import db
 from app.models import (
     Event,
     EventLocation,
+    EventLocationOperatingDay,
     Item,
     Location,
     LocationCountSubmission,
@@ -131,6 +132,107 @@ def test_event_detail_hides_management_controls_without_permission(client, app):
     assert "/undo_confirm_location" not in body
 
 
+def test_inventory_event_detail_hides_regular_location_workflow_controls(
+    client, app
+):
+    event_date = date(2026, 4, 3)
+    with app.app_context():
+        user = User(
+            email="inventory-detail-controls@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        location = Location(name="Inventory Detail Stand")
+        event = Event(
+            name="Inventory Detail Event",
+            start_date=event_date,
+            end_date=event_date,
+            event_type="inventory",
+        )
+        db.session.add_all([user, location, event])
+        db.session.flush()
+        event_location = EventLocation(event=event, location=location)
+        db.session.add(event_location)
+        db.session.flush()
+        db.session.add(
+            EventLocationOperatingDay(
+                event_location_id=event_location.id,
+                operating_date=event_date,
+            )
+        )
+        db.session.commit()
+        grant_event_permissions(user)
+        event_id = event.id
+        event_location_id = event_location.id
+        location_id = location.id
+        count_qr_token = location.count_qr_token
+
+    with client:
+        login(client, "inventory-detail-controls@example.com", "pass")
+        response = client.get(f"/events/{event_id}")
+        body = response.data.decode()
+
+    assert response.status_code == 200
+    assert f"/events/{event_id}/sales/upload" not in body
+    assert f"/events/{event_id}/locations/{event_location_id}/sales/add" not in body
+    assert f"/events/{event_id}/stand_sheet/{location_id}" not in body
+    assert "Opening</th>" not in body
+    assert "Closing</th>" not in body
+    assert "Sales</th>" not in body
+    assert "Estimated Sales" not in body
+    assert "Actual Confirmed Sales" not in body
+    assert "Physical vs Terminal Variance" not in body
+    assert "Terminal sales assignment conflict" not in body
+    assert ">Counts</a>" not in body
+    assert ">Sales</a>" not in body
+    assert f"/events/{event_id}/count_sheet/{location_id}" in body
+    assert f"/events/{event_id}/locations/{location_id}/scan_counts" not in body
+    assert "Scan Counts" not in body
+    assert f"/locations/scan/{count_qr_token}/inventory/{event_id}" in body
+    assert (
+        f"/locations/count-submissions?event_location_id={event_location_id}"
+        in body
+    )
+    assert "submission_type=inventory" in body
+    assert "status=pending" in body
+
+
+def test_closed_inventory_event_detail_shows_only_inventory_reports(client, app):
+    event_date = date(2026, 4, 4)
+    with app.app_context():
+        user = User(
+            email="inventory-reports-only@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        location = Location(name="Inventory Reports Stand")
+        event = Event(
+            name="Inventory Reports Event",
+            start_date=event_date,
+            end_date=event_date,
+            event_type="inventory",
+            closed=True,
+        )
+        db.session.add_all([user, location, event])
+        db.session.flush()
+        event_location = EventLocation(event=event, location=location, confirmed=True)
+        db.session.add(event_location)
+        db.session.commit()
+        grant_event_permissions(user)
+        event_id = event.id
+
+    with client:
+        login(client, "inventory-reports-only@example.com", "pass")
+        response = client.get(f"/events/{event_id}")
+        body = response.data.decode()
+
+    assert response.status_code == 200
+    assert "Closed Event Report" not in body
+    assert "Count Sheet Report" in body
+    assert "Summary Source 18" in body
+    assert "Inventory Comparison" in body
+
+
 def test_report_only_user_cannot_mutate_stand_sheet(client, app):
     seeded = _seed_event_user(
         app,
@@ -202,6 +304,9 @@ def test_report_only_user_cannot_submit_inventory_count_sheet(client, app):
     assert page.status_code == 200
     assert "This count sheet is read only for your account." in body
     assert "Submit For Review" not in body
+    assert 'data-inventory-add-panel="1"' not in body
+    assert 'data-inventory-add-row=' not in body
+    assert 'data-inventory-remove-row="1"' not in body
     assert response.status_code == 403
     with app.app_context():
         assert LocationCountSubmission.query.count() == 0

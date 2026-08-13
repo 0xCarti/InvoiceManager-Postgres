@@ -84,6 +84,26 @@ def test_user_can_access_endpoint_requires_matching_permission():
         "POST",
     )
     assert user_can_access_endpoint(
+        DummyUser("events.reports"),
+        "event.inventory_comparison_report",
+        "GET",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("events.reports"),
+        "event.bulk_count_sheets_csv",
+        "GET",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("events.reports"),
+        "event.inventory_report_csv",
+        "GET",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("events.reports"),
+        "event.inventory_comparison_report_csv",
+        "GET",
+    )
+    assert user_can_access_endpoint(
         DummyUser("events.view"),
         "event.download_event_document",
     )
@@ -219,6 +239,11 @@ def test_user_can_access_endpoint_requires_matching_permission():
         DummyUser("purchase_orders.view", "purchase_orders.edit"),
         "purchase.mark_purchase_order_ordered",
         "POST",
+    )
+    assert user_can_access_endpoint(
+        DummyUser("items.view"),
+        "item.selected_item_rows",
+        "GET",
     )
     assert user_can_access_endpoint(
         DummyUser("items.view"),

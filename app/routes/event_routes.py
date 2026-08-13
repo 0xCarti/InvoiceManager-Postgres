@@ -37,7 +37,6 @@ from app.forms import (
     EventLocationUndoConfirmForm,
     ProductWithRecipeForm,
     UpdateOpeningCountsForm,
-    ScanCountForm,
     TerminalSalesUploadForm,
 )
 from app.models import (
@@ -62,10 +61,18 @@ from app.models import (
 )
 from app.services.location_count_submissions import (
     aggregate_submission_rows_for_event_location_day,
+    approved_inventory_count_totals_for_event_day,
+    build_inventory_print_unit_labels,
     build_location_inventory_count_item_entries,
     ensure_event_location_operating_days,
     event_operating_dates,
+    extend_inventory_entries_with_posted_items,
+    INVENTORY_ITEM_SEARCH_LIMIT,
+    INVENTORY_ITEM_SEARCH_MIN_LENGTH,
+    inventory_item_search_payload,
     parse_inventory_count_submission_rows,
+    parse_inventory_item_ids,
+    query_inventory_item_search,
 )
 from app.services.event_documents import (
     cleanup_orphaned_event_document_storage,
@@ -118,7 +125,11 @@ from app.utils.units import (
     convert_quantity_for_reporting,
     get_unit_label,
 )
-from app.utils.text import build_text_match_predicate, normalize_name_for_sorting
+from app.utils.text import (
+    build_text_match_predicate,
+    normalize_name_for_sorting,
+    normalize_request_text_filter,
+)
 from app.utils.email import send_email
 from app.utils.timezone import default_timezone_date
 from itsdangerous import BadSignature, URLSafeSerializer
@@ -2484,404 +2495,6 @@ def add_terminal_sale(event_id, el_id):
         event_location=el,
         existing_sales=existing_sales,
         products=available_products,
-    )
-
-
-def _wants_json_response() -> bool:
-    """Return True when the current request prefers a JSON response."""
-
-    if request.is_json:
-        return True
-    accept_mimetypes = request.accept_mimetypes
-    return (
-        accept_mimetypes["application/json"]
-        > accept_mimetypes["text/html"]
-    )
-
-
-def _serialize_scan_totals(
-    event_location: EventLocation,
-    operating_date: date_cls,
-):
-    """Return the location and summaries of counted items."""
-
-    location = event_location.location or db.session.get(
-        Location, event_location.location_id
-    )
-    if location is None:
-        return None, []
-
-    item_entries = build_location_inventory_count_item_entries(location)
-    pending_totals: dict[int, float] = defaultdict(float)
-    pending_submissions = (
-        LocationCountSubmission.query.options(
-            selectinload(LocationCountSubmission.rows)
-        )
-        .filter(
-            LocationCountSubmission.event_location_id == event_location.id,
-            LocationCountSubmission.submission_type
-            == LocationCountSubmission.TYPE_INVENTORY,
-            LocationCountSubmission.status == LocationCountSubmission.STATUS_PENDING,
-            LocationCountSubmission.submission_date == operating_date,
-        )
-        .all()
-    )
-    for submission in pending_submissions:
-        for row in submission.rows:
-            if row.item_id is not None:
-                pending_totals[row.item_id] += float(row.count_value or 0.0)
-
-    sheet_map = {
-        sheet.item_id: sheet for sheet in (event_location.stand_sheet_items or [])
-    }
-    totals = []
-    seen_item_ids = set()
-
-    for entry in item_entries:
-        item = entry["item"]
-        sheet = sheet_map.get(item.id)
-        approved_count = float(sheet.closing_count or 0.0) if sheet else 0.0
-        counted = approved_count + pending_totals.pop(item.id, 0.0)
-        totals.append(
-            {
-                "item_id": item.id,
-                "name": item.name,
-                "upc": item.upc,
-                "expected": float(entry.get("expected") or 0.0),
-                "counted": counted,
-                "base_unit": item.base_unit,
-            }
-        )
-        seen_item_ids.add(item.id)
-
-    for item_id, pending_count in pending_totals.items():
-        if item_id in seen_item_ids:
-            continue
-        item = db.session.get(Item, item_id)
-        if item is None:
-            continue
-        sheet = sheet_map.get(item_id)
-        approved_count = float(sheet.closing_count or 0.0) if sheet else 0.0
-        totals.append(
-            {
-                "item_id": item.id,
-                "name": item.name,
-                "upc": item.upc,
-                "expected": 0.0,
-                "counted": approved_count + pending_count,
-                "base_unit": item.base_unit,
-            }
-        )
-        seen_item_ids.add(item.id)
-
-    for sheet in event_location.stand_sheet_items or []:
-        if sheet.item_id in seen_item_ids:
-            continue
-        item = sheet.item
-        if item is None:
-            continue
-        totals.append(
-            {
-                "item_id": item.id,
-                "name": item.name,
-                "upc": item.upc,
-                "expected": 0.0,
-                "counted": float(sheet.closing_count or 0.0),
-                "base_unit": item.base_unit,
-            }
-        )
-
-    totals.sort(key=lambda record: record["name"].lower())
-    return location, totals
-
-
-def _get_or_create_scan_inventory_submission(
-    event: Event,
-    event_location: EventLocation,
-    operating_day: EventLocationOperatingDay,
-) -> LocationCountSubmission:
-    """Return the current user's pending barcode-scan inventory submission."""
-
-    submission_date = operating_day.operating_date
-    submitted_name = (
-        current_user.display_name
-        or current_user.email
-        or "Barcode Scanner"
-    )
-    submission = (
-        LocationCountSubmission.query.filter_by(
-            event_location_id=event_location.id,
-            submission_type=LocationCountSubmission.TYPE_INVENTORY,
-            status=LocationCountSubmission.STATUS_PENDING,
-            submitted_name=submitted_name,
-            submission_date=submission_date,
-        )
-        .order_by(LocationCountSubmission.submitted_at.desc())
-        .first()
-    )
-    if submission is not None:
-        if submission.event_operating_day_id is None:
-            submission.event_operating_day = operating_day
-        return submission
-
-    submission = LocationCountSubmission(
-        source_location_id=event_location.location_id,
-        location_id=event_location.location_id,
-        event_location_id=event_location.id,
-        event_operating_day_id=operating_day.id,
-        submission_type=LocationCountSubmission.TYPE_INVENTORY,
-        submitted_name=submitted_name,
-        submission_date=submission_date,
-        status=LocationCountSubmission.STATUS_PENDING,
-    )
-    db.session.add(submission)
-    db.session.flush()
-    return submission
-
-
-@event.route(
-    "/events/<int:event_id>/locations/<int:location_id>/scan_counts",
-    methods=["GET", "POST"],
-)
-@login_required
-def scan_counts(event_id, location_id):
-    ev = db.session.get(Event, event_id)
-    if ev is None:
-        abort(404)
-    if ev.event_type != "inventory":
-        abort(404)
-
-    el = EventLocation.query.filter_by(
-        event_id=event_id, location_id=location_id
-    ).first()
-    if el is None:
-        abort(404)
-
-    wants_json = _wants_json_response()
-
-    if ev.closed:
-        if wants_json:
-            return (
-                jsonify(
-                    success=False, error="This event is closed to updates."
-                ),
-                403,
-            )
-        abort(403, description="This event is closed to updates.")
-
-    json_payload = (
-        request.get_json(silent=True) or {}
-        if request.method == "POST" and wants_json
-        else {}
-    )
-    requested_operating_date = (
-        request.values.get("operating_date")
-        or json_payload.get("operating_date")
-        or ""
-    )
-    operating_date, operating_day, operating_day_error = (
-        _resolve_inventory_operating_day(
-            el,
-            requested_operating_date,
-        )
-    )
-    if operating_day_error:
-        if wants_json:
-            return jsonify(success=False, error=operating_day_error), 400
-        flash(operating_day_error, "warning")
-        return redirect(url_for("event.view_event", event_id=event_id))
-
-    form = ScanCountForm()
-    if form.quantity.data is None:
-        form.quantity.data = 1
-
-    if request.method == "GET" and wants_json:
-        location, totals = _serialize_scan_totals(el, operating_date)
-        return jsonify(
-            success=True,
-            location={"id": location.id, "name": location.name},
-            totals=totals,
-            operating_date=operating_date.isoformat(),
-        )
-
-    if request.method == "POST":
-        if wants_json:
-            payload = json_payload
-            upc = (payload.get("upc") or "").strip()
-            raw_quantity = payload.get("quantity", 1)
-            try:
-                quantity = float(raw_quantity)
-            except (TypeError, ValueError):
-                quantity = None
-
-            if not upc:
-                return (
-                    jsonify(
-                        success=False, error="A barcode value is required."
-                    ),
-                    400,
-                )
-            if quantity is None:
-                return (
-                    jsonify(
-                        success=False,
-                        error="Quantity must be a numeric value.",
-                    ),
-                    400,
-                )
-        else:
-            if not form.validate_on_submit():
-                location, totals = _serialize_scan_totals(el, operating_date)
-                return (
-                    render_template(
-                        "events/scan_count.html",
-                        event=ev,
-                        location=location,
-                        form=form,
-                        totals=totals,
-                        operating_date=operating_date,
-                    ),
-                    400,
-                )
-            upc = (form.upc.data or "").strip()
-            quantity = float(form.quantity.data or 0)
-
-        item = Item.lookup_by_barcode(upc)
-        if item is None:
-            if wants_json:
-                return (
-                    jsonify(
-                        success=False,
-                        error=f"No item found for barcode {upc}.",
-                    ),
-                    404,
-                )
-            flash(f"No item found for barcode {upc}.", "danger")
-            location, totals = _serialize_scan_totals(el, operating_date)
-            return (
-                render_template(
-                    "events/scan_count.html",
-                    event=ev,
-                    location=location,
-                    form=form,
-                    totals=totals,
-                    operating_date=operating_date,
-                ),
-                404,
-            )
-
-        location_record = LocationStandItem.query.filter_by(
-            location_id=location_id,
-            item_id=item.id,
-        ).first()
-        if (
-            location_record is None
-            or not bool(location_record.active)
-            or not bool(location_record.countable)
-        ):
-            message = f"{item.name} is not countable for this inventory location."
-            if wants_json:
-                return jsonify(success=False, error=message), 400
-            flash(message, "danger")
-            location, totals = _serialize_scan_totals(el, operating_date)
-            return (
-                render_template(
-                    "events/scan_count.html",
-                    event=ev,
-                    location=location,
-                    form=form,
-                    totals=totals,
-                    operating_date=operating_date,
-                ),
-                400,
-            )
-
-        submission = _get_or_create_scan_inventory_submission(
-            ev,
-            el,
-            operating_day,
-        )
-        row = next(
-            (existing for existing in submission.rows if existing.item_id == item.id),
-            None,
-        )
-        if row is None:
-            row = LocationCountSubmissionRow(
-                submission_id=submission.id,
-                item_id=item.id,
-                count_value=0.0,
-                submitted_count_value=0.0,
-                unit_breakdown=[],
-                parse_index=len(submission.rows or []),
-            )
-            db.session.add(row)
-            submission.rows.append(row)
-
-        row.count_value = float(row.count_value or 0.0) + quantity
-        row.submitted_count_value = float(row.submitted_count_value or 0.0) + quantity
-        breakdown = list(row.unit_breakdown or [])
-        breakdown.append(
-            {
-                "unit_id": None,
-                "unit_name": get_unit_label(item.base_unit) or item.base_unit,
-                "unit_factor": 1.0,
-                "quantity": quantity,
-                "base_quantity": quantity,
-                "base_unit": item.base_unit,
-            }
-        )
-        row.unit_breakdown = breakdown
-        db.session.commit()
-        log_activity(
-            f"Submitted scanned inventory count for event {event_id}"
-            f" location {location_id} item {item.id}"
-        )
-
-        location, totals = _serialize_scan_totals(el, operating_date)
-        total_count = next(
-            (
-                float(entry["counted"] or 0.0)
-                for entry in totals
-                if entry["item_id"] == item.id
-            ),
-            float(row.count_value or 0.0),
-        )
-
-        if wants_json:
-            return jsonify(
-                success=True,
-                item={
-                    "id": item.id,
-                    "name": item.name,
-                    "upc": item.upc,
-                    "quantity": quantity,
-                    "total": total_count,
-                    "base_unit": item.base_unit,
-                },
-                totals=totals,
-            )
-
-        flash(
-            f"Submitted {quantity:g} {item.base_unit} for {item.name} for manager review.",
-            "success",
-        )
-        return redirect(
-            url_for(
-                "event.scan_counts",
-                event_id=event_id,
-                location_id=location_id,
-                operating_date=operating_date.isoformat(),
-            )
-        )
-
-    location, totals = _serialize_scan_totals(el, operating_date)
-    return render_template(
-        "events/scan_count.html",
-        event=ev,
-        location=location,
-        form=form,
-        totals=totals,
-        operating_date=operating_date,
     )
 
 
@@ -6385,9 +5998,23 @@ def count_sheet(event_id, location_id):
     location = el.location or db.session.get(Location, location_id)
     if location is None:
         abort(404)
-    items = build_location_inventory_count_item_entries(location)
+    approved_inventory_counts = approved_inventory_count_totals_for_event_day(
+        el.id,
+        operating_day.id,
+    )
+    items = build_location_inventory_count_item_entries(
+        location,
+        approved_counts_by_item_id=approved_inventory_counts,
+    )
+    inventory_item_search_url = url_for(
+        "event.count_sheet_item_search",
+        event_id=event_id,
+        location_id=location_id,
+        operating_date=operating_date.isoformat(),
+    )
 
     if request.method == "POST":
+        items = extend_inventory_entries_with_posted_items(items, request.form)
         submitted_name = (
             request.form.get("submitted_name")
             or current_user.display_name
@@ -6403,6 +6030,7 @@ def count_sheet(event_id, location_id):
                 items=items,
                 submitted_name=submitted_name,
                 operating_date=operating_date,
+                inventory_item_search_url=inventory_item_search_url,
             )
         requested_rows = parse_inventory_count_submission_rows(
             request.form,
@@ -6417,6 +6045,7 @@ def count_sheet(event_id, location_id):
                 items=items,
                 submitted_name=submitted_name,
                 operating_date=operating_date,
+                inventory_item_search_url=inventory_item_search_url,
             )
 
         submission = LocationCountSubmission(
@@ -6438,6 +6067,7 @@ def count_sheet(event_id, location_id):
                     item_id=row_data["item_id"],
                     count_value=row_data["count_value"],
                     submitted_count_value=row_data["submitted_count_value"],
+                    expected_count_value=row_data.get("expected_count_value"),
                     unit_breakdown=row_data.get("unit_breakdown"),
                     parse_index=index,
                 )
@@ -6456,6 +6086,63 @@ def count_sheet(event_id, location_id):
         items=items,
         submitted_name=(current_user.display_name or current_user.email or ""),
         operating_date=operating_date,
+        inventory_item_search_url=inventory_item_search_url,
+    )
+
+
+@event.route(
+    "/events/<int:event_id>/count_sheet/<int:location_id>/items/search",
+    methods=["GET"],
+)
+@login_required
+def count_sheet_item_search(event_id: int, location_id: int):
+    """Return capped item-master matches for an authenticated inventory count."""
+
+    ev = db.session.get(Event, event_id)
+    if ev is None:
+        abort(404)
+    if ev.event_type != "inventory":
+        abort(404)
+
+    event_location = EventLocation.query.filter_by(
+        event_id=event_id,
+        location_id=location_id,
+    ).first()
+    if event_location is None:
+        abort(404)
+
+    if ev.closed:
+        return jsonify({"items": [], "message": "This inventory event is closed."}), 400
+
+    _, _, operating_day_error = _resolve_inventory_operating_day(
+        event_location,
+        request.args.get("operating_date"),
+    )
+    if operating_day_error:
+        return jsonify({"items": [], "message": operating_day_error}), 400
+
+    search_term = normalize_request_text_filter(
+        request.args.get("q") or request.args.get("term")
+    )
+    item_ids = parse_inventory_item_ids(request.args.get("ids"))
+    items = query_inventory_item_search(
+        search_term=search_term,
+        item_ids=item_ids,
+    )
+    message = ""
+    if not item_ids and len(search_term) < INVENTORY_ITEM_SEARCH_MIN_LENGTH:
+        message = (
+            f"Type at least {INVENTORY_ITEM_SEARCH_MIN_LENGTH} characters "
+            "to search item master."
+        )
+
+    return jsonify(
+        {
+            "items": [inventory_item_search_payload(item) for item in items],
+            "limit": INVENTORY_ITEM_SEARCH_LIMIT,
+            "min_query_length": INVENTORY_ITEM_SEARCH_MIN_LENGTH,
+            "message": message,
+        }
     )
 
 
@@ -6645,13 +6332,80 @@ def bulk_count_sheets(event_id):
         abort(404)
     if ev.event_type != "inventory":
         abort(404)
+    try:
+        report_context = _bulk_count_sheet_report_context(
+            ev,
+            request.args.get("operating_date"),
+        )
+    except ValueError:
+        flash("Choose a valid inventory count date.", "warning")
+        return redirect(url_for("event.view_event", event_id=event_id))
+    return render_template(
+        "events/bulk_count_sheets.html",
+        event=ev,
+        **report_context,
+    )
+
+
+@event.route("/events/<int:event_id>/count_sheets.csv")
+@login_required
+def bulk_count_sheets_csv(event_id):
+    ev = db.session.get(Event, event_id)
+    if ev is None:
+        abort(404)
+    if ev.event_type != "inventory":
+        abort(404)
+    try:
+        report_context = _bulk_count_sheet_report_context(
+            ev,
+            request.args.get("operating_date"),
+        )
+    except ValueError:
+        abort(400)
+
+    rows = []
+    for block in report_context["data"]:
+        location_name = block["location"].name
+        for entry in block["items"]:
+            rows.append(
+                [
+                    location_name,
+                    entry["item"].name,
+                    "",
+                    entry["receiving_unit_label"],
+                    "",
+                    entry["transfer_unit_label"],
+                    "",
+                    entry["base_unit_label"],
+                ]
+            )
+
+    date_suffix = report_context["selected_operating_date"].isoformat()
+    return _csv_download_response(
+        f"count-sheet-report-event-{ev.id}-{date_suffix}.csv",
+        [
+            [
+                "Location",
+                "Item Name",
+                "Receiving Count",
+                "Receiving Unit",
+                "Transfer Count",
+                "Transfer Unit",
+                "Base Count",
+                "Base Unit",
+            ],
+            *rows,
+        ],
+    )
+
+
+def _bulk_count_sheet_report_context(ev: Event, requested_operating_date) -> dict:
     event_dates = event_operating_dates(ev)
-    requested_operating_date = (request.args.get("operating_date") or "").strip()
+    requested_operating_date = (requested_operating_date or "").strip()
     if requested_operating_date:
         selected_operating_date = _parse_date(requested_operating_date)
         if selected_operating_date is None:
-            flash("Choose a valid inventory count date.", "warning")
-            return redirect(url_for("event.view_event", event_id=event_id))
+            raise ValueError("Invalid inventory count date")
     else:
         selected_operating_date = _default_inventory_operating_date(ev)
 
@@ -6659,8 +6413,7 @@ def bulk_count_sheets(event_id):
         selected_operating_date is None
         or selected_operating_date not in set(event_dates)
     ):
-        flash("Choose a valid inventory count date.", "warning")
-        return redirect(url_for("event.view_event", event_id=event_id))
+        raise ValueError("Invalid inventory count date")
 
     data = []
     skipped_locations = []
@@ -6682,6 +6435,8 @@ def bulk_count_sheets(event_id):
             )
             continue
         items = build_location_inventory_count_item_entries(loc)
+        for entry in items:
+            entry.update(build_inventory_print_unit_labels(entry["item"]))
         data.append(
             {
                 "location": loc,
@@ -6690,14 +6445,23 @@ def bulk_count_sheets(event_id):
                 "page_count": 1,
             }
         )
-    return render_template(
-        "events/bulk_count_sheets.html",
-        event=ev,
-        data=data,
-        event_dates=event_dates,
-        selected_operating_date=selected_operating_date,
-        skipped_locations=skipped_locations,
-    )
+
+    return {
+        "data": data,
+        "event_dates": event_dates,
+        "selected_operating_date": selected_operating_date,
+        "skipped_locations": skipped_locations,
+    }
+
+
+def _csv_download_response(filename: str, rows: list[list]) -> object:
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerows(rows)
+    response = make_response(output.getvalue())
+    response.headers["Content-Type"] = "text/csv; charset=utf-8"
+    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+    return response
 
 
 def _approved_inventory_submission_item_ids(event_location_id: int) -> set[int]:
@@ -6809,14 +6573,57 @@ def close_event(event_id):
 @event.route("/events/<int:event_id>/inventory_report")
 @login_required
 def inventory_report(event_id):
-    """Display inventory variances and GL code totals for an event."""
+    """Display inventory GL-code quantity and cost totals for an event."""
     ev = db.session.get(Event, event_id)
     if ev is None:
         abort(404)
+    if ev.event_type != "inventory":
+        abort(404)
+    report_context = _inventory_summary_report_context(ev)
+    return render_template(
+        "events/inventory_report.html",
+        event=ev,
+        **report_context,
+    )
 
-    rows = []
-    gl_totals = {}
-    gl_summary = {}
+
+@event.route("/events/<int:event_id>/inventory_report.csv")
+@login_required
+def inventory_report_csv(event_id):
+    ev = db.session.get(Event, event_id)
+    if ev is None:
+        abort(404)
+    if ev.event_type != "inventory":
+        abort(404)
+    report_context = _inventory_summary_report_context(ev)
+    rows = [
+        ["GL Code", "GL Code Description", "Total Quantity", "Total Cost"],
+    ]
+    for summary_row in report_context["gl_summary"]:
+        rows.append(
+            [
+                summary_row["gl_code"],
+                summary_row["gl_description"],
+                f"{summary_row['quantity']:.4f}",
+                f"{summary_row['cost']:.2f}",
+            ]
+        )
+    rows.append(
+        [
+            "Grand Total",
+            "",
+            f"{report_context['grand_quantity']:.4f}",
+            f"{report_context['grand_total']:.2f}",
+        ]
+    )
+    return _csv_download_response(
+        f"summary-source-18-event-{ev.id}.csv",
+        rows,
+    )
+
+
+def _inventory_summary_report_context(ev: Event) -> dict:
+    summary_by_gl_code = {}
     grand_total = 0.0
     grand_quantity = 0.0
 
@@ -6824,50 +6631,264 @@ def inventory_report(event_id):
         loc = el.location
         for sheet in el.stand_sheet_items:
             item = sheet.item
-            lsi = None
-            if item is not None:
-                lsi = LocationStandItem.query.filter_by(
-                    location_id=loc.id, item_id=item.id
-                ).first()
-            expected = lsi.expected_count if lsi else 0
-            variance = sheet.closing_count - expected
             item_cost = _sheet_item_cost(sheet)
             cost_total = float(sheet.closing_count or 0.0) * item_cost
+            location_id = loc.id if loc is not None else el.location_id
             gl_obj = (
-                item.purchase_gl_code_for_location(loc.id)
-                if item is not None
+                item.purchase_gl_code_for_location(location_id)
+                if item is not None and location_id is not None
                 else None
             )
             gl_code = gl_obj.code if gl_obj else "Unassigned"
+            gl_description = gl_obj.description if gl_obj else "Unassigned"
             actual_count = float(sheet.closing_count or 0.0)
-            rows.append(
-                {
-                    "location": loc,
-                    "item": item,
-                    "item_name": _sheet_item_name(sheet),
-                    "expected": expected,
-                    "actual": sheet.closing_count,
-                    "variance": variance,
-                    "gl_code": gl_code,
-                    "cost_total": cost_total,
-                }
-            )
-            gl_totals[gl_code] = gl_totals.get(gl_code, 0.0) + cost_total
-            summary_entry = gl_summary.setdefault(
+            summary_entry = summary_by_gl_code.setdefault(
                 gl_code,
-                {"quantity": 0.0, "cost": 0.0},
+                {
+                    "gl_code": gl_code,
+                    "gl_description": gl_description or "",
+                    "quantity": 0.0,
+                    "cost": 0.0,
+                },
             )
+            if not summary_entry["gl_description"] and gl_description:
+                summary_entry["gl_description"] = gl_description
             summary_entry["quantity"] += actual_count
             summary_entry["cost"] += cost_total
             grand_total += cost_total
             grand_quantity += actual_count
 
-    return render_template(
-        "events/inventory_report.html",
-        event=ev,
-        rows=rows,
-        gl_totals=gl_totals,
-        gl_summary=gl_summary,
-        grand_total=grand_total,
-        grand_quantity=grand_quantity,
+    def gl_summary_sort_key(summary_row):
+        code = str(summary_row["gl_code"] or "").strip()
+        if code.casefold() == "unassigned":
+            return (1, math.inf, code.casefold())
+        if code.isdigit():
+            return (0, int(code), code.casefold())
+        return (0, math.inf, code.casefold())
+
+    gl_summary = sorted(summary_by_gl_code.values(), key=gl_summary_sort_key)
+
+    return {
+        "gl_summary": gl_summary,
+        "grand_total": grand_total,
+        "grand_quantity": grand_quantity,
+    }
+
+
+def _previous_inventory_event(current_event: Event) -> Event | None:
+    """Return the inventory event immediately before ``current_event``."""
+
+    return (
+        Event.query.filter(
+            Event.event_type == "inventory",
+            Event.id != current_event.id,
+            or_(
+                Event.end_date < current_event.start_date,
+                (
+                    Event.end_date == current_event.start_date
+                )
+                & (Event.id < current_event.id),
+            ),
+        )
+        .order_by(Event.end_date.desc(), Event.start_date.desc(), Event.id.desc())
+        .first()
     )
+
+
+def _inventory_item_totals_for_event(event_obj: Event) -> dict[int, dict]:
+    totals: dict[int, dict] = {}
+    for event_location in event_obj.locations:
+        location_obj = event_location.location
+        location_id = location_obj.id if location_obj is not None else None
+        for sheet in event_location.stand_sheet_items:
+            item_id = sheet.item_id
+            item_obj = sheet.item
+            quantity = float(sheet.closing_count or 0.0)
+            item_cost = _sheet_item_cost(sheet)
+            cost_total = quantity * item_cost
+            gl_obj = (
+                item_obj.purchase_gl_code_for_location(location_id)
+                if item_obj is not None and location_id is not None
+                else None
+            )
+            gl_code = gl_obj.code if gl_obj else "Unassigned"
+            entry = totals.setdefault(
+                item_id,
+                {
+                    "item_id": item_id,
+                    "item_name": _sheet_item_name(sheet),
+                    "base_unit": _sheet_item_base_unit(sheet),
+                    "gl_code": gl_code,
+                    "quantity": 0.0,
+                    "cost": 0.0,
+                },
+            )
+            entry["quantity"] += quantity
+            entry["cost"] += cost_total
+            if entry["gl_code"] == "Unassigned" and gl_code != "Unassigned":
+                entry["gl_code"] = gl_code
+            if not entry["base_unit"] and _sheet_item_base_unit(sheet):
+                entry["base_unit"] = _sheet_item_base_unit(sheet)
+    return totals
+
+
+@event.route("/events/<int:event_id>/inventory_comparison_report")
+@login_required
+def inventory_comparison_report(event_id):
+    """Compare current inventory item totals to the previous inventory event."""
+    report_context = _inventory_comparison_report_context(event_id)
+    return render_template(
+        "events/inventory_comparison_report.html",
+        **report_context,
+    )
+
+
+@event.route("/events/<int:event_id>/inventory_comparison_report.csv")
+@login_required
+def inventory_comparison_report_csv(event_id):
+    report_context = _inventory_comparison_report_context(event_id)
+    rows = [
+        [
+            "Item",
+            "Base Unit",
+            "GL Code",
+            "Previous Quantity",
+            "Current Quantity",
+            "Quantity Change",
+            "Previous Cost",
+            "Current Cost",
+            "Cost Change",
+        ],
+    ]
+    for row in report_context["rows"]:
+        rows.append(
+            [
+                row["item_name"],
+                row["base_unit"],
+                row["gl_code"],
+                f"{row['previous_quantity']:.4f}",
+                f"{row['current_quantity']:.4f}",
+                f"{row['quantity_delta']:+.4f}",
+                f"{row['previous_cost']:.2f}",
+                f"{row['current_cost']:.2f}",
+                f"{row['cost_delta']:+.2f}",
+            ]
+        )
+    totals = report_context["totals"]
+    rows.append(
+        [
+            "Totals",
+            "",
+            "",
+            f"{totals['previous_quantity']:.4f}",
+            f"{totals['current_quantity']:.4f}",
+            f"{totals['quantity_delta']:+.4f}",
+            f"{totals['previous_cost']:.2f}",
+            f"{totals['current_cost']:.2f}",
+            f"{totals['cost_delta']:+.2f}",
+        ]
+    )
+    return _csv_download_response(
+        f"inventory-comparison-event-{report_context['event'].id}.csv",
+        rows,
+    )
+
+
+def _inventory_comparison_report_context(event_id: int) -> dict:
+    current_event = (
+        Event.query.options(
+            selectinload(Event.locations)
+            .selectinload(EventLocation.stand_sheet_items)
+            .selectinload(EventStandSheetItem.item),
+            selectinload(Event.locations).selectinload(EventLocation.location),
+        )
+        .filter(Event.id == event_id)
+        .first()
+    )
+    if current_event is None or current_event.event_type != "inventory":
+        abort(404)
+
+    previous_event = _previous_inventory_event(current_event)
+    if previous_event is not None:
+        previous_event = (
+            Event.query.options(
+                selectinload(Event.locations)
+                .selectinload(EventLocation.stand_sheet_items)
+                .selectinload(EventStandSheetItem.item),
+                selectinload(Event.locations).selectinload(EventLocation.location),
+            )
+            .filter(Event.id == previous_event.id)
+            .first()
+        )
+
+    current_totals = _inventory_item_totals_for_event(current_event)
+    previous_totals = (
+        _inventory_item_totals_for_event(previous_event)
+        if previous_event is not None
+        else {}
+    )
+
+    rows = []
+    all_item_ids = sorted(
+        set(current_totals) | set(previous_totals),
+        key=lambda item_id: (
+            (
+                current_totals.get(item_id)
+                or previous_totals.get(item_id)
+                or {}
+            ).get("item_name", "")
+        ).casefold(),
+    )
+    total_current_quantity = 0.0
+    total_previous_quantity = 0.0
+    total_current_cost = 0.0
+    total_previous_cost = 0.0
+
+    for item_id in all_item_ids:
+        current_entry = current_totals.get(item_id)
+        previous_entry = previous_totals.get(item_id)
+        display_entry = current_entry or previous_entry or {}
+        current_quantity = (
+            float(current_entry["quantity"]) if current_entry is not None else 0.0
+        )
+        previous_quantity = (
+            float(previous_entry["quantity"]) if previous_entry is not None else 0.0
+        )
+        current_cost = float(current_entry["cost"]) if current_entry is not None else 0.0
+        previous_cost = (
+            float(previous_entry["cost"]) if previous_entry is not None else 0.0
+        )
+        total_current_quantity += current_quantity
+        total_previous_quantity += previous_quantity
+        total_current_cost += current_cost
+        total_previous_cost += previous_cost
+        rows.append(
+            {
+                "item_id": item_id,
+                "item_name": display_entry.get("item_name") or f"Item #{item_id}",
+                "base_unit": display_entry.get("base_unit") or "",
+                "gl_code": display_entry.get("gl_code") or "Unassigned",
+                "previous_quantity": previous_quantity,
+                "current_quantity": current_quantity,
+                "quantity_delta": current_quantity - previous_quantity,
+                "previous_cost": previous_cost,
+                "current_cost": current_cost,
+                "cost_delta": current_cost - previous_cost,
+            }
+        )
+
+    totals = {
+        "previous_quantity": total_previous_quantity,
+        "current_quantity": total_current_quantity,
+        "quantity_delta": total_current_quantity - total_previous_quantity,
+        "previous_cost": total_previous_cost,
+        "current_cost": total_current_cost,
+        "cost_delta": total_current_cost - total_previous_cost,
+    }
+
+    return {
+        "event": current_event,
+        "previous_event": previous_event,
+        "rows": rows,
+        "totals": totals,
+    }

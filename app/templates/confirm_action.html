@@ -7,10 +7,10 @@
         <li>{{ warn }}</li>
     {% endfor %}
     </ul>
-    <form method="post" action="{{ action_url }}">
+    <form method="post" action="{{ action_url }}" class="app-form-actions">
         {{ form.csrf_token }}
         {{ form.submit(class='btn btn-primary') }}
-        <a href="{{ cancel_url }}" class="btn btn-secondary ml-2">Cancel</a>
+        <a href="{{ cancel_url }}" class="btn btn-secondary">Cancel</a>
     </form>
 </div>
 {% endblock %}
