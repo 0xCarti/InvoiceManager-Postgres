@@ -19,6 +19,7 @@
 {% set can_download_event_documents = can_access_endpoint('event.download_event_document') %}
 {% set can_delete_event_documents = can_access_endpoint('event.delete_event_document_file', 'POST') %}
 {% set can_review_count_submissions = can_access_endpoint('locations.count_submissions', 'GET') %}
+{% set can_view_location = can_access_endpoint('locations.view_location', 'GET') %}
 {% if is_inventory_event %}
     {% set report_count = (1 if can_view_count_sheets else 0) + (1 if can_view_inventory_report else 0) + (1 if can_view_inventory_comparison_report else 0) %}
 {% else %}
@@ -144,7 +145,12 @@
         <div class="mb-2">{{ terminal_sales_conflict_guidance }}</div>
         {% for conflict in terminal_sales_conflicts %}
         <div>
-            {{ conflict.location_name }} also belongs to
+            {% if can_view_location %}
+            <a href="{{ url_for('locations.view_location', location_id=conflict.location_id) }}">{{ conflict.location_name }}</a>
+            {% else %}
+            {{ conflict.location_name }}
+            {% endif %}
+            also belongs to
             <a href="{{ url_for('event.view_event', event_id=conflict.event_id) }}">{{ conflict.event_name }}</a>
             on {{ conflict.overlap_start_date }}{% if conflict.overlap_start_date != conflict.overlap_end_date %} to {{ conflict.overlap_end_date }}{% endif %}.
         </div>
@@ -279,7 +285,17 @@
                             <tbody>
                                 {% for entry in day.locations %}
                                 <tr>
-                                    <td>{{ entry.location.name if entry.location else 'Unknown location' }}</td>
+                                    <td>
+                                        {% if entry.location %}
+                                            {% if can_view_location %}
+                                            <a href="{{ url_for('locations.view_location', location_id=entry.location.id) }}">{{ entry.location.name }}</a>
+                                            {% else %}
+                                            {{ entry.location.name }}
+                                            {% endif %}
+                                        {% else %}
+                                        Unknown location
+                                        {% endif %}
+                                    </td>
                                     <td>
                                         {% if entry.day_confirmed %}
                                         <span class="badge text-bg-success">Closed</span>

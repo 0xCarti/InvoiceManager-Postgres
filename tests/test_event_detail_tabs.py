@@ -82,6 +82,23 @@ def test_event_features_remain_in_their_relevant_primary_panel():
     assert "Inventory Comparison" in reports
 
 
+def test_event_location_names_link_to_location_details_when_permitted():
+    template = _template()
+
+    assert (
+        "can_view_location = can_access_endpoint('locations.view_location', 'GET')"
+        in template
+    )
+    assert (
+        "url_for('locations.view_location', location_id=entry.location.id)"
+        in template
+    )
+    assert (
+        "url_for('locations.view_location', location_id=conflict.location_id)"
+        in template
+    )
+
+
 def test_document_redirect_hash_activates_the_documents_tab():
     template = _template()
 

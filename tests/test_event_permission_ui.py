@@ -128,8 +128,34 @@ def test_event_detail_hides_management_controls_without_permission(client, app):
     assert "Count Sheet" not in body
     assert "Scan Counts" not in body
     assert "Enter Sales" not in body
+    assert "Main Bar" in body
+    assert f'href="/locations/{seeded["location_id"]}"' not in body
     assert f"/events/{seeded['event_id']}/locations/{seeded['event_location_id']}/confirm" not in body
     assert "/undo_confirm_location" not in body
+
+
+def test_event_location_name_links_to_location_detail_when_permitted(client, app):
+    seeded = _seed_event_user(app, email="event-location-link@example.com")
+
+    with app.app_context():
+        user = User.query.filter_by(email=seeded["email"]).one()
+        grant_permissions(
+            user,
+            "events.view",
+            "locations.view",
+            group_name=f"Event Location Link {user.email}",
+            description="View event and location details.",
+        )
+
+    with client:
+        login(client, seeded["email"], "pass")
+        response = client.get(f"/events/{seeded['event_id']}")
+        body = response.data.decode()
+
+    assert response.status_code == 200
+    assert (
+        f'<a href="/locations/{seeded["location_id"]}">Main Bar</a>' in body
+    )
 
 
 def test_inventory_event_detail_hides_regular_location_workflow_controls(
