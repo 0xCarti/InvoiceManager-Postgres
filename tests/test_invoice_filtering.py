@@ -217,7 +217,8 @@ def test_view_invoices_actions_column_uses_overflow_menu_with_delete(client, app
     assert response.status_code == 200
 
     assert 'class="col-invoice-actions" data-sortable="false">Actions</th>' in html
-    assert 'class="btn btn-primary mr-2">View</a>' in html
+    assert 'class="mobile-actions mobile-card-actions"' in html
+    assert 'class="btn btn-primary btn-sm">View</a>' in html
     assert 'aria-label="Invoice actions"' in html
     assert 'class="js-confirm-delete-invoice"' in html
     assert 'method="post"' in html
