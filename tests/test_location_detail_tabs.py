@@ -3,6 +3,15 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE_PATH = REPO_ROOT / "app" / "templates" / "locations" / "view_location.html"
+ITEMS_PANEL_PATH = (
+    REPO_ROOT / "app" / "templates" / "locations" / "_location_items_panel.html"
+)
+LOCATION_ROW_PATH = (
+    REPO_ROOT / "app" / "templates" / "locations" / "_location_row.html"
+)
+LOCATIONS_LIST_PATH = (
+    REPO_ROOT / "app" / "templates" / "locations" / "view_locations.html"
+)
 
 
 def _template() -> str:
@@ -13,6 +22,7 @@ def test_location_detail_uses_accessible_tab_structure():
     template = _template()
     tab_pairs = [
         ("location-setup-tab", "location-setup"),
+        ("location-items-tab", "location-items"),
         ("location-submissions-tab", "location-submissions"),
         ("location-transfers-tab", "location-transfers"),
         ("location-events-tab", "location-events"),
@@ -38,6 +48,9 @@ def test_location_detail_uses_accessible_tab_structure():
 def test_location_detail_groups_existing_sections_into_tabs():
     template = _template()
     setup = template.split('id="location-setup"', 1)[1].split(
+        'id="location-items"', 1
+    )[0]
+    items = template.split('id="location-items"', 1)[1].split(
         'id="location-submissions"', 1
     )[0]
     submissions = template.split('id="location-submissions"', 1)[1].split(
@@ -53,6 +66,8 @@ def test_location_detail_groups_existing_sections_into_tabs():
 
     assert "Location Setup" in setup
     assert "Products At This Location" in setup
+    assert "locations/_location_items_panel.html" in items
+    assert "Location Items" in ITEMS_PANEL_PATH.read_text(encoding="utf-8")
     assert "Recent Location Submissions" in submissions
     assert "Recent Transfers" in transfers
     assert "Recent Events" in events
@@ -90,3 +105,24 @@ def test_location_tabs_support_hash_activation_and_mobile_scrolling():
     assert "mobile-list-page app-page-shell" in template
     assert "location-detail-actions" in template
     assert "table-mobile-card" in template
+
+
+def test_location_detail_removes_redundant_header_actions():
+    template = _template()
+    header = template.split('<section class="location-section-shell', 1)[0]
+    submissions = template.split('id="location-submissions"', 1)[1].split(
+        'id="location-transfers"', 1
+    )[0]
+
+    assert ">Manage Items</a>" not in header
+    assert ">Location Submissions</a>" not in header
+    assert "Review Queue" in submissions
+
+
+def test_location_list_item_links_open_the_embedded_items_tab():
+    row_template = LOCATION_ROW_PATH.read_text(encoding="utf-8")
+    list_template = LOCATIONS_LIST_PATH.read_text(encoding="utf-8")
+
+    assert "_anchor='location-items'" in row_template
+    assert '/locations/${loc.id}#location-items' in list_template
+    assert '/locations/${loc.id}/items' not in list_template

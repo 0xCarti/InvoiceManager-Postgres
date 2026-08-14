@@ -398,11 +398,14 @@ def test_view_location_shows_recent_activity_and_terminal_mappings(client, app):
     assert b"Detail Stand" in response.data
     assert b'id="location-section-tabs"' in response.data
     assert b'id="location-setup"' in response.data
+    assert b'id="location-items"' in response.data
     assert b'id="location-submissions"' in response.data
     assert b'id="location-transfers"' in response.data
     assert b'id="location-events"' in response.data
     assert b'id="terminal-sales-mappings"' in response.data
     assert b"Terminal Sales Mappings" in response.data
+    assert b"Location Items" in response.data
+    assert b"Flour" in response.data
     assert b"Stand #1" in response.data
     assert b"Recent Transfers" in response.data
     assert b"Recent Events" in response.data
@@ -412,6 +415,8 @@ def test_view_location_shows_recent_activity_and_terminal_mappings(client, app):
     assert b"Transfer #" in response.data
     assert b"Import #" in response.data
     assert b"Back to Locations" not in response.data
+    assert b">Manage Items</a>" not in response.data
+    assert b">Location Submissions</a>" not in response.data
     assert f'href="/locations/scan/{count_qr_token}"'.encode() in response.data
     assert b">Submit Counts</a>" in response.data
     assert f'href="/transfers/add?from_location_id={location_id}"'.encode() in response.data
@@ -423,6 +428,37 @@ def test_view_location_shows_recent_activity_and_terminal_mappings(client, app):
     assert count_response.status_code == 200
     assert b"Submit opening or closing counts for manager review." in count_response.data
     assert b"Detail Stand" in count_response.data
+
+
+def test_view_location_clamps_stale_items_page(client, app):
+    email, _, _ = setup_data(app)
+    with app.app_context():
+        item = Item(name="Only Location Item", base_unit="each")
+        location = Location(name="Stale Items Page Location")
+        db.session.add_all([item, location])
+        db.session.flush()
+        db.session.add(
+            LocationStandItem(
+                location_id=location.id,
+                item_id=item.id,
+                expected_count=1,
+            )
+        )
+        db.session.commit()
+        location_id = location.id
+
+    with client:
+        login(client, email, "pass")
+        with captured_templates(app) as templates:
+            response = client.get(
+                f"/locations/{location_id}?items_page=999&items_per_page=25"
+            )
+
+    assert response.status_code == 200
+    _, context = templates[0]
+    assert context["entries"].page == 1
+    assert context["entries"].pages == 1
+    assert b"Only Location Item" in response.data
 
 
 def test_view_locations_filters_by_menu_and_spoilage(client, app):
@@ -586,27 +622,43 @@ def test_location_items_manage_gl_overrides(client, app):
         default_id = gl_default.id
     with client:
         login(client, email, "pass")
+        legacy_response = client.get(
+            f"/locations/{location_id}/items?page=1&per_page=50"
+        )
+        assert legacy_response.status_code == 302
+        assert legacy_response.headers["Location"] == (
+            f"/locations/{location_id}?items_page=1&items_per_page=50#location-items"
+        )
         with captured_templates(app) as templates:
-            resp = client.get(f"/locations/{location_id}/items")
+            resp = client.get(legacy_response.headers["Location"])
             assert resp.status_code == 200
             template, context = templates[0]
-            assert template.name == "locations/location_items.html"
+            assert template.name == "locations/view_location.html"
             assert context["location"].id == location_id
             assert context["entries"].total == 2
             assert any(gl.id == default_id for gl in context["purchase_gl_codes"])
-            assert "per_page" in context["pagination_args"]
-            assert context["pagination_args"]["per_page"] == str(context["per_page"])
+            assert "items_per_page" in context["pagination_args"]
+            assert context["pagination_args"]["items_per_page"] == str(
+                context["per_page"]
+            )
         resp = client.post(
             f"/locations/{location_id}/items?page=1",
             data={
+                "page": "1",
+                "per_page": "25",
+                "return_to_location": "1",
                 f"location_countable_{first_item_id}": "1",
                 f"location_gl_code_{first_item_id}": "",
                 f"location_countable_{second_item_id}": "1",
                 f"location_gl_code_{second_item_id}": str(override_id),
             },
-            follow_redirects=True,
+            follow_redirects=False,
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 302
+        assert resp.headers["Location"] == (
+            f"/locations/{location_id}?items_page=1&items_per_page=25#location-items"
+        )
+        resp = client.get(resp.headers["Location"])
         assert b"Location item settings updated successfully" in resp.data
     with app.app_context():
         first = LocationStandItem.query.filter_by(
@@ -676,7 +728,7 @@ def test_location_items_include_non_countable_recipe_items_and_save_countable_ov
     with client:
         login(client, email, "pass")
         with captured_templates(app) as templates:
-            response = client.get(f"/locations/{location_id}/items")
+            response = client.get(f"/locations/{location_id}")
             assert response.status_code == 200
             _, context = templates[0]
             assert context["entries"].total == 2
@@ -721,11 +773,23 @@ def test_location_items_add_and_remove_item(client, app):
         login(client, email, "pass")
         resp = client.post(
             f"/locations/{location_id}/items/add",
-            data={"item_id": extra_item_id, "expected_count": "4"},
-            follow_redirects=True,
+            data={
+                "item_id": extra_item_id,
+                "expected_count": "4",
+                "page": "2",
+                "per_page": "50",
+                "return_to_location": "1",
+            },
+            follow_redirects=False,
         )
-        assert resp.status_code == 200
-        assert b"Item added to location" in resp.data
+        assert resp.status_code == 302
+        assert resp.headers["Location"] == (
+            f"/locations/{location_id}?items_page=2&items_per_page=50#location-items"
+        )
+        redirected = client.get(resp.headers["Location"])
+        assert redirected.status_code == 200
+        assert b"Item added to location" in redirected.data
+        assert b"Napkins" in redirected.data
 
     with app.app_context():
         record = LocationStandItem.query.filter_by(
@@ -739,11 +803,21 @@ def test_location_items_add_and_remove_item(client, app):
         login(client, email, "pass")
         resp = client.post(
             f"/locations/{location_id}/items/{extra_item_id}/delete",
-            data={"submit": "Delete"},
-            follow_redirects=True,
+            data={
+                "submit": "Delete",
+                "page": "1",
+                "per_page": "25",
+                "return_to_location": "1",
+            },
+            follow_redirects=False,
         )
-        assert resp.status_code == 200
-        assert b"Item removed from location" in resp.data
+        assert resp.status_code == 302
+        assert resp.headers["Location"] == (
+            f"/locations/{location_id}?items_page=1&items_per_page=25#location-items"
+        )
+        redirected = client.get(resp.headers["Location"])
+        assert redirected.status_code == 200
+        assert b"Item removed from location" in redirected.data
 
     with app.app_context():
         assert (
@@ -860,18 +934,71 @@ def test_location_items_hide_add_remove_and_gl_override_controls_for_view_only_u
 
     with client:
         login(client, "location-items-viewer@example.com", "pass")
-        response = client.get(
-            f"/locations/{location_id}/items",
-            follow_redirects=True,
-        )
+        response = client.get(f"/locations/{location_id}")
 
     assert response.status_code == 200
+    assert b'id="location-items"' in response.data
+    assert b"View Only Napkins" in response.data
     assert b"Save Changes" not in response.data
     assert b"/items/add" not in response.data
     assert b'name="location_countable_' not in response.data
     assert b'name="location_gl_code_' not in response.data
     assert b"Remove" not in response.data
     assert b"View only" in response.data
+
+
+def test_manage_items_only_user_keeps_legacy_standalone_page(client, app):
+    with app.app_context():
+        item = Item(name="Legacy Items Access", base_unit="each")
+        location = Location(name="Manage Only Warehouse")
+        viewer = User(
+            email="location-items-manager-only@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add_all([item, location, viewer])
+        db.session.flush()
+        db.session.add(
+            LocationStandItem(
+                location_id=location.id,
+                item_id=item.id,
+                expected_count=2,
+            )
+        )
+        db.session.commit()
+        grant_permissions(
+            viewer,
+            "locations.manage_items",
+            group_name="Location Items Manage Only",
+            description="Can manage items without viewing location activity.",
+        )
+        location_id = location.id
+        item_id = item.id
+
+    with client:
+        login(client, "location-items-manager-only@example.com", "pass")
+        response = client.get(f"/locations/{location_id}/items")
+        assert response.status_code == 200
+        assert b"Manage Only Warehouse Items" in response.data
+        assert b"Legacy Items Access" in response.data
+        assert b'id="location-section-tabs"' not in response.data
+
+        response = client.post(
+            f"/locations/{location_id}/items?page=1&per_page=25",
+            data={
+                "page": "1",
+                "per_page": "25",
+                "return_to_location": "1",
+                f"location_countable_{item_id}": "1",
+                f"location_gl_code_{item_id}": "",
+            },
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == (
+        f"/locations/{location_id}/items?page=1&per_page=25"
+    )
 
 
 def test_location_stand_sheet_uses_location_countable_override(client, app):

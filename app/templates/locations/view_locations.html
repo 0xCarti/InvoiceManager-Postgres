@@ -526,7 +526,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             {% endif %}
                             <li><a href=\"/locations/${loc.id}/stand_sheet\" class=\"dropdown-item\">Stand Sheet</a></li>
                             {% if can_manage_location_items %}
-                            <li><a href=\"/locations/${loc.id}/items\" class=\"dropdown-item\">Items</a></li>
+                            <li><a href=\"/locations/${loc.id}#location-items\" class=\"dropdown-item\">Items</a></li>
                             {% endif %}
                             <li><a href=\"${notesUrl}\" class=\"dropdown-item\">Notes</a></li>
                             {% if can_copy_location_items %}

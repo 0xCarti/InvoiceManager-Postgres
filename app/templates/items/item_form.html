@@ -176,7 +176,7 @@
                         {% endif %}
                         <tr>
                             <td>
-                                <a href="{{ url_for('locations.location_items', location_id=record.location_id) }}">
+                                <a href="{{ url_for('locations.view_location', location_id=record.location_id, _anchor='location-items') if can_access_endpoint('locations.view_location', 'GET') else url_for('locations.location_items', location_id=record.location_id) }}">
                                     {{ record.location.name }}
                                 </a>
                             </td>

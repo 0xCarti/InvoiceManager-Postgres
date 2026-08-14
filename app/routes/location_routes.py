@@ -234,15 +234,123 @@ def _location_item_has_inventory_submission_rows(
     )
 
 
-def _location_items_redirect(location_id: int, page: str | None, per_page: str | None):
-    """Redirect back to the location items view preserving pagination."""
+def _location_items_redirect(
+    location_id: int,
+    page: str | int | None,
+    per_page: str | int | None,
+    *,
+    return_to_location: bool = False,
+):
+    """Redirect to location item management while preserving pagination."""
+
+    page_value = int(page) if page is not None and str(page).isdigit() else None
+    per_page_value = (
+        int(per_page)
+        if per_page is not None and str(per_page).isdigit()
+        else None
+    )
+    if return_to_location and current_user.can_access_endpoint(
+        "locations.view_location", "GET"
+    ):
+        args = {"location_id": location_id}
+        if page_value is not None:
+            args["items_page"] = page_value
+        if per_page_value is not None:
+            args["items_per_page"] = per_page_value
+        return redirect(
+            url_for(
+                "locations.view_location",
+                **args,
+                _anchor="location-items",
+            )
+        )
 
     args = {"location_id": location_id}
-    if page and page.isdigit():
-        args["page"] = int(page)
-    if per_page and per_page.isdigit():
-        args["per_page"] = int(per_page)
+    if page_value is not None:
+        args["page"] = page_value
+    if per_page_value is not None:
+        args["per_page"] = per_page_value
     return redirect(url_for("locations.location_items", **args))
+
+
+def _build_location_items_context(
+    location_obj: Location,
+    *,
+    page_param: str = "page",
+    per_page_param: str = "per_page",
+    embedded: bool = False,
+):
+    """Build the shared item-management context for a location."""
+
+    existing_items = sync_location_stand_items(location_obj, remove_missing=False)
+    if any(record.id is None for record in existing_items.values()):
+        db.session.commit()
+
+    protected_item_ids = _protected_location_item_ids(location_obj)
+    form = CSRFOnlyForm()
+    add_form = LocationItemAddForm()
+    page = max(request.args.get(page_param, 1, type=int) or 1, 1)
+    per_page = get_per_page(per_page_param)
+
+    active_item_ids = {
+        record.item_id
+        for record in location_obj.stand_items
+        if bool(record.active)
+    }
+    available_choices = [
+        (item.id, item.name)
+        for item in Item.query.filter_by(archived=False)
+        .order_by(Item.name)
+        .all()
+        if item.id not in active_item_ids
+    ]
+    add_form.item_id.choices = available_choices
+
+    query = (
+        LocationStandItem.query.join(Item)
+        .outerjoin(GLCode, LocationStandItem.purchase_gl_code_id == GLCode.id)
+        .options(
+            selectinload(LocationStandItem.item),
+            selectinload(LocationStandItem.purchase_gl_code),
+        )
+        .filter(LocationStandItem.location_id == location_obj.id)
+        .filter(LocationStandItem.active.is_(True))
+        .order_by(Item.name)
+    )
+    entries = query.paginate(page=page, per_page=per_page, error_out=False)
+    last_page = max(entries.pages, 1)
+    if page > last_page:
+        entries = query.paginate(
+            page=last_page,
+            per_page=per_page,
+            error_out=False,
+        )
+    for record in entries.items:
+        record.is_protected = record.item_id in protected_item_ids
+        record.is_recipe_backed = record.item_id in protected_item_ids
+
+    total_expected = (
+        db.session.query(db.func.sum(LocationStandItem.expected_count))
+        .filter_by(location_id=location_obj.id, active=True)
+        .scalar()
+        or 0
+    )
+    return {
+        "entries": entries,
+        "total": total_expected,
+        "per_page": per_page,
+        "form": form,
+        "add_form": add_form,
+        "delete_form": DeleteForm(),
+        "can_add_items": bool(available_choices),
+        "purchase_gl_codes": ItemForm._fetch_purchase_gl_codes(),
+        "pagination_args": build_pagination_args(
+            per_page,
+            page_param=page_param,
+            per_page_param=per_page_param,
+        ),
+        "location_items_embedded": embedded,
+    }
 
 
 def _safe_next_url(raw_value: str | None) -> str | None:
@@ -2010,6 +2118,10 @@ def view_location(location_id: int):
             selectinload(Location.current_menu).selectinload(Menu.products),
             selectinload(Location.default_playlist),
             selectinload(Location.products),
+            selectinload(Location.stand_items).selectinload(LocationStandItem.item),
+            selectinload(Location.stand_items).selectinload(
+                LocationStandItem.purchase_gl_code
+            ),
             selectinload(Location.terminal_sale_location_aliases),
         )
         .filter(Location.id == location_id)
@@ -2091,6 +2203,12 @@ def view_location(location_id: int):
         if recent_event_locations and recent_event_locations[0].event
         else None
     )
+    location_items_context = _build_location_items_context(
+        location_obj,
+        page_param="items_page",
+        per_page_param="items_per_page",
+        embedded=True,
+    )
     return render_template(
         "locations/view_location.html",
         location=location_obj,
@@ -2104,6 +2222,7 @@ def view_location(location_id: int):
         latest_transfer_at=latest_transfer_at,
         latest_event_date=latest_event_date,
         submission_type_label=_submission_type_label,
+        **location_items_context,
     )
 
 
@@ -2162,46 +2281,25 @@ def location_items(location_id):
     if location_obj is None:
         abort(404)
 
-    existing_items = sync_location_stand_items(location_obj, remove_missing=False)
-    if any(record.id is None for record in existing_items.values()):
-        db.session.commit()
-
-    protected_item_ids = _protected_location_item_ids(location_obj)
-    form = CSRFOnlyForm()
-    add_form = LocationItemAddForm()
-    delete_form = DeleteForm()
-    page = request.args.get("page", 1, type=int)
-    per_page = get_per_page()
-
-    active_item_ids = {
-        record.item_id
-        for record in location_obj.stand_items
-        if bool(record.active)
-    }
-    available_choices = [
-        (item.id, item.name)
-        for item in Item.query.filter_by(archived=False)
-        .order_by(Item.name)
-        .all()
-        if item.id not in active_item_ids
-    ]
-    add_form.item_id.choices = available_choices
-
-    query = (
-        LocationStandItem.query.join(Item)
-        .outerjoin(GLCode, LocationStandItem.purchase_gl_code_id == GLCode.id)
-        .options(
-            selectinload(LocationStandItem.item),
-            selectinload(LocationStandItem.purchase_gl_code),
+    if request.method == "GET" and current_user.can_access_endpoint(
+        "locations.view_location", "GET"
+    ):
+        return _location_items_redirect(
+            location_id,
+            request.args.get("page"),
+            request.args.get("per_page"),
+            return_to_location=True,
         )
-        .filter(LocationStandItem.location_id == location_id)
-        .filter(LocationStandItem.active.is_(True))
-        .order_by(Item.name)
-    )
+
+    items_context = _build_location_items_context(location_obj)
+    form = items_context["form"]
+    page = items_context["entries"].page
+    per_page = items_context["per_page"]
+    return_to_location = request.form.get("return_to_location") == "1"
 
     if form.validate_on_submit():
         updated = 0
-        for record in query.paginate(page=page, per_page=per_page).items:
+        for record in items_context["entries"].items:
             field_name = f"location_gl_code_{record.item_id}"
             raw_value = request.form.get(field_name, "").strip()
             if raw_value:
@@ -2225,37 +2323,26 @@ def location_items(location_id):
             flash("Location item settings updated successfully.", "success")
         else:
             flash("No changes were made to location item settings.", "info")
-        return redirect(
-            url_for(
-                "locations.location_items",
-                location_id=location_id,
-                page=page,
-                per_page=per_page,
-            )
+        return _location_items_redirect(
+            location_id,
+            page,
+            per_page,
+            return_to_location=return_to_location,
         )
 
-    entries = query.paginate(page=page, per_page=per_page)
-    for record in entries.items:
-        record.is_protected = record.item_id in protected_item_ids
-        record.is_recipe_backed = record.item_id in protected_item_ids
-    total_expected = (
-        db.session.query(db.func.sum(LocationStandItem.expected_count))
-        .filter_by(location_id=location_id, active=True)
-        .scalar()
-        or 0
-    )
+    if request.method == "POST" and return_to_location:
+        flash("Unable to update location item settings. Please try again.", "danger")
+        return _location_items_redirect(
+            location_id,
+            page,
+            per_page,
+            return_to_location=True,
+        )
+
     return render_template(
         "locations/location_items.html",
         location=location_obj,
-        entries=entries,
-        total=total_expected,
-        per_page=per_page,
-        form=form,
-        add_form=add_form,
-        delete_form=delete_form,
-        can_add_items=bool(available_choices),
-        purchase_gl_codes=ItemForm._fetch_purchase_gl_codes(),
-        pagination_args=build_pagination_args(per_page),
+        **items_context,
     )
 
 
@@ -2275,6 +2362,7 @@ def add_location_item(location_id: int):
     add_form = LocationItemAddForm()
     page = request.form.get("page")
     per_page = request.form.get("per_page")
+    return_to_location = request.form.get("return_to_location") == "1"
 
     active_item_ids = {
         record.item_id
@@ -2292,21 +2380,41 @@ def add_location_item(location_id: int):
 
     if not available_choices:
         flash("There are no additional items available to add.", "info")
-        return _location_items_redirect(location_id, page, per_page)
+        return _location_items_redirect(
+            location_id,
+            page,
+            per_page,
+            return_to_location=return_to_location,
+        )
 
     if not add_form.validate_on_submit():
         flash("Unable to add item to the location.", "error")
-        return _location_items_redirect(location_id, page, per_page)
+        return _location_items_redirect(
+            location_id,
+            page,
+            per_page,
+            return_to_location=return_to_location,
+        )
 
     item_id = add_form.item_id.data
     if item_id in active_item_ids:
         flash("This item is already tracked at the location.", "info")
-        return _location_items_redirect(location_id, page, per_page)
+        return _location_items_redirect(
+            location_id,
+            page,
+            per_page,
+            return_to_location=return_to_location,
+        )
 
     item = db.session.get(Item, item_id)
     if item is None or item.archived:
         flash("Selected item is no longer available.", "error")
-        return _location_items_redirect(location_id, page, per_page)
+        return _location_items_redirect(
+            location_id,
+            page,
+            per_page,
+            return_to_location=return_to_location,
+        )
 
     expected = add_form.expected_count.data or 0
     item_name = item.name
@@ -2338,7 +2446,12 @@ def add_location_item(location_id: int):
         f"Added item {item_name} to location {location_obj.name}"
     )
     flash("Item added to location.", "success")
-    return _location_items_redirect(location_id, page, per_page)
+    return _location_items_redirect(
+        location_id,
+        page,
+        per_page,
+        return_to_location=return_to_location,
+    )
 
 
 @location.route(
@@ -2360,16 +2473,27 @@ def delete_location_item(location_id: int, item_id: int):
     form = DeleteForm()
     page = request.form.get("page")
     per_page = request.form.get("per_page")
+    return_to_location = request.form.get("return_to_location") == "1"
     if not form.validate_on_submit():
         flash("Unable to remove the item from the location.", "error")
-        return _location_items_redirect(location_id, page, per_page)
+        return _location_items_redirect(
+            location_id,
+            page,
+            per_page,
+            return_to_location=return_to_location,
+        )
 
     record = LocationStandItem.query.filter_by(
         location_id=location_id, item_id=item_id
     ).first()
     if record is None:
         flash("Item not found on location.", "error")
-        return _location_items_redirect(location_id, page, per_page)
+        return _location_items_redirect(
+            location_id,
+            page,
+            per_page,
+            return_to_location=return_to_location,
+        )
 
     protected_item_ids = _protected_location_item_ids(location_obj)
     if item_id in protected_item_ids:
@@ -2377,7 +2501,12 @@ def delete_location_item(location_id: int, item_id: int):
             "This item is required by a product recipe and cannot be removed. Uncheck Countable instead.",
             "error",
         )
-        return _location_items_redirect(location_id, page, per_page)
+        return _location_items_redirect(
+            location_id,
+            page,
+            per_page,
+            return_to_location=return_to_location,
+        )
 
     item_name = record.item.name
     has_inventory_submission_rows = _location_item_has_inventory_submission_rows(
@@ -2397,7 +2526,12 @@ def delete_location_item(location_id: int, item_id: int):
         f"Removed item {item_name} from location {location_obj.name}"
     )
     flash("Item removed from location.", "success")
-    return _location_items_redirect(location_id, page, per_page)
+    return _location_items_redirect(
+        location_id,
+        page,
+        per_page,
+        return_to_location=return_to_location,
+    )
 
 
 @location.route("/locations")

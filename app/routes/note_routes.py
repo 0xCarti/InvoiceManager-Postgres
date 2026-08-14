@@ -59,7 +59,13 @@ ENTITY_CONFIG: dict[str, EntityConfig] = {
         parse_identifier=lambda raw: int(raw),
         identifier_getter=lambda obj: str(obj.id),
         back_getter=lambda obj: (
-            url_for("locations.location_items", location_id=obj.id),
+            url_for(
+                "locations.view_location",
+                location_id=obj.id,
+                _anchor="location-items",
+            )
+            if current_user.can_access_endpoint("locations.view_location", "GET")
+            else url_for("locations.location_items", location_id=obj.id),
             f"{obj.name} Items",
         ),
         activity_getter=lambda obj: f"location {obj.name}",

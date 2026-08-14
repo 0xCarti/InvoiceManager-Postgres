@@ -32,7 +32,7 @@
                     {% endif %}
                     <li><a href="{{ url_for('locations.view_stand_sheet', location_id=location.id) }}" class="dropdown-item">Stand Sheet</a></li>
                     {% if can_access_endpoint('locations.location_items', 'GET') %}
-                    <li><a href="{{ url_for('locations.location_items', location_id=location.id) }}" class="dropdown-item">Items</a></li>
+                    <li><a href="{{ url_for('locations.view_location', location_id=location.id, _anchor='location-items') }}" class="dropdown-item">Items</a></li>
                     {% endif %}
                     <li><a href="{{ url_for('notes.entity_notes', entity_type='location', entity_id=location.id) }}" class="dropdown-item">Notes</a></li>
                     {% if can_access_endpoint('locations.copy_location_items', 'POST') %}
