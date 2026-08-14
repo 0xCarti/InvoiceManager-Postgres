@@ -5,8 +5,8 @@
 {% block content %}
 {% set can_manage_terminal_location_mappings = can_access_endpoint('locations.remove_terminal_sale_alias', 'POST') %}
 {% set can_review_count_submissions = can_access_endpoint('locations.count_submissions', 'GET') %}
-{% set can_print_count_sign = can_access_endpoint('locations.print_count_sign', 'GET') %}
-{% set can_print_transfer_sign = can_access_endpoint('locations.print_transfer_sign', 'GET') %}
+{% set can_submit_counts = can_access_endpoint('locations.edit_location', 'GET') %}
+{% set can_create_transfer = can_access_endpoint('transfer.add_transfer', 'GET') %}
 <style nonce="{{ csp_nonce }}">
 .location-section-tabs .nav-link {
     min-height: 100%;
@@ -67,11 +67,11 @@
             {% if can_access_endpoint('locations.edit_location', 'GET') %}
             <a class="btn btn-primary" href="{{ url_for('locations.edit_location', location_id=location.id, next=url_for('locations.view_location', location_id=location.id)) }}">Edit Location</a>
             {% endif %}
-            {% if can_print_count_sign %}
-            <a class="btn btn-outline-secondary" href="{{ url_for('locations.print_count_sign', location_id=location.id) }}">Print Count QR Sign</a>
+            {% if can_submit_counts and not location.archived %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('locations.scan_count_submission', token=location.count_qr_token) }}">Submit Counts</a>
             {% endif %}
-            {% if can_print_transfer_sign %}
-            <a class="btn btn-outline-secondary" href="{{ url_for('locations.print_transfer_sign', location_id=location.id) }}">Print Transfer QR Sign</a>
+            {% if can_create_transfer and not location.archived %}
+            <a class="btn btn-outline-secondary" href="{{ url_for('transfer.add_transfer', from_location_id=location.id) }}">Create Transfer</a>
             {% endif %}
             {% if can_review_count_submissions %}
             <a class="btn btn-outline-secondary" href="{{ url_for('locations.count_submissions', location_id=location.id) }}">Location Submissions</a>

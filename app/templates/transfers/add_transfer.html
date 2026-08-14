@@ -5,7 +5,7 @@
     <h2>Add New Transfer</h2>
     {% if prefilled_from_location %}
     <div class="alert alert-info">
-        This transfer was opened from the QR sign for <strong>{{ prefilled_from_location.name }}</strong>.
+        From Location is preselected as <strong>{{ prefilled_from_location.name }}</strong>.
     </div>
     {% endif %}
     <form method="POST">

@@ -816,6 +816,48 @@ def test_view_location_page_hides_terminal_mapping_delete_actions_for_view_only_
     assert b"Terminal Location" in response.data
     assert b"View only" in response.data
     assert b"Remove" not in response.data
+    assert b"Submit Counts" not in response.data
+    assert b"Create Transfer" not in response.data
+
+
+def test_view_location_page_shows_create_transfer_for_transfer_creators(client, app):
+    with app.app_context():
+        location = Location(name="Transfer Creator Location")
+        user = User(
+            email="location-transfer-creator@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add_all([location, user])
+        db.session.commit()
+        grant_permissions(
+            user,
+            "locations.view",
+            "transfers.create",
+            group_name="Location Transfer Creator",
+            description="Can view locations and create transfers.",
+        )
+        location_id = location.id
+
+    with client:
+        login(client, "location-transfer-creator@example.com", "pass")
+        response = client.get(f"/locations/{location_id}", follow_redirects=True)
+        transfer_response = client.get(
+            f"/transfers/add?from_location_id={location_id}",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert (
+        f'href="/transfers/add?from_location_id={location_id}"'.encode()
+        in response.data
+    )
+    assert b">Create Transfer</a>" in response.data
+    assert b"Submit Counts" not in response.data
+    assert transfer_response.status_code == 200
+    assert b"From Location is preselected as" in transfer_response.data
+    assert b"Transfer Creator Location" in transfer_response.data
+    assert b"opened from the QR sign" not in transfer_response.data
 
 
 def test_vendor_item_aliases_page_hides_manage_actions_for_view_only_users(

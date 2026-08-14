@@ -387,10 +387,12 @@ def test_view_location_shows_recent_activity_and_terminal_mappings(client, app):
         )
         db.session.commit()
         location_id = location.id
+        count_qr_token = location.count_qr_token
 
     with client:
         login(client, email, "pass")
         response = client.get(f"/locations/{location_id}")
+        count_response = client.get(f"/locations/scan/{count_qr_token}")
 
     assert response.status_code == 200
     assert b"Detail Stand" in response.data
@@ -410,6 +412,17 @@ def test_view_location_shows_recent_activity_and_terminal_mappings(client, app):
     assert b"Transfer #" in response.data
     assert b"Import #" in response.data
     assert b"Back to Locations" not in response.data
+    assert f'href="/locations/scan/{count_qr_token}"'.encode() in response.data
+    assert b">Submit Counts</a>" in response.data
+    assert f'href="/transfers/add?from_location_id={location_id}"'.encode() in response.data
+    assert b">Create Transfer</a>" in response.data
+    assert b"Print Count QR Sign" not in response.data
+    assert b"Print Transfer QR Sign" not in response.data
+    assert f'/locations/{location_id}/count-sign'.encode() not in response.data
+    assert f'/locations/{location_id}/transfer-sign'.encode() not in response.data
+    assert count_response.status_code == 200
+    assert b"Submit opening or closing counts for manager review." in count_response.data
+    assert b"Detail Stand" in count_response.data
 
 
 def test_view_locations_filters_by_menu_and_spoilage(client, app):
