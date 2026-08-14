@@ -394,6 +394,12 @@ def test_view_location_shows_recent_activity_and_terminal_mappings(client, app):
 
     assert response.status_code == 200
     assert b"Detail Stand" in response.data
+    assert b'id="location-section-tabs"' in response.data
+    assert b'id="location-setup"' in response.data
+    assert b'id="location-submissions"' in response.data
+    assert b'id="location-transfers"' in response.data
+    assert b'id="location-events"' in response.data
+    assert b'id="terminal-sales-mappings"' in response.data
     assert b"Terminal Sales Mappings" in response.data
     assert b"Stand #1" in response.data
     assert b"Recent Transfers" in response.data

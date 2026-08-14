@@ -50,12 +50,17 @@ def test_location_detail_can_remove_terminal_sales_mapping_and_legacy_admin_url_
         csrf_token = extract_csrf_token(detail_page)
 
         resp = client.post(
-            f"/locations/{location_id}/terminal_sale_aliases/{location_alias_id}/delete?next=/locations/{location_id}",
+            f"/locations/{location_id}/terminal_sale_aliases/{location_alias_id}/delete",
             data={"csrf_token": csrf_token},
-            follow_redirects=True,
+            follow_redirects=False,
         )
-        assert resp.status_code == 200
-        assert b"Terminal sales location mapping removed." in resp.data
+        assert resp.status_code == 302
+        assert resp.headers["Location"] == (
+            f"/locations/{location_id}#terminal-sales-mappings"
+        )
+        detail_response = client.get(f"/locations/{location_id}")
+        assert detail_response.status_code == 200
+        assert b"Terminal sales location mapping removed." in detail_response.data
 
     with app.app_context():
         assert TerminalSaleProductAlias.query.count() == 1

@@ -8,6 +8,25 @@
 {% set can_print_count_sign = can_access_endpoint('locations.print_count_sign', 'GET') %}
 {% set can_print_transfer_sign = can_access_endpoint('locations.print_transfer_sign', 'GET') %}
 <style nonce="{{ csp_nonce }}">
+.location-section-tabs .nav-link {
+    min-height: 100%;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.location-section-tabs .nav-item {
+    flex: 1 1 0;
+}
+.location-section-tabs .nav-link {
+    width: 100%;
+}
+.location-section-shell .tab-content {
+    background: var(--bs-body-bg);
+}
+.location-tab-section + .location-tab-section {
+    border-top: 1px solid var(--bs-border-color);
+    margin-top: 2rem;
+    padding-top: 2rem;
+}
 @media (max-width: 767.98px) {
     .mobile-list-page .location-detail-actions,
     .mobile-list-page .location-detail-actions .btn,
@@ -22,6 +41,19 @@
     .mobile-list-page .mobile-table-wrap .table td {
         white-space: normal !important;
         vertical-align: top;
+    }
+    .location-section-tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: thin;
+    }
+    .location-section-tabs .nav-item {
+        flex: 0 0 auto;
+    }
+    .location-section-tabs .nav-link {
+        width: auto;
+        min-height: 44px;
     }
 }
 </style>
@@ -54,86 +86,259 @@
         </div>
     </div>
 
-    <div class="row g-3 mb-4">
-        <div class="col-md-6 col-xl-2">
-            <div class="card h-100">
-                <div class="card-body">
-                    <div class="small text-muted">Current Menu</div>
-                    <div class="h6 mb-0">
-                        {% if location.current_menu %}
-                        {{ location.current_menu.name }}
-                        {% else %}
-                        No Menu
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6 col-xl-2">
-            <div class="card h-100">
-                <div class="card-body">
-                    <div class="small text-muted">Default Playlist</div>
-                    <div class="h6 mb-0">{{ location.default_playlist.name if location.default_playlist else 'None' }}</div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6 col-xl-2">
-            <div class="card h-100">
-                <div class="card-body">
-                    <div class="small text-muted">Status</div>
-                    <div class="h6 mb-0">{{ 'Archived' if location.archived else 'Active' }}</div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6 col-xl-2">
-            <div class="card h-100">
-                <div class="card-body">
-                    <div class="small text-muted">Spoilage</div>
-                    <div class="h6 mb-0">{{ 'Yes' if location.is_spoilage else 'No' }}</div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6 col-xl-2">
-            <div class="card h-100">
-                <div class="card-body">
-                    <div class="small text-muted">Products</div>
-                    <div class="h6 mb-0">{{ associated_products|length }}</div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6 col-xl-2">
-            <div class="card h-100">
-                <div class="card-body">
-                    <div class="small text-muted">Last Import</div>
-                    <div class="h6 mb-0">{{ latest_import_at.strftime('%Y-%m-%d') if latest_import_at else 'Never' }}</div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6 col-xl-2">
-            <div class="card h-100">
-                <div class="card-body">
-                    <div class="small text-muted">Last Submission</div>
-                    <div class="h6 mb-0">{{ latest_count_submission_at|format_utc_datetime('%Y-%m-%d %H:%M') if latest_count_submission_at else 'Never' }}</div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6 col-xl-2">
-            <div class="card h-100">
-                <div class="card-body">
-                    <div class="small text-muted">Pending Submission Reviews</div>
-                    <div class="h6 mb-0">{{ pending_count_submission_count }}</div>
-                </div>
-            </div>
-        </div>
-    </div>
+    <section class="location-section-shell mb-4" aria-label="Location detail sections">
+        <ul class="nav nav-tabs location-section-tabs" id="location-section-tabs" role="tablist" aria-label="Location sections">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="location-setup-tab" data-bs-toggle="tab" data-bs-target="#location-setup" data-location-section-tab="1" type="button" role="tab" aria-controls="location-setup" aria-selected="true">Setup</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="location-submissions-tab" data-bs-toggle="tab" data-bs-target="#location-submissions" data-location-section-tab="1" type="button" role="tab" aria-controls="location-submissions" aria-selected="false">Submissions</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="location-transfers-tab" data-bs-toggle="tab" data-bs-target="#location-transfers" data-location-section-tab="1" type="button" role="tab" aria-controls="location-transfers" aria-selected="false">Transfers</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="location-events-tab" data-bs-toggle="tab" data-bs-target="#location-events" data-location-section-tab="1" type="button" role="tab" aria-controls="location-events" aria-selected="false">Events</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="location-sales-tab" data-bs-toggle="tab" data-bs-target="#terminal-sales-mappings" data-location-section-tab="1" type="button" role="tab" aria-controls="terminal-sales-mappings" aria-selected="false">Sales</button>
+            </li>
+        </ul>
 
-    <div class="row g-4">
-        <div class="col-lg-7">
-            <div class="card mb-4" id="terminal-sales-mappings">
-                <div class="card-body">
+        <div class="tab-content border border-top-0 rounded-bottom p-3 p-lg-4">
+            <div class="tab-pane fade show active" id="location-setup" role="tabpanel" aria-labelledby="location-setup-tab" tabindex="0">
+                <div class="row g-4">
+                    <section class="col-lg-5" aria-labelledby="location-setup-heading">
+                        <h3 class="h5 mb-3" id="location-setup-heading">Location Setup</h3>
+                        <div class="list-group list-group-flush">
+                            <div class="list-group-item px-0">
+                                <div class="small text-muted">Current Menu</div>
+                                <div class="fw-semibold">
+                                    {% if location.current_menu %}
+                                    {% if can_access_endpoint('menu.edit_menu', 'GET') %}
+                                    <a href="{{ url_for('menu.edit_menu', menu_id=location.current_menu.id) }}">{{ location.current_menu.name }}</a>
+                                    {% else %}
+                                    {{ location.current_menu.name }}
+                                    {% endif %}
+                                    {% else %}
+                                    <span class="text-muted">No menu assigned</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="list-group-item px-0">
+                                <div class="small text-muted">Default Playlist</div>
+                                <div class="fw-semibold">{{ location.default_playlist.name if location.default_playlist else 'None' }}</div>
+                            </div>
+                            <div class="list-group-item px-0">
+                                <div class="small text-muted">Last Transfer</div>
+                                <div class="fw-semibold">{{ latest_transfer_at.strftime('%Y-%m-%d %H:%M') if latest_transfer_at else 'Never' }}</div>
+                            </div>
+                            <div class="list-group-item px-0">
+                                <div class="small text-muted">Last Event</div>
+                                <div class="fw-semibold">{{ latest_event_date.strftime('%Y-%m-%d') if latest_event_date else 'Never' }}</div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="col-lg-7" aria-labelledby="location-products-heading">
+                        <h3 class="h5 mb-3" id="location-products-heading">Products At This Location</h3>
+                        {% if associated_products %}
+                        <div class="list-group list-group-flush">
+                            {% for product in associated_products %}
+                            <div class="list-group-item px-0">
+                                <div class="fw-semibold">
+                                    {% if can_access_endpoint('product.view_product', 'GET') %}
+                                    <a href="{{ url_for('product.view_product', product_id=product.id) }}">{{ product.name }}</a>
+                                    {% else %}
+                                    {{ product.name }}
+                                    {% endif %}
+                                </div>
+                                <div class="small text-muted">Default sellable price: {{ '%.2f'|format(product.default_sellable_price or 0) }}</div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <p class="text-muted mb-0">No products are currently associated with this location.</p>
+                        {% endif %}
+                    </section>
+                </div>
+            </div>
+
+            <div class="tab-pane fade" id="location-submissions" role="tabpanel" aria-labelledby="location-submissions-tab" tabindex="0">
+                <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+                    <div>
+                        <h3 class="h5 mb-1">Recent Location Submissions</h3>
+                        <p class="text-muted mb-0">Recent count, eaten, and spoilage entries submitted from this location's mobile pages.</p>
+                    </div>
+                    {% if can_review_count_submissions %}
+                    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('locations.count_submissions', location_id=location.id) }}">Review Queue</a>
+                    {% endif %}
+                </div>
+                {% if recent_count_submissions %}
+                <div class="table-responsive mobile-table-wrap">
+                    <table class="table table-striped align-middle mb-0 table-mobile-card">
+                        <thead>
+                            <tr>
+                                <th>Submitted</th>
+                                <th>Type</th>
+                                <th>Status</th>
+                                <th>Event</th>
+                                <th class="text-end">Details</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for submission in recent_count_submissions %}
+                            <tr>
+                                <td class="mobile-card-primary">
+                                    <div>{{ submission.submitted_name }}</div>
+                                    <div class="small text-muted">{{ submission.submitted_at|format_utc_datetime('%Y-%m-%d %H:%M') if submission.submitted_at else 'Unknown' }}</div>
+                                </td>
+                                <td>{{ submission_type_label(submission.submission_type) }}</td>
+                                <td>
+                                    <span class="badge {% if submission.status == 'approved' %}text-bg-success{% elif submission.status == 'rejected' %}text-bg-danger{% else %}text-bg-warning{% endif %}">
+                                        {{ submission.status|title }}
+                                    </span>
+                                </td>
+                                <td>
+                                    {% if submission.event_location and submission.event_location.event %}
+                                    {{ submission.event_location.event.name }}
+                                    {% else %}
+                                    <span class="text-muted">Unmapped</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">
+                                    {% if can_review_count_submissions %}
+                                    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('locations.count_submission_detail', submission_id=submission.id) }}">Review</a>
+                                    {% else %}
+                                    <span class="text-muted">Unavailable</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted mb-0">No mobile submissions have been recorded for this location yet.</p>
+                {% endif %}
+            </div>
+
+            <div class="tab-pane fade" id="location-transfers" role="tabpanel" aria-labelledby="location-transfers-tab" tabindex="0">
+                <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+                    <div>
+                        <h3 class="h5 mb-1">Recent Transfers</h3>
+                        <p class="text-muted mb-0">The latest incoming and outgoing transfers that touched this location.</p>
+                    </div>
+                    {% if can_access_endpoint('transfer.view_transfers', 'GET') %}
+                    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('transfer.view_transfers') }}">All Transfers</a>
+                    {% endif %}
+                </div>
+                {% if recent_transfers %}
+                <div class="table-responsive mobile-table-wrap">
+                    <table class="table table-striped align-middle mb-0 table-mobile-card">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Direction</th>
+                                <th>Counterparty</th>
+                                <th>Status</th>
+                                <th class="text-end">Details</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for transfer in recent_transfers %}
+                            {% set is_outbound = transfer.from_location_id == location.id %}
+                            {% set other_location = transfer.to_location if is_outbound else transfer.from_location %}
+                            <tr>
+                                <td>{{ transfer.date_created.strftime('%Y-%m-%d %H:%M') if transfer.date_created else '-' }}</td>
+                                <td class="mobile-card-primary">{{ 'Outgoing' if is_outbound else 'Incoming' }}</td>
+                                <td>{{ other_location.name if other_location else 'Unknown location' }}</td>
+                                <td>{{ 'Completed' if transfer.completed else 'Pending' }}</td>
+                                <td class="text-end">
+                                    {% if can_access_endpoint('transfer.view_transfer', 'GET') %}
+                                    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('transfer.view_transfer', transfer_id=transfer.id) }}">Transfer #{{ transfer.id }}</a>
+                                    {% else %}
+                                    <span class="text-muted">#{{ transfer.id }}</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted mb-0">No transfers have been recorded for this location yet.</p>
+                {% endif %}
+            </div>
+
+            <div class="tab-pane fade" id="location-events" role="tabpanel" aria-labelledby="location-events-tab" tabindex="0">
+                <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+                    <div>
+                        <h3 class="h5 mb-1">Recent Events</h3>
+                        <p class="text-muted mb-0">Recent event assignments involving this location.</p>
+                    </div>
+                    {% if can_access_endpoint('event.view_events', 'GET') %}
+                    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.view_events') }}">All Events</a>
+                    {% endif %}
+                </div>
+                {% if recent_event_locations %}
+                <div class="table-responsive mobile-table-wrap">
+                    <table class="table table-striped align-middle mb-0 table-mobile-card">
+                        <thead>
+                            <tr>
+                                <th>Event</th>
+                                <th>Dates</th>
+                                <th>Status</th>
+                                <th class="text-end">Details</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for event_location in recent_event_locations %}
+                            {% set event_obj = event_location.event %}
+                            <tr>
+                                <td class="mobile-card-primary">
+                                    {% if event_obj %}
+                                    {{ event_obj.name }}
+                                    {% else %}
+                                    Unknown event
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if event_obj %}
+                                    {{ event_obj.start_date.strftime('%Y-%m-%d') }} to {{ event_obj.end_date.strftime('%Y-%m-%d') }}
+                                    {% else %}
+                                    -
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if event_obj %}
+                                    {{ 'Closed' if event_obj.closed else 'Open' }} / {{ 'Confirmed' if event_location.confirmed else 'Pending' }}
+                                    {% else %}
+                                    -
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">
+                                    {% if event_obj and can_access_endpoint('event.view_event', 'GET') %}
+                                    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('event.view_event', event_id=event_obj.id) }}">View Event</a>
+                                    {% else %}
+                                    <span class="text-muted">Unavailable</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted mb-0">No event history has been recorded for this location yet.</p>
+                {% endif %}
+            </div>
+
+            <div class="tab-pane fade" id="terminal-sales-mappings" role="tabpanel" aria-labelledby="location-sales-tab" tabindex="0">
+                <section class="location-tab-section" aria-labelledby="terminal-sales-mappings-heading">
                     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
                         <div>
-                            <h3 class="h5 mb-1">Terminal Sales Mappings</h3>
+                            <h3 class="h5 mb-1" id="terminal-sales-mappings-heading">Terminal Sales Mappings</h3>
                             <p class="text-muted mb-0">Saved POS location aliases that map future imports back to this location.</p>
                         </div>
                     </div>
@@ -172,256 +377,12 @@
                     {% else %}
                     <p class="text-muted mb-0">There are no terminal sales mappings for this location.</p>
                     {% endif %}
-                </div>
-            </div>
+                </section>
 
-            <div class="card mb-4">
-                <div class="card-body">
+                <section class="location-tab-section" aria-labelledby="recent-imported-sales-heading">
                     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
                         <div>
-                            <h3 class="h5 mb-1">Recent Location Submissions</h3>
-                            <p class="text-muted mb-0">Recent count, eaten, and spoilage entries submitted from this location's mobile pages.</p>
-                        </div>
-                        {% if can_review_count_submissions %}
-                        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('locations.count_submissions', location_id=location.id) }}">Review Queue</a>
-                        {% endif %}
-                    </div>
-                    {% if recent_count_submissions %}
-                    <div class="table-responsive mobile-table-wrap">
-                        <table class="table table-striped align-middle mb-0 table-mobile-card">
-                            <thead>
-                                <tr>
-                                    <th>Submitted</th>
-                                    <th>Type</th>
-                                    <th>Status</th>
-                                    <th>Event</th>
-                                    <th class="text-end">Details</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for submission in recent_count_submissions %}
-                                <tr>
-                                    <td class="mobile-card-primary">
-                                        <div>{{ submission.submitted_name }}</div>
-                                        <div class="small text-muted">{{ submission.submitted_at|format_utc_datetime('%Y-%m-%d %H:%M') if submission.submitted_at else 'Unknown' }}</div>
-                                    </td>
-                                    <td>{{ submission_type_label(submission.submission_type) }}</td>
-                                    <td>
-                                        <span class="badge {% if submission.status == 'approved' %}text-bg-success{% elif submission.status == 'rejected' %}text-bg-danger{% else %}text-bg-warning{% endif %}">
-                                            {{ submission.status|title }}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        {% if submission.event_location and submission.event_location.event %}
-                                        {{ submission.event_location.event.name }}
-                                        {% else %}
-                                        <span class="text-muted">Unmapped</span>
-                                        {% endif %}
-                                    </td>
-                                    <td class="text-end">
-                                        {% if can_review_count_submissions %}
-                                        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('locations.count_submission_detail', submission_id=submission.id) }}">Review</a>
-                                        {% else %}
-                                        <span class="text-muted">Unavailable</span>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    {% else %}
-                    <p class="text-muted mb-0">No mobile submissions have been recorded for this location yet.</p>
-                    {% endif %}
-                </div>
-            </div>
-
-            <div class="card mb-4">
-                <div class="card-body">
-                    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
-                        <div>
-                            <h3 class="h5 mb-1">Recent Transfers</h3>
-                            <p class="text-muted mb-0">The latest incoming and outgoing transfers that touched this location.</p>
-                        </div>
-                        {% if can_access_endpoint('transfer.view_transfers', 'GET') %}
-                        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('transfer.view_transfers') }}">All Transfers</a>
-                        {% endif %}
-                    </div>
-                    {% if recent_transfers %}
-                    <div class="table-responsive mobile-table-wrap">
-                        <table class="table table-striped align-middle mb-0 table-mobile-card">
-                            <thead>
-                                <tr>
-                                    <th>Date</th>
-                                    <th>Direction</th>
-                                    <th>Counterparty</th>
-                                    <th>Status</th>
-                                    <th class="text-end">Details</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for transfer in recent_transfers %}
-                                {% set is_outbound = transfer.from_location_id == location.id %}
-                                {% set other_location = transfer.to_location if is_outbound else transfer.from_location %}
-                                <tr>
-                                    <td>{{ transfer.date_created.strftime('%Y-%m-%d %H:%M') if transfer.date_created else '-' }}</td>
-                                    <td class="mobile-card-primary">{{ 'Outgoing' if is_outbound else 'Incoming' }}</td>
-                                    <td>{{ other_location.name if other_location else 'Unknown location' }}</td>
-                                    <td>{{ 'Completed' if transfer.completed else 'Pending' }}</td>
-                                    <td class="text-end">
-                                        {% if can_access_endpoint('transfer.view_transfer', 'GET') %}
-                                        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('transfer.view_transfer', transfer_id=transfer.id) }}">Transfer #{{ transfer.id }}</a>
-                                        {% else %}
-                                        <span class="text-muted">#{{ transfer.id }}</span>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    {% else %}
-                    <p class="text-muted mb-0">No transfers have been recorded for this location yet.</p>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-
-        <div class="col-lg-5">
-            <div class="card mb-4">
-                <div class="card-body">
-                    <h3 class="h5 mb-3">Location Setup</h3>
-                    <div class="list-group list-group-flush">
-                        <div class="list-group-item px-0">
-                            <div class="small text-muted">Current Menu</div>
-                            <div class="fw-semibold">
-                                {% if location.current_menu %}
-                                {% if can_access_endpoint('menu.edit_menu', 'GET') %}
-                                <a href="{{ url_for('menu.edit_menu', menu_id=location.current_menu.id) }}">{{ location.current_menu.name }}</a>
-                                {% else %}
-                                {{ location.current_menu.name }}
-                                {% endif %}
-                                {% else %}
-                                <span class="text-muted">No menu assigned</span>
-                                {% endif %}
-                            </div>
-                        </div>
-                        <div class="list-group-item px-0">
-                            <div class="small text-muted">Default Playlist</div>
-                            <div class="fw-semibold">{{ location.default_playlist.name if location.default_playlist else 'None' }}</div>
-                        </div>
-                        <div class="list-group-item px-0">
-                            <div class="small text-muted">Last Transfer</div>
-                            <div class="fw-semibold">{{ latest_transfer_at.strftime('%Y-%m-%d %H:%M') if latest_transfer_at else 'Never' }}</div>
-                        </div>
-                        <div class="list-group-item px-0">
-                            <div class="small text-muted">Last Event</div>
-                            <div class="fw-semibold">{{ latest_event_date.strftime('%Y-%m-%d') if latest_event_date else 'Never' }}</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card mb-4">
-                <div class="card-body">
-                    <h3 class="h5 mb-3">Products At This Location</h3>
-                    {% if associated_products %}
-                    <div class="list-group list-group-flush">
-                        {% for product in associated_products %}
-                        <div class="list-group-item px-0">
-                            <div class="fw-semibold">
-                                {% if can_access_endpoint('product.view_product', 'GET') %}
-                                <a href="{{ url_for('product.view_product', product_id=product.id) }}">{{ product.name }}</a>
-                                {% else %}
-                                {{ product.name }}
-                                {% endif %}
-                            </div>
-                            <div class="small text-muted">Default sellable price: {{ '%.2f'|format(product.default_sellable_price or 0) }}</div>
-                        </div>
-                        {% endfor %}
-                    </div>
-                    {% else %}
-                    <p class="text-muted mb-0">No products are currently associated with this location.</p>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="row g-4">
-        <div class="col-xl-6">
-            <div class="card h-100">
-                <div class="card-body">
-                    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
-                        <div>
-                            <h3 class="h5 mb-1">Recent Events</h3>
-                            <p class="text-muted mb-0">Recent event assignments involving this location.</p>
-                        </div>
-                        {% if can_access_endpoint('event.view_events', 'GET') %}
-                        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.view_events') }}">All Events</a>
-                        {% endif %}
-                    </div>
-                    {% if recent_event_locations %}
-                    <div class="table-responsive mobile-table-wrap">
-                        <table class="table table-striped align-middle mb-0 table-mobile-card">
-                            <thead>
-                                <tr>
-                                    <th>Event</th>
-                                    <th>Dates</th>
-                                    <th>Status</th>
-                                    <th class="text-end">Details</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for event_location in recent_event_locations %}
-                                {% set event_obj = event_location.event %}
-                                <tr>
-                                    <td class="mobile-card-primary">
-                                        {% if event_obj %}
-                                        {{ event_obj.name }}
-                                        {% else %}
-                                        Unknown event
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        {% if event_obj %}
-                                        {{ event_obj.start_date.strftime('%Y-%m-%d') }} to {{ event_obj.end_date.strftime('%Y-%m-%d') }}
-                                        {% else %}
-                                        -
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        {% if event_obj %}
-                                        {{ 'Closed' if event_obj.closed else 'Open' }} / {{ 'Confirmed' if event_location.confirmed else 'Pending' }}
-                                        {% else %}
-                                        -
-                                        {% endif %}
-                                    </td>
-                                    <td class="text-end">
-                                        {% if event_obj and can_access_endpoint('event.view_event', 'GET') %}
-                                        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('event.view_event', event_id=event_obj.id) }}">View Event</a>
-                                        {% else %}
-                                        <span class="text-muted">Unavailable</span>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    {% else %}
-                    <p class="text-muted mb-0">No event history has been recorded for this location yet.</p>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-
-        <div class="col-xl-6">
-            <div class="card h-100">
-                <div class="card-body">
-                    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
-                        <div>
-                            <h3 class="h5 mb-1">Recent Imported Sales</h3>
+                            <h3 class="h5 mb-1" id="recent-imported-sales-heading">Recent Imported Sales</h3>
                             <p class="text-muted mb-0">Recent POS sales imports that were mapped to this location.</p>
                         </div>
                         {% if can_access_endpoint('admin.sales_imports', 'GET') %}
@@ -467,9 +428,41 @@
                     {% else %}
                     <p class="text-muted mb-0">No imported sales have been mapped to this location yet.</p>
                     {% endif %}
-                </div>
+                </section>
             </div>
         </div>
-    </div>
+    </section>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('DOMContentLoaded', function () {
+    const tabs = Array.from(
+        document.querySelectorAll('#location-section-tabs button[data-location-section-tab="1"]')
+    );
+    const hash = window.location.hash;
+    const targetTab = tabs.find(function (button) {
+        return button.getAttribute('data-bs-target') === hash;
+    });
+
+    tabs.forEach(function (button) {
+        button.addEventListener('shown.bs.tab', function (event) {
+            const target = event.target.getAttribute('data-bs-target');
+            if (target) {
+                history.replaceState(null, '', target);
+            }
+        });
+    });
+
+    if (targetTab && window.bootstrap?.Tab) {
+        bootstrap.Tab.getOrCreateInstance(targetTab).show();
+        window.requestAnimationFrame(function () {
+            document.querySelector('.location-section-shell')?.scrollIntoView({ block: 'start' });
+            targetTab.scrollIntoView({ block: 'nearest', inline: 'center' });
+        });
+    }
+});
+</script>
 {% endblock %}

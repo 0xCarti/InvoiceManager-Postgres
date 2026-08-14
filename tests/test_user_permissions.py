@@ -810,6 +810,8 @@ def test_view_location_page_hides_terminal_mapping_delete_actions_for_view_only_
         response = client.get(f"/locations/{location_id}", follow_redirects=True)
 
     assert response.status_code == 200
+    assert b'id="location-section-tabs"' in response.data
+    assert b'id="terminal-sales-mappings"' in response.data
     assert b"Terminal Sales Mappings" in response.data
     assert b"Terminal Location" in response.data
     assert b"View only" in response.data

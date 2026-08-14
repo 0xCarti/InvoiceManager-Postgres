@@ -2091,21 +2091,6 @@ def view_location(location_id: int):
         if recent_event_locations and recent_event_locations[0].event
         else None
     )
-    latest_import_at = (
-        recent_import_locations[0].sales_import.received_at
-        if recent_import_locations and recent_import_locations[0].sales_import
-        else None
-    )
-    latest_count_submission_at = (
-        recent_count_submissions[0].submitted_at if recent_count_submissions else None
-    )
-    pending_count_submission_count = (
-        LocationCountSubmission.query.filter(
-            LocationCountSubmission.source_location_id == location_id,
-            LocationCountSubmission.status == LocationCountSubmission.STATUS_PENDING,
-        ).count()
-    )
-
     return render_template(
         "locations/view_location.html",
         location=location_obj,
@@ -2118,10 +2103,6 @@ def view_location(location_id: int):
         recent_count_submissions=recent_count_submissions,
         latest_transfer_at=latest_transfer_at,
         latest_event_date=latest_event_date,
-        latest_import_at=latest_import_at,
-        latest_count_submission_at=latest_count_submission_at,
-        pending_count_submission_count=pending_count_submission_count,
-        format_event_location_label=_format_event_location_label,
         submission_type_label=_submission_type_label,
     )
 
