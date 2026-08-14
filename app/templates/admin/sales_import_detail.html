@@ -73,6 +73,9 @@
             <input type="hidden" name="action" value="approve_import">
             <input type="hidden" name="selected_location_id" value="{{ selected_location.id if selected_location else '' }}">
             <input type="hidden" name="location_filter" value="{{ active_location_filter }}">
+            {% if return_event_id %}
+            <input type="hidden" name="return_event_id" value="{{ return_event_id }}">
+            {% endif %}
             <button type="submit" class="btn btn-success btn-sm" {% if unresolved_location_count or unresolved_event_location_count or unresolved_row_count or unresolved_price_count or not can_approve_import %}disabled{% endif %}>
                 Approve Import
             </button>

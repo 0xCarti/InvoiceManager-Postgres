@@ -636,6 +636,175 @@ def test_admin_can_approve_sales_import_and_post_to_event_location(client, app):
         assert row_metadata["target"]["event_location_id"] == seeded["event_location_id"]
 
 
+def test_event_origin_sales_import_approval_returns_to_event_day(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    seeded = _create_event_linked_sales_import(
+        app,
+        message_id="msg-approve-event-return",
+    )
+    detail_url = (
+        f"/controlpanel/sales-imports/{seeded['import_id']}"
+        f"?location_id={seeded['location_import_id']}"
+        f"&return_event_id={seeded['event_id']}"
+    )
+
+    with client:
+        login(client, admin_email, admin_pass)
+        detail_response = client.get(detail_url)
+        assert detail_response.status_code == 200
+        assert (
+            f'name="return_event_id" value="{seeded["event_id"]}"'.encode()
+            in detail_response.data
+        )
+
+        response = client.post(
+            f"/controlpanel/sales-imports/{seeded['import_id']}",
+            data={
+                "action": "approve_import",
+                "selected_location_id": seeded["location_import_id"],
+                "return_event_id": seeded["event_id"],
+            },
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == (
+        f"/events/{seeded['event_id']}"
+        f"#event-day-pane-{seeded['sales_date'].isoformat()}"
+    )
+    with app.app_context():
+        assert (
+            db.session.get(PosSalesImport, seeded["import_id"]).status
+            == PosSalesImport.STATUS_APPROVED
+        )
+
+
+def test_failed_sales_import_approval_does_not_follow_event_return_marker(
+    client, app
+):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    seeded = _create_unresolved_sales_import(
+        app,
+        message_id="msg-failed-event-return",
+    )
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            f"/controlpanel/sales-imports/{seeded['import_id']}",
+            data={
+                "action": "approve_import",
+                "selected_location_id": seeded["location_import_id"],
+                "return_event_id": 999999,
+            },
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == (
+        f"/controlpanel/sales-imports/{seeded['import_id']}"
+        f"?location_id={seeded['location_import_id']}&location_filter=all"
+        "&return_event_id=999999"
+    )
+    with app.app_context():
+        assert (
+            db.session.get(PosSalesImport, seeded["import_id"]).status
+            == PosSalesImport.STATUS_PENDING
+        )
+
+
+def test_sales_import_approval_without_event_view_permission_stays_on_detail(
+    client, app
+):
+    seeded = _create_event_linked_sales_import(
+        app,
+        message_id="msg-event-return-no-view",
+    )
+    with app.app_context():
+        reviewer = User(
+            email="sales-approval-no-event-view@example.com",
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add(reviewer)
+        db.session.commit()
+        grant_permissions(
+            reviewer,
+            "sales_imports.view",
+            "sales_imports.manage",
+            group_name="Sales Approval Without Event View",
+            description="Can approve sales imports without viewing events.",
+        )
+
+    with client:
+        login(client, "sales-approval-no-event-view@example.com", "pass")
+        response = client.post(
+            f"/controlpanel/sales-imports/{seeded['import_id']}",
+            data={
+                "action": "approve_import",
+                "selected_location_id": seeded["location_import_id"],
+                "return_event_id": seeded["event_id"],
+            },
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == (
+        f"/controlpanel/sales-imports/{seeded['import_id']}"
+        f"?location_id={seeded['location_import_id']}&location_filter=all"
+        f"&return_event_id={seeded['event_id']}"
+    )
+    with app.app_context():
+        assert (
+            db.session.get(PosSalesImport, seeded["import_id"]).status
+            == PosSalesImport.STATUS_APPROVED
+        )
+
+
+def test_sales_import_approval_rejects_unrelated_event_return_marker(client, app):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    seeded = _create_event_linked_sales_import(
+        app,
+        message_id="msg-unrelated-event-return",
+    )
+    with app.app_context():
+        unrelated_event = Event(
+            name="Unrelated Return Event",
+            start_date=seeded["sales_date"],
+            end_date=seeded["sales_date"],
+        )
+        db.session.add(unrelated_event)
+        db.session.commit()
+        unrelated_event_id = unrelated_event.id
+
+    with client:
+        login(client, admin_email, admin_pass)
+        response = client.post(
+            f"/controlpanel/sales-imports/{seeded['import_id']}",
+            data={
+                "action": "approve_import",
+                "selected_location_id": seeded["location_import_id"],
+                "return_event_id": unrelated_event_id,
+            },
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == (
+        f"/controlpanel/sales-imports/{seeded['import_id']}"
+        f"?location_id={seeded['location_import_id']}&location_filter=all"
+        f"&return_event_id={unrelated_event_id}"
+    )
+    with app.app_context():
+        assert (
+            db.session.get(PosSalesImport, seeded["import_id"]).status
+            == PosSalesImport.STATUS_APPROVED
+        )
+
+
 def test_admin_can_append_event_linked_sales_across_daily_imports(
     client, app
 ):

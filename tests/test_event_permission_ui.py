@@ -268,7 +268,7 @@ def test_event_pending_badges_link_to_their_review_pages(client, app):
     assert f'href="{count_queue}?{common_filters}&submission_type=closing"' in body
     assert (
         f'href="/controlpanel/sales-imports/{sales_import_id}'
-        f'?location_id={import_location_id}"' in body
+        f'?location_id={import_location_id}&return_event_id={seeded["event_id"]}"' in body
     )
 
 

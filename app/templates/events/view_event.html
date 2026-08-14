@@ -345,7 +345,7 @@
                                                 {% for pending_import in entry.pending_sales_imports %}
                                                 <a
                                                     class="badge text-bg-warning text-decoration-none"
-                                                    href="{{ url_for('admin.sales_import_detail', import_id=pending_import.import_id, location_id=pending_import.import_location_id) }}"
+                                                    href="{{ url_for('admin.sales_import_detail', import_id=pending_import.import_id, location_id=pending_import.import_location_id, return_event_id=event.id) }}"
                                                     aria-label="Review pending sales import{% if entry.pending_sales_imports|length > 1 %} {{ loop.index }}{% endif %}"
                                                 >Pending{% if entry.pending_sales_imports|length > 1 %} {{ loop.index }}{% endif %}</a>
                                                 {% endfor %}

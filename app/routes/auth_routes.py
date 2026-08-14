@@ -4100,6 +4100,47 @@ def _sales_import_current_user_id() -> int | None:
     return current_user.id
 
 
+def _sales_import_event_return_url(
+    import_id: int,
+    import_location_id: int | None,
+    return_event_id: int | None,
+) -> str | None:
+    """Build a validated event-day return URL for an approved sales import."""
+
+    if import_location_id is None or return_event_id is None:
+        return None
+    if not current_user.can_access_endpoint("event.view_event", "GET"):
+        return None
+
+    import_location = (
+        PosSalesImportLocation.query.join(
+            EventLocation,
+            PosSalesImportLocation.event_location_id == EventLocation.id,
+        )
+        .filter(
+            PosSalesImportLocation.id == import_location_id,
+            PosSalesImportLocation.import_id == import_id,
+            EventLocation.event_id == return_event_id,
+        )
+        .first()
+    )
+    if import_location is None:
+        return None
+
+    sales_import = db.session.get(PosSalesImport, import_id)
+    event = db.session.get(Event, return_event_id)
+    if sales_import is None or sales_import.sales_date is None or event is None:
+        return None
+    if not (event.start_date <= sales_import.sales_date <= event.end_date):
+        return None
+
+    return url_for(
+        "event.view_event",
+        event_id=event.id,
+        _anchor=f"event-day-pane-{sales_import.sales_date.isoformat()}",
+    )
+
+
 def _approve_sales_import(
     import_id: int,
     *,
@@ -4536,6 +4577,11 @@ def sales_import_detail(import_id: int):
     active_location_filter = _normalize_sales_import_location_filter(
         request.values.get("location_filter")
     )
+    return_event_id = (
+        request.form.get("return_event_id", type=int)
+        if request.method == "POST"
+        else request.args.get("return_event_id", type=int)
+    )
     sales_import = (
         PosSalesImport.query.options(
             selectinload(PosSalesImport.locations)
@@ -4648,14 +4694,14 @@ def sales_import_detail(import_id: int):
                     409,
                 )
             flash(locked_message, "warning")
-            return redirect(
-                url_for(
-                    "admin.sales_import_detail",
-                    import_id=sales_import.id,
-                    location_id=selected_location_id,
-                    location_filter=active_location_filter,
-                )
-            )
+            redirect_args = {
+                "import_id": sales_import.id,
+                "location_id": selected_location_id,
+                "location_filter": active_location_filter,
+            }
+            if return_event_id is not None:
+                redirect_args["return_event_id"] = return_event_id
+            return redirect(url_for("admin.sales_import_detail", **redirect_args))
 
         if action == "save_sales_date":
             if not _sales_import_review_is_editable(sales_import):
@@ -5011,7 +5057,15 @@ def sales_import_detail(import_id: int):
             else:
                 flash("No additional automatic mappings were found.", "info")
         elif action == "approve_import":
-            _approve_sales_import(sales_import.id)
+            approval_succeeded = _approve_sales_import(sales_import.id)
+            if approval_succeeded:
+                event_return_url = _sales_import_event_return_url(
+                    sales_import.id,
+                    selected_location_id,
+                    return_event_id,
+                )
+                if event_return_url is not None:
+                    return redirect(event_return_url)
         elif action == "undo_approved_import":
             reversal_reason = (request.form.get("reversal_reason") or "").strip()
             has_warning_confirmation = request.form.get("confirm_reversal") == "1"
@@ -5386,14 +5440,14 @@ def sales_import_detail(import_id: int):
                 flash("Unable to delete import due to an unexpected error.", "danger")
 
         if ajax_review_response is None:
-            return redirect(
-                url_for(
-                    "admin.sales_import_detail",
-                    import_id=sales_import.id,
-                    location_id=selected_location_id,
-                    location_filter=active_location_filter,
-                )
-            )
+            redirect_args = {
+                "import_id": sales_import.id,
+                "location_id": selected_location_id,
+                "location_filter": active_location_filter,
+            }
+            if return_event_id is not None:
+                redirect_args["return_event_id"] = return_event_id
+            return redirect(url_for("admin.sales_import_detail", **redirect_args))
 
     issue_state = _sync_detail_review_state()
     if issue_state["assignment_changed"] or issue_state["status_changed"]:
@@ -5571,6 +5625,7 @@ def sales_import_detail(import_id: int):
         row_review_data=row_review_data,
         location_discount_totals=location_discount_totals,
         can_approve_import=_sales_import_can_be_approved(sales_import),
+        return_event_id=return_event_id,
         review_edit_locked=not _sales_import_review_is_editable(sales_import),
         price_review_locked=not _sales_import_review_is_editable(sales_import),
         undo_confirm_form=undo_confirm_form,
