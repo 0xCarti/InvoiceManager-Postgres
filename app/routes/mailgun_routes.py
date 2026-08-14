@@ -6,17 +6,20 @@ import hashlib
 import hmac
 import os
 import time
-from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request
 from werkzeug.utils import secure_filename
 
-from app.services.pos_sales_ingest import ingest_pos_sales_attachment
+from app.services.pos_sales_ingest import (
+    PosSalesImportStorageError,
+    ingest_pos_sales_attachment,
+)
 from app.utils.activity import log_activity
 from app.utils.pos_import_security import (
     DEFAULT_MAX_ATTACHMENT_BYTES,
     csv_config_set,
     normalized_extension_allowlist,
+    resolve_pos_import_storage_dir,
     sender_policy_error,
 )
 
@@ -105,12 +108,7 @@ def inbound_mailgun():
     if not request.files:
         return jsonify({"ok": False, "error": "missing_attachment"}), 400
 
-    storage_dir_config = current_app.config.get("MAILGUN_INBOUND_STORAGE_DIR")
-    storage_dir = Path(
-        storage_dir_config
-        or os.path.join(current_app.config["UPLOAD_FOLDER"], "mailgun_inbound")
-    )
-    storage_dir.mkdir(parents=True, exist_ok=True)
+    storage_dir = resolve_pos_import_storage_dir(current_app.config)
 
     imported = []
     ignored = []
@@ -167,7 +165,17 @@ def inbound_mailgun():
                     "Received duplicate POS sales import webhook payload "
                     f"for existing import {sales_import.id}"
                 )
+        except PosSalesImportStorageError:
+            current_app.logger.exception(
+                "Mailgun POS sales attachment storage is unavailable for %s",
+                filename,
+            )
+            return jsonify({"ok": False, "error": "storage_unavailable"}), 503
         except Exception:
+            current_app.logger.exception(
+                "Failed to ingest Mailgun POS sales attachment %s",
+                filename,
+            )
             return jsonify({"ok": False, "error": "parse_failed"}), 422
 
     if not imported and not handled_attachment:

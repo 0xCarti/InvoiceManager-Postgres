@@ -2,11 +2,70 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
+from collections.abc import Mapping
 from email.utils import parseaddr
 from pathlib import Path
+from typing import Any
 
 DEFAULT_ATTACHMENT_EXTENSIONS = "xls,xlsx"
 DEFAULT_MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+
+
+def resolve_pos_import_storage_dir(config: Mapping[str, Any]) -> Path:
+    """Return the configured directory for persisted POS import attachments."""
+
+    configured_dir = str(config.get("MAILGUN_INBOUND_STORAGE_DIR") or "").strip()
+    if configured_dir:
+        return Path(configured_dir)
+
+    upload_folder = config.get("UPLOAD_FOLDER")
+    if not upload_folder:
+        raise RuntimeError(
+            "UPLOAD_FOLDER is required to resolve the POS sales import storage "
+            "directory."
+        )
+    return Path(str(upload_folder)) / "mailgun_inbound"
+
+
+def ensure_pos_import_storage_writable(config: Mapping[str, Any]) -> Path:
+    """Create and write-test the POS import attachment directory.
+
+    A real create/write/delete probe catches bind-mount ownership and ACL issues
+    that existence checks and ``os.access`` can miss.
+    """
+
+    storage_dir = resolve_pos_import_storage_dir(config)
+    probe_path: Path | None = None
+    try:
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            prefix=".pos-import-write-probe-",
+            dir=storage_dir,
+            delete=False,
+        ) as probe:
+            probe_path = Path(probe.name)
+            probe.write(b"probe")
+            probe.flush()
+            os.fsync(probe.fileno())
+        probe_path.unlink()
+        probe_path = None
+    except OSError as exc:
+        raise RuntimeError(
+            "POS sales import storage directory is not writable: "
+            f"{storage_dir}. Ensure the application user can create and delete "
+            "files there."
+        ) from exc
+    finally:
+        if probe_path is not None:
+            try:
+                probe_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    return storage_dir
 
 
 def csv_config_set(value: str | None) -> set[str]:

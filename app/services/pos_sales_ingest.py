@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import secrets
 from datetime import datetime, timedelta, timezone as dt_timezone
 from pathlib import Path
@@ -41,6 +42,10 @@ from app.utils.timezone import get_default_timezone
 
 class EmptyPosSalesImportError(ValueError):
     """Raised when an attachment contains no usable POS sales data."""
+
+
+class PosSalesImportStorageError(RuntimeError):
+    """Raised when an inbound sales attachment cannot be persisted."""
 
 
 def _get_pos_sales_import_interval() -> tuple[int, str]:
@@ -387,10 +392,35 @@ def ingest_pos_sales_attachment(
 
     attachment_sha256 = hashlib.sha256(content).hexdigest()
     destination_dir = Path(storage_dir)
-    destination_dir.mkdir(parents=True, exist_ok=True)
     persisted_path = destination_dir / f"{attachment_sha256}{extension}"
-    if not persisted_path.exists():
-        persisted_path.write_bytes(content)
+    temporary_path: Path | None = None
+    try:
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        persisted_content_matches = (
+            persisted_path.is_file()
+            and hashlib.sha256(persisted_path.read_bytes()).hexdigest()
+            == attachment_sha256
+        )
+        if not persisted_content_matches:
+            temporary_path = destination_dir / (
+                f".{attachment_sha256}.{secrets.token_hex(8)}.tmp"
+            )
+            with temporary_path.open("xb") as attachment_file:
+                attachment_file.write(content)
+                attachment_file.flush()
+                os.fsync(attachment_file.fileno())
+            os.replace(temporary_path, persisted_path)
+            temporary_path = None
+    except OSError as exc:
+        raise PosSalesImportStorageError(
+            "Unable to persist the inbound POS sales attachment."
+        ) from exc
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     received_at = datetime.utcnow()
     sales_import = PosSalesImport(

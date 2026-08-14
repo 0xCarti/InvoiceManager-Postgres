@@ -13,7 +13,6 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from email import policy
-from pathlib import Path
 from threading import Event, Thread
 
 from flask import current_app
@@ -25,6 +24,7 @@ from app.utils.pos_import_security import (
     attachment_allowed,
     csv_config_set,
     normalized_extension_allowlist,
+    resolve_pos_import_storage_dir,
     sender_policy_error,
 )
 
@@ -260,10 +260,7 @@ def run_pos_sales_mailbox_poll_once(app) -> dict[str, int]:
                 ),
             )
         )
-        storage_root = Path(
-            app.config.get("MAILGUN_INBOUND_STORAGE_DIR")
-            or os.path.join(app.config["UPLOAD_FOLDER"], "mailgun_inbound")
-        )
+        storage_root = resolve_pos_import_storage_dir(app.config)
 
         result = {"messages": 0, "imports": 0, "duplicates": 0, "errors": 0}
         for message in provider.fetch_unseen_messages():
@@ -312,6 +309,10 @@ def run_pos_sales_mailbox_poll_once(app) -> dict[str, int]:
                 except Exception:
                     result["errors"] += 1
                     message_failed = True
+                    current_app.logger.exception(
+                        "Failed to ingest polled POS sales attachment %s",
+                        attachment.filename,
+                    )
 
             if not message_failed:
                 provider.acknowledge(message.ack_token)

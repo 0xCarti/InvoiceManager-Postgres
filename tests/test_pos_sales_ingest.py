@@ -1,3 +1,4 @@
+import hashlib
 from decimal import Decimal
 from datetime import datetime, timezone as dt_timezone
 
@@ -11,7 +12,10 @@ from app.models import (
     db,
 )
 from app.services import pos_sales_ingest
-from app.services.pos_sales_ingest import ingest_pos_sales_attachment
+from app.services.pos_sales_ingest import (
+    PosSalesImportStorageError,
+    ingest_pos_sales_attachment,
+)
 from app.utils.pos_import import parse_terminal_sales_email_rows
 from tests.utils import build_terminal_sales_workbook_bytes
 
@@ -41,6 +45,77 @@ def test_ingest_pos_sales_attachment_is_idempotent_for_duplicate_message_and_att
         assert second_duplicate is True
         assert first.id == second.id
         assert PosSalesImport.query.count() == 1
+
+
+def test_ingest_pos_sales_attachment_wraps_storage_failures(app, tmp_path):
+    storage_path = tmp_path / "mailgun_staging"
+    storage_path.write_text("not a directory", encoding="utf-8")
+
+    with app.app_context():
+        with pytest.raises(PosSalesImportStorageError) as exc_info:
+            ingest_pos_sales_attachment(
+                source_provider="mailgun",
+                source_message_id="<storage-failure-message>",
+                filename="game_sales.xls",
+                content=b"spreadsheet bytes",
+                storage_dir=storage_path,
+            )
+
+        assert isinstance(exc_info.value.__cause__, OSError)
+        assert PosSalesImport.query.count() == 0
+
+
+def test_ingest_replaces_truncated_attachment_before_staging(
+    app, monkeypatch, tmp_path
+):
+    content = b"complete spreadsheet bytes"
+    storage_dir = tmp_path / "mailgun_staging"
+    storage_dir.mkdir()
+    persisted_path = storage_dir / f"{hashlib.sha256(content).hexdigest()}.xls"
+    persisted_path.write_bytes(b"truncated")
+    monkeypatch.setattr(
+        pos_sales_ingest,
+        "stage_pos_sales_import",
+        lambda sales_import, filepath, extension: None,
+    )
+
+    with app.app_context():
+        sales_import, duplicate = ingest_pos_sales_attachment(
+            source_provider="mailgun",
+            source_message_id="<replace-truncated-message>",
+            filename="game_sales.xls",
+            content=content,
+            storage_dir=storage_dir,
+        )
+
+        assert duplicate is False
+        assert sales_import.status == PosSalesImport.STATUS_PENDING
+        assert persisted_path.read_bytes() == content
+        assert list(storage_dir.glob(".*.tmp")) == []
+
+
+def test_ingest_cleans_temporary_attachment_after_replace_failure(
+    app, monkeypatch, tmp_path
+):
+    storage_dir = tmp_path / "mailgun_staging"
+
+    def _fail_replace(source, destination):
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(pos_sales_ingest.os, "replace", _fail_replace)
+
+    with app.app_context():
+        with pytest.raises(PosSalesImportStorageError):
+            ingest_pos_sales_attachment(
+                source_provider="mailgun",
+                source_message_id="<replace-failure-message>",
+                filename="game_sales.xls",
+                content=b"spreadsheet bytes",
+                storage_dir=storage_dir,
+            )
+
+        assert list(storage_dir.iterdir()) == []
+        assert PosSalesImport.query.count() == 0
 
 
 def test_default_sales_import_date_uses_configured_lookback_interval(app):

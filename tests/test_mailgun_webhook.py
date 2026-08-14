@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from app.models import PosSalesImport
+from app.services.pos_sales_ingest import PosSalesImportStorageError
 from tests.utils import build_terminal_sales_workbook_bytes
 
 
@@ -239,3 +240,92 @@ def test_mailgun_webhook_ignores_empty_sales_attachment(client, app, monkeypatch
 
     with app.app_context():
         assert PosSalesImport.query.count() == 0
+
+
+def test_mailgun_webhook_returns_retryable_error_for_unavailable_storage(
+    client, app, monkeypatch, caplog
+):
+    app.config.update(
+        {
+            "MAILGUN_WEBHOOK_SIGNING_KEY": "secret-key",
+            "MAILGUN_ALLOWED_SENDER_DOMAINS": "example.com",
+            "MAILGUN_ALLOWED_ATTACHMENT_EXTENSIONS": "xls,xlsx",
+        }
+    )
+
+    def _raise_storage_error(**kwargs):
+        raise PosSalesImportStorageError("simulated storage failure")
+
+    monkeypatch.setattr(
+        "app.routes.mailgun_routes.ingest_pos_sales_attachment",
+        _raise_storage_error,
+    )
+    data = _payload("secret-key", sender="private-sender@example.com")
+    data["attachment-1"] = (
+        io.BytesIO(b"spreadsheet bytes"),
+        "../../daily sales.xls",
+    )
+
+    logger_was_disabled = app.logger.disabled
+    app.logger.disabled = False
+    app.logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level("ERROR", logger=app.logger.name):
+            response = client.post(
+                "/webhooks/mailgun/inbound",
+                data=data,
+                content_type="multipart/form-data",
+            )
+    finally:
+        app.logger.removeHandler(caplog.handler)
+        app.logger.disabled = logger_was_disabled
+
+    assert response.status_code == 503
+    assert response.get_json() == {"ok": False, "error": "storage_unavailable"}
+    assert "Mailgun POS sales attachment storage is unavailable" in caplog.text
+    assert "daily_sales.xls" in caplog.text
+    assert "secret-key" not in caplog.text
+    assert "tok-123" not in caplog.text
+    assert "private-sender@example.com" not in caplog.text
+    assert "spreadsheet bytes" not in caplog.text
+
+
+def test_mailgun_webhook_logs_parse_failures(client, app, monkeypatch, caplog):
+    app.config.update(
+        {
+            "MAILGUN_WEBHOOK_SIGNING_KEY": "secret-key",
+            "MAILGUN_ALLOWED_SENDER_DOMAINS": "example.com",
+            "MAILGUN_ALLOWED_ATTACHMENT_EXTENSIONS": "xls,xlsx",
+        }
+    )
+
+    def _raise_parse_error(**kwargs):
+        raise ValueError("simulated parser failure")
+
+    monkeypatch.setattr(
+        "app.routes.mailgun_routes.ingest_pos_sales_attachment",
+        _raise_parse_error,
+    )
+    data = _payload("secret-key")
+    data["attachment-1"] = (io.BytesIO(b"invalid workbook"), "daily_sales.xls")
+
+    logger_was_disabled = app.logger.disabled
+    app.logger.disabled = False
+    app.logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level("ERROR", logger=app.logger.name):
+            response = client.post(
+                "/webhooks/mailgun/inbound",
+                data=data,
+                content_type="multipart/form-data",
+            )
+    finally:
+        app.logger.removeHandler(caplog.handler)
+        app.logger.disabled = logger_was_disabled
+
+    assert response.status_code == 422
+    assert response.get_json() == {"ok": False, "error": "parse_failed"}
+    assert (
+        "Failed to ingest Mailgun POS sales attachment daily_sales.xls"
+        in caplog.text
+    )

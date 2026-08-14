@@ -646,6 +646,13 @@ def create_app(args=None):
     os.makedirs(app.config["BACKUP_FOLDER"], exist_ok=True)
     os.makedirs(app.config["IMPORT_FILES_FOLDER"], exist_ok=True)
     _configure_error_file_logging(app)
+    from app.utils.pos_import_security import ensure_pos_import_storage_writable
+
+    try:
+        ensure_pos_import_storage_writable(app.config)
+    except RuntimeError as exc:
+        app.logger.critical("%s", exc)
+        raise
     if app.config["SECRET_KEY_IS_EPHEMERAL"]:
         app.logger.warning(
             "SECRET_KEY is not configured; using an ephemeral in-memory key. "
