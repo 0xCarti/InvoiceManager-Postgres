@@ -118,6 +118,10 @@ from app.services.inventory_expiry import (
     consume_item_lots,
     restore_lot_adjustments,
 )
+from app.services.pos_sales_event_assignments import (
+    load_sales_import_event_candidates as _load_sales_import_event_candidates,
+    sync_sales_import_event_assignments as _sync_sales_import_event_assignments,
+)
 from app.permissions import (
     get_default_landing_endpoint,
     get_permission_categories,
@@ -3316,93 +3320,6 @@ def _format_sales_import_event_label(event_location: EventLocation) -> str:
     )
     location_label = location_obj.name if location_obj is not None else "Unknown location"
     return f"{event_obj.name} | {location_label} | {date_label}"
-
-
-def _load_sales_import_event_candidates(
-    sales_import: PosSalesImport,
-) -> dict[int, list[EventLocation]]:
-    candidate_lookup: dict[int, list[EventLocation]] = {}
-    if sales_import.sales_date is None:
-        return candidate_lookup
-
-    location_ids = sorted(
-        {
-            import_location.location_id
-            for import_location in sales_import.locations
-            if import_location.location_id is not None
-        }
-    )
-    if not location_ids:
-        return candidate_lookup
-
-    candidate_rows = (
-        EventLocation.query.options(
-            selectinload(EventLocation.event),
-            selectinload(EventLocation.location),
-        )
-        .join(Event, Event.id == EventLocation.event_id)
-        .filter(EventLocation.location_id.in_(location_ids))
-        .filter(Event.closed.is_(False))
-        .filter(Event.start_date <= sales_import.sales_date)
-        .filter(Event.end_date >= sales_import.sales_date)
-        .order_by(
-            EventLocation.location_id.asc(),
-            Event.start_date.asc(),
-            Event.end_date.asc(),
-            Event.id.asc(),
-        )
-        .all()
-    )
-
-    for candidate in candidate_rows:
-        candidate_lookup.setdefault(candidate.location_id, []).append(candidate)
-    return candidate_lookup
-
-
-def _sync_sales_import_event_assignments(
-    sales_import: PosSalesImport,
-    *,
-    candidate_lookup: dict[int, list[EventLocation]] | None = None,
-) -> bool:
-    if sales_import.status not in _SALES_IMPORT_REVIEW_EDITABLE_STATUSES:
-        return False
-
-    candidate_lookup = (
-        candidate_lookup
-        if candidate_lookup is not None
-        else _load_sales_import_event_candidates(sales_import)
-    )
-    changed = False
-
-    for import_location in sales_import.locations:
-        if (
-            _sales_import_location_is_skipped(import_location)
-            or import_location.location_id is None
-            or sales_import.sales_date is None
-        ):
-            if import_location.event_location_id is not None:
-                import_location.event_location_id = None
-                import_location.event_location = None
-                changed = True
-            continue
-
-        candidates = candidate_lookup.get(import_location.location_id, [])
-        if len(candidates) != 1:
-            if import_location.event_location_id is not None:
-                import_location.event_location_id = None
-                import_location.event_location = None
-                changed = True
-            continue
-
-        matched_event_location = candidates[0]
-        candidate_id = matched_event_location.id
-        if import_location.event_location_id != candidate_id:
-            import_location.event_location_id = candidate_id
-            changed = True
-        if import_location.event_location is not matched_event_location:
-            import_location.event_location = matched_event_location
-
-    return changed
 
 
 def _build_sales_import_event_assignment_state(

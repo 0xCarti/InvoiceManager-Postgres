@@ -19,6 +19,7 @@
 {% set can_download_event_documents = can_access_endpoint('event.download_event_document') %}
 {% set can_delete_event_documents = can_access_endpoint('event.delete_event_document_file', 'POST') %}
 {% set can_review_count_submissions = can_access_endpoint('locations.count_submissions', 'GET') %}
+{% set can_view_sales_imports = can_access_endpoint('admin.sales_import_detail', 'GET') %}
 {% set can_view_location = can_access_endpoint('locations.view_location', 'GET') %}
 {% if is_inventory_event %}
     {% set report_count = (1 if can_view_count_sheets else 0) + (1 if can_view_inventory_report else 0) + (1 if can_view_inventory_comparison_report else 0) %}
@@ -244,12 +245,13 @@
                 <li class="nav-item" role="presentation">
                     <button
                         class="nav-link {% if loop.first %}active{% endif %}"
-                        id="event-day-tab-{{ loop.index }}"
+                        id="event-day-tab-{{ day.date.isoformat() }}"
+                        data-event-day-tab="1"
                         data-bs-toggle="tab"
-                        data-bs-target="#event-day-pane-{{ loop.index }}"
+                        data-bs-target="#event-day-pane-{{ day.date.isoformat() }}"
                         type="button"
                         role="tab"
-                        aria-controls="event-day-pane-{{ loop.index }}"
+                        aria-controls="event-day-pane-{{ day.date.isoformat() }}"
                         aria-selected="{{ 'true' if loop.first else 'false' }}"
                     >
                         {{ day.date.strftime('%a') }} {{ day.date.month }}/{{ day.date.day }}
@@ -262,9 +264,9 @@
                 {% for day in event_day_summaries %}
                 <div
                     class="tab-pane fade {% if loop.first %}show active{% endif %}"
-                    id="event-day-pane-{{ loop.index }}"
+                    id="event-day-pane-{{ day.date.isoformat() }}"
                     role="tabpanel"
-                    aria-labelledby="event-day-tab-{{ loop.index }}"
+                    aria-labelledby="event-day-tab-{{ day.date.isoformat() }}"
                     tabindex="0"
                 >
                     {% if day.locations %}
@@ -305,23 +307,56 @@
                                     </td>
                                     {% if not is_inventory_event %}
                                     <td>
+                                        {% if entry.opening_status == 'pending' and can_review_count_submissions %}
+                                        <a
+                                            class="badge text-bg-warning text-decoration-none"
+                                            href="{{ url_for('locations.count_submissions', event_location_id=entry.event_location.id, submission_date=day.date.isoformat(), status='pending', submission_type='opening') }}"
+                                            aria-label="Review pending opening count submissions"
+                                        >Pending</a>
+                                        {% else %}
                                         <span class="badge {% if entry.opening_status == 'approved' %}text-bg-success{% elif entry.opening_status == 'pending' %}text-bg-warning{% elif entry.opening_status == 'rejected' %}text-bg-danger{% else %}text-bg-light border text-dark{% endif %}">
                                             {{ entry.opening_status|title }}
                                         </span>
+                                        {% endif %}
                                         {% if entry.opening_submission_count %}
                                         <span class="small text-muted">{{ entry.opening_submission_count }}</span>
                                         {% endif %}
                                     </td>
                                     <td>
+                                        {% if entry.closing_status == 'pending' and can_review_count_submissions %}
+                                        <a
+                                            class="badge text-bg-warning text-decoration-none"
+                                            href="{{ url_for('locations.count_submissions', event_location_id=entry.event_location.id, submission_date=day.date.isoformat(), status='pending', submission_type='closing') }}"
+                                            aria-label="Review pending closing count submissions"
+                                        >Pending</a>
+                                        {% else %}
                                         <span class="badge {% if entry.closing_status == 'approved' %}text-bg-success{% elif entry.closing_status == 'pending' %}text-bg-warning{% elif entry.closing_status == 'rejected' %}text-bg-danger{% else %}text-bg-light border text-dark{% endif %}">
                                             {{ entry.closing_status|title }}
                                         </span>
+                                        {% endif %}
                                         {% if entry.closing_submission_count %}
                                         <span class="small text-muted">{{ entry.closing_submission_count }}</span>
                                         {% endif %}
                                     </td>
                                     <td>
-                                        {% if entry.sales_count %}
+                                        {% if entry.pending_sales_imports %}
+                                            <div class="d-flex flex-wrap gap-1">
+                                            {% if can_view_sales_imports %}
+                                                {% for pending_import in entry.pending_sales_imports %}
+                                                <a
+                                                    class="badge text-bg-warning text-decoration-none"
+                                                    href="{{ url_for('admin.sales_import_detail', import_id=pending_import.import_id, location_id=pending_import.import_location_id) }}"
+                                                    aria-label="Review pending sales import{% if entry.pending_sales_imports|length > 1 %} {{ loop.index }}{% endif %}"
+                                                >Pending{% if entry.pending_sales_imports|length > 1 %} {{ loop.index }}{% endif %}</a>
+                                                {% endfor %}
+                                            {% else %}
+                                                <span class="badge text-bg-warning">Pending</span>
+                                            {% endif %}
+                                            </div>
+                                            {% if entry.sales_count %}
+                                            <span class="small text-muted">{{ entry.sales_count }} approved row{% if entry.sales_count != 1 %}s{% endif %}; {{ '%.2f'|format(entry.sales_quantity) }} units</span>
+                                            {% endif %}
+                                        {% elif entry.sales_count %}
                                         <span class="badge text-bg-success">{{ entry.sales_count }} row{% if entry.sales_count != 1 %}s{% endif %}</span>
                                         <span class="small text-muted">{{ '%.2f'|format(entry.sales_quantity) }} units</span>
                                         {% else %}
@@ -615,15 +650,21 @@
     {{ super() }}
     <script nonce="{{ csp_nonce }}">
         document.addEventListener('DOMContentLoaded', function () {
-            const tabs = Array.from(
+            const sectionTabs = Array.from(
                 document.querySelectorAll('#event-section-tabs button[data-event-section-tab="1"]')
             );
+            const dayTabs = Array.from(
+                document.querySelectorAll('#event-day-tabs button[data-event-day-tab="1"]')
+            );
             const hash = window.location.hash;
-            const targetTab = tabs.find(function (button) {
+            const targetSectionTab = sectionTabs.find(function (button) {
+                return button.getAttribute('data-bs-target') === hash;
+            });
+            const targetDayTab = dayTabs.find(function (button) {
                 return button.getAttribute('data-bs-target') === hash;
             });
 
-            tabs.forEach(function (button) {
+            sectionTabs.concat(dayTabs).forEach(function (button) {
                 button.addEventListener('shown.bs.tab', function (event) {
                     const target = event.target.getAttribute('data-bs-target');
                     if (target) {
@@ -632,8 +673,13 @@
                 });
             });
 
-            if (targetTab && window.bootstrap?.Tab) {
-                bootstrap.Tab.getOrCreateInstance(targetTab).show();
+            if (targetSectionTab && window.bootstrap?.Tab) {
+                bootstrap.Tab.getOrCreateInstance(targetSectionTab).show();
+                window.requestAnimationFrame(function () {
+                    document.querySelector('.event-section-shell')?.scrollIntoView({ block: 'start' });
+                });
+            } else if (targetDayTab && window.bootstrap?.Tab) {
+                bootstrap.Tab.getOrCreateInstance(targetDayTab).show();
                 window.requestAnimationFrame(function () {
                     document.querySelector('.event-section-shell')?.scrollIntoView({ block: 'start' });
                 });

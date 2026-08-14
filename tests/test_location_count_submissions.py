@@ -20,6 +20,7 @@ from app.models import (
 from app.services.location_count_submissions import (
     sync_event_location_counts_from_approved_submissions,
 )
+from tests.permission_helpers import grant_permissions
 from tests.utils import login
 
 
@@ -97,6 +98,132 @@ def _create_pending_submission(
     db.session.add(row)
     db.session.commit()
     return submission.id
+
+
+def _approval_payload(context: dict, row_id: int, *, submitted_name: str) -> dict:
+    return {
+        "action": "approve_add",
+        "submitted_name": submitted_name,
+        "submission_type": "opening",
+        "submission_date": context["today"].isoformat(),
+        "location_id": str(context["location_id"]),
+        "event_location_id": str(context["event_location_id"]),
+        "review_note": "",
+        f"count_{row_id}": "7",
+    }
+
+
+def test_count_approval_redirects_to_the_matching_event_day_tab(client, app):
+    context = _setup_location_count_context(app)
+    with app.app_context():
+        submission_id = _create_pending_submission(
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+            submission_type=LocationCountSubmission.TYPE_OPENING,
+            submission_date=context["today"],
+            count_value=7.0,
+            submitted_name="Day Lead",
+        )
+        submission = db.session.get(LocationCountSubmission, submission_id)
+        row_id = submission.rows[0].id
+
+    with client:
+        login(client, "admin@example.com", "adminpass")
+        response = client.post(
+            f"/locations/count-submissions/{submission_id}",
+            data=_approval_payload(context, row_id, submitted_name="Day Lead"),
+        )
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == (
+        f"/events/{context['event_id']}"
+        f"#event-day-pane-{context['today'].isoformat()}"
+    )
+    with app.app_context():
+        assert (
+            db.session.get(LocationCountSubmission, submission_id).status
+            == LocationCountSubmission.STATUS_APPROVED
+        )
+
+
+def test_count_approval_falls_back_when_reviewer_cannot_view_event(client, app):
+    context = _setup_location_count_context(app)
+    reviewer_email = "count-review-no-event-view@example.com"
+    with app.app_context():
+        reviewer = User(
+            email=reviewer_email,
+            password=generate_password_hash("pass"),
+            active=True,
+        )
+        db.session.add(reviewer)
+        db.session.commit()
+        grant_permissions(
+            reviewer,
+            "events.manage_locations",
+            group_name="Count Review Without Event View",
+            description="Review counts without event detail access.",
+        )
+        submission_id = _create_pending_submission(
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+            submission_type=LocationCountSubmission.TYPE_OPENING,
+            submission_date=context["today"],
+            count_value=7.0,
+            submitted_name="Restricted Reviewer",
+        )
+        submission = db.session.get(LocationCountSubmission, submission_id)
+        row_id = submission.rows[0].id
+
+    with client:
+        login(client, reviewer_email, "pass")
+        response = client.post(
+            f"/locations/count-submissions/{submission_id}",
+            data=_approval_payload(
+                context,
+                row_id,
+                submitted_name="Restricted Reviewer",
+            ),
+        )
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == (
+        f"/locations/count-submissions/{submission_id}"
+    )
+
+
+def test_count_approval_rejects_a_cleared_event_mapping(client, app):
+    context = _setup_location_count_context(app)
+    with app.app_context():
+        submission_id = _create_pending_submission(
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+            submission_type=LocationCountSubmission.TYPE_OPENING,
+            submission_date=context["today"],
+            count_value=7.0,
+            submitted_name="Unmapped Lead",
+        )
+        submission = db.session.get(LocationCountSubmission, submission_id)
+        row_id = submission.rows[0].id
+
+    payload = _approval_payload(context, row_id, submitted_name="Unmapped Lead")
+    payload["event_location_id"] = ""
+    with client:
+        login(client, "admin@example.com", "adminpass")
+        response = client.post(
+            f"/locations/count-submissions/{submission_id}",
+            data=payload,
+        )
+
+    assert response.status_code == 200
+    assert b"Map this submission to an event before approving it" in response.data
+    with app.app_context():
+        assert (
+            db.session.get(LocationCountSubmission, submission_id).status
+            == LocationCountSubmission.STATUS_PENDING
+        )
 
 
 def test_public_count_submission_blocks_closing_until_opening_exists(client, app):

@@ -52,6 +52,8 @@ from app.models import (
     LocationCountSubmission,
     LocationCountSubmissionRow,
     LocationStandItem,
+    PosSalesImport,
+    PosSalesImportLocation,
     Product,
     ProductRecipeItem,
     TerminalSale,
@@ -82,6 +84,10 @@ from app.services.event_documents import (
     resolve_event_document_path,
 )
 from app.services.notification_service import notify_users_for_event
+from app.services.pos_sales_event_assignments import (
+    load_sales_import_event_candidates,
+    resolve_sales_import_event_location,
+)
 from app.services.pdf import render_stand_sheet_pdf
 from app.utils.activity import log_activity
 from app.utils.filter_state import (
@@ -889,6 +895,56 @@ def _build_event_day_summaries(event_obj: Event) -> list[SimpleNamespace]:
             )
         ].append(submission)
 
+    canonical_location_ids = [
+        event_location.location_id
+        for event_location in event_locations
+        if event_location.location_id is not None
+    ]
+    pending_sales_imports = (
+        PosSalesImport.query.options(selectinload(PosSalesImport.locations))
+        .filter(
+            PosSalesImport.status == PosSalesImport.STATUS_PENDING,
+            PosSalesImport.sales_date >= event_obj.start_date,
+            PosSalesImport.sales_date <= event_obj.end_date,
+            PosSalesImport.locations.any(
+                or_(
+                    PosSalesImportLocation.event_location_id.in_(event_location_ids),
+                    PosSalesImportLocation.location_id.in_(canonical_location_ids),
+                )
+            ),
+        )
+        .order_by(PosSalesImport.received_at.asc(), PosSalesImport.id.asc())
+        .all()
+    )
+    pending_sales_imports_by_key: dict[
+        tuple[int, date_cls], dict[int, SimpleNamespace]
+    ] = defaultdict(dict)
+    event_location_id_set = set(event_location_ids)
+    for sales_import in pending_sales_imports:
+        if sales_import.sales_date is None:
+            continue
+        candidate_lookup = load_sales_import_event_candidates(sales_import)
+        for import_location in sales_import.locations:
+            matched_event_location = resolve_sales_import_event_location(
+                sales_import,
+                import_location,
+                candidate_lookup=candidate_lookup,
+            )
+            if (
+                matched_event_location is None
+                or matched_event_location.id not in event_location_id_set
+            ):
+                continue
+            pending_sales_imports_by_key[
+                (matched_event_location.id, sales_import.sales_date)
+            ].setdefault(
+                sales_import.id,
+                SimpleNamespace(
+                    import_id=sales_import.id,
+                    import_location_id=import_location.id,
+                ),
+            )
+
     start_dt = datetime.combine(event_obj.start_date, datetime.min.time())
     end_dt = datetime.combine(event_obj.end_date, datetime.max.time())
     terminal_sales = (
@@ -947,6 +1003,11 @@ def _build_event_day_summaries(event_obj: Event) -> list[SimpleNamespace]:
                 [],
             )
             sales_rows = sales_by_key.get((event_location.id, operating_date), [])
+            pending_sales_import_entries = list(
+                pending_sales_imports_by_key.get(
+                    (event_location.id, operating_date), {}
+                ).values()
+            )
             operating_day = next(
                 (
                     day
@@ -965,6 +1026,7 @@ def _build_event_day_summaries(event_obj: Event) -> list[SimpleNamespace]:
                     closing_status=_event_day_status(closing_submissions),
                     opening_submission_count=len(opening_submissions),
                     closing_submission_count=len(closing_submissions),
+                    pending_sales_imports=tuple(pending_sales_import_entries),
                     sales_count=len(sales_rows),
                     sales_quantity=sum(
                         float(sale.quantity or 0.0) for sale in sales_rows

@@ -16,6 +16,8 @@ from app.models import (
     Item,
     Location,
     LocationCountSubmission,
+    PosSalesImport,
+    PosSalesImportLocation,
     User,
 )
 from tests.permission_helpers import grant_event_permissions, grant_permissions
@@ -74,6 +76,80 @@ def _create_terminal_product(client, *, name: str = "Uploaded Product") -> int:
     payload = response.get_json()
     assert payload and payload.get("success"), payload
     return int(payload["product"]["id"])
+
+
+def _seed_pending_event_submissions(app, seeded: dict) -> tuple[int, int]:
+    submission_date = date(2026, 4, 1)
+    with app.app_context():
+        db.session.add_all(
+            [
+                LocationCountSubmission(
+                    source_location_id=seeded["location_id"],
+                    location_id=seeded["location_id"],
+                    event_location_id=seeded["event_location_id"],
+                    submission_type=LocationCountSubmission.TYPE_OPENING,
+                    submitted_name="Opening Lead",
+                    submission_date=submission_date,
+                    status=LocationCountSubmission.STATUS_PENDING,
+                ),
+                LocationCountSubmission(
+                    source_location_id=seeded["location_id"],
+                    location_id=seeded["location_id"],
+                    event_location_id=seeded["event_location_id"],
+                    submission_type=LocationCountSubmission.TYPE_CLOSING,
+                    submitted_name="Closing Lead",
+                    submission_date=submission_date,
+                    status=LocationCountSubmission.STATUS_PENDING,
+                ),
+            ]
+        )
+        sales_import = PosSalesImport(
+            source_provider="mailgun",
+            message_id="<pending-event-navigation>",
+            attachment_filename="pending-sales.xls",
+            attachment_sha256="e" * 64,
+            sales_date=submission_date,
+            status=PosSalesImport.STATUS_PENDING,
+        )
+        db.session.add(sales_import)
+        db.session.flush()
+        db.session.add(
+            PosSalesImportLocation(
+                import_id=sales_import.id,
+                source_location_name="Unmapped Source",
+                normalized_location_name="unmapped source",
+                parse_index=0,
+            )
+        )
+        target_import_location = PosSalesImportLocation(
+            import_id=sales_import.id,
+            source_location_name="Main Bar",
+            normalized_location_name="main bar",
+            location_id=seeded["location_id"],
+            # Fresh imports are resolved from location + sales date before their
+            # event_location_id has been persisted by the review workflow.
+            event_location_id=None,
+            parse_index=1,
+        )
+        db.session.add(target_import_location)
+        db.session.flush()
+        if target_import_location.id == seeded["location_id"]:
+            target_import_location.location_id = None
+            target_import_location.source_location_name = "Second Unmapped Source"
+            target_import_location.normalized_location_name = "second unmapped source"
+            target_import_location = PosSalesImportLocation(
+                import_id=sales_import.id,
+                source_location_name="Main Bar",
+                normalized_location_name="main bar",
+                location_id=seeded["location_id"],
+                event_location_id=None,
+                parse_index=2,
+            )
+            db.session.add(target_import_location)
+            db.session.flush()
+        db.session.commit()
+        assert target_import_location.id != seeded["location_id"]
+        return sales_import.id, target_import_location.id
 
 
 def test_events_list_hides_create_and_reports_without_permission(client, app):
@@ -156,6 +232,73 @@ def test_event_location_name_links_to_location_detail_when_permitted(client, app
     assert (
         f'<a href="/locations/{seeded["location_id"]}">Main Bar</a>' in body
     )
+
+
+def test_event_pending_badges_link_to_their_review_pages(client, app):
+    seeded = _seed_event_user(
+        app,
+        email="event-pending-links@example.com",
+        event_type="other",
+    )
+    sales_import_id, import_location_id = _seed_pending_event_submissions(app, seeded)
+
+    with app.app_context():
+        user = User.query.filter_by(email=seeded["email"]).one()
+        grant_permissions(
+            user,
+            "events.view",
+            "events.manage_locations",
+            "sales_imports.view",
+            group_name=f"Event Pending Links {user.email}",
+            description="Review pending event counts and sales imports.",
+        )
+
+    with client:
+        login(client, seeded["email"], "pass")
+        response = client.get(f"/events/{seeded['event_id']}")
+        body = unescape(response.data.decode())
+
+    count_queue = "/locations/count-submissions"
+    common_filters = (
+        f"event_location_id={seeded['event_location_id']}"
+        "&submission_date=2026-04-01&status=pending"
+    )
+    assert response.status_code == 200
+    assert f'href="{count_queue}?{common_filters}&submission_type=opening"' in body
+    assert f'href="{count_queue}?{common_filters}&submission_type=closing"' in body
+    assert (
+        f'href="/controlpanel/sales-imports/{sales_import_id}'
+        f'?location_id={import_location_id}"' in body
+    )
+
+
+def test_event_pending_badges_stay_plain_without_review_permissions(client, app):
+    seeded = _seed_event_user(
+        app,
+        email="event-pending-view-only@example.com",
+        event_type="other",
+    )
+    sales_import_id, _ = _seed_pending_event_submissions(app, seeded)
+
+    with app.app_context():
+        user = User.query.filter_by(email=seeded["email"]).one()
+        grant_permissions(
+            user,
+            "events.view",
+            group_name=f"Event Pending View Only {user.email}",
+            description="View event pending states without review access.",
+        )
+
+    with client:
+        login(client, seeded["email"], "pass")
+        response = client.get(f"/events/{seeded['event_id']}")
+        body = unescape(response.data.decode())
+
+    assert response.status_code == 200
+    assert body.count("text-bg-warning") >= 3
+    assert "status=pending&submission_type=opening" not in body
+    assert "status=pending&submission_type=closing" not in body
+    assert f"/controlpanel/sales-imports/{sales_import_id}" not in body
 
 
 def test_inventory_event_detail_hides_regular_location_workflow_controls(

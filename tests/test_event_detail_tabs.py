@@ -104,8 +104,20 @@ def test_document_redirect_hash_activates_the_documents_tab():
 
     assert "const hash = window.location.hash;" in template
     assert "button.getAttribute('data-bs-target') === hash" in template
-    assert "bootstrap.Tab.getOrCreateInstance(targetTab).show();" in template
+    assert "bootstrap.Tab.getOrCreateInstance(targetSectionTab).show();" in template
+    assert "bootstrap.Tab.getOrCreateInstance(targetDayTab).show();" in template
     assert "history.replaceState(null, '', target);" in template
+
+
+def test_day_tabs_have_date_stable_ids_and_hash_activation():
+    template = _template()
+
+    assert 'id="event-day-tab-{{ day.date.isoformat() }}"' in template
+    assert 'data-bs-target="#event-day-pane-{{ day.date.isoformat() }}"' in template
+    assert 'id="event-day-pane-{{ day.date.isoformat() }}"' in template
+    assert 'data-event-day-tab="1"' in template
+    assert "const dayTabs = Array.from(" in template
+    assert "const targetDayTab = dayTabs.find(function (button)" in template
 
 
 def test_primary_tabs_have_mobile_layout_and_day_tabs_scroll_safely():

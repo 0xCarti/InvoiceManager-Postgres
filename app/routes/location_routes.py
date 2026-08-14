@@ -1887,7 +1887,7 @@ def count_submission_detail(submission_id: int):
                         row.count_value = expected_count_value
 
                 if action in approval_mode_by_action:
-                    if submission.event_location_id is None:
+                    if mapped_event_location is None:
                         flash(
                             "Map this submission to an event before approving it.",
                             "danger",
@@ -1904,7 +1904,7 @@ def count_submission_detail(submission_id: int):
                         submission.reviewed_by = current_user.id
                         submission.reviewed_at = datetime.utcnow()
                         sync_event_location_counts_from_approved_submissions(
-                            submission.event_location_id
+                            mapped_event_location.id
                         )
                         if (
                             submission.submission_type
@@ -1930,6 +1930,19 @@ def count_submission_detail(submission_id: int):
                             f"using {approval_mode} mode.",
                             "success",
                         )
+                        if current_user.can_access_endpoint(
+                            "event.view_event", "GET"
+                        ):
+                            return redirect(
+                                url_for(
+                                    "event.view_event",
+                                    event_id=mapped_event_location.event_id,
+                                    _anchor=(
+                                        "event-day-pane-"
+                                        f"{submission.submission_date.isoformat()}"
+                                    ),
+                                )
+                            )
                         return redirect(
                             url_for(
                                 "locations.count_submission_detail",

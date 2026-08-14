@@ -23,6 +23,9 @@ from app.models import (
     TerminalSaleProductAlias,
     db,
 )
+from app.services.pos_sales_event_assignments import (
+    sync_sales_import_event_assignments,
+)
 from app.utils.activity import log_activity
 from app.utils.numeric import coerce_float
 from app.utils.pos_import import (
@@ -359,6 +362,8 @@ def stage_pos_sales_import(
         )
         db.session.add(row_record)
         row_index_by_location[location_name] += 1
+
+    sync_sales_import_event_assignments(pos_import)
 
 
 def _auto_approve_sales_import_if_enabled(sales_import: PosSalesImport) -> None:

@@ -51,7 +51,6 @@
             {% if can_access_endpoint('notes.entity_notes', 'GET') %}
             <a class="btn btn-outline-secondary" href="{{ url_for('notes.entity_notes', entity_type='location', entity_id=location.id) }}">View Notes</a>
             {% endif %}
-            <a class="btn btn-outline-secondary" href="{{ url_for('locations.view_locations') }}">Back to Locations</a>
         </div>
     </div>
 

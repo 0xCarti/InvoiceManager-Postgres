@@ -403,6 +403,7 @@ def test_view_location_shows_recent_activity_and_terminal_mappings(client, app):
     assert b"Cake" in response.data
     assert b"Transfer #" in response.data
     assert b"Import #" in response.data
+    assert b"Back to Locations" not in response.data
 
 
 def test_view_locations_filters_by_menu_and_spoilage(client, app):
