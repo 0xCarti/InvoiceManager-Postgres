@@ -67,6 +67,7 @@ def test_event_features_remain_in_their_relevant_primary_panel():
     assert "Add Location" in locations
     assert "Upload Sales" in locations
     assert "event-day-tabs" in locations
+    assert "data-email-stand-sheet" not in locations
     assert 'data-event-document-form="1"' not in locations
 
     assert 'data-event-document-form="1"' in documents
@@ -76,6 +77,7 @@ def test_event_features_remain_in_their_relevant_primary_panel():
     assert "event-day-tabs" not in documents
 
     assert "Stand Sheets" in reports
+    assert "data-email-stand-sheet" in reports
     assert "Closed Event Report" in reports
     assert "Count Sheet Report" in reports
     assert "Summary Source 18" in reports

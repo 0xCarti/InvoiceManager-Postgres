@@ -384,16 +384,6 @@
                                             {% if is_inventory_event and can_review_count_submissions %}
                                             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('locations.count_submissions', event_location_id=entry.event_location.id, submission_date=day.date.isoformat(), status='pending', submission_type='inventory') }}">Review Counts</a>
                                             {% endif %}
-                                            {% if not is_inventory_event and entry.location and can_email_stand_sheets %}
-                                            <a
-                                                href="#"
-                                                class="btn btn-sm btn-outline-secondary"
-                                                data-email-stand-sheet
-                                                data-email-action="{{ url_for('event.email_bulk_stand_sheets', event_id=event.id) }}"
-                                                data-email-label="{{ entry.location.name }}"
-                                                data-location-ids="{{ entry.event_location.location_id }}"
-                                            >Email</a>
-                                            {% endif %}
                                             {% if entry.operating_day and not event.closed %}
                                                 {% if entry.day_confirmed %}
                                                     {% if can_undo_confirm_event_days %}

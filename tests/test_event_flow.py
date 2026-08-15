@@ -817,7 +817,7 @@ def test_bulk_stand_sheets_render_multiple_pages(client, app):
         assert b"Upload Stand Sheet QR" not in resp.data
 
 
-def test_view_event_location_email_button_uses_existing_bulk_email_route(
+def test_view_event_only_offers_event_wide_stand_sheet_email_in_reports(
     client, app
 ):
     email, loc_id, prod_id, item_id = setup_event_env(app)
@@ -848,11 +848,17 @@ def test_view_event_location_email_button_uses_existing_bulk_email_route(
         )
         response = client.get(f"/events/{event_id}")
         assert response.status_code == 200
+        body = response.get_data(as_text=True)
+        assert body.count("data-email-stand-sheet") == 1
         assert (
-            f'data-email-action="/events/{event_id}/stand_sheets/email"'.encode()
-            in response.data
+            body.count(
+                f'data-email-action="/events/{event_id}/stand_sheets/email"'
+            )
+            == 1
         )
-        assert f'data-location-ids="{loc_id}"'.encode() in response.data
+        assert 'data-email-label="all stand sheets for EmailButtonEvent"' in body
+        assert f'data-location-ids="{loc_id}"' in body
+        assert 'data-email-label="EventLoc"' not in body
 
 
 def test_email_bulk_stand_sheets_can_limit_to_single_location(
