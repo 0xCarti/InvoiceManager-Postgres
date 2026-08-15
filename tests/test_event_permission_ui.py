@@ -520,6 +520,64 @@ def test_report_only_user_cannot_mutate_stand_sheet(client, app):
         assert event_location.notes is None
 
 
+def test_daily_stand_sheet_print_requires_report_access(client, app):
+    seeded = _seed_event_user(
+        app,
+        email="daily-sheet-permissions@example.com",
+        event_type="other",
+    )
+    operating_date = date(2026, 4, 1)
+    with app.app_context():
+        user = User.query.filter_by(email=seeded["email"]).one()
+        db.session.add(
+            EventLocationOperatingDay(
+                event_location_id=seeded["event_location_id"],
+                operating_date=operating_date,
+            )
+        )
+        db.session.commit()
+        grant_permissions(
+            user,
+            "events.view",
+            group_name=f"Daily Sheet View Only {user.email}",
+            description="Can view events without report access.",
+        )
+
+    path = (
+        f"/events/{seeded['event_id']}/stand_sheet/{seeded['location_id']}/print"
+        f"?operating_date={operating_date.isoformat()}"
+    )
+    with client:
+        login(client, seeded["email"], "pass")
+        event_page = client.get(f"/events/{seeded['event_id']}")
+        denied = client.get(path)
+
+    assert event_page.status_code == 200
+    assert path not in unescape(event_page.data.decode())
+    assert "Print Sheet" not in event_page.data.decode()
+    assert denied.status_code == 403
+
+    with app.app_context():
+        user = User.query.filter_by(email=seeded["email"]).one()
+        grant_permissions(
+            user,
+            "events.reports",
+            group_name=f"Daily Sheet Reports {user.email}",
+            description="Can view printable daily stand sheets.",
+        )
+
+    with client:
+        client.post("/auth/logout")
+        login(client, seeded["email"], "pass")
+        allowed_event_page = client.get(f"/events/{seeded['event_id']}")
+        allowed = client.get(path)
+
+    assert allowed_event_page.status_code == 200
+    assert path in unescape(allowed_event_page.data.decode())
+    assert "Print Sheet" in allowed_event_page.data.decode()
+    assert allowed.status_code == 200
+
+
 def test_report_only_user_cannot_submit_inventory_count_sheet(client, app):
     seeded = _seed_event_user(
         app,

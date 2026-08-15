@@ -12,6 +12,7 @@
 {% set can_upload_sales = can_access_endpoint('event.upload_terminal_sales') %}
 {% set can_close_event = can_access_endpoint('event.close_event', 'POST') %}
 {% set can_view_stand_sheet = can_access_endpoint('event.stand_sheet') %}
+{% set can_print_daily_stand_sheet = can_access_endpoint('event.printable_daily_stand_sheet') %}
 {% set can_add_terminal_sale = can_access_endpoint('event.add_terminal_sale') %}
 {% set can_confirm_event_days = can_access_endpoint('event.confirm_event_location_day', 'POST') %}
 {% set can_undo_confirm_event_days = can_access_endpoint('event.undo_confirm_event_location_day', 'POST') %}
@@ -373,8 +374,14 @@
                                             {% if not is_inventory_event and can_add_terminal_sale %}
                                             <a class="btn btn-sm btn-outline-primary" href="{{ url_for('event.add_terminal_sale', event_id=event.id, el_id=entry.event_location.id) }}">Sales</a>
                                             {% endif %}
-                                            {% if not is_inventory_event and can_view_stand_sheet %}
+                                            {% if not is_inventory_event and can_view_stand_sheet and not entry.day_confirmed and not event.closed %}
                                             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.stand_sheet', event_id=event.id, location_id=entry.event_location.location_id, operating_date=day.date.isoformat()) }}">Stand Sheet</a>
+                                            {% endif %}
+                                            {% if not is_inventory_event and can_print_daily_stand_sheet %}
+                                            <a
+                                                class="btn btn-sm btn-outline-secondary"
+                                                href="{{ url_for('event.printable_daily_stand_sheet', event_id=event.id, location_id=entry.event_location.location_id, operating_date=day.date.isoformat()) }}"
+                                            >Print Sheet</a>
                                             {% endif %}
                                             {% if is_inventory_event and can_view_count_sheets %}
                                             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('event.count_sheet', event_id=event.id, location_id=entry.event_location.location_id, operating_date=day.date.isoformat()) }}">Count Sheet</a>

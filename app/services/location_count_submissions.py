@@ -344,7 +344,7 @@ def aggregate_submission_rows_for_event_location_day(
     return _roll_up_submission_rows(query.all())
 
 
-def _event_location_transfer_totals_for_date(
+def event_location_transfer_totals_for_date(
     event_location: EventLocation,
     operating_date: date_cls,
 ) -> tuple[dict[int, float], dict[int, float]]:
@@ -423,7 +423,7 @@ def expected_opening_counts_for_event_day(
             previous_day.operating_date,
         )
 
-    incoming, outgoing = _event_location_transfer_totals_for_date(
+    incoming, outgoing = event_location_transfer_totals_for_date(
         event_location,
         operating_date,
     )

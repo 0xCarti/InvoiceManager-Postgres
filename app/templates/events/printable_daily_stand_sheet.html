@@ -1,0 +1,261 @@
+{% extends 'base.html' %}
+
+{% macro report_number(value) -%}
+    {%- if value is none -%}
+        <span class="daily-sheet-missing" aria-label="Not available">&mdash;</span>
+    {%- else -%}
+        {{ '%.2f'|format(value) }}
+    {%- endif -%}
+{%- endmacro %}
+
+{% macro count_status(label, approved, status) -%}
+    {{ label }}:
+    {%- if approved %}
+        Approved data{% if status == 'pending' %} &middot; Pending review{% endif %}
+    {%- elif status == 'pending' %}
+        Pending review (no approved data)
+    {%- elif status == 'rejected' %}
+        Rejected (no approved data)
+    {%- else %}
+        Missing
+    {%- endif %}
+{%- endmacro %}
+
+{% block content %}
+<style nonce="{{ csp_nonce }}">
+    .daily-sheet-page {
+        max-width: 90rem;
+    }
+
+    .daily-sheet-paper {
+        background: #fff;
+    }
+
+    .daily-sheet-table {
+        width: 100%;
+        table-layout: fixed;
+        border-collapse: collapse;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .daily-sheet-table th,
+    .daily-sheet-table td {
+        border: 1px solid #6c757d;
+        padding: 0.3rem 0.35rem;
+        line-height: 1.15;
+        vertical-align: middle;
+    }
+
+    .daily-sheet-table thead th {
+        background: #eef1f4;
+        text-align: center;
+        white-space: normal;
+    }
+
+    .daily-sheet-table .daily-sheet-item {
+        overflow-wrap: anywhere;
+    }
+
+    .daily-sheet-table .daily-sheet-number {
+        text-align: right;
+        white-space: nowrap;
+    }
+
+    .daily-sheet-missing {
+        color: #6c757d;
+    }
+
+    .daily-sheet-status {
+        border: 1px solid #ced4da;
+        border-radius: 0.375rem;
+        padding: 0.35rem 0.55rem;
+        background: #f8f9fa;
+        white-space: nowrap;
+    }
+
+    @page {
+        size: letter landscape;
+        margin: 0.3in;
+    }
+
+    @media print {
+        body {
+            background: #fff !important;
+            color: #000 !important;
+            font-size: 8pt;
+        }
+
+        .daily-sheet-page {
+            width: 100% !important;
+            max-width: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+
+        .daily-sheet-toolbar {
+            display: none !important;
+        }
+
+        .daily-sheet-paper {
+            box-shadow: none !important;
+            border: 0 !important;
+        }
+
+        .daily-sheet-title {
+            font-size: 13pt;
+            margin-bottom: 2pt !important;
+        }
+
+        .daily-sheet-meta,
+        .daily-sheet-footnote,
+        .daily-sheet-status {
+            font-size: 7.5pt;
+        }
+
+        .daily-sheet-status {
+            border-color: #777;
+            background: transparent;
+            padding: 1.5pt 3pt;
+        }
+
+        .daily-sheet-table {
+            width: 100% !important;
+            min-width: 0 !important;
+            table-layout: fixed !important;
+            font-size: 8pt;
+        }
+
+        .daily-sheet-table thead {
+            display: table-header-group;
+        }
+
+        .daily-sheet-table tr {
+            break-inside: avoid;
+            page-break-inside: avoid;
+        }
+
+        .daily-sheet-table th,
+        .daily-sheet-table td {
+            border-color: #000 !important;
+            padding: 2pt 2.5pt !important;
+            line-height: 1.05;
+        }
+
+        .daily-sheet-table thead th {
+            background: #eee !important;
+            color: #000 !important;
+            font-size: 7.5pt;
+            font-weight: 700;
+            white-space: normal !important;
+        }
+
+        .daily-sheet-table .daily-sheet-number {
+            white-space: nowrap !important;
+        }
+    }
+</style>
+
+<div class="container daily-sheet-page py-3 py-print-0">
+    <div class="daily-sheet-toolbar d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <a
+            class="btn btn-outline-secondary"
+            href="{{ url_for('event.view_event', event_id=event.id, _anchor='event-day-pane-' ~ operating_date.isoformat()) }}"
+        >Back to Event</a>
+        <button class="btn btn-primary" type="button" data-print-daily-sheet>Print</button>
+    </div>
+
+    <article class="daily-sheet-paper border rounded shadow-sm p-3" data-daily-stand-sheet="1">
+        <header class="mb-2">
+            <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                <div>
+                    <h1 class="h4 daily-sheet-title mb-1">Daily Stand Sheet</h1>
+                    <div class="daily-sheet-meta"><strong>Event:</strong> {{ event.name }}</div>
+                    <div class="daily-sheet-meta"><strong>Location:</strong> {{ location.name }}</div>
+                    <div class="daily-sheet-meta"><strong>Operating Date:</strong> {{ operating_date.isoformat() }}</div>
+                </div>
+                <div class="d-flex flex-wrap justify-content-end gap-1" aria-label="Daily sheet status">
+                    <span class="daily-sheet-status">Day: {{ 'Closed' if operating_day.confirmed else 'Open' }}</span>
+                    <span class="daily-sheet-status">{{ count_status('Opening', opening_approved, opening_status) }}</span>
+                    <span class="daily-sheet-status">{{ count_status('Closing', closing_approved, closing_status) }}</span>
+                    <span class="daily-sheet-status">Sales: {{ sales_row_count }} posted row{% if sales_row_count != 1 %}s{% endif %}</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm daily-sheet-table mb-2">
+                <caption class="visually-hidden">
+                    Daily stand sheet for {{ location.name }} on {{ operating_date.isoformat() }}
+                </caption>
+                <colgroup>
+                    <col style="width: 30%">
+                    <col style="width: 9%">
+                    <col style="width: 10%">
+                    <col style="width: 7%">
+                    <col style="width: 7%">
+                    <col style="width: 8%">
+                    <col style="width: 7%">
+                    <col style="width: 7%">
+                    <col style="width: 8%">
+                    <col style="width: 7%">
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th scope="col" rowspan="2">Item<br>(Report Unit)</th>
+                        <th scope="col" rowspan="2">Expected<br>Opening</th>
+                        <th scope="col" rowspan="2">Pre-Event<br>Count</th>
+                        <th scope="colgroup" colspan="2">Completed Transfers</th>
+                        <th scope="col" rowspan="2">Posted<br>Sales</th>
+                        <th scope="col" rowspan="2">Eaten</th>
+                        <th scope="col" rowspan="2">Spoiled</th>
+                        <th scope="col" rowspan="2">Closing<br>Count</th>
+                        <th scope="col" rowspan="2">Variance</th>
+                    </tr>
+                    <tr>
+                        <th scope="col">In</th>
+                        <th scope="col">Out</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entry in report_items %}
+                    <tr data-report-item-id="{{ entry.item_id }}">
+                        <td class="daily-sheet-item" data-label="Item">
+                            <strong>{{ entry.item_name }}</strong>
+                            {% if entry.report_unit_label %}
+                            <span class="text-muted">({{ entry.report_unit_label }})</span>
+                            {% endif %}
+                        </td>
+                        <td class="daily-sheet-number" data-field="expected">{{ report_number(entry.expected) }}</td>
+                        <td class="daily-sheet-number" data-field="opening">{{ report_number(entry.opening) }}</td>
+                        <td class="daily-sheet-number" data-field="transferred-in">{{ report_number(entry.transferred_in) }}</td>
+                        <td class="daily-sheet-number" data-field="transferred-out">{{ report_number(entry.transferred_out) }}</td>
+                        <td class="daily-sheet-number" data-field="sales">{{ report_number(entry.sales) }}</td>
+                        <td class="daily-sheet-number" data-field="eaten">{{ report_number(entry.eaten) }}</td>
+                        <td class="daily-sheet-number" data-field="spoiled">{{ report_number(entry.spoiled) }}</td>
+                        <td class="daily-sheet-number" data-field="closing">{{ report_number(entry.closing) }}</td>
+                        <td class="daily-sheet-number" data-field="variance">{{ report_number(entry.variance) }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="10" class="text-center text-muted py-3">No stand-sheet items are available for this location and date.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <footer class="daily-sheet-footnote small text-muted">
+            <div>Includes approved daily counts, completed transfers, and posted sales for this operating date.</div>
+            <div>Undated manual event adjustments are excluded from this daily variance.</div>
+            <div>Variance = Pre-Event Count + Transfers In &minus; Transfers Out &minus; Sales &minus; Eaten &minus; Spoiled &minus; Closing Count.</div>
+            <div>Generated {{ generated_at.strftime('%Y-%m-%d %H:%M') }} UTC.</div>
+        </footer>
+    </article>
+</div>
+
+<script nonce="{{ csp_nonce }}">
+    document.querySelector('[data-print-daily-sheet]')?.addEventListener('click', function() {
+        window.print();
+    });
+</script>
+{% endblock %}

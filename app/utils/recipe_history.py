@@ -84,11 +84,46 @@ def sync_terminal_sale_recipe_snapshots(
     TerminalSaleRecipeItemSnapshot.query.filter_by(
         terminal_sale_id=terminal_sale.id
     ).delete()
+    terminal_sale.recipe_snapshot_captured = True
+    event_location = terminal_sale.event_location
+    if event_location is None and terminal_sale.event_location_id is not None:
+        event_location = db.session.get(
+            EventLocation,
+            terminal_sale.event_location_id,
+        )
+    location_records = {}
+    stand_sheet_item_ids = set()
+    if event_location is not None:
+        location_records = {
+            record.item_id: record
+            for record in LocationStandItem.query.filter_by(
+                location_id=event_location.location_id
+            ).all()
+        }
+        stand_sheet_item_ids = {
+            item_id
+            for (item_id,) in db.session.query(EventStandSheetItem.item_id)
+            .filter_by(event_location_id=event_location.id)
+            .all()
+            if item_id is not None
+        }
+    recipe_yield_quantity = float(product_obj.recipe_yield_quantity or 1.0)
+    if recipe_yield_quantity <= 0:
+        recipe_yield_quantity = 1.0
     for recipe_item in product_obj.recipe_items:
+        snapshot_values = _recipe_snapshot_values(recipe_item)
+        location_record = location_records.get(recipe_item.item_id)
+        if location_record is not None:
+            snapshot_values["countable"] = bool(
+                location_record.active and location_record.countable
+            )
+        elif recipe_item.item_id in stand_sheet_item_ids:
+            snapshot_values["countable"] = True
         db.session.add(
             TerminalSaleRecipeItemSnapshot(
                 terminal_sale_id=terminal_sale.id,
-                **_recipe_snapshot_values(recipe_item),
+                recipe_yield_quantity=recipe_yield_quantity,
+                **snapshot_values,
             )
         )
 

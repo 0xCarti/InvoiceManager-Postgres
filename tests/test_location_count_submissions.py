@@ -15,11 +15,17 @@ from app.models import (
     LocationCountSubmission,
     LocationCountSubmissionRow,
     LocationStandItem,
+    Product,
+    ProductRecipeItem,
+    TerminalSale,
+    Transfer,
+    TransferItem,
     User,
 )
 from app.services.location_count_submissions import (
     sync_event_location_counts_from_approved_submissions,
 )
+from app.utils.recipe_history import sync_terminal_sale_recipe_snapshots
 from tests.permission_helpers import grant_permissions
 from tests.utils import login
 
@@ -998,6 +1004,572 @@ def test_event_day_stand_sheet_uses_requested_day_approved_opening(client, app):
 
     assert response.status_code == 200
     assert b'value="207.0000"' in response.data
+
+
+def test_printable_daily_stand_sheet_uses_only_selected_day_approved_data(
+    client,
+    app,
+):
+    context = _setup_location_count_context(app)
+    first_day = context["today"] - timedelta(days=1)
+    selected_day = context["today"]
+
+    with app.app_context():
+        user = User.query.filter_by(email="admin@example.com").one()
+        location = db.session.get(Location, context["location_id"])
+        item = db.session.get(Item, context["item_id"])
+        secondary_item = Item(
+            name=f"New Countable Item {uuid4().hex[:8]}",
+            base_unit="each",
+        )
+        non_countable_item = Item(
+            name=f"Explicitly Non-Countable Item {uuid4().hex[:8]}",
+            base_unit="each",
+        )
+        other_location = Location(name=f"Transfer Peer {uuid4().hex[:8]}")
+        product = Product(
+            name=f"Daily Sheet Product {uuid4().hex[:8]}",
+            recipe_yield_quantity=1.0,
+            price=0.0,
+        )
+        empty_recipe_product = Product(
+            name=f"Empty Recipe Product {uuid4().hex[:8]}",
+            recipe_yield_quantity=1.0,
+            price=0.0,
+        )
+        unit = ItemUnit(item=item, name="each", factor=1.0)
+        secondary_unit = ItemUnit(
+            item=secondary_item,
+            name="each",
+            factor=1.0,
+        )
+        non_countable_unit = ItemUnit(
+            item=non_countable_item,
+            name="each",
+            factor=1.0,
+        )
+        recipe = ProductRecipeItem(
+            product=product,
+            item=item,
+            unit=unit,
+            quantity=1.0,
+            countable=True,
+        )
+        secondary_recipe = ProductRecipeItem(
+            product=product,
+            item=secondary_item,
+            unit=secondary_unit,
+            quantity=2.0,
+            countable=True,
+        )
+        non_countable_recipe = ProductRecipeItem(
+            product=product,
+            item=non_countable_item,
+            unit=non_countable_unit,
+            quantity=3.0,
+            countable=True,
+        )
+        db.session.add_all(
+            [
+                secondary_item,
+                non_countable_item,
+                other_location,
+                product,
+                empty_recipe_product,
+                unit,
+                secondary_unit,
+                non_countable_unit,
+                recipe,
+                secondary_recipe,
+                non_countable_recipe,
+            ]
+        )
+        location.products.extend([product, empty_recipe_product])
+        db.session.flush()
+        db.session.add(
+            LocationStandItem(
+                location_id=location.id,
+                item_id=secondary_item.id,
+                active=True,
+                countable=True,
+                expected_count=0.0,
+            )
+        )
+        db.session.add(
+            LocationStandItem(
+                location_id=location.id,
+                item_id=non_countable_item.id,
+                active=True,
+                countable=False,
+                expected_count=0.0,
+            )
+        )
+
+        first_operating_day = EventLocationOperatingDay(
+            event_location_id=context["event_location_id"],
+            operating_date=first_day,
+            confirmed=True,
+        )
+        selected_operating_day = EventLocationOperatingDay(
+            event_location_id=context["event_location_id"],
+            operating_date=selected_day,
+            confirmed=True,
+        )
+        db.session.add_all(
+            [
+                first_operating_day,
+                selected_operating_day,
+                EventStandSheetItem(
+                    event_location_id=context["event_location_id"],
+                    item_id=non_countable_item.id,
+                ),
+            ]
+        )
+
+        incoming_transfer = Transfer(
+            from_location_id=other_location.id,
+            to_location_id=location.id,
+            user_id=user.id,
+            from_location_name=other_location.name,
+            to_location_name=location.name,
+            completed=True,
+            date_created=datetime.combine(selected_day, datetime.min.time()),
+        )
+        incoming_transfer.transfer_items.append(
+            TransferItem(
+                item_id=item.id,
+                item_name=item.name,
+                quantity=3.0,
+                completed_quantity=3.0,
+                completed_at=datetime.combine(selected_day, datetime.min.time()),
+            )
+        )
+        outgoing_transfer = Transfer(
+            from_location_id=location.id,
+            to_location_id=other_location.id,
+            user_id=user.id,
+            from_location_name=location.name,
+            to_location_name=other_location.name,
+            completed=True,
+            date_created=datetime.combine(selected_day, datetime.min.time()),
+        )
+        outgoing_transfer.transfer_items.append(
+            TransferItem(
+                item_id=item.id,
+                item_name=item.name,
+                quantity=2.0,
+                completed_quantity=2.0,
+                completed_at=datetime.combine(selected_day, datetime.min.time()),
+            )
+        )
+        db.session.add_all([incoming_transfer, outgoing_transfer])
+        selected_sale = TerminalSale(
+            event_location_id=context["event_location_id"],
+            product_id=product.id,
+            quantity=4.0,
+            sold_at=datetime.combine(selected_day, datetime.min.time()),
+        )
+        other_day_sale = TerminalSale(
+            event_location_id=context["event_location_id"],
+            product_id=product.id,
+            quantity=99.0,
+            sold_at=datetime.combine(first_day, datetime.min.time()),
+        )
+        empty_recipe_sale = TerminalSale(
+            event_location_id=context["event_location_id"],
+            product_id=empty_recipe_product.id,
+            quantity=7.0,
+            sold_at=datetime.combine(selected_day, datetime.min.time()),
+        )
+        db.session.add_all(
+            [selected_sale, other_day_sale, empty_recipe_sale]
+        )
+        db.session.flush()
+        sync_terminal_sale_recipe_snapshots(selected_sale, product=product)
+        sync_terminal_sale_recipe_snapshots(other_day_sale, product=product)
+        sync_terminal_sale_recipe_snapshots(
+            empty_recipe_sale,
+            product=empty_recipe_product,
+        )
+        db.session.commit()
+
+        approved_values = (
+            (
+                first_day,
+                LocationCountSubmission.TYPE_OPENING,
+                10.0,
+                "First Opening",
+                5.0,
+            ),
+            (
+                first_day,
+                LocationCountSubmission.TYPE_CLOSING,
+                12.0,
+                "Prior Close",
+                None,
+            ),
+            (
+                selected_day,
+                LocationCountSubmission.TYPE_OPENING,
+                20.0,
+                "Opening",
+                13.0,
+            ),
+            (
+                selected_day,
+                LocationCountSubmission.TYPE_EATEN,
+                1.0,
+                "Eaten",
+                None,
+            ),
+            (
+                selected_day,
+                LocationCountSubmission.TYPE_SPOILAGE,
+                1.0,
+                "Spoiled",
+                None,
+            ),
+            (
+                selected_day,
+                LocationCountSubmission.TYPE_CLOSING,
+                8.0,
+                "Closing",
+                None,
+            ),
+        )
+        for (
+            submission_date,
+            submission_type,
+            value,
+            submitted_name,
+            expected_value,
+        ) in approved_values:
+            submission_id = _create_pending_submission(
+                location_id=location.id,
+                event_location_id=context["event_location_id"],
+                item_id=item.id,
+                submission_type=submission_type,
+                submission_date=submission_date,
+                count_value=value,
+                submitted_name=submitted_name,
+            )
+            submission = db.session.get(LocationCountSubmission, submission_id)
+            submission.status = LocationCountSubmission.STATUS_APPROVED
+            if expected_value is not None:
+                submission.rows[0].expected_count_value = expected_value
+
+        rejected_id = _create_pending_submission(
+            location_id=location.id,
+            event_location_id=context["event_location_id"],
+            item_id=item.id,
+            submission_type=LocationCountSubmission.TYPE_OPENING,
+            submission_date=selected_day,
+            count_value=500.0,
+            submitted_name="Rejected Decoy",
+        )
+        db.session.get(LocationCountSubmission, rejected_id).status = (
+            LocationCountSubmission.STATUS_REJECTED
+        )
+        _create_pending_submission(
+            location_id=location.id,
+            event_location_id=context["event_location_id"],
+            item_id=item.id,
+            submission_type=LocationCountSubmission.TYPE_CLOSING,
+            submission_date=selected_day,
+            count_value=600.0,
+            submitted_name="Pending Decoy",
+        )
+        db.session.commit()
+        sync_event_location_counts_from_approved_submissions(
+            context["event_location_id"]
+        )
+        event_location = db.session.get(
+            EventLocation,
+            context["event_location_id"],
+        )
+        event_location.confirmed = True
+        db.session.commit()
+        secondary_item_id = secondary_item.id
+        non_countable_item_id = non_countable_item.id
+        product_id = product.id
+        empty_recipe_product_id = empty_recipe_product.id
+        empty_recipe_sale_id = empty_recipe_sale.id
+
+    print_path = (
+        f"/events/{context['event_id']}/stand_sheet/{context['location_id']}/print"
+        f"?operating_date={selected_day.isoformat()}"
+    )
+    with client:
+        login(client, "admin@example.com", "adminpass")
+        response = client.get(print_path)
+
+    assert response.status_code == 200
+    body = response.data.decode()
+    row = body.split(f'data-report-item-id="{context["item_id"]}"', 1)[1].split(
+        "</tr>", 1
+    )[0]
+    assert 'data-field="expected">13.00' in row
+    assert 'data-field="opening">20.00' in row
+    assert 'data-field="transferred-in">3.00' in row
+    assert 'data-field="transferred-out">2.00' in row
+    assert 'data-field="sales">4.00' in row
+    assert 'data-field="eaten">1.00' in row
+    assert 'data-field="spoiled">1.00' in row
+    assert 'data-field="closing">8.00' in row
+    assert 'data-field="variance">7.00' in row
+    assert "500.00" not in row
+    assert "600.00" not in row
+    assert "99.00" not in row
+    printable_article = body.split(
+        '<article class="daily-sheet-paper', 1
+    )[1].split("</article>", 1)[0]
+    assert "<input" not in printable_article
+    assert "sticky_standsheet_headers.js" not in body
+    assert "size: letter landscape" in body
+    assert "Pending review" in body
+    secondary_row = body.split(
+        f'data-report-item-id="{secondary_item_id}"', 1
+    )[1].split("</tr>", 1)[0]
+    assert 'data-field="sales">8.00' in secondary_row
+    non_countable_row = body.split(
+        f'data-report-item-id="{non_countable_item_id}"', 1
+    )[1].split("</tr>", 1)[0]
+    assert 'data-field="sales">0.00' in non_countable_row
+
+    first_day_path = (
+        f"/events/{context['event_id']}/stand_sheet/{context['location_id']}/print"
+        f"?operating_date={first_day.isoformat()}"
+    )
+    with client:
+        first_day_response = client.get(first_day_path)
+
+    assert first_day_response.status_code == 200
+    first_day_row = first_day_response.data.decode().split(
+        f'data-report-item-id="{context["item_id"]}"', 1
+    )[1].split("</tr>", 1)[0]
+    assert 'data-field="expected">5.00' in first_day_row
+    assert 'data-field="opening">10.00' in first_day_row
+
+    with client:
+        close_response = client.post(
+            f"/events/{context['event_id']}/close",
+            data={"csrf_token": ""},
+            follow_redirects=False,
+        )
+        closed_print_response = client.get(print_path)
+
+    assert close_response.status_code == 302
+    assert closed_print_response.status_code == 200
+    closed_body = closed_print_response.data.decode()
+    closed_row = closed_body.split(
+        f'data-report-item-id="{context["item_id"]}"', 1
+    )[1].split("</tr>", 1)[0]
+    assert 'data-field="sales">4.00' in closed_row
+    with app.app_context():
+        product = db.session.get(Product, product_id)
+        product.recipe_yield_quantity = 5.0
+        secondary_record = LocationStandItem.query.filter_by(
+            location_id=context["location_id"],
+            item_id=secondary_item_id,
+        ).first()
+        if secondary_record is None:
+            secondary_record = LocationStandItem(
+                location_id=context["location_id"],
+                item_id=secondary_item_id,
+                expected_count=0.0,
+            )
+            db.session.add(secondary_record)
+        secondary_record.active = False
+        secondary_record.countable = False
+        late_recipe_item = Item(
+            name=f"Late Recipe Item {uuid4().hex[:8]}",
+            base_unit="each",
+        )
+        late_recipe_unit = ItemUnit(
+            item=late_recipe_item,
+            name="each",
+            factor=1.0,
+        )
+        db.session.add_all([late_recipe_item, late_recipe_unit])
+        db.session.flush()
+        db.session.add_all(
+            [
+                ProductRecipeItem(
+                    product_id=empty_recipe_product_id,
+                    item_id=late_recipe_item.id,
+                    unit_id=late_recipe_unit.id,
+                    quantity=1.0,
+                    countable=True,
+                ),
+                LocationStandItem(
+                    location_id=context["location_id"],
+                    item_id=late_recipe_item.id,
+                    active=True,
+                    countable=True,
+                    expected_count=0.0,
+                ),
+            ]
+        )
+        db.session.commit()
+        late_recipe_item_id = late_recipe_item.id
+        assert db.session.get(
+            TerminalSale,
+            empty_recipe_sale_id,
+        ).recipe_snapshot_captured is True
+        assert (
+            TerminalSale.query.filter_by(
+                event_location_id=context["event_location_id"]
+            ).count()
+            == 3
+        )
+
+    with client:
+        yield_changed_response = client.get(print_path)
+
+    assert yield_changed_response.status_code == 200
+    yield_changed_body = yield_changed_response.data.decode()
+    yield_changed_row = yield_changed_body.split(
+        f'data-report-item-id="{context["item_id"]}"', 1
+    )[1].split("</tr>", 1)[0]
+    assert 'data-field="sales">4.00' in yield_changed_row
+    yield_changed_secondary_row = yield_changed_body.split(
+        f'data-report-item-id="{secondary_item_id}"', 1
+    )[1].split("</tr>", 1)[0]
+    assert 'data-field="sales">8.00' in yield_changed_secondary_row
+    late_recipe_row = yield_changed_body.split(
+        f'data-report-item-id="{late_recipe_item_id}"', 1
+    )[1].split("</tr>", 1)[0]
+    assert 'data-field="sales">0.00' in late_recipe_row
+
+
+def test_printable_daily_stand_sheet_rejects_non_operating_dates(client, app):
+    context = _setup_location_count_context(app)
+    operating_date = context["today"]
+    with app.app_context():
+        db.session.add(
+            EventLocationOperatingDay(
+                event_location_id=context["event_location_id"],
+                operating_date=operating_date,
+            )
+        )
+        db.session.commit()
+
+    base_path = (
+        f"/events/{context['event_id']}/stand_sheet/{context['location_id']}/print"
+    )
+    with client:
+        login(client, "admin@example.com", "adminpass")
+        missing_date = client.get(base_path)
+        invalid_date = client.get(f"{base_path}?operating_date=not-a-date")
+        closed_date = client.get(
+            f"{base_path}?operating_date="
+            f"{(operating_date + timedelta(days=1)).isoformat()}"
+        )
+
+    assert missing_date.status_code == 404
+    assert invalid_date.status_code == 404
+    assert closed_date.status_code == 404
+
+
+def test_confirmed_event_day_uses_printable_sheet_and_blocks_edits(client, app):
+    context = _setup_location_count_context(app)
+    operating_date = context["today"]
+    with app.app_context():
+        operating_day = EventLocationOperatingDay(
+            event_location_id=context["event_location_id"],
+            operating_date=operating_date,
+            confirmed=True,
+        )
+        sheet = EventStandSheetItem(
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+            opening_count=4.0,
+        )
+        db.session.add_all([operating_day, sheet])
+        db.session.commit()
+        operating_day_id = operating_day.id
+
+    edit_path = (
+        f"/events/{context['event_id']}/stand_sheet/{context['location_id']}"
+        f"?operating_date={operating_date.isoformat()}"
+    )
+    print_path = (
+        f"/events/{context['event_id']}/stand_sheet/{context['location_id']}/print"
+        f"?operating_date={operating_date.isoformat()}"
+    )
+    with client:
+        login(client, "admin@example.com", "adminpass")
+        event_page = client.get(f"/events/{context['event_id']}")
+        locked_get = client.get(edit_path, follow_redirects=False)
+        unscoped_locked_get = client.get(
+            f"/events/{context['event_id']}/stand_sheet/{context['location_id']}",
+            follow_redirects=False,
+        )
+        locked_post = client.post(
+            edit_path,
+            data={
+                f"open_{context['item_id']}": "99",
+                "operating_date": operating_date.isoformat(),
+            },
+            follow_redirects=False,
+        )
+        unscoped_locked_post = client.post(
+            f"/events/{context['event_id']}/stand_sheet/{context['location_id']}",
+            data={f"open_{context['item_id']}": "101"},
+            follow_redirects=False,
+        )
+
+    assert event_page.status_code == 200
+    event_body = event_page.data.decode()
+    assert f'href="{edit_path}"' not in event_body
+    assert f'href="{print_path}"' in event_body
+    assert locked_get.status_code == 302
+    assert locked_get.headers["Location"] == print_path
+    assert unscoped_locked_get.status_code == 302
+    assert unscoped_locked_get.headers["Location"] == (
+        f"/events/{context['event_id']}"
+    )
+    assert locked_post.status_code == 302
+    assert locked_post.headers["Location"] == (
+        f"/events/{context['event_id']}"
+        f"#event-day-pane-{operating_date.isoformat()}"
+    )
+    assert unscoped_locked_post.status_code == 302
+    assert unscoped_locked_post.headers["Location"] == (
+        f"/events/{context['event_id']}"
+    )
+    with app.app_context():
+        sheet = EventStandSheetItem.query.filter_by(
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+        ).one()
+        assert sheet.opening_count == 4.0
+        operating_day = db.session.get(
+            EventLocationOperatingDay,
+            operating_day_id,
+        )
+        operating_day.confirmed = False
+        db.session.commit()
+
+    with client:
+        reopened_get = client.get(edit_path)
+        reopened_post = client.post(
+            edit_path,
+            data={
+                f"open_{context['item_id']}": "9",
+                "operating_date": operating_date.isoformat(),
+            },
+            follow_redirects=False,
+        )
+
+    assert reopened_get.status_code == 200
+    assert reopened_post.status_code == 302
+    with app.app_context():
+        sheet = EventStandSheetItem.query.filter_by(
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+        ).one()
+        assert sheet.opening_count == 9.0
 
 
 def test_manager_approval_can_overwrite_same_day_counts(client, app):

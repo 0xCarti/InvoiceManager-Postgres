@@ -671,6 +671,9 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "event.sustainability_dashboard": requirement(any_of=("events.reports",)),
     "event.sustainability_dashboard_print": requirement(any_of=("events.reports",)),
     "event.sustainability_dashboard_csv": requirement(any_of=("events.reports",)),
+    "event.printable_daily_stand_sheet": requirement(
+        any_of=("events.reports", "events.manage_sales")
+    ),
     "event.count_sheet_item_search": requirement(
         any_of=("events.reports", "events.manage_sales")
     ),

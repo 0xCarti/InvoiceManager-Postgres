@@ -57,6 +57,7 @@ from app.models import (
     Product,
     ProductRecipeItem,
     TerminalSale,
+    TerminalSaleRecipeItemSnapshot,
     TerminalSaleProductAlias,
     TerminalSaleLocationAlias,
     TerminalSalesResolutionState,
@@ -67,7 +68,9 @@ from app.services.location_count_submissions import (
     build_inventory_print_unit_labels,
     build_location_inventory_count_item_entries,
     ensure_event_location_operating_days,
+    event_location_transfer_totals_for_date,
     event_operating_dates,
+    expected_opening_counts_for_event_day,
     extend_inventory_entries_with_posted_items,
     INVENTORY_ITEM_SEARCH_LIMIT,
     INVENTORY_ITEM_SEARCH_MIN_LENGTH,
@@ -511,6 +514,370 @@ def _build_stand_item_entry(
         "recv_unit": recv_unit,
         "trans_unit": trans_unit,
     }
+
+
+def _terminal_sale_item_usage_for_date(
+    event_location: EventLocation,
+    operating_date: date_cls,
+) -> tuple[dict[int, float], dict[int, SimpleNamespace], int]:
+    """Return posted item usage and metadata for one event-location day."""
+
+    day_start = datetime.combine(operating_date, datetime.min.time())
+    day_end = day_start + timedelta(days=1)
+    sales = (
+        TerminalSale.query.options(
+            selectinload(TerminalSale.recipe_item_snapshots).selectinload(
+                TerminalSaleRecipeItemSnapshot.item
+            ),
+            selectinload(TerminalSale.product)
+            .selectinload(Product.recipe_items)
+            .selectinload(ProductRecipeItem.item),
+            selectinload(TerminalSale.product)
+            .selectinload(Product.recipe_items)
+            .selectinload(ProductRecipeItem.unit),
+        )
+        .filter(
+            TerminalSale.event_location_id == event_location.id,
+            TerminalSale.sold_at >= day_start,
+            TerminalSale.sold_at < day_end,
+        )
+        .order_by(TerminalSale.id.asc())
+        .all()
+    )
+    usage_by_item_id: dict[int, float] = defaultdict(float)
+    metadata_by_item_id: dict[int, SimpleNamespace] = {}
+    tracked_item_ids = {
+        sheet.item_id
+        for sheet in (event_location.stand_sheet_items or [])
+        if sheet.item_id is not None
+    }
+    location_records = {
+        record.item_id: record
+        for record in LocationStandItem.query.filter_by(
+            location_id=event_location.location_id
+        ).all()
+    }
+    historical_item_tracking = bool(
+        (event_location.event is not None and event_location.event.closed)
+        or any(
+            day.operating_date == operating_date and day.confirmed
+            for day in (event_location.operating_days or [])
+        )
+    )
+
+    def item_is_tracked(item_id: int, default: bool) -> bool:
+        if historical_item_tracking:
+            return bool(default)
+        record = location_records.get(item_id)
+        if record is not None:
+            return bool(record.active and record.countable)
+        if item_id in tracked_item_ids:
+            return True
+        return bool(default)
+
+    for sale in sales:
+        sold_quantity = float(sale.quantity or 0.0) * float(
+            sale.sellable_quantity or 1.0
+        )
+        if not sold_quantity:
+            continue
+
+        if sale.recipe_snapshot_captured or sale.recipe_item_snapshots:
+            for snapshot in sale.recipe_item_snapshots:
+                if snapshot.item_id is None or not item_is_tracked(
+                    snapshot.item_id,
+                    bool(snapshot.countable),
+                ):
+                    continue
+                product_yield = float(
+                    snapshot.recipe_yield_quantity
+                    if snapshot.recipe_yield_quantity is not None
+                    else getattr(sale.product, "recipe_yield_quantity", 1.0)
+                    or 1.0
+                )
+                if product_yield <= 0:
+                    product_yield = 1.0
+                units_per_product = (
+                    float(snapshot.quantity or 0.0)
+                    * float(snapshot.unit_factor or 1.0)
+                    / product_yield
+                )
+                if units_per_product <= 0:
+                    continue
+                usage_by_item_id[snapshot.item_id] += (
+                    sold_quantity * units_per_product
+                )
+                metadata_by_item_id.setdefault(
+                    snapshot.item_id,
+                    SimpleNamespace(
+                        item=snapshot.item,
+                        item_name=snapshot.item_name,
+                        base_unit=snapshot.base_unit,
+                    ),
+                )
+            continue
+
+        product = sale.product
+        if product is None:
+            continue
+        for recipe_item in product.recipe_items:
+            if recipe_item.item_id is None or not item_is_tracked(
+                recipe_item.item_id,
+                bool(recipe_item.countable),
+            ):
+                continue
+            units_per_product = recipe_item_base_units_per_sale(recipe_item)
+            if units_per_product <= 0:
+                continue
+            usage_by_item_id[recipe_item.item_id] += (
+                sold_quantity * units_per_product
+            )
+            metadata_by_item_id.setdefault(
+                recipe_item.item_id,
+                SimpleNamespace(
+                    item=recipe_item.item,
+                    item_name=(
+                        recipe_item.item.name
+                        if recipe_item.item is not None
+                        else f"Item #{recipe_item.item_id}"
+                    ),
+                    base_unit=(
+                        recipe_item.item.base_unit
+                        if recipe_item.item is not None
+                        else None
+                    ),
+                ),
+            )
+
+    return dict(usage_by_item_id), metadata_by_item_id, len(sales)
+
+
+def _approved_opening_expected_counts_for_day(
+    event_location_id: int,
+    operating_date: date_cls,
+) -> dict[int, float]:
+    """Return the latest persisted expected values from approved opening rows."""
+
+    submissions = (
+        LocationCountSubmission.query.options(
+            selectinload(LocationCountSubmission.rows)
+        )
+        .filter(
+            LocationCountSubmission.event_location_id == event_location_id,
+            LocationCountSubmission.submission_date == operating_date,
+            LocationCountSubmission.submission_type
+            == LocationCountSubmission.TYPE_OPENING,
+            LocationCountSubmission.status
+            == LocationCountSubmission.STATUS_APPROVED,
+        )
+        .all()
+    )
+    submissions.sort(
+        key=lambda submission: (
+            submission.reviewed_at
+            or submission.submitted_at
+            or datetime.min,
+            submission.id,
+        ),
+        reverse=True,
+    )
+    expected_by_item_id: dict[int, float] = {}
+    for submission in submissions:
+        for row in submission.rows:
+            if (
+                row.item_id is None
+                or row.expected_count_value is None
+                or row.item_id in expected_by_item_id
+            ):
+                continue
+            expected_by_item_id[row.item_id] = float(row.expected_count_value)
+    return expected_by_item_id
+
+
+def _ensure_terminal_sale_recipe_snapshots(
+    event_location: EventLocation,
+    operating_date: date_cls | None = None,
+) -> None:
+    """Freeze recipe usage for any legacy sales before a day is closed."""
+
+    for sale in event_location.terminal_sales:
+        if sale.recipe_snapshot_captured:
+            continue
+        if (
+            operating_date is not None
+            and (
+                sale.sold_at is None
+                or sale.sold_at.date() != operating_date
+            )
+        ):
+            continue
+        sync_terminal_sale_recipe_snapshots(
+            sale,
+            product=sale.product,
+        )
+
+
+def _build_daily_stand_sheet_report_items(
+    event_location: EventLocation,
+    operating_date: date_cls,
+) -> tuple[Location, list[SimpleNamespace], int]:
+    """Build a read-only daily stand sheet from date-scoped source records."""
+
+    location = event_location.location or db.session.get(
+        Location, event_location.location_id
+    )
+    if location is None:
+        abort(404)
+
+    _, configured_entries = _get_stand_items(location.id)
+    configured_by_item_id = {
+        entry["item"].id: entry
+        for entry in configured_entries
+        if entry.get("item") is not None
+    }
+    expected_by_item_id = _approved_opening_expected_counts_for_day(
+        event_location.id,
+        operating_date,
+    )
+    previous_operating_day = (
+        EventLocationOperatingDay.query.filter(
+            EventLocationOperatingDay.event_location_id == event_location.id,
+            EventLocationOperatingDay.operating_date < operating_date,
+        )
+        .order_by(EventLocationOperatingDay.operating_date.desc())
+        .first()
+    )
+    if previous_operating_day is not None:
+        derived_expected = expected_opening_counts_for_event_day(
+            event_location,
+            operating_date,
+        )
+        for item_id, expected_value in derived_expected.items():
+            expected_by_item_id.setdefault(item_id, expected_value)
+    count_totals_by_field = {
+        field_name: aggregate_submission_rows_for_event_location_day(
+            event_location.id,
+            submission_type,
+            operating_date,
+        )
+        for submission_type, field_name in _COUNT_SUBMISSION_FIELD_BY_TYPE.items()
+    }
+    incoming_by_item_id, outgoing_by_item_id = (
+        event_location_transfer_totals_for_date(
+            event_location,
+            operating_date,
+        )
+    )
+    sales_by_item_id, sales_metadata_by_item_id, sales_row_count = (
+        _terminal_sale_item_usage_for_date(
+            event_location,
+            operating_date,
+        )
+    )
+    sheets_by_item_id = {
+        sheet.item_id: sheet
+        for sheet in (event_location.stand_sheet_items or [])
+        if sheet.item_id is not None
+    }
+
+    item_ids = set(configured_by_item_id)
+    item_ids.update(expected_by_item_id)
+    item_ids.update(incoming_by_item_id)
+    item_ids.update(outgoing_by_item_id)
+    item_ids.update(sales_by_item_id)
+    item_ids.update(sheets_by_item_id)
+    for totals_by_item_id in count_totals_by_field.values():
+        item_ids.update(totals_by_item_id)
+
+    conversions = _conversion_mapping()
+    opening_by_item_id = count_totals_by_field["opening_count"]
+    closing_by_item_id = count_totals_by_field["closing_count"]
+    eaten_by_item_id = count_totals_by_field["eaten"]
+    spoiled_by_item_id = count_totals_by_field["spoiled"]
+    report_items: list[SimpleNamespace] = []
+
+    for item_id in item_ids:
+        configured_entry = configured_by_item_id.get(item_id)
+        sheet = sheets_by_item_id.get(item_id)
+        sales_metadata = sales_metadata_by_item_id.get(item_id)
+        item = (
+            configured_entry.get("item")
+            if configured_entry is not None
+            else None
+        )
+        if item is None and sales_metadata is not None:
+            item = sales_metadata.item
+        if item is None and sheet is not None:
+            item = sheet.item
+        if item is None:
+            item = db.session.get(Item, item_id)
+
+        item_name = (
+            sheet.item_name_snapshot
+            if sheet is not None and sheet.item_name_snapshot
+            else (
+                sales_metadata.item_name
+                if sales_metadata is not None and sales_metadata.item_name
+                else (item.name if item is not None else f"Item #{item_id}")
+            )
+        )
+        base_unit = (
+            sheet.item_base_unit_snapshot
+            if sheet is not None and sheet.item_base_unit_snapshot
+            else (
+                sales_metadata.base_unit
+                if sales_metadata is not None and sales_metadata.base_unit
+                else (item.base_unit if item is not None else None)
+            )
+        )
+
+        def display_value(value):
+            if value is None:
+                return None
+            return _convert_value_for_reporting(value, base_unit, conversions)
+
+        opening_base = opening_by_item_id.get(item_id)
+        closing_base = closing_by_item_id.get(item_id)
+        incoming_base = float(incoming_by_item_id.get(item_id, 0.0) or 0.0)
+        outgoing_base = float(outgoing_by_item_id.get(item_id, 0.0) or 0.0)
+        sales_base = float(sales_by_item_id.get(item_id, 0.0) or 0.0)
+        eaten_base = float(eaten_by_item_id.get(item_id, 0.0) or 0.0)
+        spoiled_base = float(spoiled_by_item_id.get(item_id, 0.0) or 0.0)
+        variance_base = None
+        if opening_base is not None and closing_base is not None:
+            variance_base = (
+                float(opening_base)
+                + incoming_base
+                - outgoing_base
+                - sales_base
+                - eaten_base
+                - spoiled_base
+                - float(closing_base)
+            )
+
+        report_items.append(
+            SimpleNamespace(
+                item_id=item_id,
+                item_name=item_name,
+                report_unit_label=get_unit_label(
+                    conversions.get(base_unit, base_unit)
+                ),
+                expected=display_value(expected_by_item_id.get(item_id)),
+                opening=display_value(opening_base),
+                transferred_in=display_value(incoming_base),
+                transferred_out=display_value(outgoing_base),
+                sales=display_value(sales_base),
+                eaten=display_value(eaten_base),
+                spoiled=display_value(spoiled_base),
+                closing=display_value(closing_base),
+                variance=display_value(variance_base),
+            )
+        )
+
+    report_items.sort(
+        key=lambda entry: normalize_name_for_sorting(entry.item_name).casefold()
+    )
+    return location, report_items, sales_row_count
 
 
 def _calculate_confirmed_sales_summary(event: Event) -> SimpleNamespace | None:
@@ -2341,6 +2708,10 @@ def confirm_event_location_day(event_id, day_id):
         )
         return redirect(url_for("event.view_event", event_id=event_id))
 
+    _ensure_terminal_sale_recipe_snapshots(
+        event_location,
+        operating_day.operating_date,
+    )
     _set_operating_day_confirmation(operating_day, True)
     _sync_event_location_confirmation_from_days(event_location)
     db.session.commit()
@@ -5195,6 +5566,7 @@ def confirm_location(event_id, el_id):
             summary_record.total_quantity = total_quantity
             summary_record.total_amount = total_amount
 
+        _ensure_terminal_sale_recipe_snapshots(el)
         _set_event_location_all_days_confirmed(el, True)
         db.session.commit()
         log_activity(
@@ -5856,6 +6228,94 @@ def build_sustainability_report(event_id: int) -> dict:
 
 
 @event.route(
+    "/events/<int:event_id>/stand_sheet/<int:location_id>/print",
+    methods=["GET"],
+)
+@login_required
+def printable_daily_stand_sheet(event_id, location_id):
+    ev = db.session.get(Event, event_id)
+    if ev is None or ev.event_type == "inventory":
+        abort(404)
+
+    event_location = EventLocation.query.filter_by(
+        event_id=event_id,
+        location_id=location_id,
+    ).first()
+    if event_location is None:
+        abort(404)
+
+    requested_operating_date = (request.args.get("operating_date") or "").strip()
+    operating_date = _parse_date(requested_operating_date)
+    if operating_date is None:
+        abort(404)
+
+    operating_day = EventLocationOperatingDay.query.filter_by(
+        event_location_id=event_location.id,
+        operating_date=operating_date,
+    ).first()
+    if operating_day is None:
+        abort(404)
+
+    location, report_items, sales_row_count = (
+        _build_daily_stand_sheet_report_items(
+            event_location,
+            operating_date,
+        )
+    )
+    count_submissions = (
+        LocationCountSubmission.query.filter(
+            LocationCountSubmission.event_location_id == event_location.id,
+            LocationCountSubmission.submission_date == operating_date,
+            LocationCountSubmission.submission_type.in_(
+                (
+                    LocationCountSubmission.TYPE_OPENING,
+                    LocationCountSubmission.TYPE_CLOSING,
+                )
+            ),
+        )
+        .order_by(
+            LocationCountSubmission.submitted_at.asc(),
+            LocationCountSubmission.id.asc(),
+        )
+        .all()
+    )
+    opening_submissions = [
+        submission
+        for submission in count_submissions
+        if submission.submission_type == LocationCountSubmission.TYPE_OPENING
+    ]
+    closing_submissions = [
+        submission
+        for submission in count_submissions
+        if submission.submission_type == LocationCountSubmission.TYPE_CLOSING
+    ]
+    opening_approved = any(
+        submission.status == LocationCountSubmission.STATUS_APPROVED
+        for submission in opening_submissions
+    )
+    closing_approved = any(
+        submission.status == LocationCountSubmission.STATUS_APPROVED
+        for submission in closing_submissions
+    )
+
+    return render_template(
+        "events/printable_daily_stand_sheet.html",
+        event=ev,
+        event_location=event_location,
+        location=location,
+        operating_day=operating_day,
+        operating_date=operating_date,
+        report_items=report_items,
+        sales_row_count=sales_row_count,
+        opening_approved=opening_approved,
+        closing_approved=closing_approved,
+        opening_status=_event_day_status(opening_submissions),
+        closing_status=_event_day_status(closing_submissions),
+        generated_at=datetime.utcnow(),
+    )
+
+
+@event.route(
     "/events/<int:event_id>/stand_sheet/<int:location_id>",
     methods=["GET", "POST"],
 )
@@ -5883,6 +6343,7 @@ def stand_sheet(event_id, location_id):
     operating_date = _parse_date(requested_operating_date)
     if requested_operating_date and operating_date is None:
         abort(404)
+    operating_day = None
     if operating_date is not None:
         operating_day = EventLocationOperatingDay.query.filter_by(
             event_location_id=el.id,
@@ -5890,11 +6351,35 @@ def stand_sheet(event_id, location_id):
         ).first()
         if operating_day is None:
             abort(404)
-    if el.confirmed or ev.closed:
+    day_confirmed = bool(operating_day and operating_day.confirmed)
+    has_confirmed_operating_day = bool(
+        operating_date is None
+        and any(day.confirmed for day in (el.operating_days or []))
+    )
+    if day_confirmed or has_confirmed_operating_day or el.confirmed or ev.closed:
         flash(
-            "This location is closed and the stand sheet cannot be modified."
+            "This event day is closed and the stand sheet cannot be modified."
         )
-        return redirect(url_for("event.view_event", event_id=event_id))
+        if request.method == "GET" and operating_date is not None:
+            return redirect(
+                url_for(
+                    "event.printable_daily_stand_sheet",
+                    event_id=event_id,
+                    location_id=location_id,
+                    operating_date=operating_date.isoformat(),
+                )
+            )
+        return redirect(
+            url_for(
+                "event.view_event",
+                event_id=event_id,
+                _anchor=(
+                    f"event-day-pane-{operating_date.isoformat()}"
+                    if operating_date is not None
+                    else None
+                ),
+            )
+        )
 
     location, stand_items = _get_stand_items(
         location_id,
@@ -6587,6 +7072,7 @@ def close_event(event_id):
         )
         return redirect(url_for("event.view_event", event_id=event_id))
     for el in ev.locations:
+        _ensure_terminal_sale_recipe_snapshots(el)
         approved_inventory_item_ids = (
             _approved_inventory_submission_item_ids(el.id)
             if ev.event_type == "inventory"
@@ -6644,7 +7130,9 @@ def close_event(event_id):
                 countable=True,
             ).delete()
 
-        TerminalSale.query.filter_by(event_location_id=el.id).delete()
+        # Keep posted sales as historical event records. Daily closed stand sheets,
+        # sales reporting, forecasting, and product history all need the original
+        # dated rows after the event is closed.
 
     ev.closed = True
     db.session.commit()

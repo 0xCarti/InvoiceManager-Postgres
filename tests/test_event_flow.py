@@ -408,7 +408,7 @@ def test_event_lifecycle(client, app):
         lsi = LocationStandItem.query.filter_by(location_id=loc_id).first()
         assert lsi is None
         assert (
-            TerminalSale.query.filter_by(event_location_id=elid).count() == 0
+            TerminalSale.query.filter_by(event_location_id=elid).count() == 1
         )
 
 

@@ -7,6 +7,7 @@ from app import db
 from app.models import (
     Event,
     EventLocation,
+    EventLocationOperatingDay,
     EventLocationTerminalSalesSummary,
     Item,
     Location,
@@ -678,6 +679,58 @@ def test_event_origin_sales_import_approval_returns_to_event_day(client, app):
             db.session.get(PosSalesImport, seeded["import_id"]).status
             == PosSalesImport.STATUS_APPROVED
         )
+
+
+def test_approved_sales_import_appears_on_printable_daily_stand_sheet(
+    client,
+    app,
+):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    admin_pass = os.getenv("ADMIN_PASS", "adminpass")
+    seeded = _create_event_linked_sales_import(
+        app,
+        message_id="msg-daily-sheet-approved-import",
+        sales_quantity=3.0,
+    )
+    with app.app_context():
+        db.session.add(
+            EventLocationOperatingDay(
+                event_location_id=seeded["event_location_id"],
+                operating_date=seeded["sales_date"],
+            )
+        )
+        db.session.commit()
+
+    print_path = (
+        f"/events/{seeded['event_id']}/stand_sheet/{seeded['location_id']}/print"
+        f"?operating_date={seeded['sales_date'].isoformat()}"
+    )
+    with client:
+        login(client, admin_email, admin_pass)
+        approval_response = client.post(
+            f"/controlpanel/sales-imports/{seeded['import_id']}",
+            data={"action": "approve_import"},
+            follow_redirects=True,
+        )
+        print_response = client.get(print_path)
+
+    assert approval_response.status_code == 200
+    assert b"Import approved" in approval_response.data
+    assert print_response.status_code == 200
+    body = print_response.data.decode()
+    row = body.split(
+        f'data-report-item-id="{seeded["item_id"]}"', 1
+    )[1].split("</tr>", 1)[0]
+    assert 'data-field="sales">6.00' in row
+
+    with app.app_context():
+        sale = TerminalSale.query.filter_by(
+            event_location_id=seeded["event_location_id"],
+            pos_sales_import_id=seeded["import_id"],
+        ).one()
+        assert sale.recipe_snapshot_captured is True
+        assert len(sale.recipe_item_snapshots) == 1
+        assert sale.recipe_item_snapshots[0].recipe_yield_quantity == 1.0
 
 
 def test_failed_sales_import_approval_does_not_follow_event_return_marker(

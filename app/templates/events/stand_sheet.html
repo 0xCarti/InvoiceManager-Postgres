@@ -2,6 +2,7 @@
 
 {% block content %}
 {% set can_edit_stand_sheet = can_access_endpoint('event.stand_sheet', 'POST') %}
+{% set can_print_daily_stand_sheet = can_access_endpoint('event.printable_daily_stand_sheet', 'GET') %}
 <style>
     .stand-sheet-table {
         font-size: 0.95rem;
@@ -111,6 +112,14 @@
     }
 </style>
 <div class="container mt-4">
+    {% if operating_date and can_print_daily_stand_sheet %}
+    <div class="d-flex justify-content-end mb-3">
+        <a
+            class="btn btn-outline-secondary"
+            href="{{ url_for('event.printable_daily_stand_sheet', event_id=event.id, location_id=location.id, operating_date=operating_date.isoformat()) }}"
+        >Print Sheet</a>
+    </div>
+    {% endif %}
     {% if not can_edit_stand_sheet %}
     <div class="alert alert-info" role="status">This stand sheet is read only for your account.</div>
     {% endif %}

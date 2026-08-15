@@ -4416,6 +4416,9 @@ class TerminalSale(db.Model):
     unit_price_snapshot = db.Column(db.Float, nullable=True)
     line_total_snapshot = db.Column(db.Float, nullable=True)
     sold_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    recipe_snapshot_captured = db.Column(
+        db.Boolean, nullable=False, default=False, server_default="0"
+    )
 
     event_location = relationship(
         "EventLocation", back_populates="terminal_sales"
@@ -4467,6 +4470,9 @@ class TerminalSaleRecipeItemSnapshot(db.Model):
     unit_name = db.Column(db.String(50), nullable=True)
     unit_factor = db.Column(db.Float, nullable=False, default=1.0, server_default="1.0")
     quantity = db.Column(db.Float, nullable=False)
+    recipe_yield_quantity = db.Column(
+        db.Float, nullable=False, default=1.0, server_default="1.0"
+    )
     countable = db.Column(
         db.Boolean, nullable=False, default=False, server_default="0"
     )
