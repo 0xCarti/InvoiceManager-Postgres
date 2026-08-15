@@ -19,6 +19,7 @@
 {% set can_download_event_documents = can_access_endpoint('event.download_event_document') %}
 {% set can_delete_event_documents = can_access_endpoint('event.delete_event_document_file', 'POST') %}
 {% set can_review_count_submissions = can_access_endpoint('locations.count_submissions', 'GET') %}
+{% set can_review_count_submission_detail = can_access_endpoint('locations.count_submission_detail', 'GET') %}
 {% set can_view_sales_imports = can_access_endpoint('admin.sales_import_detail', 'GET') %}
 {% set can_view_location = can_access_endpoint('locations.view_location', 'GET') %}
 {% if is_inventory_event %}
@@ -307,11 +308,11 @@
                                     </td>
                                     {% if not is_inventory_event %}
                                     <td>
-                                        {% if entry.opening_status == 'pending' and can_review_count_submissions %}
+                                        {% if entry.opening_pending_submission_id and can_review_count_submission_detail %}
                                         <a
                                             class="badge text-bg-warning text-decoration-none"
-                                            href="{{ url_for('locations.count_submissions', event_location_id=entry.event_location.id, submission_date=day.date.isoformat(), status='pending', submission_type='opening') }}"
-                                            aria-label="Review pending opening count submissions"
+                                            href="{{ url_for('locations.count_submission_detail', submission_id=entry.opening_pending_submission_id) }}"
+                                            aria-label="Review pending opening count submission"
                                         >Pending</a>
                                         {% else %}
                                         <span class="badge {% if entry.opening_status == 'approved' %}text-bg-success{% elif entry.opening_status == 'pending' %}text-bg-warning{% elif entry.opening_status == 'rejected' %}text-bg-danger{% else %}text-bg-light border text-dark{% endif %}">
@@ -323,11 +324,11 @@
                                         {% endif %}
                                     </td>
                                     <td>
-                                        {% if entry.closing_status == 'pending' and can_review_count_submissions %}
+                                        {% if entry.closing_pending_submission_id and can_review_count_submission_detail %}
                                         <a
                                             class="badge text-bg-warning text-decoration-none"
-                                            href="{{ url_for('locations.count_submissions', event_location_id=entry.event_location.id, submission_date=day.date.isoformat(), status='pending', submission_type='closing') }}"
-                                            aria-label="Review pending closing count submissions"
+                                            href="{{ url_for('locations.count_submission_detail', submission_id=entry.closing_pending_submission_id) }}"
+                                            aria-label="Review pending closing count submission"
                                         >Pending</a>
                                         {% else %}
                                         <span class="badge {% if entry.closing_status == 'approved' %}text-bg-success{% elif entry.closing_status == 'pending' %}text-bg-warning{% elif entry.closing_status == 'rejected' %}text-bg-danger{% else %}text-bg-light border text-dark{% endif %}">

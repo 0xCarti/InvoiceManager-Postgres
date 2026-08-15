@@ -865,6 +865,19 @@ def _event_day_status(submissions: list[LocationCountSubmission]) -> str:
     return "missing"
 
 
+def _latest_pending_submission_id(
+    submissions: list[LocationCountSubmission],
+) -> int | None:
+    return next(
+        (
+            submission.id
+            for submission in reversed(submissions)
+            if submission.status == LocationCountSubmission.STATUS_PENDING
+        ),
+        None,
+    )
+
+
 def _build_event_day_summaries(event_obj: Event) -> list[SimpleNamespace]:
     event_locations = list(event_obj.locations or [])
     event_location_ids = [event_location.id for event_location in event_locations]
@@ -880,7 +893,10 @@ def _build_event_day_summaries(event_obj: Event) -> list[SimpleNamespace]:
             LocationCountSubmission.submission_date >= event_obj.start_date,
             LocationCountSubmission.submission_date <= event_obj.end_date,
         )
-        .order_by(LocationCountSubmission.submitted_at.asc())
+        .order_by(
+            LocationCountSubmission.submitted_at.asc(),
+            LocationCountSubmission.id.asc(),
+        )
         .all()
     )
     submissions_by_key: dict[
@@ -1024,6 +1040,12 @@ def _build_event_day_summaries(event_obj: Event) -> list[SimpleNamespace]:
                     day_confirmed=bool(operating_day and operating_day.confirmed),
                     opening_status=_event_day_status(opening_submissions),
                     closing_status=_event_day_status(closing_submissions),
+                    opening_pending_submission_id=(
+                        _latest_pending_submission_id(opening_submissions)
+                    ),
+                    closing_pending_submission_id=(
+                        _latest_pending_submission_id(closing_submissions)
+                    ),
                     opening_submission_count=len(opening_submissions),
                     closing_submission_count=len(closing_submissions),
                     pending_sales_imports=tuple(pending_sales_import_entries),

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date
+from datetime import date, datetime
 from html import unescape
 
 from werkzeug.datastructures import MultiDict
@@ -78,31 +78,46 @@ def _create_terminal_product(client, *, name: str = "Uploaded Product") -> int:
     return int(payload["product"]["id"])
 
 
-def _seed_pending_event_submissions(app, seeded: dict) -> tuple[int, int]:
+def _seed_pending_event_submissions(app, seeded: dict) -> tuple[int, int, int, int]:
     submission_date = date(2026, 4, 1)
     with app.app_context():
+        decoy_submission = LocationCountSubmission(
+            source_location_id=seeded["location_id"],
+            location_id=seeded["location_id"],
+            event_location_id=seeded["event_location_id"],
+            submission_type=LocationCountSubmission.TYPE_EATEN,
+            submitted_name="Decoy Lead",
+            submission_date=submission_date,
+            status=LocationCountSubmission.STATUS_REJECTED,
+        )
+        opening_submission = LocationCountSubmission(
+            source_location_id=seeded["location_id"],
+            location_id=seeded["location_id"],
+            event_location_id=seeded["event_location_id"],
+            submission_type=LocationCountSubmission.TYPE_OPENING,
+            submitted_name="Opening Lead",
+            submission_date=submission_date,
+            status=LocationCountSubmission.STATUS_PENDING,
+        )
+        closing_submission = LocationCountSubmission(
+            source_location_id=seeded["location_id"],
+            location_id=seeded["location_id"],
+            event_location_id=seeded["event_location_id"],
+            submission_type=LocationCountSubmission.TYPE_CLOSING,
+            submitted_name="Closing Lead",
+            submission_date=submission_date,
+            status=LocationCountSubmission.STATUS_PENDING,
+        )
         db.session.add_all(
             [
-                LocationCountSubmission(
-                    source_location_id=seeded["location_id"],
-                    location_id=seeded["location_id"],
-                    event_location_id=seeded["event_location_id"],
-                    submission_type=LocationCountSubmission.TYPE_OPENING,
-                    submitted_name="Opening Lead",
-                    submission_date=submission_date,
-                    status=LocationCountSubmission.STATUS_PENDING,
-                ),
-                LocationCountSubmission(
-                    source_location_id=seeded["location_id"],
-                    location_id=seeded["location_id"],
-                    event_location_id=seeded["event_location_id"],
-                    submission_type=LocationCountSubmission.TYPE_CLOSING,
-                    submitted_name="Closing Lead",
-                    submission_date=submission_date,
-                    status=LocationCountSubmission.STATUS_PENDING,
-                ),
+                decoy_submission,
+                opening_submission,
+                closing_submission,
             ]
         )
+        db.session.flush()
+        opening_submission_id = opening_submission.id
+        closing_submission_id = closing_submission.id
         sales_import = PosSalesImport(
             source_provider="mailgun",
             message_id="<pending-event-navigation>",
@@ -149,7 +164,12 @@ def _seed_pending_event_submissions(app, seeded: dict) -> tuple[int, int]:
             db.session.flush()
         db.session.commit()
         assert target_import_location.id != seeded["location_id"]
-        return sales_import.id, target_import_location.id
+        return (
+            opening_submission_id,
+            closing_submission_id,
+            sales_import.id,
+            target_import_location.id,
+        )
 
 
 def test_events_list_hides_create_and_reports_without_permission(client, app):
@@ -240,7 +260,43 @@ def test_event_pending_badges_link_to_their_review_pages(client, app):
         email="event-pending-links@example.com",
         event_type="other",
     )
-    sales_import_id, import_location_id = _seed_pending_event_submissions(app, seeded)
+    (
+        opening_submission_id,
+        closing_submission_id,
+        sales_import_id,
+        import_location_id,
+    ) = _seed_pending_event_submissions(app, seeded)
+
+    with app.app_context():
+        original_opening = db.session.get(
+            LocationCountSubmission, opening_submission_id
+        )
+        original_opening.submitted_at = datetime(2026, 4, 1, 9, 0)
+        latest_pending_opening = LocationCountSubmission(
+            source_location_id=seeded["location_id"],
+            location_id=seeded["location_id"],
+            event_location_id=seeded["event_location_id"],
+            submission_type=LocationCountSubmission.TYPE_OPENING,
+            submitted_name="Latest Pending Opening Lead",
+            submission_date=date(2026, 4, 1),
+            status=LocationCountSubmission.STATUS_PENDING,
+            submitted_at=datetime(2026, 4, 1, 10, 0),
+        )
+        newer_approved_opening = LocationCountSubmission(
+            source_location_id=seeded["location_id"],
+            location_id=seeded["location_id"],
+            event_location_id=seeded["event_location_id"],
+            submission_type=LocationCountSubmission.TYPE_OPENING,
+            submitted_name="Approved Opening Lead",
+            submission_date=date(2026, 4, 1),
+            status=LocationCountSubmission.STATUS_APPROVED,
+            submitted_at=datetime(2026, 4, 1, 11, 0),
+        )
+        db.session.add_all([latest_pending_opening, newer_approved_opening])
+        db.session.flush()
+        latest_pending_opening_id = latest_pending_opening.id
+        newer_approved_opening_id = newer_approved_opening.id
+        db.session.commit()
 
     with app.app_context():
         user = User.query.filter_by(email=seeded["email"]).one()
@@ -258,18 +314,31 @@ def test_event_pending_badges_link_to_their_review_pages(client, app):
         response = client.get(f"/events/{seeded['event_id']}")
         body = unescape(response.data.decode())
 
-    count_queue = "/locations/count-submissions"
-    common_filters = (
-        f"event_location_id={seeded['event_location_id']}"
-        "&submission_date=2026-04-01&status=pending"
-    )
     assert response.status_code == 200
-    assert f'href="{count_queue}?{common_filters}&submission_type=opening"' in body
-    assert f'href="{count_queue}?{common_filters}&submission_type=closing"' in body
+    assert (
+        f'href="/locations/count-submissions/{latest_pending_opening_id}"' in body
+    )
+    assert f'href="/locations/count-submissions/{closing_submission_id}"' in body
+    assert f'href="/locations/count-submissions/{opening_submission_id}"' not in body
+    assert f'href="/locations/count-submissions/{newer_approved_opening_id}"' not in body
+    assert "status=pending&submission_type=opening" not in body
+    assert "status=pending&submission_type=closing" not in body
     assert (
         f'href="/controlpanel/sales-imports/{sales_import_id}'
         f'?location_id={import_location_id}&return_event_id={seeded["event_id"]}"' in body
     )
+
+    with client:
+        detail_response = client.get(
+            f"/locations/count-submissions/{latest_pending_opening_id}"
+        )
+        detail_body = detail_response.get_data(as_text=True)
+
+    assert detail_response.status_code == 200
+    assert (
+        f"Opening Count Submission #{latest_pending_opening_id}" in detail_body
+    )
+    assert "Latest Pending Opening Lead" in detail_body
 
 
 def test_event_pending_badges_stay_plain_without_review_permissions(client, app):
@@ -278,7 +347,12 @@ def test_event_pending_badges_stay_plain_without_review_permissions(client, app)
         email="event-pending-view-only@example.com",
         event_type="other",
     )
-    sales_import_id, _ = _seed_pending_event_submissions(app, seeded)
+    (
+        opening_submission_id,
+        closing_submission_id,
+        sales_import_id,
+        _,
+    ) = _seed_pending_event_submissions(app, seeded)
 
     with app.app_context():
         user = User.query.filter_by(email=seeded["email"]).one()
@@ -293,12 +367,18 @@ def test_event_pending_badges_stay_plain_without_review_permissions(client, app)
         login(client, seeded["email"], "pass")
         response = client.get(f"/events/{seeded['event_id']}")
         body = unescape(response.data.decode())
+        direct_review_response = client.get(
+            f"/locations/count-submissions/{opening_submission_id}"
+        )
 
     assert response.status_code == 200
     assert body.count("text-bg-warning") >= 3
     assert "status=pending&submission_type=opening" not in body
     assert "status=pending&submission_type=closing" not in body
+    assert f"/locations/count-submissions/{opening_submission_id}" not in body
+    assert f"/locations/count-submissions/{closing_submission_id}" not in body
     assert f"/controlpanel/sales-imports/{sales_import_id}" not in body
+    assert direct_review_response.status_code == 403
 
 
 def test_inventory_event_detail_hides_regular_location_workflow_controls(
