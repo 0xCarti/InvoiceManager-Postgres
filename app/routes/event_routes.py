@@ -455,7 +455,20 @@ def _build_sheet_values(sheet, base_unit, conversions):
 
     values = {}
     for field in _STAND_SHEET_FIELDS:
-        raw = getattr(sheet, field, None) if sheet else None
+        if sheet is not None and field == "transferred_in":
+            raw = getattr(
+                sheet,
+                "total_transferred_in",
+                getattr(sheet, "transferred_in", None),
+            )
+        elif sheet is not None and field == "transferred_out":
+            raw = getattr(
+                sheet,
+                "total_transferred_out",
+                getattr(sheet, "transferred_out", None),
+            )
+        else:
+            raw = getattr(sheet, field, None) if sheet else None
         values[field] = (
             _convert_value_for_reporting(raw, base_unit, conversions)
             if raw is not None
@@ -473,11 +486,23 @@ def _daily_submission_sheet_value_source(
         return sheet
 
     values = {
-        field: getattr(sheet, field, None) if sheet else None
+        field: (
+            sheet.total_transferred_in
+            if sheet is not None and field == "transferred_in"
+            else (
+                sheet.total_transferred_out
+                if sheet is not None and field == "transferred_out"
+                else (getattr(sheet, field, None) if sheet else None)
+            )
+        )
         for field in _STAND_SHEET_FIELDS
     }
     has_daily_value = False
     for field_name, totals_by_item_id in daily_submission_totals_by_field.items():
+        if field_name in {"transferred_in", "transferred_out"}:
+            values[field_name] = totals_by_item_id.get(item_id, 0.0)
+            has_daily_value = has_daily_value or item_id in totals_by_item_id
+            continue
         if item_id in totals_by_item_id:
             values[field_name] = totals_by_item_id[item_id]
             has_daily_value = True
@@ -1050,8 +1075,8 @@ def _build_closed_event_stand_items(event_location: EventLocation) -> list[dict]
                 "sheet": sheet,
                 "sheet_values": SimpleNamespace(
                     opening_count=float(sheet.opening_count or 0.0),
-                    transferred_in=float(sheet.transferred_in or 0.0),
-                    transferred_out=float(sheet.transferred_out or 0.0),
+                    transferred_in=sheet.total_transferred_in,
+                    transferred_out=sheet.total_transferred_out,
                     adjustments=float(sheet.adjustments or 0.0),
                     eaten=float(sheet.eaten or 0.0),
                     spoiled=float(sheet.spoiled or 0.0),
@@ -1087,9 +1112,9 @@ def _calculate_physical_vs_terminal_variance(event: Event) -> float | None:
                 continue
             variance_units = (
                 float(sheet.opening_count or 0.0)
-                + float(sheet.transferred_in or 0.0)
+                + sheet.total_transferred_in
                 + float(sheet.adjustments or 0.0)
-                - float(sheet.transferred_out or 0.0)
+                - sheet.total_transferred_out
                 - float(entry.get("sales_base") or 0.0)
                 - float(sheet.eaten or 0.0)
                 - float(sheet.spoiled or 0.0)
@@ -2408,8 +2433,8 @@ def closed_event_report(event_id):
             any_sheet_data = True
 
             opening = float(sheet.opening_count or 0.0)
-            transferred_in = float(sheet.transferred_in or 0.0)
-            transferred_out = float(sheet.transferred_out or 0.0)
+            transferred_in = sheet.total_transferred_in
+            transferred_out = sheet.total_transferred_out
             adjustments = float(sheet.adjustments or 0.0)
             eaten = float(sheet.eaten or 0.0)
             spoiled = float(sheet.spoiled or 0.0)
@@ -6228,6 +6253,13 @@ def _get_stand_items(location_id, event_id=None, operating_date=None):
                         _COUNT_SUBMISSION_FIELD_BY_TYPE.items()
                     )
                 }
+                incoming_by_item_id, outgoing_by_item_id = (
+                    event_location_transfer_totals_for_date(el, operating_date)
+                )
+                daily_submission_totals_by_field["transferred_in"] = incoming_by_item_id
+                daily_submission_totals_by_field["transferred_out"] = (
+                    outgoing_by_item_id
+                )
             for sale in el.terminal_sales:
                 if operating_date is not None:
                     if sale.sold_at is None or sale.sold_at.date() != operating_date:
@@ -6644,12 +6676,19 @@ def stand_sheet(event_id, location_id):
             sheet.opening_count = _convert_report_value_to_base(
                 opening or 0, base_unit, report_unit
             )
-            sheet.transferred_in = _convert_report_value_to_base(
-                transferred_in or 0, base_unit, report_unit
-            )
-            sheet.transferred_out = _convert_report_value_to_base(
-                transferred_out or 0, base_unit, report_unit
-            )
+            if operating_date is None:
+                total_transferred_in = _convert_report_value_to_base(
+                    transferred_in or 0, base_unit, report_unit
+                )
+                total_transferred_out = _convert_report_value_to_base(
+                    transferred_out or 0, base_unit, report_unit
+                )
+                sheet.transferred_in = total_transferred_in - float(
+                    sheet.reported_transferred_in or 0.0
+                )
+                sheet.transferred_out = total_transferred_out - float(
+                    sheet.reported_transferred_out or 0.0
+                )
             sheet.adjustments = _convert_report_value_to_base(
                 adjustments or 0, base_unit, report_unit
             )

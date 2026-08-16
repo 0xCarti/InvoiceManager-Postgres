@@ -43,6 +43,12 @@
     font-size: 1.25rem;
 }
 
+.transfer-quantity-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
 .inventory-filtered-out {
     display: none !important;
 }
@@ -308,6 +314,49 @@
                                 <button type="button" class="btn btn-outline-danger" data-inventory-remove-row="1" aria-label="Remove unit row" title="Remove unit row" disabled>&times;</button>
                             </div>
                         </div>
+                        {% elif selected_type == 'transfer' %}
+                        <div class="transfer-quantity-grid">
+                            <div>
+                                <label class="form-label small mb-1" for="transfer_in_{{ entry.item.id }}">Transfer In</label>
+                                <input
+                                    type="number"
+                                    step="any"
+                                    min="0"
+                                    inputmode="decimal"
+                                    enterkeyhint="next"
+                                    autocomplete="off"
+                                    data-count-entry="1"
+                                    data-count-draft-field="1"
+                                    data-native-numeric="1"
+                                    class="form-control form-control-lg"
+                                    id="transfer_in_{{ entry.item.id }}"
+                                    name="transfer_in_{{ entry.item.id }}"
+                                    value="{{ request.form.get('transfer_in_' ~ entry.item.id, '') }}"
+                                    placeholder="0"
+                                    aria-label="Transfer In for {{ entry.item.name }}"
+                                >
+                            </div>
+                            <div>
+                                <label class="form-label small mb-1" for="transfer_out_{{ entry.item.id }}">Transfer Out</label>
+                                <input
+                                    type="number"
+                                    step="any"
+                                    min="0"
+                                    inputmode="decimal"
+                                    enterkeyhint="next"
+                                    autocomplete="off"
+                                    data-count-entry="1"
+                                    data-count-draft-field="1"
+                                    data-native-numeric="1"
+                                    class="form-control form-control-lg"
+                                    id="transfer_out_{{ entry.item.id }}"
+                                    name="transfer_out_{{ entry.item.id }}"
+                                    value="{{ request.form.get('transfer_out_' ~ entry.item.id, '') }}"
+                                    placeholder="0"
+                                    aria-label="Transfer Out for {{ entry.item.name }}"
+                                >
+                            </div>
+                        </div>
                         {% else %}
                         <input
                             type="number"
@@ -384,7 +433,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const inventoryItemSearchUrl = form.dataset.inventoryItemSearchUrl || '';
     const inventoryCatalogById = {};
     const clearDraftType = form.dataset.clearDraftType || '';
-    const supportedDraftTypes = ['opening', 'closing', 'inventory'];
+    const supportedDraftTypes = ['opening', 'closing', 'transfer', 'inventory'];
     const draftMaxAgeMs = 1000 * 60 * 60 * 48;
     let pendingDraft = null;
     let canUseLocalStorage = true;

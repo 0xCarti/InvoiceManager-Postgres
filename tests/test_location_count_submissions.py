@@ -23,7 +23,11 @@ from app.models import (
     User,
 )
 from app.services.location_count_submissions import (
+    aggregate_transfer_submission_rows_for_event_location_day,
+    event_location_transfer_totals_for_date,
+    expected_opening_counts_for_event_day,
     sync_event_location_counts_from_approved_submissions,
+    sync_event_location_reported_transfers_from_approved_submissions,
 )
 from app.utils.recipe_history import sync_terminal_sale_recipe_snapshots
 from tests.permission_helpers import grant_permissions
@@ -102,6 +106,57 @@ def _create_pending_submission(
         parse_index=0,
     )
     db.session.add(row)
+    db.session.commit()
+    return submission.id
+
+
+def _create_transfer_submission(
+    *,
+    location_id: int,
+    event_location_id: int,
+    item_id: int,
+    submission_date: date,
+    transfer_in: float,
+    transfer_out: float,
+    submitted_name: str,
+    status: str = LocationCountSubmission.STATUS_PENDING,
+    approval_mode: str | None = None,
+    submitted_at: datetime | None = None,
+) -> int:
+    operating_day = EventLocationOperatingDay.query.filter_by(
+        event_location_id=event_location_id,
+        operating_date=submission_date,
+    ).first()
+    submission = LocationCountSubmission(
+        source_location_id=location_id,
+        location_id=location_id,
+        event_location_id=event_location_id,
+        event_operating_day_id=operating_day.id if operating_day else None,
+        submission_type=LocationCountSubmission.TYPE_TRANSFER,
+        submission_date=submission_date,
+        submitted_name=submitted_name,
+        status=status,
+        approval_mode=approval_mode,
+        submitted_at=submitted_at or datetime.utcnow(),
+        reviewed_at=(
+            submitted_at or datetime.utcnow()
+            if status == LocationCountSubmission.STATUS_APPROVED
+            else None
+        ),
+    )
+    db.session.add(submission)
+    db.session.flush()
+    db.session.add(
+        LocationCountSubmissionRow(
+            submission_id=submission.id,
+            item_id=item_id,
+            count_value=0.0,
+            submitted_count_value=0.0,
+            transfer_in_value=transfer_in,
+            transfer_out_value=transfer_out,
+            parse_index=0,
+        )
+    )
     db.session.commit()
     return submission.id
 
@@ -415,6 +470,19 @@ def test_public_count_submission_auto_switches_to_inventory_for_inventory_event(
     assert b'data-inventory-quantity-entry="1"' in response.data
     assert b'inputmode="decimal"' not in response.data
     assert b"Case of 12" in response.data
+    assert f"/locations/scan/{token}/transfer".encode() not in response.data
+
+    transfer_response = client.get(
+        f"/locations/scan/{token}/transfer",
+        follow_redirects=True,
+    )
+    assert transfer_response.status_code == 200
+    assert (
+        b"Transfer submissions are not available for inventory events."
+        in transfer_response.data
+    )
+    with app.app_context():
+        assert LocationCountSubmission.query.count() == 0
 
     response = client.post(
         f"/locations/scan/{token}",
@@ -1998,3 +2066,668 @@ def test_spoilage_approval_rolls_up_all_days_and_overwrites_same_day(client, app
         ).first()
         assert sheet is not None
         assert sheet.spoiled == 8.0
+
+
+def test_public_transfer_submission_has_paired_inputs_and_fixed_type(client, app):
+    context = _setup_location_count_context(app)
+    scan_url = f"/locations/scan/{context['token']}/transfer"
+
+    response = client.get(scan_url)
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Submit Transfers" in body
+    assert f'name="transfer_in_{context["item_id"]}"' in body
+    assert f'name="transfer_out_{context["item_id"]}"' in body
+    assert f'aria-label="Transfer In for Count Item' in body
+    assert f'aria-label="Transfer Out for Count Item' in body
+    assert f'href="/locations/scan/{context["token"]}/eaten"' in body
+    assert f'href="/locations/scan/{context["token"]}/spoilage"' in body
+
+    response = client.post(
+        scan_url,
+        data={
+            "submitted_name": "Transfer Lead",
+            "submission_type": "closing",
+            f"transfer_in_{context['item_id']}": "2.5",
+            f"transfer_out_{context['item_id']}": "1.25",
+        },
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith(
+        f"/locations/scan/{context['token']}/transfer?clear_draft=transfer"
+    )
+
+    with app.app_context():
+        submission = LocationCountSubmission.query.one()
+        assert submission.submission_type == LocationCountSubmission.TYPE_TRANSFER
+        assert submission.event_location_id == context["event_location_id"]
+        assert submission.event_operating_day_id is not None
+        assert submission.status == LocationCountSubmission.STATUS_PENDING
+        assert len(submission.rows) == 1
+        row = submission.rows[0]
+        assert row.count_value == 0.0
+        assert row.transfer_in_value == 2.5
+        assert row.transfer_out_value == 1.25
+
+
+def test_transfer_submission_converts_both_reported_quantities_to_base_units(
+    client, app
+):
+    context = _setup_location_count_context(app)
+    with app.app_context():
+        item = db.session.get(Item, context["item_id"])
+        item.base_unit = "ounce"
+        db.session.commit()
+    app.config["BASE_UNIT_CONVERSIONS"] = {"ounce": "gram"}
+
+    scan_url = f"/locations/scan/{context['token']}/transfer"
+    response = client.post(
+        scan_url,
+        data={
+            "submitted_name": "Metric Transfer Lead",
+            f"transfer_in_{context['item_id']}": "28.349523125",
+            f"transfer_out_{context['item_id']}": "56.69904625",
+        },
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        submission = LocationCountSubmission.query.one()
+        row = submission.rows[0]
+        submission_id = submission.id
+        row_id = row.id
+        assert abs(row.transfer_in_value - 1.0) < 1e-9
+        assert abs(row.transfer_out_value - 2.0) < 1e-9
+
+    with client:
+        login(client, "admin@example.com", "adminpass")
+        detail = client.get(f"/locations/count-submissions/{submission_id}")
+        assert detail.status_code == 200
+        detail_body = detail.get_data(as_text=True)
+        transfer_in_start = detail_body.index(f'name="transfer_in_{row_id}"')
+        transfer_in_input = detail_body[transfer_in_start:]
+        transfer_out_start = detail_body.index(f'name="transfer_out_{row_id}"')
+        transfer_out_input = detail_body[transfer_out_start:]
+        assert 'value="28.3495"' in transfer_in_input[:300]
+        assert 'value="56.6990"' in transfer_out_input[:300]
+
+        saved = client.post(
+            f"/locations/count-submissions/{submission_id}",
+            data={
+                "action": "save_review",
+                "submitted_name": "Metric Transfer Lead",
+                "submission_type": "transfer",
+                "submission_date": context["today"].isoformat(),
+                "location_id": str(context["location_id"]),
+                "event_location_id": str(context["event_location_id"]),
+                "review_note": "Converted in review",
+                f"transfer_in_{row_id}": "85.048569375",
+                f"transfer_out_{row_id}": "113.3980925",
+            },
+        )
+        assert saved.status_code == 302
+
+    with app.app_context():
+        row = db.session.get(LocationCountSubmissionRow, row_id)
+        assert abs(row.transfer_in_value - 3.0) < 1e-9
+        assert abs(row.transfer_out_value - 4.0) < 1e-9
+
+
+def test_public_transfer_submission_validates_pairs_and_compares_both_for_duplicates(
+    client, app
+):
+    context = _setup_location_count_context(app)
+    scan_url = f"/locations/scan/{context['token']}/transfer"
+
+    for posted_values, expected_message in (
+        (
+            {"in": "0", "out": "0"},
+            b"Enter at least one transfer in or transfer out quantity",
+        ),
+        (
+            {"in": "-1", "out": "0"},
+            b"must be a nonnegative finite quantity",
+        ),
+        (
+            {"in": "NaN", "out": "0"},
+            b"must be a nonnegative finite quantity",
+        ),
+    ):
+        response = client.post(
+            scan_url,
+            data={
+                "submitted_name": "Pair Validator",
+                f"transfer_in_{context['item_id']}": posted_values["in"],
+                f"transfer_out_{context['item_id']}": posted_values["out"],
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert expected_message in response.data
+
+    with app.app_context():
+        assert LocationCountSubmission.query.count() == 0
+
+    base_payload = {
+        "submitted_name": "Duplicate Lead",
+        f"transfer_in_{context['item_id']}": "2",
+        f"transfer_out_{context['item_id']}": "3",
+    }
+    first = client.post(scan_url, data=base_payload, follow_redirects=True)
+    duplicate = client.post(scan_url, data=base_payload, follow_redirects=True)
+    assert first.status_code == 200
+    assert duplicate.status_code == 200
+    assert b"Transfers already submitted for manager review." in duplicate.data
+
+    changed_out = dict(base_payload)
+    changed_out[f"transfer_out_{context['item_id']}"] = "4"
+    response = client.post(scan_url, data=changed_out, follow_redirects=True)
+    assert response.status_code == 200
+
+    changed_in = dict(base_payload)
+    changed_in[f"transfer_in_{context['item_id']}"] = "5"
+    response = client.post(scan_url, data=changed_in, follow_redirects=True)
+    assert response.status_code == 200
+
+    with app.app_context():
+        submissions = LocationCountSubmission.query.order_by(
+            LocationCountSubmission.id.asc()
+        ).all()
+        assert len(submissions) == 3
+        assert submissions[0].rows[0].transfer_out_value == 3.0
+        assert submissions[1].rows[0].transfer_out_value == 4.0
+        assert submissions[2].rows[0].transfer_in_value == 5.0
+
+
+def test_transfer_approval_combines_with_formal_transfers_without_double_sync(
+    client, app
+):
+    context = _setup_location_count_context(app)
+    with app.app_context():
+        event_location = db.session.get(EventLocation, context["event_location_id"])
+        operating_day = EventLocationOperatingDay(
+            event_location_id=event_location.id,
+            operating_date=context["today"],
+        )
+        next_operating_day = EventLocationOperatingDay(
+            event_location_id=event_location.id,
+            operating_date=context["today"] + timedelta(days=1),
+        )
+        other_location = Location(name=f"Transfer Peer {uuid4().hex[:8]}")
+        db.session.add_all([operating_day, next_operating_day, other_location])
+        db.session.flush()
+
+        admin = User.query.filter_by(email="admin@example.com").one()
+        completed_at = datetime.combine(context["today"], datetime.min.time())
+        inbound = Transfer(
+            from_location_id=other_location.id,
+            to_location_id=context["location_id"],
+            user_id=admin.id,
+            date_created=completed_at,
+            completed=True,
+        )
+        outbound = Transfer(
+            from_location_id=context["location_id"],
+            to_location_id=other_location.id,
+            user_id=admin.id,
+            date_created=completed_at,
+            completed=True,
+        )
+        db.session.add_all([inbound, outbound])
+        db.session.flush()
+        db.session.add_all(
+            [
+                TransferItem(
+                    transfer_id=inbound.id,
+                    item_id=context["item_id"],
+                    quantity=5.0,
+                    completed_quantity=5.0,
+                    completed_at=completed_at,
+                ),
+                TransferItem(
+                    transfer_id=outbound.id,
+                    item_id=context["item_id"],
+                    quantity=1.0,
+                    completed_quantity=1.0,
+                    completed_at=completed_at,
+                ),
+            ]
+        )
+        sheet = EventStandSheetItem(
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+            opening_count=11.0,
+            transferred_in=5.0,
+            transferred_out=1.0,
+            eaten=2.0,
+            spoiled=1.0,
+            closing_count=9.0,
+        )
+        db.session.add(sheet)
+        db.session.commit()
+
+        submission_id = _create_transfer_submission(
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+            submission_date=context["today"],
+            transfer_in=2.0,
+            transfer_out=3.0,
+            submitted_name="Transfer Reviewer",
+        )
+        row_id = db.session.get(LocationCountSubmission, submission_id).rows[0].id
+
+    with client:
+        login(client, "admin@example.com", "adminpass")
+        detail = client.get(f"/locations/count-submissions/{submission_id}")
+        assert detail.status_code == 200
+        assert f'name="transfer_in_{row_id}"'.encode() in detail.data
+        assert f'name="transfer_out_{row_id}"'.encode() in detail.data
+        assert b"Completed formal transfers remain additive." in detail.data
+
+        response = client.post(
+            f"/locations/count-submissions/{submission_id}",
+            data={
+                "action": "approve_add",
+                "submitted_name": "Transfer Reviewer",
+                "submission_type": "transfer",
+                "submission_date": context["today"].isoformat(),
+                "location_id": str(context["location_id"]),
+                "event_location_id": str(context["event_location_id"]),
+                "review_note": "",
+                f"transfer_in_{row_id}": "2",
+                f"transfer_out_{row_id}": "3",
+            },
+        )
+
+        assert response.status_code == 302
+        assert response.headers["Location"] == (
+            f"/events/{context['event_id']}"
+            f"#event-day-pane-{context['today'].isoformat()}"
+        )
+
+        stand_sheet_url = (
+            f"/events/{context['event_id']}/stand_sheet/{context['location_id']}"
+            f"?operating_date={context['today'].isoformat()}"
+        )
+        stand_sheet = client.get(stand_sheet_url)
+        assert stand_sheet.status_code == 200
+        stand_sheet_body = stand_sheet.get_data(as_text=True)
+        assert (
+            f'name="in_{context["item_id"]}" value="7.0000" readonly'
+            in stand_sheet_body
+        )
+        assert (
+            f'name="out_{context["item_id"]}" value="4.0000" readonly'
+            in stand_sheet_body
+        )
+
+        next_day = context["today"] + timedelta(days=1)
+        next_day_sheet = client.get(
+            f"/events/{context['event_id']}/stand_sheet/{context['location_id']}"
+            f"?operating_date={next_day.isoformat()}"
+        )
+        assert next_day_sheet.status_code == 200
+        next_day_body = next_day_sheet.get_data(as_text=True)
+        assert (
+            f'name="in_{context["item_id"]}" value="0.0000" readonly' in next_day_body
+        )
+        assert (
+            f'name="out_{context["item_id"]}" value="0.0000" readonly' in next_day_body
+        )
+
+        next_day_print = client.get(
+            f"/events/{context['event_id']}/stand_sheet/{context['location_id']}/print"
+            f"?operating_date={next_day.isoformat()}"
+        )
+        assert next_day_print.status_code == 200
+        assert b'data-field="transferred-in">0.00' in next_day_print.data
+        assert b'data-field="transferred-out">0.00' in next_day_print.data
+
+        saved = client.post(
+            stand_sheet_url,
+            data={
+                f"open_{context['item_id']}": "11",
+                f"in_{context['item_id']}": "7",
+                f"out_{context['item_id']}": "4",
+                f"adjust_{context['item_id']}": "0",
+                f"eaten_{context['item_id']}": "2",
+                f"spoiled_{context['item_id']}": "1",
+                f"close_{context['item_id']}": "9",
+                "notes": "",
+            },
+        )
+        assert saved.status_code == 302
+
+    with app.app_context():
+        submission = db.session.get(LocationCountSubmission, submission_id)
+        assert submission.status == LocationCountSubmission.STATUS_APPROVED
+        sheet = EventStandSheetItem.query.filter_by(
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+        ).one()
+        assert sheet.transferred_in == 5.0
+        assert sheet.transferred_out == 1.0
+        assert sheet.reported_transferred_in == 2.0
+        assert sheet.reported_transferred_out == 3.0
+        assert sheet.total_transferred_in == 7.0
+        assert sheet.total_transferred_out == 4.0
+        assert sheet.opening_count == 11.0
+        assert sheet.eaten == 2.0
+        assert sheet.spoiled == 1.0
+        assert sheet.closing_count == 9.0
+
+        sync_event_location_reported_transfers_from_approved_submissions(
+            context["event_location_id"]
+        )
+        sync_event_location_reported_transfers_from_approved_submissions(
+            context["event_location_id"]
+        )
+        db.session.commit()
+        db.session.refresh(sheet)
+        assert sheet.transferred_in == 5.0
+        assert sheet.transferred_out == 1.0
+        assert sheet.reported_transferred_in == 2.0
+        assert sheet.reported_transferred_out == 3.0
+
+        event_location = db.session.get(EventLocation, context["event_location_id"])
+        incoming, outgoing = event_location_transfer_totals_for_date(
+            event_location,
+            context["today"],
+        )
+        assert incoming == {context["item_id"]: 7.0}
+        assert outgoing == {context["item_id"]: 4.0}
+
+        sheet.opening_count = 10.0
+        db.session.commit()
+        expected = expected_opening_counts_for_event_day(
+            event_location,
+            context["today"],
+        )
+        assert expected[context["item_id"]] == 13.0
+
+
+def test_transfer_approve_overwrite_uses_manager_edited_pair(client, app):
+    context = _setup_location_count_context(app)
+    with app.app_context():
+        operating_day = EventLocationOperatingDay(
+            event_location_id=context["event_location_id"],
+            operating_date=context["today"],
+        )
+        db.session.add(operating_day)
+        db.session.commit()
+
+        _create_transfer_submission(
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+            submission_date=context["today"],
+            transfer_in=2.0,
+            transfer_out=3.0,
+            submitted_name="Earlier Add",
+            status=LocationCountSubmission.STATUS_APPROVED,
+            approval_mode=LocationCountSubmission.APPROVAL_MODE_ADD,
+            submitted_at=datetime.utcnow() - timedelta(minutes=1),
+        )
+        overwrite_submission_id = _create_transfer_submission(
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+            submission_date=context["today"],
+            transfer_in=99.0,
+            transfer_out=98.0,
+            submitted_name="Overwrite Lead",
+        )
+        overwrite_row_id = db.session.get(
+            LocationCountSubmission,
+            overwrite_submission_id,
+        ).rows[0].id
+
+    with client:
+        login(client, "admin@example.com", "adminpass")
+        response = client.post(
+            f"/locations/count-submissions/{overwrite_submission_id}",
+            data={
+                "action": "approve_overwrite",
+                "submitted_name": "Overwrite Lead",
+                "submission_type": "transfer",
+                "submission_date": context["today"].isoformat(),
+                "location_id": str(context["location_id"]),
+                "event_location_id": str(context["event_location_id"]),
+                "review_note": "Manager corrected both directions",
+                f"transfer_in_{overwrite_row_id}": "5",
+                f"transfer_out_{overwrite_row_id}": "7",
+            },
+        )
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == (
+        f"/events/{context['event_id']}"
+        f"#event-day-pane-{context['today'].isoformat()}"
+    )
+    with app.app_context():
+        submission = db.session.get(
+            LocationCountSubmission,
+            overwrite_submission_id,
+        )
+        assert submission.status == LocationCountSubmission.STATUS_APPROVED
+        assert (
+            submission.approval_mode
+            == LocationCountSubmission.APPROVAL_MODE_OVERWRITE
+        )
+        assert submission.rows[0].transfer_in_value == 5.0
+        assert submission.rows[0].transfer_out_value == 7.0
+
+        sheet = EventStandSheetItem.query.filter_by(
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+        ).one()
+        assert sheet.reported_transferred_in == 5.0
+        assert sheet.reported_transferred_out == 7.0
+
+
+def test_ambiguous_formal_transfer_is_not_assigned_to_overlapping_events(app):
+    context = _setup_location_count_context(app)
+    with app.app_context():
+        overlapping_event = Event(
+            name=f"Overlapping Event {uuid4().hex[:8]}",
+            start_date=context["today"] - timedelta(days=1),
+            end_date=context["today"] + timedelta(days=1),
+        )
+        peer_location = Location(name=f"Transfer Peer {uuid4().hex[:8]}")
+        db.session.add_all([overlapping_event, peer_location])
+        db.session.flush()
+        overlapping_event_location = EventLocation(
+            event_id=overlapping_event.id,
+            location_id=context["location_id"],
+        )
+        db.session.add(overlapping_event_location)
+        db.session.flush()
+
+        admin = User.query.filter_by(email="admin@example.com").one()
+        completed_at = datetime.combine(context["today"], datetime.min.time())
+        inbound = Transfer(
+            from_location_id=peer_location.id,
+            to_location_id=context["location_id"],
+            user_id=admin.id,
+            date_created=completed_at,
+            completed=True,
+        )
+        db.session.add(inbound)
+        db.session.flush()
+        db.session.add(
+            TransferItem(
+                transfer_id=inbound.id,
+                item_id=context["item_id"],
+                quantity=5.0,
+                completed_quantity=5.0,
+                completed_at=completed_at,
+            )
+        )
+        db.session.commit()
+
+        _create_transfer_submission(
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+            submission_date=context["today"],
+            transfer_in=2.0,
+            transfer_out=1.0,
+            submitted_name="Mapped Reporter",
+            status=LocationCountSubmission.STATUS_APPROVED,
+            approval_mode=LocationCountSubmission.APPROVAL_MODE_ADD,
+        )
+
+        primary_event_location = db.session.get(
+            EventLocation,
+            context["event_location_id"],
+        )
+        primary_in, primary_out = event_location_transfer_totals_for_date(
+            primary_event_location,
+            context["today"],
+        )
+        overlap_in, overlap_out = event_location_transfer_totals_for_date(
+            overlapping_event_location,
+            context["today"],
+        )
+
+        assert primary_in == {context["item_id"]: 2.0}
+        assert primary_out == {context["item_id"]: 1.0}
+        assert overlap_in == {}
+        assert overlap_out == {}
+
+
+def test_transfer_add_and_overwrite_roll_up_each_day_independently(app):
+    context = _setup_location_count_context(app)
+    first_day = context["today"] - timedelta(days=1)
+    second_day = context["today"]
+
+    with app.app_context():
+        for offset, values in enumerate(
+            (
+                (first_day, 2.0, 3.0, LocationCountSubmission.APPROVAL_MODE_ADD),
+                (
+                    first_day,
+                    5.0,
+                    0.0,
+                    LocationCountSubmission.APPROVAL_MODE_OVERWRITE,
+                ),
+                (first_day, 1.0, 1.0, LocationCountSubmission.APPROVAL_MODE_ADD),
+                (second_day, 4.0, 2.0, LocationCountSubmission.APPROVAL_MODE_ADD),
+            )
+        ):
+            timestamp = datetime.combine(first_day, datetime.min.time()) + timedelta(
+                minutes=offset
+            )
+            _create_transfer_submission(
+                location_id=context["location_id"],
+                event_location_id=context["event_location_id"],
+                item_id=context["item_id"],
+                submission_date=values[0],
+                transfer_in=values[1],
+                transfer_out=values[2],
+                submitted_name=f"Approved {offset}",
+                status=LocationCountSubmission.STATUS_APPROVED,
+                approval_mode=values[3],
+                submitted_at=timestamp,
+            )
+
+        _create_transfer_submission(
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+            submission_date=second_day,
+            transfer_in=99.0,
+            transfer_out=99.0,
+            submitted_name="Pending is excluded",
+        )
+
+        first_in, first_out = aggregate_transfer_submission_rows_for_event_location_day(
+            context["event_location_id"], first_day
+        )
+        second_in, second_out = (
+            aggregate_transfer_submission_rows_for_event_location_day(
+                context["event_location_id"], second_day
+            )
+        )
+        assert first_in == {context["item_id"]: 6.0}
+        assert first_out == {context["item_id"]: 1.0}
+        assert second_in == {context["item_id"]: 4.0}
+        assert second_out == {context["item_id"]: 2.0}
+
+        sync_event_location_counts_from_approved_submissions(
+            context["event_location_id"]
+        )
+        db.session.commit()
+        sheet = EventStandSheetItem.query.filter_by(
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+        ).one()
+        assert sheet.reported_transferred_in == 10.0
+        assert sheet.reported_transferred_out == 3.0
+
+
+def test_confirmed_event_day_blocks_transfer_approval_but_allows_review_save(
+    client, app
+):
+    context = _setup_location_count_context(app)
+    with app.app_context():
+        operating_day = EventLocationOperatingDay(
+            event_location_id=context["event_location_id"],
+            operating_date=context["today"],
+            confirmed=True,
+        )
+        db.session.add(operating_day)
+        db.session.commit()
+        submission_id = _create_transfer_submission(
+            location_id=context["location_id"],
+            event_location_id=context["event_location_id"],
+            item_id=context["item_id"],
+            submission_date=context["today"],
+            transfer_in=2.0,
+            transfer_out=1.0,
+            submitted_name="Closed Day Lead",
+        )
+        row_id = db.session.get(LocationCountSubmission, submission_id).rows[0].id
+
+    payload = {
+        "submitted_name": "Closed Day Lead",
+        "submission_type": "transfer",
+        "submission_date": context["today"].isoformat(),
+        "location_id": str(context["location_id"]),
+        "event_location_id": str(context["event_location_id"]),
+        "review_note": "Checked",
+        f"transfer_in_{row_id}": "2",
+        f"transfer_out_{row_id}": "1",
+    }
+    with client:
+        login(client, "admin@example.com", "adminpass")
+        saved = client.post(
+            f"/locations/count-submissions/{submission_id}",
+            data={**payload, "action": "save_review"},
+            follow_redirects=True,
+        )
+        assert saved.status_code == 200
+        assert b"Submission review saved." in saved.data
+
+        blocked = client.post(
+            f"/locations/count-submissions/{submission_id}",
+            data={**payload, "action": "approve_add"},
+            follow_redirects=True,
+        )
+        assert blocked.status_code == 200
+        assert (
+            b"Reopen this event day before approving transfer quantities."
+            in blocked.data
+        )
+
+    with app.app_context():
+        submission = db.session.get(LocationCountSubmission, submission_id)
+        assert submission.status == LocationCountSubmission.STATUS_PENDING
+        assert (
+            EventStandSheetItem.query.filter_by(
+                event_location_id=context["event_location_id"],
+                item_id=context["item_id"],
+            ).first()
+            is None
+        )

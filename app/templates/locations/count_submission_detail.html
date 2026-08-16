@@ -4,6 +4,7 @@
 
 {% block content %}
 {% set is_count_submission = submission.submission_type in ('opening', 'closing', 'inventory') %}
+{% set is_transfer_submission = submission.submission_type == 'transfer' %}
 <style nonce="{{ csp_nonce }}">
 @media (max-width: 767.98px) {
     .count-submission-detail-actions,
@@ -104,11 +105,15 @@
                 <div class="col-lg-2">
                     <label class="form-label" for="submission_type">Type</label>
                     <select class="form-select" id="submission_type" name="submission_type" {% if not editable %}disabled{% endif %}>
+                        {% if is_transfer_submission %}
+                        <option value="transfer" selected>Transfers</option>
+                        {% else %}
                         <option value="opening" {% if submission.submission_type == 'opening' %}selected{% endif %}>Opening Count</option>
                         <option value="closing" {% if submission.submission_type == 'closing' %}selected{% endif %}>Closing Count</option>
                         <option value="inventory" {% if submission.submission_type == 'inventory' %}selected{% endif %}>Inventory Count</option>
                         <option value="eaten" {% if submission.submission_type == 'eaten' %}selected{% endif %}>Eaten Items</option>
                         <option value="spoilage" {% if submission.submission_type == 'spoilage' %}selected{% endif %}>Spoilage Items</option>
+                        {% endif %}
                     </select>
                 </div>
                 <div class="col-lg-3">
@@ -176,7 +181,12 @@
                                 <th>Expected Opening</th>
                                 <th>Difference</th>
                                 {% endif %}
+                                {% if is_transfer_submission %}
+                                <th>Transfer In</th>
+                                <th>Transfer Out</th>
+                                {% else %}
                                 <th>{% if is_count_submission %}Count{% else %}Quantity{% endif %}</th>
+                                {% endif %}
                             </tr>
                         </thead>
                         <tbody>
@@ -205,6 +215,32 @@
                                     {{ '%+.4f'|format(expected_entry.difference_display if expected_entry else 0) }}
                                 </td>
                                 {% endif %}
+                                {% if is_transfer_submission %}
+                                <td>
+                                    <input
+                                        type="text"
+                                        inputmode="decimal"
+                                        data-numeric-input="1"
+                                        class="form-control"
+                                        name="transfer_in_{{ entry.row.id }}"
+                                        value="{{ '%.4f'|format(entry.transfer_in_display or 0) }}"
+                                        aria-label="Transfer In for {{ entry.item.name }}"
+                                        {% if not editable %}disabled{% endif %}
+                                    >
+                                </td>
+                                <td>
+                                    <input
+                                        type="text"
+                                        inputmode="decimal"
+                                        data-numeric-input="1"
+                                        class="form-control"
+                                        name="transfer_out_{{ entry.row.id }}"
+                                        value="{{ '%.4f'|format(entry.transfer_out_display or 0) }}"
+                                        aria-label="Transfer Out for {{ entry.item.name }}"
+                                        {% if not editable %}disabled{% endif %}
+                                    >
+                                </td>
+                                {% else %}
                                 <td>
                                     <input
                                         type="text"
@@ -216,6 +252,7 @@
                                         {% if not editable %}disabled{% endif %}
                                     >
                                 </td>
+                                {% endif %}
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -234,9 +271,11 @@
             <div class="d-flex flex-wrap gap-2">
                 {% if editable %}
                 <div class="w-100 small text-muted">
-                    {% if is_count_submission %}
+                    {% if is_count_submission or is_transfer_submission %}
                     {% if submission.submission_type == 'inventory' %}
                     Add will sum this inventory count with already-approved inventory counts for this location. Overwrite will replace the approved inventory count for the whole location.
+                    {% elif is_transfer_submission %}
+                    Add will sum both directions with approved reported transfers for the same day. Overwrite will replace both Transfer In and Transfer Out for each included item on that day. Completed formal transfers remain additive.
                     {% else %}
                     Add will sum this submission with already-approved values for the same count date. Overwrite will replace the current approved value for each item included in this submission.
                     {% endif %}

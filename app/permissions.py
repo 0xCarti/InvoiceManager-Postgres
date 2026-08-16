@@ -332,6 +332,7 @@ PUBLIC_ENDPOINTS: frozenset[str] = frozenset(
         "locations.scan_inventory_item_search",
         "locations.scan_inventory_submission",
         "locations.scan_spoilage_submission",
+        "locations.scan_transfer_submission",
         "mailgun.inbound_mailgun",
         "menu.menu_feed",
         "security_txt",

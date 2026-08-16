@@ -176,10 +176,10 @@
                     <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="open_{{ entry.item.id }}" value="{% if entry.sheet_values.opening_count is not none %}{{ '%.4f'|format(entry.sheet_values.opening_count) }}{% endif %}"{% if not can_edit_stand_sheet %} readonly aria-readonly="true"{% endif %}>
                 </td>
                 <td data-label="Transferred In">
-                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="in_{{ entry.item.id }}" value="{% if entry.sheet_values.transferred_in is not none %}{{ '%.4f'|format(entry.sheet_values.transferred_in) }}{% endif %}"{% if not can_edit_stand_sheet %} readonly aria-readonly="true"{% endif %}>
+                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="in_{{ entry.item.id }}" value="{% if entry.sheet_values.transferred_in is not none %}{{ '%.4f'|format(entry.sheet_values.transferred_in) }}{% endif %}"{% if operating_date or not can_edit_stand_sheet %} readonly aria-readonly="true"{% endif %}>
                 </td>
                 <td data-label="Transferred Out">
-                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="out_{{ entry.item.id }}" value="{% if entry.sheet_values.transferred_out is not none %}{{ '%.4f'|format(entry.sheet_values.transferred_out) }}{% endif %}"{% if not can_edit_stand_sheet %} readonly aria-readonly="true"{% endif %}>
+                    <input type="text" inputmode="text" data-numeric-input="1" class="form-control" name="out_{{ entry.item.id }}" value="{% if entry.sheet_values.transferred_out is not none %}{{ '%.4f'|format(entry.sheet_values.transferred_out) }}{% endif %}"{% if operating_date or not can_edit_stand_sheet %} readonly aria-readonly="true"{% endif %}>
                 </td>
                 <td data-label="Adjustments">
                     <input type="text" inputmode="text" data-numeric-input="1" class="form-control adjustments" name="adjust_{{ entry.item.id }}" value="{% if entry.sheet_values.adjustments is not none %}{{ '%.4f'|format(entry.sheet_values.adjustments) }}{% endif %}"{% if not can_edit_stand_sheet %} readonly aria-readonly="true"{% endif %}>

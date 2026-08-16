@@ -4832,6 +4832,12 @@ class EventStandSheetItem(db.Model):
     transferred_out = db.Column(
         db.Float, nullable=False, default=0.0, server_default="0.0"
     )
+    reported_transferred_in = db.Column(
+        db.Float, nullable=False, default=0.0, server_default="0.0"
+    )
+    reported_transferred_out = db.Column(
+        db.Float, nullable=False, default=0.0, server_default="0.0"
+    )
     adjustments = db.Column(
         db.Float, nullable=False, default=0.0, server_default="0.0"
     )
@@ -4862,6 +4868,18 @@ class EventStandSheetItem(db.Model):
         ),
     )
 
+    @property
+    def total_transferred_in(self) -> float:
+        return float(self.transferred_in or 0.0) + float(
+            self.reported_transferred_in or 0.0
+        )
+
+    @property
+    def total_transferred_out(self) -> float:
+        return float(self.transferred_out or 0.0) + float(
+            self.reported_transferred_out or 0.0
+        )
+
 
 class LocationCountSubmission(db.Model):
     STATUS_PENDING = "pending"
@@ -4871,11 +4889,13 @@ class LocationCountSubmission(db.Model):
     TYPE_CLOSING = "closing"
     TYPE_EATEN = "eaten"
     TYPE_SPOILAGE = "spoilage"
+    TYPE_TRANSFER = "transfer"
     TYPE_INVENTORY = "inventory"
     COUNT_TYPES = (TYPE_OPENING, TYPE_CLOSING)
     VARIANCE_TYPES = (TYPE_EATEN, TYPE_SPOILAGE)
+    TRANSFER_TYPES = (TYPE_TRANSFER,)
     INVENTORY_TYPES = (TYPE_INVENTORY,)
-    ALL_TYPES = COUNT_TYPES + VARIANCE_TYPES + INVENTORY_TYPES
+    ALL_TYPES = COUNT_TYPES + VARIANCE_TYPES + TRANSFER_TYPES + INVENTORY_TYPES
     APPROVAL_MODE_ADD = "add"
     APPROVAL_MODE_OVERWRITE = "overwrite"
     APPLIED_SOURCE_SUBMITTED = "submitted"
@@ -4965,7 +4985,7 @@ class LocationCountSubmission(db.Model):
 
     __table_args__ = (
         db.CheckConstraint(
-            "submission_type IN ('opening', 'closing', 'eaten', 'spoilage', 'inventory')",
+            "submission_type IN ('opening', 'closing', 'eaten', 'spoilage', 'transfer', 'inventory')",
             name="ck_location_count_submission_type",
         ),
         db.CheckConstraint(
@@ -5022,6 +5042,12 @@ class LocationCountSubmissionRow(db.Model):
     )
     submitted_count_value = db.Column(db.Float, nullable=True)
     expected_count_value = db.Column(db.Float, nullable=True)
+    transfer_in_value = db.Column(
+        db.Float, nullable=False, default=0.0, server_default="0.0"
+    )
+    transfer_out_value = db.Column(
+        db.Float, nullable=False, default=0.0, server_default="0.0"
+    )
     unit_breakdown = db.Column(db.JSON, nullable=True)
     parse_index = db.Column(db.Integer, nullable=False)
 
@@ -5035,6 +5061,14 @@ class LocationCountSubmissionRow(db.Model):
             "submission_id",
             "parse_index",
             name="uq_location_count_submission_row_order",
+        ),
+        db.CheckConstraint(
+            "transfer_in_value >= 0",
+            name="ck_location_count_submission_row_transfer_in_nonnegative",
+        ),
+        db.CheckConstraint(
+            "transfer_out_value >= 0",
+            name="ck_location_count_submission_row_transfer_out_nonnegative",
         ),
         db.Index(
             "ix_location_count_submission_row_submission",

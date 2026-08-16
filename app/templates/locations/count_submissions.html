@@ -19,7 +19,7 @@
     <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-4">
         <div>
             <h2 class="mb-1">Location Submissions</h2>
-            <p class="text-muted mb-0">Review count, eaten, and spoilage entries submitted from location mobile pages.</p>
+            <p class="text-muted mb-0">Review count, transfer, eaten, and spoilage entries submitted from location mobile pages.</p>
         </div>
         <div class="d-flex flex-wrap gap-2">
             {% if can_access_endpoint('locations.view_locations', 'GET') %}
@@ -58,6 +58,7 @@
                     <option value="inventory" {% if submission_type_filter == 'inventory' %}selected{% endif %}>Inventory Count</option>
                     <option value="eaten" {% if submission_type_filter == 'eaten' %}selected{% endif %}>Eaten Items</option>
                     <option value="spoilage" {% if submission_type_filter == 'spoilage' %}selected{% endif %}>Spoilage Items</option>
+                    <option value="transfer" {% if submission_type_filter == 'transfer' %}selected{% endif %}>Transfers</option>
                 </select>
             </div>
             <div class="col-lg-1">

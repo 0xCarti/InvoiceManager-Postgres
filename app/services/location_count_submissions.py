@@ -344,23 +344,135 @@ def aggregate_submission_rows_for_event_location_day(
     return _roll_up_submission_rows(query.all())
 
 
+def _roll_up_transfer_submission_rows(
+    submissions: list[LocationCountSubmission],
+) -> tuple[dict[int, float], dict[int, float]]:
+    """Combine paired transfer rows while honoring add/overwrite mode."""
+
+    incoming: dict[int, float] = {}
+    outgoing: dict[int, float] = {}
+    for submission in submissions:
+        approval_mode = (
+            submission.approval_mode or LocationCountSubmission.APPROVAL_MODE_ADD
+        )
+        for row in submission.rows:
+            if row.item_id is None:
+                continue
+            transfer_in = float(row.transfer_in_value or 0.0)
+            transfer_out = float(row.transfer_out_value or 0.0)
+            if approval_mode == LocationCountSubmission.APPROVAL_MODE_OVERWRITE:
+                incoming[row.item_id] = transfer_in
+                outgoing[row.item_id] = transfer_out
+            else:
+                incoming[row.item_id] = incoming.get(row.item_id, 0.0) + transfer_in
+                outgoing[row.item_id] = outgoing.get(row.item_id, 0.0) + transfer_out
+    return incoming, outgoing
+
+
+def aggregate_transfer_submission_rows_for_event_location_day(
+    event_location_id: int,
+    operating_date: date_cls,
+    *,
+    approved_only: bool = True,
+) -> tuple[dict[int, float], dict[int, float]]:
+    """Return paired reported transfers for one event-location operating day."""
+
+    query = (
+        LocationCountSubmission.query.options(
+            selectinload(LocationCountSubmission.rows)
+        )
+        .filter(
+            LocationCountSubmission.event_location_id == event_location_id,
+            LocationCountSubmission.submission_type
+            == LocationCountSubmission.TYPE_TRANSFER,
+            LocationCountSubmission.submission_date == operating_date,
+        )
+        .order_by(
+            LocationCountSubmission.reviewed_at.asc(),
+            LocationCountSubmission.submitted_at.asc(),
+            LocationCountSubmission.id.asc(),
+        )
+    )
+    if approved_only:
+        query = query.filter(
+            LocationCountSubmission.status == LocationCountSubmission.STATUS_APPROVED
+        )
+    return _roll_up_transfer_submission_rows(query.all())
+
+
+def _aggregate_transfer_submission_rows_for_event_location(
+    event_location_id: int,
+) -> tuple[dict[int, float], dict[int, float]]:
+    """Return event-wide reported transfers, rolling each day independently."""
+
+    submissions = (
+        LocationCountSubmission.query.options(
+            selectinload(LocationCountSubmission.rows)
+        )
+        .filter(
+            LocationCountSubmission.event_location_id == event_location_id,
+            LocationCountSubmission.submission_type
+            == LocationCountSubmission.TYPE_TRANSFER,
+            LocationCountSubmission.status == LocationCountSubmission.STATUS_APPROVED,
+        )
+        .order_by(
+            LocationCountSubmission.submission_date.asc(),
+            LocationCountSubmission.reviewed_at.asc(),
+            LocationCountSubmission.submitted_at.asc(),
+            LocationCountSubmission.id.asc(),
+        )
+        .all()
+    )
+    by_date: dict[date_cls, list[LocationCountSubmission]] = defaultdict(list)
+    for submission in submissions:
+        by_date[submission.submission_date].append(submission)
+
+    incoming: dict[int, float] = defaultdict(float)
+    outgoing: dict[int, float] = defaultdict(float)
+    for submission_date in sorted(by_date):
+        daily_incoming, daily_outgoing = _roll_up_transfer_submission_rows(
+            by_date[submission_date]
+        )
+        for item_id, quantity in daily_incoming.items():
+            incoming[item_id] += quantity
+        for item_id, quantity in daily_outgoing.items():
+            outgoing[item_id] += quantity
+    return dict(incoming), dict(outgoing)
+
+
 def event_location_transfer_totals_for_date(
     event_location: EventLocation,
     operating_date: date_cls,
 ) -> tuple[dict[int, float], dict[int, float]]:
-    """Return completed transfer quantities into and out of a location on a date."""
+    """Return completed and approved reported transfers for one location/date."""
 
     if event_location.location_id is None:
         return {}, {}
 
-    transfers = (
-        TransferItem.query.join(Transfer, Transfer.id == TransferItem.transfer_id)
-        .filter(
-            (Transfer.from_location_id == event_location.location_id)
-            | (Transfer.to_location_id == event_location.location_id)
+    active_event_location_ids = [
+        event_location_id
+        for (event_location_id,) in (
+            db.session.query(EventLocation.id)
+            .join(Event, Event.id == EventLocation.event_id)
+            .filter(
+                EventLocation.location_id == event_location.location_id,
+                Event.start_date <= operating_date,
+                Event.end_date >= operating_date,
+            )
+            .all()
         )
-        .all()
-    )
+    ]
+    formal_transfer_is_unambiguous = active_event_location_ids == [event_location.id]
+    transfers = []
+    if formal_transfer_is_unambiguous:
+        transfers = (
+            TransferItem.query.join(Transfer, Transfer.id == TransferItem.transfer_id)
+            .filter(
+                (Transfer.from_location_id == event_location.location_id)
+                | (Transfer.to_location_id == event_location.location_id)
+            )
+            .all()
+        )
 
     incoming: dict[int, float] = defaultdict(float)
     outgoing: dict[int, float] = defaultdict(float)
@@ -384,6 +496,16 @@ def event_location_transfer_totals_for_date(
             incoming[transfer_item.item_id] += quantity
         if transfer_obj.from_location_id == event_location.location_id:
             outgoing[transfer_item.item_id] += quantity
+    reported_incoming, reported_outgoing = (
+        aggregate_transfer_submission_rows_for_event_location_day(
+            event_location.id,
+            operating_date,
+        )
+    )
+    for item_id, quantity in reported_incoming.items():
+        incoming[item_id] += quantity
+    for item_id, quantity in reported_outgoing.items():
+        outgoing[item_id] += quantity
     return dict(incoming), dict(outgoing)
 
 
@@ -537,6 +659,16 @@ def build_submission_row_entries(submission: LocationCountSubmission) -> list[di
             base_unit,
             _conversion_mapping(),
         )
+        transfer_in_display, _ = convert_quantity_for_reporting(
+            float(row.transfer_in_value or 0.0),
+            base_unit,
+            _conversion_mapping(),
+        )
+        transfer_out_display, _ = convert_quantity_for_reporting(
+            float(row.transfer_out_value or 0.0),
+            base_unit,
+            _conversion_mapping(),
+        )
         entries.append(
             {
                 "row": row,
@@ -547,6 +679,8 @@ def build_submission_row_entries(submission: LocationCountSubmission) -> list[di
                 or get_unit_label(report_unit),
                 "unit_breakdown": row.unit_breakdown or [],
                 "display_value": display_value,
+                "transfer_in_display": transfer_in_display,
+                "transfer_out_display": transfer_out_display,
             }
         )
     return entries
@@ -1133,6 +1267,48 @@ def _approved_submission_item_ids_for_type(
     return {item_id for (item_id,) in rows if item_id is not None}
 
 
+def sync_event_location_reported_transfers_from_approved_submissions(
+    event_location_id: int,
+) -> None:
+    """Refresh only the reported-transfer component of an event stand sheet."""
+
+    event_location = (
+        EventLocation.query.options(
+            selectinload(EventLocation.stand_sheet_items),
+        )
+        .filter(EventLocation.id == event_location_id)
+        .first()
+    )
+    if event_location is None:
+        return
+
+    reported_incoming, reported_outgoing = (
+        _aggregate_transfer_submission_rows_for_event_location(event_location_id)
+    )
+    sheet_by_item_id = {
+        sheet.item_id: sheet for sheet in (event_location.stand_sheet_items or [])
+    }
+    for sheet in sheet_by_item_id.values():
+        sheet.reported_transferred_in = 0.0
+        sheet.reported_transferred_out = 0.0
+
+    for item_id in set(reported_incoming) | set(reported_outgoing):
+        sheet = sheet_by_item_id.get(item_id)
+        if sheet is None:
+            sheet = EventStandSheetItem(
+                event_location_id=event_location.id,
+                item_id=item_id,
+            )
+            db.session.add(sheet)
+            sheet_by_item_id[item_id] = sheet
+        sheet.reported_transferred_in = float(
+            reported_incoming.get(item_id, 0.0) or 0.0
+        )
+        sheet.reported_transferred_out = float(
+            reported_outgoing.get(item_id, 0.0) or 0.0
+        )
+
+
 def sync_event_location_inventory_from_approved_submissions(
     event_location_id: int,
 ) -> None:
@@ -1240,6 +1416,10 @@ def sync_event_location_inventory_from_approved_submissions(
             if created_location_item:
                 record.countable = True
             record.expected_count = total_count
+
+    sync_event_location_reported_transfers_from_approved_submissions(
+        event_location_id
+    )
 
 
 def sync_event_location_counts_from_approved_submissions(

@@ -1,3 +1,4 @@
+import math
 from datetime import date as date_cls, datetime, timedelta
 
 from flask import (
@@ -67,6 +68,7 @@ from app.services.location_count_submissions import (
     parse_submission_count_value,
     query_inventory_item_search,
     sync_event_location_counts_from_approved_submissions,
+    sync_event_location_reported_transfers_from_approved_submissions,
 )
 from app.services.pdf import render_stand_sheet_pdf
 from app.utils.activity import log_activity
@@ -425,6 +427,7 @@ def _submission_type_label(submission_type: str) -> str:
         LocationCountSubmission.TYPE_CLOSING: "Closing Count",
         LocationCountSubmission.TYPE_EATEN: "Eaten Items",
         LocationCountSubmission.TYPE_SPOILAGE: "Spoilage Items",
+        LocationCountSubmission.TYPE_TRANSFER: "Transfers",
         LocationCountSubmission.TYPE_INVENTORY: "Inventory Count",
     }
     return labels.get(submission_type, submission_type.replace("_", " ").title())
@@ -436,6 +439,7 @@ def _submission_detail_heading(submission_type: str) -> str:
         LocationCountSubmission.TYPE_CLOSING: "Closing count",
         LocationCountSubmission.TYPE_EATEN: "Eaten item",
         LocationCountSubmission.TYPE_SPOILAGE: "Spoilage item",
+        LocationCountSubmission.TYPE_TRANSFER: "Transfer",
         LocationCountSubmission.TYPE_INVENTORY: "Inventory count",
     }
     return headings.get(submission_type, submission_type.replace("_", " "))
@@ -447,6 +451,7 @@ def _submission_sentence_label(submission_type: str) -> str:
         LocationCountSubmission.TYPE_CLOSING: "Closing count",
         LocationCountSubmission.TYPE_EATEN: "Eaten items",
         LocationCountSubmission.TYPE_SPOILAGE: "Spoilage items",
+        LocationCountSubmission.TYPE_TRANSFER: "Transfers",
         LocationCountSubmission.TYPE_INVENTORY: "Inventory count",
     }
     return labels.get(submission_type, submission_type.replace("_", " "))
@@ -477,7 +482,27 @@ def _submission_rows_match(
             return False
         if existing_row.item_id != requested_row["item_id"]:
             return False
-        if abs(float(existing_value or 0.0) - float(requested_row["count_value"])) > 0.0001:
+        if submission.submission_type == LocationCountSubmission.TYPE_TRANSFER:
+            if (
+                abs(
+                    float(existing_row.transfer_in_value or 0.0)
+                    - float(requested_row.get("transfer_in_value") or 0.0)
+                )
+                > 0.0001
+            ):
+                return False
+            if (
+                abs(
+                    float(existing_row.transfer_out_value or 0.0)
+                    - float(requested_row.get("transfer_out_value") or 0.0)
+                )
+                > 0.0001
+            ):
+                return False
+        if (
+            abs(float(existing_value or 0.0) - float(requested_row["count_value"]))
+            > 0.0001
+        ):
             return False
     return True
 
@@ -534,6 +559,7 @@ def _public_submission_links(
     active_key: str,
     *,
     inventory_url: str | None = None,
+    allow_transfer: bool = True,
 ) -> list[dict[str, object]]:
     links = [
         {
@@ -552,6 +578,15 @@ def _public_submission_links(
             "url": url_for("locations.scan_spoilage_submission", token=token),
         },
     ]
+    if allow_transfer:
+        links.insert(
+            1,
+            {
+                "key": "transfer",
+                "label": "Transfers",
+                "url": url_for("locations.scan_transfer_submission", token=token),
+            },
+        )
     if inventory_url:
         links.append(
             {
@@ -603,6 +638,19 @@ def _public_submission_page_config(
             "submission_type_options": [],
             "submission_type_help_text": "",
             "selected_type": LocationCountSubmission.TYPE_SPOILAGE,
+        }
+    if fixed_submission_type == LocationCountSubmission.TYPE_TRANSFER:
+        return {
+            "active_link_key": "transfer",
+            "page_title": "Submit Transfers",
+            "page_description": (
+                "Record items transferred into or out of this location for manager review."
+            ),
+            "submit_button_label": "Send Transfers For Review",
+            "show_submission_type_select": False,
+            "submission_type_options": [],
+            "submission_type_help_text": "",
+            "selected_type": LocationCountSubmission.TYPE_TRANSFER,
         }
     if fixed_submission_type == LocationCountSubmission.TYPE_INVENTORY:
         return {
@@ -797,12 +845,35 @@ def _handle_public_location_submission(
         ),
     )
     effective_fixed_submission_type = fixed_submission_type
-    if (
-        effective_fixed_submission_type is None
-        and matched_event_location is not None
+    matched_inventory_event = bool(
+        matched_event_location is not None
         and matched_event_location.event is not None
         and matched_event_location.event.event_type == "inventory"
+    )
+    only_ambiguous_inventory_events = bool(
+        matched_event_location is None
+        and open_event_candidates
+        and all(
+            candidate.event is not None
+            and candidate.event.event_type == "inventory"
+            for candidate in open_event_candidates
+        )
+    )
+    transfer_submission_unavailable = (
+        matched_inventory_event or only_ambiguous_inventory_events
+    )
+    if (
+        fixed_submission_type == LocationCountSubmission.TYPE_TRANSFER
+        and transfer_submission_unavailable
     ):
+        flash("Transfer submissions are not available for inventory events.", "warning")
+        return redirect(
+            url_for(
+                "locations.scan_count_submission",
+                token=location_obj.count_qr_token,
+            )
+        )
+    if effective_fixed_submission_type is None and matched_inventory_event:
         effective_fixed_submission_type = LocationCountSubmission.TYPE_INVENTORY
     page_config = _public_submission_page_config(
         fixed_submission_type=effective_fixed_submission_type,
@@ -880,6 +951,7 @@ def _handle_public_location_submission(
         redirect_endpoint = {
             LocationCountSubmission.TYPE_EATEN: "locations.scan_eaten_submission",
             LocationCountSubmission.TYPE_SPOILAGE: "locations.scan_spoilage_submission",
+            LocationCountSubmission.TYPE_TRANSFER: "locations.scan_transfer_submission",
         }.get(selected_type, "locations.scan_count_submission")
         return redirect(
             url_for(
@@ -911,6 +983,68 @@ def _handle_public_location_submission(
                 )
                 if not requested_rows:
                     flash("Enter at least one inventory count before submitting.", "danger")
+                    requested_rows = None
+            elif selected_type == LocationCountSubmission.TYPE_TRANSFER:
+                requested_rows = []
+                transfer_errors: list[str] = []
+                has_transfer_quantity = False
+                for entry in items:
+                    item_id = entry["item"].id
+                    parsed_values = {}
+                    for direction, label in (
+                        ("in", "Transfer In"),
+                        ("out", "Transfer Out"),
+                    ):
+                        raw_value = (
+                            request.form.get(f"transfer_{direction}_{item_id}") or ""
+                        ).strip()
+                        try:
+                            display_value = float(raw_value or 0.0)
+                        except (TypeError, ValueError):
+                            display_value = 0.0
+                            transfer_errors.append(
+                                f"Enter a valid {label.lower()} quantity for {entry['item'].name}."
+                            )
+                        if not math.isfinite(display_value) or display_value < 0:
+                            display_value = 0.0
+                            transfer_errors.append(
+                                f"{label} for {entry['item'].name} must be a nonnegative finite quantity."
+                            )
+                        parsed_value = parse_submission_count_value(
+                            display_value,
+                            base_unit=entry.get("base_unit"),
+                            report_unit=entry.get("report_unit"),
+                        )
+                        if not math.isfinite(parsed_value) or parsed_value < 0:
+                            parsed_value = 0.0
+                            transfer_errors.append(
+                                f"{label} for {entry['item'].name} is too large to record."
+                            )
+                        parsed_values[direction] = parsed_value
+                    transfer_in = parsed_values["in"]
+                    transfer_out = parsed_values["out"]
+                    has_transfer_quantity = has_transfer_quantity or bool(
+                        transfer_in or transfer_out
+                    )
+                    requested_rows.append(
+                        {
+                            "item_id": item_id,
+                            "count_value": 0.0,
+                            "submitted_count_value": 0.0,
+                            "transfer_in_value": transfer_in,
+                            "transfer_out_value": transfer_out,
+                            "unit_breakdown": None,
+                        }
+                    )
+                if transfer_errors:
+                    for message in dict.fromkeys(transfer_errors):
+                        flash(message, "danger")
+                    requested_rows = None
+                elif not has_transfer_quantity:
+                    flash(
+                        "Enter at least one transfer in or transfer out quantity before submitting.",
+                        "danger",
+                    )
                     requested_rows = None
             else:
                 requested_rows = []
@@ -981,6 +1115,8 @@ def _handle_public_location_submission(
                             count_value=row_data["count_value"],
                             submitted_count_value=row_data["submitted_count_value"],
                             expected_count_value=row_data.get("expected_count_value"),
+                            transfer_in_value=row_data.get("transfer_in_value", 0.0),
+                            transfer_out_value=row_data.get("transfer_out_value", 0.0),
                             unit_breakdown=row_data.get("unit_breakdown"),
                             parse_index=row_data["parse_index"],
                         )
@@ -1018,6 +1154,7 @@ def _handle_public_location_submission(
             location_obj.count_qr_token,
             page_config["active_link_key"],
             inventory_url=inventory_link_url,
+            allow_transfer=not transfer_submission_unavailable,
         ),
     )
 
@@ -1550,6 +1687,16 @@ def scan_spoilage_submission(token: str):
     )
 
 
+@location.route("/locations/scan/<token>/transfer", methods=["GET", "POST"])
+def scan_transfer_submission(token: str):
+    """Public mobile entry page for paired transfer submissions."""
+
+    return _handle_public_location_submission(
+        token,
+        fixed_submission_type=LocationCountSubmission.TYPE_TRANSFER,
+    )
+
+
 @location.route(
     "/locations/scan/<token>/inventory/<int:event_id>",
     methods=["GET", "POST"],
@@ -1876,6 +2023,12 @@ def count_submission_detail(submission_id: int):
             if submission_type not in LocationCountSubmission.ALL_TYPES:
                 errors.append("Choose a valid submission type.")
             if (
+                submission.submission_type == LocationCountSubmission.TYPE_TRANSFER
+            ) != (submission_type == LocationCountSubmission.TYPE_TRANSFER):
+                errors.append(
+                    "Transfer submissions cannot be changed to or from a single-quantity submission type."
+                )
+            if (
                 action == "approve_expected_opening"
                 and submission_type != LocationCountSubmission.TYPE_OPENING
             ):
@@ -1928,6 +2081,32 @@ def count_submission_detail(submission_id: int):
                 errors.append(
                     "Inventory count submissions must be mapped to an inventory event."
                 )
+            if (
+                submission_type == LocationCountSubmission.TYPE_TRANSFER
+                and action in approval_mode_by_action
+                and mapped_event_location is not None
+                and mapped_event_location.event is not None
+                and mapped_event_location.event.event_type == "inventory"
+            ):
+                errors.append(
+                    "Transfer submissions must be mapped to a non-inventory event."
+                )
+            if (
+                submission_type == LocationCountSubmission.TYPE_TRANSFER
+                and action in approval_mode_by_action
+                and mapped_event_location is not None
+                and (
+                    mapped_event_location.confirmed
+                    or bool(
+                        mapped_event_location.event
+                        and mapped_event_location.event.closed
+                    )
+                    or bool(event_operating_day and event_operating_day.confirmed)
+                )
+            ):
+                errors.append(
+                    "Reopen this event day before approving transfer quantities."
+                )
 
             metadata_by_item_id: dict[int, dict] = {}
             if mapped_location is not None:
@@ -1955,6 +2134,59 @@ def count_submission_detail(submission_id: int):
                     submission_date,
                 )
 
+            parsed_transfer_values: dict[int, tuple[float, float]] = {}
+            if (
+                submission.submission_type == LocationCountSubmission.TYPE_TRANSFER
+                and submission_type == LocationCountSubmission.TYPE_TRANSFER
+            ):
+                for row in submission.rows:
+                    metadata = metadata_by_item_id.get(
+                        row.item_id,
+                        {
+                            "base_unit": (
+                                row.item.base_unit if row.item is not None else None
+                            ),
+                            "report_unit": (
+                                row.item.base_unit if row.item is not None else None
+                            ),
+                        },
+                    )
+                    parsed_pair: list[float] = []
+                    for direction, label in (
+                        ("in", "Transfer In"),
+                        ("out", "Transfer Out"),
+                    ):
+                        raw_value = (
+                            request.form.get(f"transfer_{direction}_{row.id}") or ""
+                        ).strip()
+                        try:
+                            display_value = float(raw_value or 0.0)
+                        except (TypeError, ValueError):
+                            display_value = 0.0
+                            errors.append(
+                                f"Enter a valid {label.lower()} quantity for {row.item.name if row.item else 'this item'}."
+                            )
+                        if not math.isfinite(display_value) or display_value < 0:
+                            display_value = 0.0
+                            errors.append(
+                                f"{label} for {row.item.name if row.item else 'this item'} must be a nonnegative finite quantity."
+                            )
+                        parsed_value = parse_submission_count_value(
+                            display_value,
+                            base_unit=metadata.get("base_unit"),
+                            report_unit=metadata.get("report_unit"),
+                        )
+                        if not math.isfinite(parsed_value) or parsed_value < 0:
+                            parsed_value = 0.0
+                            errors.append(
+                                f"{label} for {row.item.name if row.item else 'this item'} is too large to record."
+                            )
+                        parsed_pair.append(parsed_value)
+                    parsed_transfer_values[row.id] = (
+                        parsed_pair[0],
+                        parsed_pair[1],
+                    )
+
             if errors:
                 for message in errors:
                     flash(message, "danger")
@@ -1975,13 +2207,20 @@ def count_submission_detail(submission_id: int):
                             "report_unit": row.item.base_unit if row.item is not None else None,
                         },
                     )
-                    submitted_count_value = parse_submission_count_value(
-                        request.form.get(f"count_{row.id}"),
-                        base_unit=metadata.get("base_unit"),
-                        report_unit=metadata.get("report_unit"),
-                    )
-                    row.count_value = submitted_count_value
-                    row.submitted_count_value = submitted_count_value
+                    if submission_type == LocationCountSubmission.TYPE_TRANSFER:
+                        transfer_in, transfer_out = parsed_transfer_values[row.id]
+                        row.count_value = 0.0
+                        row.submitted_count_value = 0.0
+                        row.transfer_in_value = transfer_in
+                        row.transfer_out_value = transfer_out
+                    else:
+                        submitted_count_value = parse_submission_count_value(
+                            request.form.get(f"count_{row.id}"),
+                            base_unit=metadata.get("base_unit"),
+                            report_unit=metadata.get("report_unit"),
+                        )
+                        row.count_value = submitted_count_value
+                        row.submitted_count_value = submitted_count_value
                     if expected_by_item_id:
                         row.expected_count_value = expected_by_item_id.get(
                             row.item_id,
@@ -2011,9 +2250,17 @@ def count_submission_detail(submission_id: int):
                         )
                         submission.reviewed_by = current_user.id
                         submission.reviewed_at = datetime.utcnow()
-                        sync_event_location_counts_from_approved_submissions(
-                            mapped_event_location.id
-                        )
+                        if (
+                            submission.submission_type
+                            == LocationCountSubmission.TYPE_TRANSFER
+                        ):
+                            sync_event_location_reported_transfers_from_approved_submissions(
+                                mapped_event_location.id
+                            )
+                        else:
+                            sync_event_location_counts_from_approved_submissions(
+                                mapped_event_location.id
+                            )
                         if (
                             submission.submission_type
                             == LocationCountSubmission.TYPE_INVENTORY
