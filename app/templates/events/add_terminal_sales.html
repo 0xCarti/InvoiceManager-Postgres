@@ -43,11 +43,30 @@
 <div class="container mt-4">
 <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-end gap-2 mb-3">
     <div>
-        <h2 class="mb-1">Terminal Sales - {{ event_location.location.name }}</h2>
-        <p class="text-muted mb-0">Enter the sold quantity for each product's default sellable amount.</p>
+        <h2 class="mb-1">Daily Sales - {{ event_location.location.name }}</h2>
+        <p class="text-muted mb-0">
+            {{ operating_date.strftime('%A, %B %d, %Y') }}. Enter the total sold quantity for this day only.
+        </p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <a
+            class="btn btn-outline-secondary"
+            href="{{ url_for('event.view_event', event_id=event_location.event_id, _anchor='event-day-pane-' ~ operating_date.isoformat()) }}"
+        >Back to Event</a>
+        <a
+            class="btn btn-outline-primary"
+            href="{{ url_for('event.cumulative_terminal_sales_report', event_id=event_location.event_id, _anchor='location-' ~ event_location.id) }}"
+        >Cumulative Sales Report</a>
     </div>
 </div>
-<form method="post" id="terminal-sales-form">
+<div class="alert alert-light border py-2" role="note">
+    Approved POS imports for {{ operating_date }} are included in these totals and cannot be reduced here.
+</div>
+<form
+    method="post"
+    action="{{ url_for('event.add_terminal_sale', event_id=event_location.event_id, el_id=event_location.id, operating_date=operating_date.isoformat()) }}"
+    id="terminal-sales-form"
+>
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
     <div class="table-responsive">
     <table class="table table-sm align-middle terminal-sales-table">
@@ -77,10 +96,10 @@
     </table>
     </div>
     <div class="mt-3">
-        <strong>Grand Total:</strong>
+        <strong>Estimated Total at Current Prices:</strong>
         <span id="terminal-sales-grand-total">$0.00</span>
     </div>
-    <button type="submit" class="btn btn-primary mt-3">Submit</button>
+    <button type="submit" class="btn btn-primary mt-3">Save Daily Sales</button>
 </form>
 </div>
 <script nonce="{{ csp_nonce }}">

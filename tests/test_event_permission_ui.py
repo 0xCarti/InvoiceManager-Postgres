@@ -224,6 +224,7 @@ def test_event_detail_hides_management_controls_without_permission(client, app):
     assert "Count Sheet" not in body
     assert "Scan Counts" not in body
     assert "Enter Sales" not in body
+    assert "Cumulative Sales" not in body
     assert "Main Bar" in body
     assert f'href="/locations/{seeded["location_id"]}"' not in body
     assert f"/events/{seeded['event_id']}/locations/{seeded['event_location_id']}/confirm" not in body
@@ -419,9 +420,11 @@ def test_inventory_event_detail_hides_regular_location_workflow_controls(
     with client:
         login(client, "inventory-detail-controls@example.com", "pass")
         response = client.get(f"/events/{event_id}")
+        cumulative_response = client.get(f"/events/{event_id}/sales/cumulative")
         body = response.data.decode()
 
     assert response.status_code == 200
+    assert cumulative_response.status_code == 404
     assert f"/events/{event_id}/sales/upload" not in body
     assert f"/events/{event_id}/locations/{event_location_id}/sales/add" not in body
     assert f"/events/{event_id}/stand_sheet/{location_id}" not in body
@@ -547,15 +550,19 @@ def test_daily_stand_sheet_print_requires_report_access(client, app):
         f"/events/{seeded['event_id']}/stand_sheet/{seeded['location_id']}/print"
         f"?operating_date={operating_date.isoformat()}"
     )
+    cumulative_path = f"/events/{seeded['event_id']}/sales/cumulative"
     with client:
         login(client, seeded["email"], "pass")
         event_page = client.get(f"/events/{seeded['event_id']}")
         denied = client.get(path)
+        cumulative_denied = client.get(cumulative_path)
 
     assert event_page.status_code == 200
     assert path not in unescape(event_page.data.decode())
     assert "Print Sheet" not in event_page.data.decode()
     assert denied.status_code == 403
+    assert "Cumulative Sales" not in event_page.data.decode()
+    assert cumulative_denied.status_code == 403
 
     with app.app_context():
         user = User.query.filter_by(email=seeded["email"]).one()
@@ -571,11 +578,14 @@ def test_daily_stand_sheet_print_requires_report_access(client, app):
         login(client, seeded["email"], "pass")
         allowed_event_page = client.get(f"/events/{seeded['event_id']}")
         allowed = client.get(path)
+        cumulative_allowed = client.get(cumulative_path)
 
     assert allowed_event_page.status_code == 200
     assert path in unescape(allowed_event_page.data.decode())
     assert "Print Sheet" in allowed_event_page.data.decode()
     assert allowed.status_code == 200
+    assert "Cumulative Sales" in allowed_event_page.data.decode()
+    assert cumulative_allowed.status_code == 200
 
 
 def test_report_only_user_cannot_submit_inventory_count_sheet(client, app):

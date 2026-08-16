@@ -1,0 +1,169 @@
+{% extends 'base.html' %}
+{% block content %}
+<style nonce="{{ csp_nonce }}">
+    .cumulative-sales-metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+        gap: 0.75rem;
+    }
+
+    .cumulative-sales-metric {
+        border: 1px solid var(--bs-border-color);
+        border-radius: 0.5rem;
+        padding: 0.75rem;
+        background: var(--bs-body-bg);
+    }
+
+    @media (max-width: 767.98px) {
+        .cumulative-sales-table thead {
+            display: none;
+        }
+
+        .cumulative-sales-table,
+        .cumulative-sales-table tbody,
+        .cumulative-sales-table tr,
+        .cumulative-sales-table td {
+            display: block;
+            width: 100%;
+        }
+
+        .cumulative-sales-table tr {
+            margin-bottom: 1rem;
+            border: 1px solid var(--bs-border-color);
+            border-radius: 0.5rem;
+            overflow: hidden;
+        }
+
+        .cumulative-sales-table td {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            padding: 0.55rem 0.75rem;
+            white-space: normal;
+        }
+
+        .cumulative-sales-table td::before {
+            content: attr(data-label);
+            flex: 0 0 42%;
+            font-weight: 600;
+        }
+    }
+</style>
+<div class="container mt-4 app-page-shell">
+    <div class="app-page-header">
+        <div class="app-page-header-copy">
+            <h2 class="mb-1">Cumulative Sales - {{ event.name }}</h2>
+            <p class="text-muted mb-0">
+                All posted sales for the event from {{ event.start_date }} to {{ event.end_date }}.
+                Pending imports are not included until they are approved.
+            </p>
+        </div>
+        <div class="app-page-header-actions">
+            <a class="btn btn-outline-secondary" href="{{ url_for('event.view_event', event_id=event.id, _anchor='event-reports') }}">Back to Event Reports</a>
+        </div>
+    </div>
+
+    <div class="cumulative-sales-metrics mb-4" aria-label="Event sales totals">
+        <div class="cumulative-sales-metric">
+            <div class="small text-muted">Imported Quantity</div>
+            <div class="fs-5 fw-semibold">{{ '%.2f'|format(totals.imported_quantity) }}</div>
+        </div>
+        <div class="cumulative-sales-metric">
+            <div class="small text-muted">Manual / Legacy Upload Quantity</div>
+            <div class="fs-5 fw-semibold">{{ '%.2f'|format(totals.manual_quantity) }}</div>
+        </div>
+        <div class="cumulative-sales-metric">
+            <div class="small text-muted">Total Quantity</div>
+            <div class="fs-5 fw-semibold">{{ '%.2f'|format(totals.total_quantity) }}</div>
+        </div>
+        <div class="cumulative-sales-metric">
+            <div class="small text-muted">Total Sales</div>
+            <div class="fs-5 fw-semibold">${{ '{:,.2f}'.format(totals.total_amount) }}</div>
+        </div>
+        <div class="cumulative-sales-metric">
+            <div class="small text-muted">Posted Rows</div>
+            <div class="fs-5 fw-semibold">{{ totals.sale_row_count }}</div>
+        </div>
+    </div>
+
+    {% if totals.unassigned_sale_count %}
+    <div class="alert alert-warning" role="alert">
+        {{ totals.unassigned_sale_count }} legacy sale row{% if totals.unassigned_sale_count != 1 %}s are{% else %} is{% endif %}
+        included in the cumulative totals but not assigned to a configured operating day.
+    </div>
+    {% endif %}
+
+    {% for report in location_reports %}
+    <section class="card shadow-sm border-0 mb-4" id="location-{{ report.event_location.id }}">
+        <div class="card-header bg-body d-flex flex-column flex-lg-row justify-content-between gap-2">
+            <div>
+                <h3 class="h5 mb-1">{{ report.location.name if report.location else 'Unknown location' }}</h3>
+                <div class="small text-muted">
+                    {{ '%.2f'|format(report.total_quantity) }} units &middot; ${{ '{:,.2f}'.format(report.total_amount) }} &middot;
+                    {{ report.sale_row_count }} posted row{% if report.sale_row_count != 1 %}s{% endif %}
+                </div>
+            </div>
+            {% if report.unassigned_sale_count %}
+            <span class="badge text-bg-warning align-self-start">
+                {{ report.unassigned_sale_count }} unassigned row{% if report.unassigned_sale_count != 1 %}s{% endif %}
+            </span>
+            {% endif %}
+        </div>
+        <div class="card-body p-0">
+            {% if report.rows %}
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0 cumulative-sales-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Product</th>
+                            <th scope="col">Sellable Amount</th>
+                            <th scope="col" class="text-end">Unit Price</th>
+                            <th scope="col" class="text-end">Imported Qty</th>
+                            <th scope="col" class="text-end">Manual / Legacy Upload Qty</th>
+                            <th scope="col" class="text-end">Total Qty</th>
+                            <th scope="col" class="text-end">Sales Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in report.rows %}
+                        <tr
+                            data-product-id="{{ row.product_id }}"
+                            data-imported-quantity="{{ '%.2f'|format(row.imported_quantity) }}"
+                            data-manual-quantity="{{ '%.2f'|format(row.manual_quantity) }}"
+                            data-total-quantity="{{ '%.2f'|format(row.total_quantity) }}"
+                            data-total-amount="{{ '%.2f'|format(row.total_amount) }}"
+                        >
+                            <td data-label="Product">{{ row.product_name }}</td>
+                            <td data-label="Sellable Amount">
+                                {{ row.sellable_amount_name }}
+                                {% if row.sellable_quantity != 1 %}
+                                <span class="small text-muted">({{ '%.2f'|format(row.sellable_quantity) }})</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end" data-label="Unit Price">${{ '{:,.2f}'.format(row.unit_price) }}</td>
+                            <td class="text-end" data-label="Imported Qty">{{ '%.2f'|format(row.imported_quantity) }}</td>
+                            <td class="text-end" data-label="Manual / Legacy Upload Qty">{{ '%.2f'|format(row.manual_quantity) }}</td>
+                            <td class="text-end fw-semibold" data-label="Total Qty">{{ '%.2f'|format(row.total_quantity) }}</td>
+                            <td class="text-end fw-semibold" data-label="Sales Amount">${{ '{:,.2f}'.format(row.total_amount) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <th colspan="3" scope="row">Location Total</th>
+                            <th class="text-end">{{ '%.2f'|format(report.imported_quantity) }}</th>
+                            <th class="text-end">{{ '%.2f'|format(report.manual_quantity) }}</th>
+                            <th class="text-end">{{ '%.2f'|format(report.total_quantity) }}</th>
+                            <th class="text-end">${{ '{:,.2f}'.format(report.total_amount) }}</th>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+            {% else %}
+            <div class="p-3 text-muted">No posted sales for this location.</div>
+            {% endif %}
+        </div>
+    </section>
+    {% endfor %}
+</div>
+{% endblock %}

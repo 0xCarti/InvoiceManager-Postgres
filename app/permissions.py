@@ -659,6 +659,9 @@ ENDPOINT_PERMISSION_RULES: dict[str, PermissionRequirement] = {
     "event.update_opening_counts": requirement(any_of=("events.manage_locations",)),
     "event.add_location": requirement(any_of=("events.manage_locations",)),
     "event.add_terminal_sale": requirement(any_of=("events.manage_sales",)),
+    "event.cumulative_terminal_sales_report": requirement(
+        any_of=("events.reports", "events.manage_sales")
+    ),
     "event.upload_terminal_sales": requirement(any_of=("events.manage_sales",)),
     "event.confirm_location": requirement(any_of=("events.confirm_locations",)),
     "event.undo_confirm_location": requirement(any_of=("events.confirm_locations",)),

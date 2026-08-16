@@ -77,11 +77,22 @@ def test_event_features_remain_in_their_relevant_primary_panel():
     assert "event-day-tabs" not in documents
 
     assert "Stand Sheets" in reports
+    assert "Cumulative Sales" in reports
+    assert "cumulative_terminal_sales_report" in reports
     assert "data-email-stand-sheet" in reports
     assert "Closed Event Report" in reports
     assert "Count Sheet Report" in reports
     assert "Summary Source 18" in reports
     assert "Inventory Comparison" in reports
+
+
+def test_event_daily_sales_links_include_the_operating_date():
+    template = _template()
+    locations = _panel(template, "event-locations", "event-documents")
+
+    assert "url_for('event.add_terminal_sale'" in locations
+    assert "operating_date=day.date.isoformat()" in locations
+    assert "not entry.day_confirmed and not entry.event_location.confirmed and not event.closed" in locations
 
 
 def test_event_location_names_link_to_location_details_when_permitted():

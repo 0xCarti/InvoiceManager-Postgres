@@ -424,6 +424,16 @@ def test_event_sheet_mutations_require_manage_sales_permission():
         "event.printable_daily_stand_sheet",
         "GET",
     )
+    assert user_can_access_endpoint(
+        report_user,
+        "event.cumulative_terminal_sales_report",
+        "GET",
+    )
+    assert user_can_access_endpoint(
+        count_manager,
+        "event.cumulative_terminal_sales_report",
+        "GET",
+    )
     assert user_can_access_endpoint(report_user, "event.count_sheet", "GET")
     assert not user_can_access_endpoint(
         report_user, "event.count_sheet", "POST"

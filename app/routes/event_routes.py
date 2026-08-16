@@ -5,7 +5,7 @@ import math
 import os
 from decimal import Decimal, ROUND_HALF_UP
 from collections import defaultdict
-from datetime import date as date_cls, datetime, timedelta
+from datetime import date as date_cls, datetime, time, timedelta
 from secrets import token_urlsafe
 from types import SimpleNamespace
 
@@ -309,6 +309,12 @@ def _build_terminal_sales_conflict_message(conflicts):
         f"{'; '.join(detail_parts)}. Combine the events in the app or remove "
         "the overlapping location."
     )
+
+
+def _terminal_sale_is_imported(sale: TerminalSale) -> bool:
+    """Return whether a terminal-sale row came from an approved import."""
+
+    return sale.pos_sales_import_id is not None or bool(sale.approval_batch_id)
 
 
 def suggest_terminal_sales_location_mapping(
@@ -2780,31 +2786,83 @@ def undo_confirm_event_location_day(event_id, day_id):
 @login_required
 def add_terminal_sale(event_id, el_id):
     el = db.session.get(EventLocation, el_id)
-    if el is None or el.event_id != event_id:
+    if (
+        el is None
+        or el.event_id != event_id
+        or el.event is None
+        or el.event.event_type == "inventory"
+    ):
         abort(404)
+
+    requested_operating_date = (
+        request.values.get("operating_date") or ""
+    ).strip()
+    operating_date = _parse_date(requested_operating_date)
+    if operating_date is None:
+        abort(404)
+
+    configured_operating_days = list(el.operating_days or [])
+    operating_day = next(
+        (
+            day
+            for day in configured_operating_days
+            if day.operating_date == operating_date
+        ),
+        None,
+    )
+    if configured_operating_days:
+        if operating_day is None:
+            abort(404)
+    elif operating_date not in set(event_operating_dates(el.event)):
+        # Preserve access for legacy event locations that predate explicit
+        # operating-day rows while still rejecting dates outside the event.
+        abort(404)
+
+    day_anchor = f"event-day-pane-{operating_date.isoformat()}"
     conflicts = _find_terminal_sales_event_location_conflicts(
-        start_date=el.event.start_date,
-        end_date=el.event.end_date,
+        start_date=operating_date,
+        end_date=operating_date,
         location_ids=[el.location_id],
         exclude_event_id=event_id,
+        open_dates_by_location_id={el.location_id: {operating_date}},
     )
     if conflicts:
         flash(_build_terminal_sales_conflict_message(conflicts), "warning")
-        return redirect(url_for("event.view_event", event_id=event_id))
-    if el.event.closed:
-        flash("This location is closed and cannot accept new sales.")
-        return redirect(url_for("event.view_event", event_id=event_id))
+        return redirect(
+            url_for("event.view_event", event_id=event_id, _anchor=day_anchor)
+        )
+    if (
+        el.event.closed
+        or el.confirmed
+        or bool(operating_day and operating_day.confirmed)
+    ):
+        flash("This event day is closed and cannot accept new sales.", "warning")
+        return redirect(
+            url_for("event.view_event", event_id=event_id, _anchor=day_anchor)
+        )
 
-    if el.confirmed:
-        flash("This location is closed and cannot accept new sales.")
-        return redirect(url_for("event.view_event", event_id=event_id))
+    day_start = datetime.combine(operating_date, time.min)
+    day_end = day_start + timedelta(days=1)
+    daily_sales = (
+        TerminalSale.query.options(selectinload(TerminalSale.product))
+        .filter(
+            TerminalSale.event_location_id == el.id,
+            TerminalSale.sold_at >= day_start,
+            TerminalSale.sold_at < day_end,
+        )
+        .order_by(TerminalSale.sold_at.asc(), TerminalSale.id.asc())
+        .all()
+    )
 
-    def _collect_event_location_products(event_location: EventLocation):
+    def _collect_event_location_products(
+        event_location: EventLocation,
+        sales: list[TerminalSale],
+    ):
         location_obj = event_location.location
         products: list[Product] = []
         if location_obj is not None:
             products.extend(get_authoritative_location_products(location_obj))
-        for sale in event_location.terminal_sales:
+        for sale in sales:
             product = sale.product
             if product is None:
                 continue
@@ -2813,9 +2871,9 @@ def add_terminal_sale(event_id, el_id):
         products.sort(key=lambda prod: prod.name.lower())
         return products
 
-    def _sales_by_product(event_location: EventLocation):
+    def _sales_by_product(sales: list[TerminalSale]):
         grouped_sales: dict[int, list[TerminalSale]] = {}
-        for sale in event_location.terminal_sales:
+        for sale in sales:
             if sale.product_id is None:
                 continue
             grouped_sales.setdefault(sale.product_id, []).append(sale)
@@ -2829,36 +2887,50 @@ def add_terminal_sale(event_id, el_id):
             )
         return grouped_sales
 
-    def _is_imported_sale(sale: TerminalSale) -> bool:
-        return sale.pos_sales_import_id is not None or bool(sale.approval_batch_id)
-
-    available_products = _collect_event_location_products(el)
-    sales_by_product = _sales_by_product(el)
+    available_products = _collect_event_location_products(el, daily_sales)
+    sales_by_product = _sales_by_product(daily_sales)
 
     if request.method == "POST":
         requested_quantities: dict[int, float] = {}
         validation_errors: list[str] = []
 
         for product in available_products:
-            qty = request.form.get(f"qty_{product.id}")
+            qty = (request.form.get(f"qty_{product.id}") or "").strip()
+            current_total = sum(
+                float(sale.quantity or 0.0)
+                for sale in sales_by_product.get(product.id, [])
+            )
             try:
                 amount = float(qty) if qty else 0.0
             except ValueError:
-                amount = 0.0
+                amount = current_total
+                validation_errors.append(
+                    f"Enter a valid quantity for {product.name}."
+                )
+            if not math.isfinite(amount):
+                amount = current_total
+                validation_errors.append(
+                    f"Enter a finite quantity for {product.name}."
+                )
 
-            target_total = amount if amount > 0 else 0.0
+            target_total = amount
             requested_quantities[product.id] = target_total
 
             imported_total = sum(
                 float(sale.quantity or 0.0)
                 for sale in sales_by_product.get(product.id, [])
-                if _is_imported_sale(sale)
+                if _terminal_sale_is_imported(sale)
             )
             if target_total + 1e-9 < imported_total:
-                validation_errors.append(
-                    f"{product.name} already has {imported_total:.2f} imported sales recorded. "
-                    "Lower this from the sales import review instead of the manual entry screen."
-                )
+                if imported_total:
+                    validation_errors.append(
+                        f"{product.name} already has {imported_total:.2f} imported sales recorded. "
+                        "Lower this from the sales import review instead of the manual entry screen."
+                    )
+                else:
+                    validation_errors.append(
+                        f"The quantity for {product.name} cannot be negative."
+                    )
 
         if validation_errors:
             for message in validation_errors:
@@ -2868,16 +2940,21 @@ def add_terminal_sale(event_id, el_id):
                 event_location=el,
                 existing_sales=requested_quantities,
                 products=available_products,
+                operating_date=operating_date,
             )
 
         updated = False
         for product in available_products:
             product_sales = sales_by_product.get(product.id, [])
             imported_sales = [
-                sale for sale in product_sales if _is_imported_sale(sale)
+                sale
+                for sale in product_sales
+                if _terminal_sale_is_imported(sale)
             ]
             manual_sales = [
-                sale for sale in product_sales if not _is_imported_sale(sale)
+                sale
+                for sale in product_sales
+                if not _terminal_sale_is_imported(sale)
             ]
             imported_total = sum(
                 float(sale.quantity or 0.0) for sale in imported_sales
@@ -2921,7 +2998,7 @@ def add_terminal_sale(event_id, el_id):
                         unit_price_snapshot=amount_snapshot["unit_price"],
                         line_total_snapshot=line_total,
                         quantity=manual_target,
-                        sold_at=datetime.utcnow(),
+                        sold_at=datetime.combine(operating_date, time(hour=12)),
                     )
                     db.session.add(sale)
                     db.session.flush()
@@ -2937,9 +3014,14 @@ def add_terminal_sale(event_id, el_id):
 
         db.session.commit()
         if updated:
-            log_activity(f"Updated terminal sales for event location {el_id}")
-        flash("Sales recorded")
-        return redirect(url_for("event.view_event", event_id=event_id))
+            log_activity(
+                "Updated terminal sales for event location %s on %s"
+                % (el_id, operating_date)
+            )
+        flash(f"Sales recorded for {operating_date}.", "success")
+        return redirect(
+            url_for("event.view_event", event_id=event_id, _anchor=day_anchor)
+        )
 
     existing_sales = {
         product_id: sum(float(sale.quantity or 0.0) for sale in product_sales)
@@ -2950,6 +3032,149 @@ def add_terminal_sale(event_id, el_id):
         event_location=el,
         existing_sales=existing_sales,
         products=available_products,
+        operating_date=operating_date,
+    )
+
+
+@event.route("/events/<int:event_id>/sales/cumulative", methods=["GET"])
+@login_required
+def cumulative_terminal_sales_report(event_id):
+    event_obj = (
+        Event.query.options(
+            selectinload(Event.locations).selectinload(EventLocation.location),
+            selectinload(Event.locations).selectinload(
+                EventLocation.operating_days
+            ),
+            selectinload(Event.locations)
+            .selectinload(EventLocation.terminal_sales)
+            .selectinload(TerminalSale.product),
+            selectinload(Event.locations)
+            .selectinload(EventLocation.terminal_sales)
+            .selectinload(TerminalSale.sellable_amount),
+        )
+        .filter(Event.id == event_id)
+        .first()
+    )
+    if event_obj is None or event_obj.event_type == "inventory":
+        abort(404)
+
+    location_reports: list[SimpleNamespace] = []
+    event_total_quantity = 0.0
+    event_imported_quantity = 0.0
+    event_manual_quantity = 0.0
+    event_total_amount = 0.0
+    event_sale_row_count = 0
+    event_unassigned_sale_count = 0
+
+    for event_location in sorted(
+        event_obj.locations,
+        key=lambda entry: (
+            entry.location.name.casefold() if entry.location is not None else ""
+        ),
+    ):
+        configured_dates = {
+            day.operating_date for day in (event_location.operating_days or [])
+        }
+        if not configured_dates:
+            configured_dates = set(event_operating_dates(event_obj))
+
+        grouped: dict[tuple, SimpleNamespace] = {}
+        unassigned_sale_count = 0
+        for sale in event_location.terminal_sales:
+            product = sale.product
+            product_name = product.name if product is not None else (
+                f"Product #{sale.product_id}"
+            )
+            amount_name = (
+                sale.sellable_amount_name
+                or (
+                    sale.sellable_amount.name
+                    if sale.sellable_amount is not None
+                    else None
+                )
+                or "Each"
+            )
+            sellable_quantity = float(sale.sellable_quantity or 1.0)
+            unit_price = float(terminal_sale_unit_price(sale) or 0.0)
+            key = (
+                sale.product_id,
+                amount_name,
+                sellable_quantity,
+                unit_price,
+            )
+            row = grouped.setdefault(
+                key,
+                SimpleNamespace(
+                    product_id=sale.product_id,
+                    product_name=product_name,
+                    sellable_amount_name=amount_name,
+                    sellable_quantity=sellable_quantity,
+                    unit_price=unit_price,
+                    imported_quantity=0.0,
+                    manual_quantity=0.0,
+                    total_quantity=0.0,
+                    total_amount=0.0,
+                    sale_row_count=0,
+                ),
+            )
+            quantity = float(sale.quantity or 0.0)
+            if _terminal_sale_is_imported(sale):
+                row.imported_quantity += quantity
+            else:
+                row.manual_quantity += quantity
+            row.total_quantity += quantity
+            row.total_amount += float(terminal_sale_line_total(sale) or 0.0)
+            row.sale_row_count += 1
+            if sale.sold_at is None or sale.sold_at.date() not in configured_dates:
+                unassigned_sale_count += 1
+
+        rows = sorted(
+            grouped.values(),
+            key=lambda row: (
+                row.product_name.casefold(),
+                row.sellable_amount_name.casefold(),
+                row.unit_price,
+            ),
+        )
+        imported_quantity = sum(row.imported_quantity for row in rows)
+        manual_quantity = sum(row.manual_quantity for row in rows)
+        total_quantity = sum(row.total_quantity for row in rows)
+        total_amount = sum(row.total_amount for row in rows)
+        sale_row_count = sum(row.sale_row_count for row in rows)
+
+        event_imported_quantity += imported_quantity
+        event_manual_quantity += manual_quantity
+        event_total_quantity += total_quantity
+        event_total_amount += total_amount
+        event_sale_row_count += sale_row_count
+        event_unassigned_sale_count += unassigned_sale_count
+        location_reports.append(
+            SimpleNamespace(
+                event_location=event_location,
+                location=event_location.location,
+                rows=rows,
+                imported_quantity=imported_quantity,
+                manual_quantity=manual_quantity,
+                total_quantity=total_quantity,
+                total_amount=total_amount,
+                sale_row_count=sale_row_count,
+                unassigned_sale_count=unassigned_sale_count,
+            )
+        )
+
+    totals = SimpleNamespace(
+        imported_quantity=event_imported_quantity,
+        manual_quantity=event_manual_quantity,
+        total_quantity=event_total_quantity,
+        total_amount=event_total_amount,
+        sale_row_count=event_sale_row_count,
+        unassigned_sale_count=event_unassigned_sale_count,
+    )
+    return render_template(
+        "events/cumulative_terminal_sales_report.html",
+        event=event_obj,
+        location_reports=location_reports,
+        totals=totals,
     )
 
 

@@ -377,7 +377,7 @@ def test_event_lifecycle(client, app):
     with client:
         login(client, email, "pass")
         client.post(
-            f"/events/{eid}/locations/{elid}/sales/add",
+            f"/events/{eid}/locations/{elid}/sales/add?operating_date=2023-01-01",
             data={f"qty_{prod_id}": 3},
             follow_redirects=True,
         )
@@ -393,8 +393,7 @@ def test_event_lifecycle(client, app):
     with app.app_context():
         sale = TerminalSale.query.filter_by(event_location_id=elid).first()
         assert sale is not None and sale.quantity == 3
-        assert sale.sold_at is not None
-        assert (datetime.utcnow() - sale.sold_at).total_seconds() < 10
+        assert sale.sold_at == datetime(2023, 1, 1, 12, 0, 0)
 
     with client:
         login(client, email, "pass")
@@ -553,7 +552,8 @@ def test_conflicting_event_warns_and_blocks_sales_entry(client, app):
         )
 
         manual_response = client.get(
-            f"/events/{env['second_event_id']}/locations/{env['second_event_location_id']}/sales/add",
+            f"/events/{env['second_event_id']}/locations/{env['second_event_location_id']}/sales/add"
+            "?operating_date=2026-01-10",
             follow_redirects=True,
         )
         assert manual_response.status_code == 200
@@ -561,6 +561,42 @@ def test_conflicting_event_warns_and_blocks_sales_entry(client, app):
             b"POS sales cannot be split across multiple events for the same location"
             in manual_response.data
         )
+
+
+def test_sales_entry_only_checks_overlap_for_the_selected_day(client, app):
+    env = setup_event_overlap_env(
+        app,
+        email="daily-sales-conflict@example.com",
+        location_name="Daily Conflict Stand",
+        first_event_name="Day One Conflict",
+        first_start=date(2026, 1, 10),
+        first_end=date(2026, 1, 10),
+        second_event_name="Two Day Event",
+        second_start=date(2026, 1, 10),
+        second_end=date(2026, 1, 11),
+        attach_second_location=True,
+    )
+    base_path = (
+        f"/events/{env['second_event_id']}/locations/"
+        f"{env['second_event_location_id']}/sales/add"
+    )
+
+    with client:
+        login(client, env["email"], "pass")
+        conflicting_day = client.get(
+            f"{base_path}?operating_date=2026-01-10",
+            follow_redirects=False,
+        )
+        clear_day = client.get(
+            f"{base_path}?operating_date=2026-01-11",
+        )
+
+    assert conflicting_day.status_code == 302
+    assert conflicting_day.headers["Location"].endswith(
+        f"/events/{env['second_event_id']}#event-day-pane-2026-01-10"
+    )
+    assert clear_day.status_code == 200
+    assert b"Sunday, January 11, 2026" in clear_day.data
 
 
 def test_bulk_stand_sheet(client, app):
@@ -685,7 +721,9 @@ def test_no_sales_after_confirmation(client, app):
         client.post(
             f"/events/{eid}/locations/{elid}/confirm", follow_redirects=True
         )
-        resp = client.get(f"/events/{eid}/locations/{elid}/sales/add")
+        resp = client.get(
+            f"/events/{eid}/locations/{elid}/sales/add?operating_date=2023-03-01"
+        )
         assert resp.status_code == 302
 
 
@@ -1088,11 +1126,13 @@ def test_terminal_sales_prefill(client, app):
     with client:
         login(client, email, "pass")
         client.post(
-            f"/events/{eid}/locations/{elid}/sales/add",
+            f"/events/{eid}/locations/{elid}/sales/add?operating_date=2023-04-01",
             data={f"qty_{prod_id}": 7},
             follow_redirects=True,
         )
-        resp = client.get(f"/events/{eid}/locations/{elid}/sales/add")
+        resp = client.get(
+            f"/events/{eid}/locations/{elid}/sales/add?operating_date=2023-04-01"
+        )
         assert resp.status_code == 200
         assert b'value="7"' in resp.data or b'value="7.0"' in resp.data
 
@@ -1134,7 +1174,7 @@ def test_saving_terminal_sales_does_not_confirm_location(client, app):
     with client:
         login(client, email, "pass")
         client.post(
-            f"/events/{eid}/locations/{elid}/sales/add",
+            f"/events/{eid}/locations/{elid}/sales/add?operating_date=2023-04-05",
             data={f"qty_{prod_id}": 5},
             follow_redirects=True,
         )
