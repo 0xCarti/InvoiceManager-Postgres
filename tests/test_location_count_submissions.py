@@ -419,6 +419,28 @@ def test_public_count_submission_renders_mobile_numeric_entry_inputs(client, app
     assert b'data-count-submit="1"' in response.data
 
 
+def test_public_submission_pages_share_device_remembered_name_behavior(client, app):
+    context = _setup_location_count_context(app)
+    base_url = f"/locations/scan/{context['token']}"
+
+    for suffix in ("", "/transfer", "/eaten", "/spoilage"):
+        response = client.get(f"{base_url}{suffix}")
+
+        assert response.status_code == 200
+        assert b'id="submitted_name"' in response.data
+        assert b'autocomplete="name"' in response.data
+        assert b'aria-describedby="submitted_name_help"' in response.data
+        assert b'id="submitted_name_help"' in response.data
+        assert b'data-count-has-server-name="0"' in response.data
+        assert b'invoice-manager-public-submitter-name:v1' in response.data
+        assert b'function saveRememberedName()' in response.data
+        assert b'function prefillRememberedName()' in response.data
+        assert b'if (!canUseLocalStorage || pendingDraft)' in response.data
+        assert b'if (submittedNameInput && !submittedNameEdited)' in response.data
+        assert b'Object.keys(counts).length === 0 && !addedInventoryItemIds.length' in response.data
+        assert b'your name will be remembered in this browser on this device' in response.data
+
+
 def test_public_count_submission_auto_switches_to_inventory_for_inventory_event(
     client, app
 ):
@@ -2204,6 +2226,8 @@ def test_public_transfer_submission_validates_pairs_and_compares_both_for_duplic
         )
         assert response.status_code == 200
         assert expected_message in response.data
+        assert b'data-count-has-server-name="1"' in response.data
+        assert b'value="Pair Validator"' in response.data
 
     with app.app_context():
         assert LocationCountSubmission.query.count() == 0

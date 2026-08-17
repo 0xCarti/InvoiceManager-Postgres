@@ -148,6 +148,7 @@
                 data-count-date="{{ submission_date.isoformat() }}"
                 data-count-submission-type="{{ selected_type }}"
                 data-clear-draft-type="{{ clear_saved_draft_type }}"
+                data-count-has-server-name="{% if request.form.get('submitted_name', '')|trim %}1{% else %}0{% endif %}"
                 data-inventory-mode="{% if selected_type == 'inventory' %}1{% else %}0{% endif %}"
                 data-inventory-item-search-url="{{ inventory_item_search_url or '' }}"
             >
@@ -164,9 +165,14 @@
                         id="submitted_name"
                         name="submitted_name"
                         value="{{ request.form.get('submitted_name', '') }}"
+                        autocomplete="name"
+                        aria-describedby="submitted_name_help"
                         maxlength="120"
                         required
                     >
+                    <div class="form-text" id="submitted_name_help">
+                        After you submit, your name will be remembered in this browser on this device. You can replace it at any time.
+                    </div>
                 </div>
 
                 <div class="mb-4">
@@ -426,9 +432,11 @@ document.addEventListener('DOMContentLoaded', function () {
     const discardDraftButton = document.querySelector('[data-count-draft-discard="1"]');
     const draftStatus = document.querySelector('[data-count-draft-status]');
     const storagePrefix = 'invoice-manager-location-count-draft';
+    const rememberedNameStorageKey = 'invoice-manager-public-submitter-name:v1';
     const storageToken = form.dataset.countToken || '';
     const storageDate = form.dataset.countDate || '';
     const fixedSubmissionType = form.dataset.countSubmissionType || '';
+    const hasServerSubmittedName = form.dataset.countHasServerName === '1';
     const isInventoryMode = form.dataset.inventoryMode === '1';
     const inventoryItemSearchUrl = form.dataset.inventoryItemSearchUrl || '';
     const inventoryCatalogById = {};
@@ -437,11 +445,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const draftMaxAgeMs = 1000 * 60 * 60 * 48;
     let pendingDraft = null;
     let canUseLocalStorage = true;
+    let submittedNameEdited = false;
     let inputs = Array.from(document.querySelectorAll('[data-count-entry="1"]'));
     let draftFields = Array.from(document.querySelectorAll('[data-count-draft-field="1"]'));
-    if (!inputs.length && !isInventoryMode) {
-        return;
-    }
 
     const inventoryFilterInput = document.querySelector('[data-inventory-filter-input]');
     const inventoryFilterClear = document.querySelector('[data-inventory-filter-clear]');
@@ -463,6 +469,58 @@ document.addEventListener('DOMContentLoaded', function () {
         window.localStorage.removeItem(probeKey);
     } catch (error) {
         canUseLocalStorage = false;
+    }
+
+    function normalizedRememberedName(value) {
+        if (typeof value !== 'string') {
+            return '';
+        }
+        return value.trim().slice(0, 120);
+    }
+
+    function readRememberedName() {
+        if (!canUseLocalStorage) {
+            return '';
+        }
+        try {
+            return normalizedRememberedName(
+                window.localStorage.getItem(rememberedNameStorageKey) || ''
+            );
+        } catch (error) {
+            canUseLocalStorage = false;
+            return '';
+        }
+    }
+
+    function prefillRememberedName() {
+        if (!submittedNameInput || submittedNameInput.value.trim()) {
+            return;
+        }
+        const rememberedName = readRememberedName();
+        if (rememberedName) {
+            submittedNameInput.value = rememberedName;
+        }
+    }
+
+    function saveRememberedName() {
+        if (!canUseLocalStorage || !submittedNameInput) {
+            return;
+        }
+        const submittedName = normalizedRememberedName(submittedNameInput.value);
+        if (!submittedName) {
+            return;
+        }
+        try {
+            window.localStorage.setItem(rememberedNameStorageKey, submittedName);
+        } catch (error) {
+            canUseLocalStorage = false;
+        }
+    }
+
+    if (!inputs.length && !isInventoryMode) {
+        prefillRememberedName();
+        form.addEventListener('submit', saveRememberedName);
+        return;
     }
 
     function focusInput(target) {
@@ -584,7 +642,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function formHasValues() {
-        if (submittedNameInput && submittedNameInput.value.trim()) {
+        if (hasServerSubmittedName) {
             return true;
         }
         inputs = Array.from(document.querySelectorAll('[data-count-entry="1"]'));
@@ -612,7 +670,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function saveDraft() {
-        if (!canUseLocalStorage) {
+        if (!canUseLocalStorage || pendingDraft) {
             return;
         }
         const submissionType = submissionTypeSelect ? submissionTypeSelect.value : fixedSubmissionType;
@@ -622,7 +680,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const submittedName = submittedNameInput ? submittedNameInput.value.trim() : '';
         const counts = collectCounts();
         const addedInventoryItemIds = collectAddedInventoryItemIds();
-        if (!submittedName && Object.keys(counts).length === 0 && !addedInventoryItemIds.length) {
+        if (Object.keys(counts).length === 0 && !addedInventoryItemIds.length) {
             clearDraft(submissionType);
             setDraftStatus('');
             return;
@@ -1115,8 +1173,13 @@ document.addEventListener('DOMContentLoaded', function () {
                     submissionTypeSelect.value = draft.submissionType;
                 }
             }
-            if (submittedNameInput) {
-                submittedNameInput.value = draft.submittedName || '';
+            if (submittedNameInput && !submittedNameEdited) {
+                const draftSubmittedName = normalizedRememberedName(draft.submittedName);
+                if (draftSubmittedName) {
+                    submittedNameInput.value = draftSubmittedName;
+                } else {
+                    prefillRememberedName();
+                }
             }
             (draft.addedInventoryItemIds || []).forEach(function (itemId) {
                 addInventoryItemById(itemId, { focus: false, save: false, fetch: false });
@@ -1287,12 +1350,16 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     if (submittedNameInput) {
+        submittedNameInput.addEventListener('input', function () {
+            submittedNameEdited = true;
+        });
         submittedNameInput.addEventListener('focusout', saveDraft);
     }
     if (submissionTypeSelect) {
         submissionTypeSelect.addEventListener('change', saveDraft);
     }
     form.addEventListener('submit', function () {
+        saveRememberedName();
         hideDraftPrompt();
     });
     window.addEventListener('pagehide', saveDraft);
@@ -1320,6 +1387,7 @@ document.addEventListener('DOMContentLoaded', function () {
         clearDraft(clearDraftType);
         hideDraftPrompt();
         setDraftStatus('');
+        prefillRememberedName();
         return;
     }
     if (formHasValues()) {
@@ -1327,6 +1395,7 @@ document.addEventListener('DOMContentLoaded', function () {
         return;
     }
     pendingDraft = loadLatestDraft();
+    prefillRememberedName();
     if (pendingDraft && draftPrompt) {
         draftPrompt.classList.remove('d-none');
         return;
